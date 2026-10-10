@@ -13,6 +13,7 @@ import type {
   RunResult,
   SessionSummary,
   Spec,
+  UpdateView,
 } from "@/lib/types";
 
 export type View = "review" | "results" | "history" | "settings";
@@ -107,6 +108,12 @@ interface Store {
   testLlm: () => Promise<void>;
   rulesCheck: (path: string) => Promise<void>;
   rulesOutput: string;
+  update: UpdateView | null;
+  checkUpdate: () => Promise<void>;
+  installUpdate: () => Promise<void>;
+  ignoreUpdate: () => Promise<void>;
+  setUpdateEnabled: (v: boolean) => Promise<void>;
+  openReleases: () => Promise<void>;
 }
 
 const Ctx = createContext<Store | null>(null);
@@ -136,6 +143,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [history, setHistory] = useState<SessionSummary[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [rulesOutput, setRulesOutput] = useState("");
+  const [update, setUpdate] = useState<Store["update"]>(null);
+
+  useEffect(() => {
+    void api.updateState().then(setUpdate);
+    return api.onUpdateState((p) => setUpdate((prev) => ({ ...(prev ?? ({} as UpdateView)), ...p })));
+  }, []);
 
   const runId = useRef<string | null>(null);
   const startedAt = useRef(0);
@@ -445,6 +458,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   }, [inspect]);
 
+  const checkUpdate = useCallback(async () => setUpdate(await api.checkUpdate()), []);
+  const installUpdate = useCallback(async () => {
+    // A rejected install must not be silent, or it repeats the bug the update
+    // banner exists to avoid.
+    const ok = await api.installUpdate();
+    if (!ok) {
+      toast.warning("当前形态无法就地更新", { description: "已为你打开下载页" });
+      await api.openReleases();
+    }
+  }, []);
+  const ignoreUpdate = useCallback(async () => {
+    if (update?.version) setUpdate(await api.ignoreUpdate(update.version));
+  }, [update?.version]);
+  const setUpdateEnabled = useCallback(async (v: boolean) => {
+    const enabled = await api.setUpdateEnabled(v);
+    setUpdate((prev) => (prev ? { ...prev, enabled } : prev));
+  }, []);
+  const openReleases = useCallback(async () => {
+    await api.openReleases();
+  }, []);
+
   const comments = useMemo(() => result?.comments ?? [], [result]);
 
   const value: Store = {
@@ -486,6 +520,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     testLlm,
     rulesCheck,
     rulesOutput,
+    update,
+    checkUpdate,
+    installUpdate,
+    ignoreUpdate,
+    setUpdateEnabled,
+    openReleases,
   };
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

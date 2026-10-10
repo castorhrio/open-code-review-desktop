@@ -222,3 +222,34 @@ export interface ExitPayload {
 }
 
 export type Ok<T> = { ok: true; value: T } | { ok: false; error: string; raw?: string };
+
+export type UpdatePhase =
+  | "idle"
+  | "checking"
+  | "downloading"
+  | "ready"
+  | "up-to-date"
+  | "error"
+  | "manual"
+  | "unsupported";
+
+export interface UpdateState {
+  phase: UpdatePhase;
+  current: string;
+  version?: string;
+  percent?: number;
+  transferred?: number;
+  total?: number;
+  message?: string;
+  notes?: string;
+  fallbackUrl?: string;
+  suppressed?: boolean;
+}
+
+/** Fields only updateState() can answer, so event pushes may omit them. */
+export type UpdateView = UpdateState & {
+  enabled?: boolean;
+  portable?: boolean;
+  packaged?: boolean;
+  releasesUrl?: string;
+};

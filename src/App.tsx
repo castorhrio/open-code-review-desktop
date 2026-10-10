@@ -6,6 +6,7 @@ import { NavRail } from "@/components/NavRail";
 import { TopBar } from "@/components/TopBar";
 import { LogDrawer } from "@/components/LogDrawer";
 import { ReviewPanel } from "@/components/ReviewPanel";
+import { UpdateBanner } from "@/components/UpdateBanner";
 import { ResultsPanel } from "@/components/ResultsPanel";
 import { HistoryPanel } from "@/components/HistoryPanel";
 import { SettingsPanel } from "@/components/SettingsPanel";
@@ -23,6 +24,7 @@ export function App() {
       <NavRail />
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar />
+        <UpdateBanner />
         <main className="min-h-0 flex-1 overflow-hidden bg-canvas">
           {view === "review" && <ReviewPanel />}
           {view === "results" && <ResultsPanel />}

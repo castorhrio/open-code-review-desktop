@@ -8,6 +8,8 @@ import type {
   RepoInfo,
   SessionSummary,
   Spec,
+  UpdateState,
+  UpdateView,
 } from "./types";
 
 export interface Provider {
@@ -78,6 +80,14 @@ export interface Bridge {
   exportSession(repo: string, sessionId: string): Promise<{ ok: boolean; file?: string; opened?: boolean; canceled?: boolean; error?: string }>;
   deleteSession(repo: string, sessionId: string): Promise<{ ok: boolean; error?: string }>;
   rulesCheck(repo: string, path: string, rule: string): Promise<Ok<string>>;
+
+  updateState(): Promise<UpdateView>;
+  checkUpdate(): Promise<UpdateState>;
+  installUpdate(): Promise<boolean>;
+  ignoreUpdate(version: string): Promise<UpdateState>;
+  openReleases(): Promise<boolean>;
+  setUpdateEnabled(enabled: boolean): Promise<boolean>;
+  onUpdateState(cb: (p: UpdateState) => void): () => void;
   onLog(cb: (p: { id: string; line: string }) => void): () => void;
   onExit(cb: (p: ExitPayload) => void): () => void;
   onMenuOpenRepo(cb: () => void): () => void;

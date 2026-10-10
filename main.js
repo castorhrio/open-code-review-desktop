@@ -7,6 +7,7 @@ const { app, BrowserWindow, dialog, ipcMain, shell, Menu } = require("electron")
 
 const ocr = require("./ocr-service");
 const git = require("./git-service");
+const updater = require("./update-service");
 
 const DOCS_URL = "https://open-codereview.ai/docs";
 
@@ -70,6 +71,8 @@ function createWindow() {
 function send(channel, payload) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
 }
+
+updater.init((state) => send("update:state", state));
 
 const parseProviderTable = (text) =>
   text
@@ -339,6 +342,7 @@ if (!gotLock) {
   app.whenReady().then(() => {
     buildMenu();
     createWindow();
+    updater.scheduleLaunchCheck();
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });

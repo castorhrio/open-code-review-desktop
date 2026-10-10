@@ -1,15 +1,16 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { CheckCircle2, KeyRound, PlugZap, Trash2 } from "lucide-react";
+import { CheckCircle2, Download, KeyRound, PlugZap, RefreshCw, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { LANGUAGES } from "@/lib/spec";
 import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
-import { Field, Input, Select } from "@/components/ui/form";
+import { Field, Input, Select, Switch } from "@/components/ui/form";
 import { Badge, ConfirmDialog } from "@/components/ui/overlay";
+import { UpdateStatusLine } from "@/components/UpdateBanner";
 
 export function SettingsPanel() {
-  const { config, providers, saveConfig, unsetProvider, testLlm, info } = useStore();
+  const { config, providers, saveConfig, unsetProvider, testLlm, info, update, checkUpdate, installUpdate, setUpdateEnabled, openReleases } = useStore();
   const [picked, setPicked] = useState("");
   const [model, setModel] = useState("");
   const [apiKey, setApiKey] = useState("");
@@ -191,6 +192,44 @@ export function SettingsPanel() {
           </p>
         </div>
       </div>
+
+      <section className="mt-4 rounded-md border border-line bg-surface p-3">
+        <div className="mb-2 flex items-center gap-2">
+          <h3 className="text-[12.5px] font-semibold text-ink">更新</h3>
+          <Badge>
+            v{info?.appVersion}
+            {update?.portable ? " · 免安装版" : update?.packaged ? "" : " · 开发模式"}
+          </Badge>
+          <UpdateStatusLine />
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button variant="outline" onClick={() => void checkUpdate()}>
+            <RefreshCw className="size-4" />
+            立即检查更新
+          </Button>
+          {update?.phase === "ready" && (
+            <Button variant="primary" onClick={() => void installUpdate()}>
+              <Download className="size-4" />
+              重启并更新到 v{update.version}
+            </Button>
+          )}
+          <label className="flex items-center gap-2 text-[12px] text-muted">
+            <Switch checked={update?.enabled !== false} onCheckedChange={(v) => void setUpdateEnabled(v)} />
+            启动时自动检查更新
+          </label>
+          <button className="ml-auto text-[11.5px] text-accent hover:underline" onClick={() => void openReleases()}>
+            查看所有版本
+          </button>
+        </div>
+        {update?.phase === "manual" && (
+          <p className="mt-2 text-[11.5px] leading-relaxed text-warn">
+            免安装（portable）版每次运行都解压到临时目录，没有可替换的安装根，因此只能到下载页取新安装包。要用自动更新请安装 setup 版。
+          </p>
+        )}
+        {update?.phase === "unsupported" && (
+          <p className="mt-2 text-[11.5px] text-faint">开发模式下不检查更新，也不会下载任何文件。</p>
+        )}
+      </section>
 
       <ConfirmDialog
         open={confirmUnset}

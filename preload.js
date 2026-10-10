@@ -35,6 +35,18 @@ contextBridge.exposeInMainWorld("api", {
 
   rulesCheck: (repo, path, rule) => ipcRenderer.invoke("rules:check", { repo, path, rule }),
 
+  updateState: () => ipcRenderer.invoke("update:state"),
+  checkUpdate: () => ipcRenderer.invoke("update:check"),
+  installUpdate: () => ipcRenderer.invoke("update:install"),
+  ignoreUpdate: (version) => ipcRenderer.invoke("update:ignore", version),
+  openReleases: () => ipcRenderer.invoke("update:openReleases"),
+  setUpdateEnabled: (enabled) => ipcRenderer.invoke("update:setEnabled", enabled),
+  onUpdateState: (cb) => {
+    const handler = (_e, p) => cb(p);
+    ipcRenderer.on("update:state", handler);
+    return () => ipcRenderer.removeListener("update:state", handler);
+  },
+
   onLog: (cb) => {
     const handler = (_e, p) => cb(p);
     ipcRenderer.on("run:log", handler);
