@@ -10,12 +10,13 @@ The review engine is the official, **unmodified** `ocr` binary. This project onl
 
 ## Status
 
-`v0.1.1` (latest) — usable, verified against `ocr v1.12.13`.
+`v0.1.6` (latest) — usable, verified against `ocr v1.12.13`.
 
 Verified end-to-end against the real CLI, without spending tokens:
 
 - all four review scopes, and `--preview` for workspace / range / commit / scan
 - the per-mode flag whitelist (`ocr scan` rejects `--effort`, `--no-filter` and `--background-file`; sending them would abort the whole run)
+- keeping several providers configured, switching the active one, and the per-run override (`--provider` / `--model` reach only that one command line, never the global config)
 - failure output handling, session listing / loading / HTML export / deletion, `ocr rules check`, `ocr llm providers` parsing
 - the packaged app boots and reaches the bundled binary
 
@@ -38,6 +39,7 @@ The CLI is excellent but you live in a terminal: reading 40 line-level findings,
 | **Accurate code context** | when a review targets a ref, the code pane reads that file *at that ref* (`git show`), not your working copy |
 | **Triage** | severity / category / text filters, `↑` `↓` or `j` `k` navigation, copy suggestion code, export JSON |
 | **First-run guidance** | a three-step guide, ref validation as you type, and Chinese hints translated from raw CLI errors |
+| **Many providers, per-run switching** | keep several providers configured at once; *Set as current* decides the default, and the review page can override provider and model for a single run (same as `--provider` / `--model`) without rewriting your config |
 | **In-app updates** | The installed build checks the published release on launch, downloads in the background, verifies the SHA-512 checksum and restarts on your word — no returning to the browser |
 | **Local config stays local** | everything is written through `ocr config set` into `~/.opencodereview/config.json`; the app keeps no separate copy of your key and talks only to the endpoint you configure |
 
@@ -61,7 +63,7 @@ npm run dist     # build the Windows installer into release/
 ## First run
 
 1. Pick a repository in the top bar (must be a git repo root; Git ≥ 2.41 on `PATH`).
-2. In **Settings**, choose a provider, enter the API key and model name, then **Save** and **Test connection**.
+2. In **Settings**, choose a provider, enter the API key and model name, then **Save and set as current** and **Test connection**. Several providers can stay configured at once — *Save only* stores one without taking over, and *Set as current* switches later.
 3. Back in **Review**, click **Preview file list** (free), check the scope, then start the review.
 
 ## Architecture
