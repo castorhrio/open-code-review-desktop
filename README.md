@@ -10,7 +10,7 @@ The review engine is the official, **unmodified** `ocr` binary. This project onl
 
 ## Status
 
-`v0.1.7` (latest) — usable, verified against `ocr v1.12.13`.
+`v0.1.8` (latest) — usable, verified against `ocr v1.12.13`.
 
 Verified end-to-end against the real CLI, without spending tokens:
 
@@ -20,6 +20,7 @@ Verified end-to-end against the real CLI, without spending tokens:
 - testing the connection from the form values (the CLI runs in an empty temp HOME, so nothing is written), the model names a rejected request lists becoming one-click fixes, and the automatic re-test after saving
 - failure output handling, session listing / loading / HTML export / deletion, `ocr rules check`, `ocr llm providers` parsing
 - the packaged app boots and reaches the bundled binary
+- the run log streams the CLI's own progress lines live (`full-scan: N file(s) discovered`, `estimated cost: …`, `scan dispatch: …`, `Session: …`, per-file exclusions and failures) while keeping the failure payload out of it
 - `ocr llm test` against a live provider, including the tool-call round trip
 
 **Not** yet exercised: a full real review (`ocr review` producing comments — it needs your API key and spends money). The results view was validated against payloads shaped exactly like the CLI's real output, but please run one small review before relying on it.
