@@ -357,8 +357,10 @@ const running = new Map();
 const SESSION_ID_RE = /\[ocr\] Session: (\S+)/;
 
 // On failure the CLI re-emits the whole JSON payload on stderr; those fragment
-// lines would flood the log panel, so only real progress lines are surfaced.
-const isPayloadFragment = (line) => /^[\s]*([[{\]},]|"[^"]*"\s*:)/.test(line);
+// lines would flood the log panel. But every real progress line starts with
+// `[ocr]`, which the same character class would swallow — so exempt it, or the
+// UI shows a single [cmd] line for a run that is quietly working.
+const isPayloadFragment = (line) => !line.startsWith("[ocr]") && /^[\s]*([[{\]},]|"[^"]*"\s*:)/.test(line);
 
 function startRun(spec, onLine, onExit) {
   const bin = binaryPath();
