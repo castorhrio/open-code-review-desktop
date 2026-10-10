@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { CheckCircle2, Download, KeyRound, PlugZap, RefreshCw, Trash2 } from "lucide-react";
+import { CheckCircle2, Copy, Download, KeyRound, PlugZap, RefreshCw, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { LANGUAGES } from "@/lib/spec";
 import { useStore } from "@/store";
@@ -10,7 +10,7 @@ import { Badge, ConfirmDialog } from "@/components/ui/overlay";
 import { UpdateStatusLine } from "@/components/UpdateBanner";
 
 export function SettingsPanel() {
-  const { config, providers, saveConfig, unsetProvider, testLlm, info, update, checkUpdate, installUpdate, setUpdateEnabled, openReleases } = useStore();
+  const { config, providers, saveConfig, unsetProvider, testLlm, info, update, checkUpdate, installUpdate, setUpdateEnabled, openReleases, llmTest } = useStore();
   const [picked, setPicked] = useState("");
   const [model, setModel] = useState("");
   const [apiKey, setApiKey] = useState("");
@@ -176,7 +176,31 @@ export function SettingsPanel() {
           )}
         </div>
 
-        <div className="mt-5 rounded-md border border-line bg-surface px-3 py-2.5 text-[11.5px] text-muted">
+        {llmTest && (
+        <div className="mt-4 overflow-hidden rounded-md border border-line">
+          <div className="flex items-center gap-2 bg-raised px-3 py-1.5">
+            <Badge tone={llmTest.ok ? "ok" : "bad"}>{llmTest.ok ? "连通正常" : "连通失败"}</Badge>
+            <span className="text-[11.5px] text-faint">测试输出（可全选复制）</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="ml-auto"
+              onClick={() => {
+                void navigator.clipboard.writeText(llmTest.output);
+                toast.success("已复制完整输出");
+              }}
+            >
+              <Copy className="size-3.5" />
+              复制
+            </Button>
+          </div>
+          <pre className="max-h-56 overflow-auto px-3 py-2 font-mono text-[11.5px] leading-relaxed whitespace-pre-wrap break-all text-muted selectable">
+            {llmTest.output || "（无输出）"}
+          </pre>
+        </div>
+      )}
+
+      <section className="mt-4 rounded-md border border-line bg-surface px-3 py-2.5 text-[11.5px] text-muted">
           <div className="flex items-center gap-2">
             <span className="text-faint">配置文件</span>
             <code className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink">{config.path}</code>
@@ -190,7 +214,7 @@ export function SettingsPanel() {
           <p className="mt-1.5 leading-relaxed text-faint">
             卸载本程序不会删除该文件（里面是你的 API Key）。会话记录保存在同一目录的 sessions/ 下，由「历史」页管理。
           </p>
-        </div>
+      </section>
       </div>
 
       <section className="mt-4 rounded-md border border-line bg-surface p-3">

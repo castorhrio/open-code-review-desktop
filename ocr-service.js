@@ -254,7 +254,11 @@ const HELP_HINTS = [
     /no valid LLM endpoint configured/,
     "还没有配置模型服务。到「设置」里选择服务、填入 API Key 并保存后再运行。",
   ],
-  [/check your LLM configuration and API key/, "模型服务连不上或 Key 无效：到「设置」点「测试连通」定位问题。"],
+  [
+    /check your LLM configuration and API key/,
+    "到「设置」点「测试连通」看完整报错。常见原因有两个：API Key 无效，或模型名填成了控制台显示名而不是 API 模型名。",
+  ],
+  [/supported API model names are/i, "模型名不被该服务接受：错误里列出的才是 API 模型名，别用控制台的显示名。"],
   [/unknown flag/, "该模式不支持这个参数，请把出错参数留空后重试。"],
   [/not a valid commit ref|unknown revision/, "分支或提交号无法解析：检查拼写，或直接从下拉列表里选。"],
   [/cannot be used together/, "预览模式不能与续跑同时使用，请先不带续跑地预览。"],

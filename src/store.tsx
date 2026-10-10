@@ -108,6 +108,7 @@ interface Store {
   testLlm: () => Promise<void>;
   rulesCheck: (path: string) => Promise<void>;
   rulesOutput: string;
+  llmTest: { ok: boolean; output: string } | null;
   update: UpdateView | null;
   checkUpdate: () => Promise<void>;
   installUpdate: () => Promise<void>;
@@ -143,6 +144,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [history, setHistory] = useState<SessionSummary[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [rulesOutput, setRulesOutput] = useState("");
+  const [llmTest, setLlmTest] = useState<{ ok: boolean; output: string } | null>(null);
   const [update, setUpdate] = useState<Store["update"]>(null);
 
   useEffect(() => {
@@ -260,7 +262,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       stopTimer();
       if (r.error) {
         setRunLabel("审查失败");
-        toast.error(r.error.split("\n")[0], { description: r.error.split("\n").slice(1).join(" ") || undefined, duration: 12000 });
+        // The log area is selectable; a toast is not, and it disappears.
+        setLog((l) => [...l, "[error] " + r.error]);
+        toast.error(r.error.split("\n")[0], { description: r.error.split("\n").slice(1).join(" ") || undefined, duration: 15000 });
       } else {
         setRunLabel("完成");
         toast.success("审查完成", { description: `${r.value?.comments?.length ?? 0} 条评论` });
@@ -415,9 +419,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [config]);
 
   const testLlm = useCallback(async () => {
+    setLlmTest(null);
     const res = await api.testLlm();
-    if (res.ok) toast.success("连通正常", { description: res.output.split("\n").slice(0, 2).join(" ") });
-    else toast.error("连通失败", { description: res.output, duration: 15000 });
+    // Keep the full text on screen and selectable: a toast cannot be copied and
+    // disappears before the user finishes reading a long vendor error.
+    setLlmTest({ ok: res.ok, output: res.output });
+    if (res.ok) toast.success("连通正常", { description: res.output.split("\n")[0] });
+    else toast.error("连通失败", { description: res.output.split("\n").slice(0, 2).join(" ") });
   }, []);
 
   const rulesCheck = useCallback(
@@ -520,6 +528,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     testLlm,
     rulesCheck,
     rulesOutput,
+    llmTest,
     update,
     checkUpdate,
     installUpdate,

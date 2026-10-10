@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronRight, Eraser } from "lucide-react";
+import { ChevronRight, ClipboardCopy, Eraser } from "lucide-react";
 import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
@@ -34,10 +34,16 @@ export function LogDrawer() {
           <span className="tnum text-faint">{log.length}</span>
         </button>
         {log.length > 0 && (
-          <Button variant="ghost" size="sm" className="ml-auto h-6" onClick={clearLog}>
-            <Eraser className="size-3" />
-            清空
-          </Button>
+          <div className="ml-auto flex items-center gap-1">
+            <Button variant="ghost" size="sm" className="h-6" onClick={() => void navigator.clipboard.writeText(log.join("\n"))}>
+              <ClipboardCopy className="size-3" />
+              复制全部
+            </Button>
+            <Button variant="ghost" size="sm" className="h-6" onClick={clearLog}>
+              <Eraser className="size-3" />
+              清空
+            </Button>
+          </div>
         )}
       </div>
       {open && (
