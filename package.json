@@ -1,7 +1,7 @@
 {
   "name": "open-code-review-desktop",
   "productName": "Open Code Review Desktop",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Desktop wrapper for the open-code-review (ocr) CLI",
   "author": "xyris",

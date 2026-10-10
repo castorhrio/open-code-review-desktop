@@ -4,6 +4,7 @@ node_modules/
 # build output (electron-builder)
 dist/
 release/
+release-*/
 
 # scratch dirs used by local runs
 .tmp-audit/
