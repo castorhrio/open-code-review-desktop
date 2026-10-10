@@ -49,7 +49,9 @@ export interface Bridge {
     pad?: number;
   }): Promise<FileWindow>;
   openFile(absPath: string): Promise<string>;
-  revealFile(absPath: string): Promise<boolean>;
+  revealFile(
+    absPath: string
+  ): Promise<{ ok: boolean; action?: "reveal" | "open-parent"; path?: string; missing?: string; error?: string }>;
   saveText(req: {
     title?: string;
     suggestedName?: string;

@@ -82,6 +82,22 @@ const parseProviderTable = (text) =>
     })
     .filter((p) => p.name && p.name !== "NAME" && !/^-+$/.test(p.name));
 
+// shell.showItemInFolder() does nothing at all when the path does not exist —
+// and the CLI config is absent until the first save, which is exactly when a
+// newcomer clicks this. Fall back to the nearest existing ancestor.
+function revealPath(target) {
+  if (!target) return { ok: false, error: "没有可显示的路径" };
+  let existing = target;
+  while (existing && !fs.existsSync(existing)) existing = path.dirname(existing);
+  if (!existing) return { ok: false, error: `路径不存在：${target}` };
+  if (existing === target) {
+    shell.showItemInFolder(target);
+    return { ok: true, action: "reveal", path: target };
+  }
+  shell.openPath(existing);
+  return { ok: true, action: "open-parent", path: existing, missing: target };
+}
+
 function buildMenu() {
   const template = [
     {
@@ -115,7 +131,7 @@ function buildMenu() {
         { label: "Open Code Review 文档", click: () => shell.openExternal(DOCS_URL) },
         {
           label: "打开配置文件所在目录",
-          click: () => shell.showItemInFolder(ocr.CONFIG_PATH),
+          click: () => revealPath(ocr.CONFIG_PATH),
         },
       ],
     },
@@ -220,10 +236,7 @@ ipcMain.handle("file:read", async (_e, req) => {
 
 ipcMain.handle("file:open", (_e, absPath) => shell.openPath(absPath));
 
-ipcMain.handle("file:reveal", (_e, absPath) => {
-  shell.showItemInFolder(absPath);
-  return true;
-});
+ipcMain.handle("file:reveal", (_e, absPath) => revealPath(absPath));
 
 ipcMain.handle("file:saveText", async (_e, req) => {
   const result = await dialog.showSaveDialog(mainWindow, {

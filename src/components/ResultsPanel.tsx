@@ -293,7 +293,17 @@ export function ResultsPanel() {
                     <Button variant="ghost" size="sm" onClick={() => file.absPath && void api.openFile(file.absPath)}>
                       <ExternalLink className="size-3.5" />
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => file.absPath && void api.revealFile(file.absPath)}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={async () => {
+                        if (!file.absPath) return;
+                        const res = await api.revealFile(file.absPath);
+                        if (!res.ok) toast.error("无法打开", { description: res.error });
+                        else if (res.action === "open-parent")
+                          toast("这个文件在工作区里不存在", { description: `可能是被审查的 ref 才有它，已打开：${res.path}` });
+                      }}
+                    >
                       <FolderOpen className="size-3.5" />
                     </Button>
                   </>

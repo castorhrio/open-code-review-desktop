@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { CheckCircle2, KeyRound, PlugZap, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { LANGUAGES } from "@/lib/spec";
@@ -45,6 +46,15 @@ export function SettingsPanel() {
     ...Object.keys(config.customProviders).map((n) => ({ value: n, label: n, group: "已保存的自定义服务" })),
     { value: "__custom__", label: "＋ 新建自定义服务 / 私有网关", group: "" },
   ];
+
+  const revealConfig = async () => {
+    const res = await api.revealFile(config.path);
+    if (!res.ok) toast.error("无法打开", { description: res.error });
+    else if (res.action === "open-parent")
+      toast("配置文件还没有生成", {
+        description: `首次「保存配置」后 CLI 会创建它，已先打开所在目录：${res.path}`,
+      });
+  };
 
   const save = async () => {
     if (!name) {
@@ -169,7 +179,7 @@ export function SettingsPanel() {
           <div className="flex items-center gap-2">
             <span className="text-faint">配置文件</span>
             <code className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink">{config.path}</code>
-            <Button variant="ghost" size="sm" onClick={() => void api.revealFile(config.path)}>
+            <Button variant="ghost" size="sm" onClick={() => void revealConfig()}>
               在文件夹中显示
             </Button>
             <Button variant="ghost" size="sm" onClick={() => info?.docsUrl && void api.openUrl(info.docsUrl)}>
