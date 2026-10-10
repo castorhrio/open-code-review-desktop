@@ -1,0 +1,90 @@
+[English](README.md) | **简体中文**
+
+# Open Code Review 桌面版
+
+[`alibaba/open-code-review`](https://github.com/alibaba/open-code-review)（`ocr`）的**非官方 Windows 桌面界面**。`ocr` 是阿里巴巴开源的 AI 代码审查 CLI，45k+ star。
+
+审查引擎是**未经修改的官方 `ocr` 二进制**。本项目只做封装：拼命令行、流式读进度、解析 JSON，并把范围确认、成本控制、问题分级、历史续跑做成图形界面。这里不重新实现任何审查逻辑。
+
+开发、打包、安装的完整细节见 [`使用说明.md`](使用说明.md)。
+
+---
+
+## 版本状态
+
+`v0.1.0`，对照 `ocr v1.12.13` 验证。
+
+已用真实 CLI、零 token 成本端到端验证：
+
+- 四种审查范围，以及工作区 / 分支对比 / 单提交 / 全量扫描的 `--preview`
+- 按模式的参数白名单（`ocr scan` 会拒绝 `--effort`、`--no-filter`、`--background-file`，误传会让整单直接失败）
+- 失败输出处理、会话列表 / 载入 / 导出 HTML / 删除、`ocr rules check`、`ocr llm providers` 解析
+- 安装版能启动并调用到内置二进制
+
+**尚未验证**：真实调用 LLM 的审查（需要你的 API Key 并产生费用）。结果页是按真实输出结构校验过的，但请先跑一次小范围审查再依赖它。
+
+## 为什么需要图形界面
+
+CLI 很强，但一切都发生在终端里：读几十条行级意见、区分"审完了"和"被预算截断了"、续跑一次中断的审查，都要靠人记住 flag 和 session id。这里把这些变成看得见、且不容易做错的操作。
+
+## 主要能力
+
+| | |
+| --- | --- |
+| **四种范围** | 工作区改动 · 分支对比（merge-base）· 单个提交 · 全量扫描 |
+| **先预览再花钱** | 列出将进入审查的文件，并说明每个被排除文件的原因（二进制、凭据路径、暂不支持类型等），不消耗 token |
+| **成本护栏** | `--max-tokens-budget` 与 `--timeout` 是一等输入项，不是藏起来的 flag |
+| **诚实的运行状态** | 完成 / 部分完成 / 失败 / 有警告 徽章，并列出**没有审完**的文件与原因——被截断的运行绝不会显示成"干净通过" |
+| **续跑** | 中断、取消或部分失败的运行可基于官方会话续跑，已审过的文件不重复计费 |
+| **会话历史** | 查看、载入、续跑、导出离线 HTML 报告、删除 |
+| **代码定位准确** | 审查目标是某个 ref 时，代码面板用 `git show` 读取该 ref 下的内容，而不是你的工作副本 |
+| **筛选与操作** | 严重级 / 类别 / 关键词筛选，`↑` `↓` 或 `j` `k` 切换，复制建议代码，导出 JSON |
+| **首次引导** | 三步引导、输入分支时实时校验，并把 CLI 的英文报错翻译成可行动的中文提示 |
+| **Key 不出本机** | 配置只通过 `ocr config set` 写入官方 `~/.opencodereview/config.json`，本程序不另存副本，也只连接你配置的端点 |
+
+## 安装
+
+**方式 A — 安装包（推荐）。** 从 [Releases](../../releases) 下载 `ocr-desktop-<版本>-setup.exe` 双击安装。当前用户级安装，不需要管理员权限。因为**未做代码签名**，SmartScreen 可能提示"Windows 已保护你的电脑"→ 点「更多信息」→「仍要运行」。
+
+**方式 B — 免安装绿色版。** 直接运行 `ocr-desktop-<版本>-portable.exe`，无需安装。
+
+**方式 C — 源码运行。**
+
+```bash
+npm install      # 会下载原生 ocr 二进制（约 55 MB）
+npm run dev      # Vite 热更新 + Electron
+npm start        # 构建界面后运行
+npm run dist     # 打 Windows 安装包到 release/
+```
+
+## 第一次使用
+
+1. 顶部选择仓库目录（必须是 git 仓库根目录，且 `PATH` 上有 Git ≥ 2.41）。
+2. 「设置」里选择模型服务、填 API Key 与模型名 → **保存配置** → **测试连通**。
+3. 回「审查」页先点 **预览清单**（免费），确认范围后再开始审查。
+
+## 代码结构
+
+```
+src/                     React 19 + TypeScript + Tailwind v4 + Radix UI（Vite 构建到 out/）
+main.js                  Electron 主进程、IPC、窗口状态
+ocr-service.js           封装契约：按模式的 flag 白名单、输出解析、会话
+git-service.js           仓库信息、ref 解析、读取指定 ref 下的文件
+preload.js               contextBridge 接口
+```
+
+动构建配置前要知道的两点：
+
+- **`asar` 必须保持 `false`。** 开启后 `resolveNativeBinary()` 返回 `app.asar\…` 路径，`fs.existsSync()` 会返回 true 骗过检查（Electron 只给 `fs` 打了补丁），而 `spawn()` 走 CreateProcess 不认识该路径直接 ENOENT——每次审查静默失败。
+- 界面产物目录是 **`out/`**（不是 `dist/`），且以 `base: './'` 构建，才能在 `file://` 下加载。
+
+## 已知限制
+
+- 只在 Windows x64 上构建并验证过；需要 `PATH` 上有 Git。
+- 安装包**未做代码签名**，首次运行会有 SmartScreen 提示。
+- CLI 不提供模型目录接口，模型名仍需手填（已上游提议：[alibaba/open-code-review#1694](https://github.com/alibaba/open-code-review/issues/1694)）。
+- 开发实例与安装版共用同一份用户数据，**单实例锁会让后启动的窗口静默退出**。
+
+## 归属声明
+
+非阿里巴巴官方项目，也未获其背书。`ocr` 及其二进制适用其自身的 Apache-2.0 许可；详见 [`LICENSE`](LICENSE) 与 [`NOTICE`](NOTICE)。

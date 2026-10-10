@@ -1,10 +1,10 @@
+**English** | [简体中文](README.zh-CN.md)
+
 # Open Code Review Desktop
 
 An **unofficial Windows desktop GUI** for [`alibaba/open-code-review`](https://github.com/alibaba/open-code-review) (`ocr`) — Alibaba's AI code review CLI, 45k+ stars.
 
 The review engine is the official, **unmodified** `ocr` binary. This project only wraps it: it builds the command line, streams progress, parses the JSON output, and gives you a GUI for scoping, cost control, findings triage, and session history. No review logic is reimplemented here.
-
-**中文文档见下方，安装与开发细节在 [`使用说明.md`](使用说明.md)。**
 
 ---
 
@@ -12,14 +12,14 @@ The review engine is the official, **unmodified** `ocr` binary. This project onl
 
 `v0.1.0` — usable, verified against `ocr v1.12.13`.
 
-What has been verified end-to-end (against the real CLI, without spending tokens):
+Verified end-to-end against the real CLI, without spending tokens:
 
-- all four review scopes, `--preview` for workspace / range / commit / scan
+- all four review scopes, and `--preview` for workspace / range / commit / scan
 - the per-mode flag whitelist (`ocr scan` rejects `--effort`, `--no-filter` and `--background-file`; sending them would abort the whole run)
 - failure output handling, session listing / loading / HTML export / deletion, `ocr rules check`, `ocr llm providers` parsing
-- packaged app boots and reaches the bundled binary
+- the packaged app boots and reaches the bundled binary
 
-What has **not** yet been exercised: a real LLM review run (it needs your API key and spends money). The results view was validated with payloads shaped exactly like the CLI's real output, but please run one small review before trusting the happy path in production.
+**Not** yet exercised: a real LLM review run (it needs your API key and spends money). The results view was validated against payloads shaped exactly like the CLI's real output, but please run one small review before relying on it.
 
 ## Why a GUI
 
@@ -76,45 +76,13 @@ Two constraints worth knowing before you touch the build:
 - **`asar` must stay `false`.** With asar enabled, `resolveNativeBinary()` returns an `app.asar\…` path, `fs.existsSync()` lies (Electron patches only `fs`), and `spawn()` fails with `ENOENT` — every review silently breaks.
 - The UI bundle goes to **`out/`**, not `dist/`, and is loaded with `base: './'` so it works over `file://`.
 
+## Known limitations
+
+- Built and verified on Windows x64 only; Git must be on `PATH`.
+- Installers are **unsigned**, so SmartScreen will warn on first launch.
+- The CLI exposes no model catalogue, so the model name is still typed by hand (see [alibaba/open-code-review#1694](https://github.com/alibaba/open-code-review/issues/1694)).
+- The dev instance and the installed app share one user-data directory, so the **single-instance lock makes whichever starts second exit silently**.
+
 ## Not affiliated
 
-Not an official Alibaba project, and not endorsed by it. `ocr` and its binary are covered by their own Apache-2.0 license; see [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
-
----
-
-# 中文说明
-
-这是 [`alibaba/open-code-review`](https://github.com/alibaba/open-code-review)（`ocr`）的非官方 Windows 桌面界面。审查引擎是**未修改的官方 CLI**，本项目只负责：拼装命令行、流式读取进度、解析 JSON、并把范围确认 / 成本控制 / 问题分级 / 历史续跑做成可见的操作。
-
-## 版本状态
-
-`v0.1.0`。已用真实 CLI 零成本验证：四种范围、预览、按模式的参数白名单（`ocr scan` 会拒绝 `--effort`、`--no-filter`、`--background-file`，误传会让整单失败）、失败输出处理、会话列表/载入/导出/删除、`rules check`、`llm providers` 解析、安装包启动并调用到内置二进制。
-
-**尚未验证的**：真实调用 LLM 的审查（需要你的 Key 并产生费用）。结果页是按真实输出结构校验过的，但请先跑一次小范围审查再依赖它。
-
-## 为什么需要图形界面
-
-CLI 很强，但一切都发生在终端里：读几十条行级意见、区分"审完了"和"被预算截断了"、续跑一次中断的审查，都要靠人记住 flag 和 session id。这里把这些变成看得见、且不容易做错的操作。
-
-## 主要能力
-
-- **四种范围**：工作区改动 / 分支对比（merge-base）/ 单个提交 / 全量扫描
-- **先预览再花钱**：列出将进入审查的文件，并说明每个被排除文件的原因（二进制、凭据路径、暂不支持类型等）
-- **成本护栏**：`--max-tokens-budget` 与 `--timeout` 是一等输入项，不是隐藏参数
-- **诚实的运行状态**：完成 / 部分完成 / 失败 / 有警告 徽章，并列出**没有审完**的文件与原因，被截断的运行绝不会显示成"干净通过"
-- **续跑**：中断、取消或部分失败的运行可基于官方会话续跑，已审过的文件不重复计费
-- **会话历史**：查看、载入、续跑、导出离线 HTML 报告、删除
-- **代码定位准确**：审查目标是某个 ref 时，代码面板用 `git show` 读取该 ref 下的内容，而不是你的工作副本
-- **筛选与操作**：严重级/类别/关键词筛选，`↑` `↓` 或 `j` `k` 切换，复制建议代码，导出 JSON
-- **首次引导**：三步引导、输入分支时实时校验、把 CLI 英文报错翻译成可行动的中文提示
-- **Key 不出本机**：配置只通过 `ocr config set` 写入官方 `~/.opencodereview/config.json`，本程序不另存副本，也只连接你配置的端点
-
-## 已知限制
-
-- 仅 Windows x64 构建并验证过；需要 PATH 上有 Git。
-- 安装包**未做代码签名**，首次运行会有 SmartScreen 提示。
-- `ocr` 未提供模型目录接口，模型名仍需手填。
-- 开发实例与安装版共用同一份用户数据，**单实例锁会让后启动的窗口静默退出**。
-- 界面截图稍后补充到 `docs/`。
-
-安装、开发与打包细节见 [`使用说明.md`](使用说明.md)。
+Not an official Alibaba project, and not endorsed by it. `ocr` and its binary are covered by their own Apache-2.0 license; see [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE). Build and usage details for contributors: [`使用说明.md`](使用说明.md) (中文).
