@@ -10,17 +10,19 @@ The review engine is the official, **unmodified** `ocr` binary. This project onl
 
 ## Status
 
-`v0.1.6` (latest) — usable, verified against `ocr v1.12.13`.
+`v0.1.7` (latest) — usable, verified against `ocr v1.12.13`.
 
 Verified end-to-end against the real CLI, without spending tokens:
 
 - all four review scopes, and `--preview` for workspace / range / commit / scan
 - the per-mode flag whitelist (`ocr scan` rejects `--effort`, `--no-filter` and `--background-file`; sending them would abort the whole run)
 - keeping several providers configured, switching the active one, and the per-run override (`--provider` / `--model` reach only that one command line, never the global config)
+- testing the connection from the form values (the CLI runs in an empty temp HOME, so nothing is written), the model names a rejected request lists becoming one-click fixes, and the automatic re-test after saving
 - failure output handling, session listing / loading / HTML export / deletion, `ocr rules check`, `ocr llm providers` parsing
 - the packaged app boots and reaches the bundled binary
+- `ocr llm test` against a live provider, including the tool-call round trip
 
-**Not** yet exercised: a real LLM review run (it needs your API key and spends money). The results view was validated against payloads shaped exactly like the CLI's real output, but please run one small review before relying on it.
+**Not** yet exercised: a full real review (`ocr review` producing comments — it needs your API key and spends money). The results view was validated against payloads shaped exactly like the CLI's real output, but please run one small review before relying on it.
 
 ## Why a GUI
 
