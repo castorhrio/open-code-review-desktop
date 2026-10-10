@@ -10,7 +10,7 @@ The review engine is the official, **unmodified** `ocr` binary. This project onl
 
 ## Status
 
-`v0.1.8` (latest) — usable, verified against `ocr v1.12.13`.
+`v0.1.9` (latest) — usable, verified against `ocr v1.12.13`.
 
 Verified end-to-end against the real CLI, without spending tokens:
 
@@ -21,9 +21,11 @@ Verified end-to-end against the real CLI, without spending tokens:
 - failure output handling, session listing / loading / HTML export / deletion, `ocr rules check`, `ocr llm providers` parsing
 - the packaged app boots and reaches the bundled binary
 - the run log streams the CLI's own progress lines live (`full-scan: N file(s) discovered`, `estimated cost: …`, `scan dispatch: …`, `Session: …`, per-file exclusions and failures) while keeping the failure payload out of it
+- a completed whole-file scan against a live provider: 1 file, 4 findings, 103K tokens, 3m36s — the results page renders that payload
+- live progress during a run (files discovered, completed tool calls, comments so far, the CLI's own cost estimate), with per-tool-call chatter counted rather than streamed; large scans are gated behind an explicit size/cost confirmation
 - `ocr llm test` against a live provider, including the tool-call round trip
 
-**Not** yet exercised: a full real review (`ocr review` producing comments — it needs your API key and spends money). The results view was validated against payloads shaped exactly like the CLI's real output, but please run one small review before relying on it.
+**Not** yet exercised in-app: the `project_summary` block on a finished scan (the CLI only puts it in the run payload, never in `session show --json`, so it cannot be checked by reopening an old session). A real review's findings themselves do render — a completed scan's 4 comments were loaded from its session and shown in the results list.
 
 ## Why a GUI
 
