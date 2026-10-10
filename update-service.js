@@ -51,7 +51,9 @@ function configure() {
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.disableWebInstaller = true;
 
-  if (process.env.OCR_UPDATE_CONFIG) autoUpdater.updateConfigPath = process.env.OCR_UPDATE_CONFIG;
+  // updateConfigPath takes a provider-config FILE, not a feed URL; pointing a
+  // test feed at a URL has to go through setFeedURL instead.
+  if (process.env.OCR_UPDATE_URL) autoUpdater.setFeedURL({ provider: "generic", url: process.env.OCR_UPDATE_URL });
   if (process.env.OCR_DEV_UPDATE_TEST) autoUpdater.forceDevUpdateConfig = true;
 
   autoUpdater.on("checking-for-update", () => setState({ phase: "checking" }));

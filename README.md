@@ -38,6 +38,7 @@ The CLI is excellent but you live in a terminal: reading 40 line-level findings,
 | **Accurate code context** | when a review targets a ref, the code pane reads that file *at that ref* (`git show`), not your working copy |
 | **Triage** | severity / category / text filters, `↑` `↓` or `j` `k` navigation, copy suggestion code, export JSON |
 | **First-run guidance** | a three-step guide, ref validation as you type, and Chinese hints translated from raw CLI errors |
+| **In-app updates** | The installed build checks the published release on launch, downloads in the background, verifies the SHA-512 checksum and restarts on your word — no returning to the browser |
 | **Local config stays local** | everything is written through `ocr config set` into `~/.opencodereview/config.json`; the app keeps no separate copy of your key and talks only to the endpoint you configure |
 
 ## Install
@@ -81,6 +82,8 @@ Two constraints worth knowing before you touch the build:
 ## Known limitations
 
 - Built and verified on Windows x64 only; Git must be on `PATH`.
+- **Auto-update applies to the NSIS setup build only.** The portable exe re-extracts to a temp dir each run and has no install root to replace, so it links to the releases page instead.
+- Releases must ship `latest.yml` and `*-setup.exe.blockmap` next to the binaries; without them the updater cannot see a version at all.
 - Installers are **unsigned**, so SmartScreen will warn on first launch.
 - The CLI exposes no model catalogue, so the model name is still typed by hand (see [alibaba/open-code-review#1694](https://github.com/alibaba/open-code-review/issues/1694)).
 - The dev instance and the installed app share one user-data directory, so the **single-instance lock makes whichever starts second exit silently**.
