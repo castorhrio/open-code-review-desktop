@@ -10,8 +10,46 @@ import { toast } from "sonner";
 
 const SEVERITIES = ["critical", "high", "medium", "low", ""] as const;
 
+/** Minimal markdown for the CLI's own summary text: headings, lists, **bold**. */
+function MarkdownLite({ text }: { text: string }) {
+  const inline = (s: string, key: string) =>
+    s.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
+      part.startsWith("**") && part.endsWith("**") ? (
+        <b key={key + i} className="font-semibold text-ink">
+          {part.slice(2, -2)}
+        </b>
+      ) : (
+        <span key={key + i}>{part}</span>
+      )
+    );
+  return (
+    <div className="space-y-1.5 text-[12px] leading-relaxed text-muted">
+      {text.split(/\r?\n/).map((line, i) => {
+        const t = line.trim();
+        if (!t) return null;
+        const heading = /^(#{1,4})\s+(.*)$/.exec(t);
+        if (heading)
+          return (
+            <p key={i} className="text-[12.5px] font-semibold text-ink">
+              {inline(heading[2], "h" + i)}
+            </p>
+          );
+        const item = /^(\d+\.|[-*])\s+(.*)$/.exec(t);
+        if (item)
+          return (
+            <p key={i} className="flex gap-1.5 pl-1">
+              <span className="shrink-0 text-faint tnum">{item[1].replace(".", "")}</span>
+              <span className="min-w-0">{inline(item[2], "i" + i)}</span>
+            </p>
+          );
+        return <p key={i}>{inline(t, "p" + i)}</p>;
+      })}
+    </div>
+  );
+}
+
 export function ResultsPanel() {
-  const { result, resultOrigin, comments, form, repo, exportSession, history, resume } = useStore();
+  const { result, resultOrigin, comments, form, repo, exportSession, history, resume, running, elapsed, runLabel, progress, cancelRun, startRun, setView } = useStore();
   const [sevOn, setSevOn] = useState<Set<string>>(() => new Set(SEVERITIES));
   const [cat, setCat] = useState("");
   const [text, setText] = useState("");
@@ -73,14 +111,72 @@ export function ResultsPanel() {
     return () => window.removeEventListener("keydown", onKey);
   }, [filtered, selected, open]);
 
+  if (running) {
+    const tools = progress?.tools ?? 0;
+    const total = progress?.reviewing ?? 0;
+    return (
+      <div className="flex h-full flex-col">
+        <div className="flex shrink-0 items-center gap-2 border-b border-line bg-surface px-4 py-2">
+          <Badge tone="accent">{runLabel || "审查运行中"}</Badge>
+          <span className="tnum text-[11.5px] text-muted">已运行 {elapsed}s</span>
+          <Button variant="ghost" size="sm" className="ml-auto text-bad" onClick={() => void cancelRun()}>
+            取消
+          </Button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6">
+          <div className="mx-auto max-w-xl space-y-4">
+            <p className="text-[13px] font-medium text-ink">正在审查，下面这些数字会一直动</p>
+            <div className="grid grid-cols-3 gap-2 text-center">
+              {[
+                { label: "进入审查的文件", value: total || "—" },
+                { label: "已完成的工具调用", value: tools },
+                { label: "已产出的评论", value: progress?.comments ?? 0 },
+              ].map((cell) => (
+                <div key={cell.label} className="rounded-md border border-line bg-surface px-2 py-3">
+                  <div className="tnum text-[18px] font-semibold text-ink">{cell.value}</div>
+                  <div className="mt-0.5 text-[11px] leading-tight text-faint">{cell.label}</div>
+                </div>
+              ))}
+            </div>
+            {progress?.cost && <p className="rounded-md border border-line bg-raised px-3 py-2 font-mono text-[11.5px] text-muted">{progress.cost}</p>}
+            {progress?.excluded ? <p className="text-[11.5px] text-faint">另有 {progress.excluded} 个文件被规则排除（原因见运行日志）。</p> : null}
+            <p className="text-[11.5px] leading-relaxed text-faint">
+              每个文件要先做一次预分析、再带着工具去审，所以前几分钟通常一条评论都没有——这不是卡住。
+              底部「运行日志」里有 CLI 的原始输出，可整段复制。中断可以用「历史」里的会话续跑，已审完的文件不会重复计费。
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!result) {
+    if (resume) {
+      return (
+        <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+          <Badge tone="warn">这次运行没有产出结果</Badge>
+          <p className="max-w-md text-[12px] leading-relaxed text-muted">
+            会话 <code className="font-mono text-[11px]">{resume.sessionId.slice(0, 12)}…</code> 已经中断
+            {resume.failed ? `（${resume.failed} 个文件失败）` : ""}。保持同样的范围与模型服务点「续跑未完成部分」，已经审完的文件不会重复计费。
+          </p>
+          <Button variant="primary" onClick={() => void startRun(resume.sessionId)}>
+            续跑未完成部分
+          </Button>
+          <p className="text-[11px] text-faint">也可以回「审查」页改小范围（按目录、按 diff）再跑一次。</p>
+        </div>
+      );
+    }
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
         <FileCode2 className="size-8 text-faint" />
         <div>
           <p className="text-[13px] text-muted">还没有结果。</p>
           <p className="mt-1 text-[11.5px] text-faint">运行一次审查，或到「历史」里打开旧会话。</p>
+          <p className="mt-1 text-[11.5px] text-faint">刚取消的运行也会留下会话，在「历史」里能续跑或导出报告。</p>
         </div>
+        <Button variant="outline" size="sm" onClick={() => setView("history")}>
+          去历史
+        </Button>
       </div>
     );
   }
@@ -130,6 +226,12 @@ export function ResultsPanel() {
             </span>
           )}
           {result.llm?.model && <span className="text-faint">{result.llm.provider} {result.llm.model}</span>}
+          {result.tool_calls?.total ? (
+            <span className="text-faint">
+              工具调用 {result.tool_calls.total}
+              {result.tool_calls.failure ? <span className="text-bad">（失败 {result.tool_calls.failure}）</span> : null}
+            </span>
+          ) : null}
           {s.budget_exceeded && <span className="text-warn">已触达 token 上限</span>}
           {(result.warnings?.length ?? 0) > 0 && <span className="text-warn">{result.warnings?.length} 条警告</span>}
         </div>
@@ -161,6 +263,19 @@ export function ResultsPanel() {
             ))}
           </div>
           {resume && <p className="mt-1 text-[11px] text-faint">点上方「续跑未完成部分」可接着跑，已完成的部分不会重复付费。</p>}
+        </div>
+      )}
+
+      {result.project_summary && (
+        <div className="shrink-0 border-b border-line bg-surface px-4 py-3">
+          <div className="mb-1.5 flex items-center gap-1.5">
+            <Sparkles className="size-3.5 text-accent" />
+            <h3 className="text-[12.5px] font-semibold text-ink">这次审查的要点</h3>
+            <span className="text-[11px] text-faint">由 CLI 汇总，不是本程序生成的</span>
+          </div>
+          <div className="max-h-52 overflow-y-auto pr-1">
+            <MarkdownLite text={result.project_summary} />
+          </div>
         </div>
       )}
 

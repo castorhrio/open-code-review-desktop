@@ -59,6 +59,11 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.on("run:exit", handler);
     return () => ipcRenderer.removeListener("run:exit", handler);
   },
+  onProgress: (cb) => {
+    const handler = (_e, p) => cb(p);
+    ipcRenderer.on("run:progress", handler);
+    return () => ipcRenderer.removeListener("run:progress", handler);
+  },
   onMenuOpenRepo: (cb) => {
     const handler = () => cb();
     ipcRenderer.on("menu:open-repo", handler);

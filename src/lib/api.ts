@@ -6,6 +6,7 @@ import type {
   Ok,
   Preview,
   RepoInfo,
+  RunProgress,
   SessionSummary,
   Spec,
   UpdateState,
@@ -95,6 +96,7 @@ export interface Bridge {
   onUpdateState(cb: (p: UpdateState) => void): () => void;
   onLog(cb: (p: { id: string; line: string }) => void): () => void;
   onExit(cb: (p: ExitPayload) => void): () => void;
+  onProgress(cb: (p: { id: string; progress: RunProgress }) => void): () => void;
   onMenuOpenRepo(cb: () => void): () => void;
 }
 

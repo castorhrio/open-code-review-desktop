@@ -362,7 +362,23 @@ const SESSION_ID_RE = /\[ocr\] Session: (\S+)/;
 // UI shows a single [cmd] line for a run that is quietly working.
 const isPayloadFragment = (line) => !line.startsWith("[ocr]") && /^[\s]*([[{\]},]|"[^"]*"\s*:)/.test(line);
 
-function startRun(spec, onLine, onExit) {
+// The CLI writes its progress with `\r` so a burst of tool-call lines arrives as
+// one "line" if you only split on `\n` — the log then holds a single entry that
+// renders as fifty.
+const splitLines = (text) => text.split(/[\r\n]/);
+
+// `[ocr]   ▶ file_read …` / `[ocr]   ✔ code_search (55ms)` is per-tool-call
+// chatter: 7 tool calls per file becomes 14 lines, and a 233-file scan becomes
+// thousands. Count it, surface a tally, keep the log for milestones.
+const TOOL_CHATTER = /^\[ocr\]\s*[▶✔✗•]\s*(\S+)/;
+const CHATTER_TALLY_EVERY = 25;
+
+// Milestones worth telling the user about while a run is still going.
+// `[ocr] full-scan: 27 file(s) discovered, reviewing 27 in <repo>`
+const DISCOVERED_RE = /(\d+) file\(s\) discovered, reviewing (\d+)/;
+const COST_RE = /\[ocr\]\s*(estimated cost:[^\r\n]*)/;
+
+function startRun(spec, onLine, onExit, onProgress) {
   const bin = binaryPath();
   // Returning null lets the IPC caller report the failure synchronously instead
   // of firing an exit event before the run id reaches the renderer.
@@ -379,6 +395,8 @@ function startRun(spec, onLine, onExit) {
   let stderrBuf = "";
   let stderrAll = "";
   let sessionId = "";
+  const progress = { files: 0, reviewing: 0, tools: 0, comments: 0, excluded: 0, cost: "", byTool: {} };
+  const report = () => onProgress && onProgress(id, { ...progress });
 
   const emit = (chunk) => {
     const text = chunk.toString("utf8");
@@ -388,13 +406,48 @@ function startRun(spec, onLine, onExit) {
       if (found) sessionId = found[1];
     }
     stderrBuf += text;
-    const lines = stderrBuf.split(/\r?\n/);
+    const lines = splitLines(stderrBuf);
     stderrBuf = lines.pop();
     // The trailing `Error:` line is reported once as the run failure, so don't
     // also stream it into the log as progress.
     lines.forEach((line) => {
       const t = line.trim();
       if (!t || /^error:/i.test(t) || isPayloadFragment(t)) return;
+      const chatter = t.match(TOOL_CHATTER);
+      if (chatter) {
+        // Only the `✔` line is a completed call; `▶` is its start, so counting
+        // both would double every number the user sees.
+        if (t.includes("✔")) {
+          const tool = chatter[1];
+          progress.byTool[tool] = (progress.byTool[tool] || 0) + 1;
+          progress.tools += 1;
+          if (tool === "code_comment") progress.comments += 1;
+          if (progress.tools % CHATTER_TALLY_EVERY === 0) {
+            const parts = Object.entries(progress.byTool)
+              .sort((a, b) => b[1] - a[1])
+              .map(([k, v]) => `${k} ${v}`)
+              .join(" · ");
+            onLine(id, `[ocr] 已完成 ${progress.tools} 次工具调用（${parts}）`);
+          }
+          report();
+        }
+        return;
+      }
+      const found = t.match(DISCOVERED_RE);
+      if (found) {
+        progress.files = Number(found[1]);
+        progress.reviewing = Number(found[2]);
+        report();
+      }
+      const cost = t.match(COST_RE);
+      if (cost) {
+        progress.cost = cost[1];
+        report();
+      }
+      if (/^\[ocr\] Skipping /.test(t)) {
+        progress.excluded += 1;
+        report();
+      }
       onLine(id, t);
     });
   };

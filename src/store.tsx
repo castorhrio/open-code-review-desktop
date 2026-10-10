@@ -10,6 +10,7 @@ import type {
   Preview,
   RepoInfo,
   ReviewMode,
+  RunProgress,
   RunResult,
   SessionSummary,
   Spec,
@@ -88,9 +89,10 @@ interface Store {
   patchForm: (patch: Partial<FormState>) => void;
   buildSpec: (resume?: string) => Spec;
   preview: { value: Preview | null; loading: boolean; error: string } | null;
-  runPreview: () => Promise<void>;
+  runPreview: () => Promise<number>;
   running: boolean;
   elapsed: number;
+  progress: RunProgress | null;
   runLabel: string;
   startRun: (resume?: string) => Promise<void>;
   cancelRun: () => Promise<void>;
@@ -140,6 +142,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [preview, setPreview] = useState<Store["preview"]>(null);
   const [running, setRunning] = useState(false);
   const [elapsed, setElapsed] = useState(0);
+  const [progress, setProgress] = useState<RunProgress | null>(null);
   const [runLabel, setRunLabel] = useState("");
   const [log, setLog] = useState<string[]>([]);
   const [result, setResult] = useState<RunResult | null>(null);
@@ -265,9 +268,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const offLog = api.onLog(({ line }) => setLog((l) => [...l.slice(-400), line]));
+    const offProgress = api.onProgress(({ id, progress: p }) => {
+      if (runId.current && id === runId.current) setProgress(p);
+    });
     const offExit = api.onExit(({ id, result: r }) => {
       if (!runId.current || id !== runId.current) return;
       stopTimer();
+      setProgress(null);
       if (r.error) {
         setRunLabel("审查失败");
         // The log area is selectable; a toast is not, and it disappears.
@@ -287,6 +294,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
     return () => {
       offLog();
+      offProgress();
       offExit();
     };
   }, [applyResult, stopTimer]);
@@ -306,8 +314,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setLog([]);
       setPreview(null);
       setResume(null);
+      setProgress(null);
       setRunning(true);
       setElapsed(0);
+      // Watching a run from the form page means watching a wall of configuration.
+      // The run belongs on the results page, where it can show progress and,
+      // the moment it ends, the findings.
+      setView("results");
       startedAt.current = Date.now();
       tick.current = window.setInterval(() => setElapsed(Math.round((Date.now() - startedAt.current) / 1000)), 500);
       setRunLabel(resumeId ? "续跑中" : "审查运行中");
@@ -337,16 +350,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setRunLabel("已请求取消");
   }, []);
 
+  // Returns how many files would enter the review, so a caller can decide
+  // whether the run is big enough to ask first — without needing the result to
+  // be rendered (the preview panel is not open during that check).
   const runPreview = useCallback(async () => {
     const spec = buildSpec();
     const error = validateSpec(spec);
     if (error) {
       toast.warning(error);
-      return;
+      return -1;
     }
     setPreview({ value: null, loading: true, error: "" });
     const res = await api.preview(spec);
     setPreview(res.ok ? { value: res.value, loading: false, error: "" } : { value: null, loading: false, error: res.error });
+    if (!res.ok || !res.value) return -1;
+    const files = res.value.files || [];
+    return res.value.reviewable_count ?? files.filter((f) => f.will_review).length;
   }, [buildSpec]);
 
   const refreshHistory = useCallback(async () => {
@@ -523,6 +542,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     runPreview,
     running,
     elapsed,
+    progress,
     runLabel,
     startRun,
     cancelRun,

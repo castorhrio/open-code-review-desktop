@@ -81,7 +81,7 @@ export interface RunResult {
   llm?: { provider?: string; model?: string };
   message?: string;
   summary?: RunSummary;
-  tool_calls?: { total?: number; failure?: number };
+  tool_calls?: { total?: number; by_tool?: Record<string, number>; failure?: number; failure_by_tool?: Record<string, number> };
   comments?: Finding[] | null;
   groups?: { label: string; files: string[] }[];
   warnings?: unknown[];
@@ -89,6 +89,17 @@ export interface RunResult {
   resume?: { resumed_from: string; reused_files: number; rerun_files: number };
   session_id?: string;
   manifest?: RunManifest | null;
+}
+
+/** Live counters parsed out of the CLI's `[ocr]` progress stream. */
+export interface RunProgress {
+  files: number;
+  reviewing: number;
+  tools: number;
+  comments: number;
+  excluded: number;
+  cost: string;
+  byTool: Record<string, number>;
 }
 
 /** agent.Preview — for `scan`, `insertions` is the file's line count and status is "scan". */

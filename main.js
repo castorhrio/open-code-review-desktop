@@ -220,7 +220,8 @@ ipcMain.handle("review:run", (_e, spec) => {
   return ocr.startRun(
     spec,
     (id, line) => send("run:log", { id, line }),
-    (id, result) => send("run:exit", { id, result })
+    (id, result) => send("run:exit", { id, result }),
+    (id, progress) => send("run:progress", { id, progress })
   );
 });
 

@@ -18,8 +18,15 @@ import { EFFORTS, MODE_META } from "@/lib/spec";
 import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
 import { Checkbox, Field, Input, Select, Textarea } from "@/components/ui/form";
-import { Badge } from "@/components/ui/overlay";
+import { Badge, ConfirmDialog } from "@/components/ui/overlay";
 import { GuideCard } from "@/components/GuideCard";
+
+// A whole-file scan costs roughly one LLM round trip per file *plus* a planning
+// pass — one measured file came to 103K tokens and 3m36s. Past this many files
+// the app asks before spending, because the number stops being incidental.
+const SCAN_CONFIRM_AT = 20;
+const SCAN_TOKENS_PER_FILE = 100_000;
+const SCAN_MINUTES_PER_FILE = 3.6;
 
 function RefInput({
   label,
@@ -114,6 +121,7 @@ export function ReviewPanel() {
       : "CLI 不提供模型目录，请按服务商的 API 模型名填写（不是控制台显示名）。";
   const [showRules, setShowRules] = useState(false);
   const [ruleProbe, setRuleProbe] = useState("");
+  const [confirmScan, setConfirmScan] = useState(false);
 
   const keep = (preview?.value?.files || []).filter((f) => f.will_review);
   const drop = (preview?.value?.files || []).filter((f) => !f.will_review);
@@ -129,18 +137,31 @@ export function ReviewPanel() {
             <code className="rounded-xs bg-raised px-1.5 py-0.5 font-mono text-[10.5px] text-faint">{meta.command}</code>
           </div>
           <div className="flex gap-1 rounded-md border border-line bg-raised p-1">
-            {Object.entries(MODE_META).map(([mode, m]) => (
-              <button
-                key={mode}
-                onClick={() => patchForm({ mode: mode as keyof typeof MODE_META })}
-                className={cn(
-                  "flex-1 rounded-sm px-2 py-1.5 text-[12.5px] transition-colors duration-150",
-                  form.mode === mode ? "bg-accent text-accent-ink font-medium" : "text-muted hover:bg-hover hover:text-ink"
-                )}
-              >
-                {m.label}
-              </button>
-            ))}
+            {Object.entries(MODE_META)
+              .filter(([mode]) => mode !== "scan")
+              .map(([mode, m]) => (
+                <button
+                  key={mode}
+                  onClick={() => patchForm({ mode: mode as keyof typeof MODE_META })}
+                  className={cn(
+                    "flex-1 rounded-sm px-2 py-1.5 text-[12.5px] transition-colors duration-150",
+                    form.mode === mode ? "bg-accent text-accent-ink font-medium" : "text-muted hover:bg-hover hover:text-ink"
+                  )}
+                >
+                  {m.label}
+                </button>
+              ))}
+            <span className="my-1 w-px shrink-0 bg-line" />
+            <button
+              onClick={() => patchForm({ mode: "scan" })}
+              className={cn(
+                "flex items-center gap-1.5 rounded-sm px-2.5 py-1.5 text-[12.5px] transition-colors duration-150",
+                form.mode === "scan" ? "bg-accent text-accent-ink font-medium" : "text-muted hover:bg-hover hover:text-ink"
+              )}
+            >
+              {MODE_META.scan.label}
+              <span className={cn("rounded-xs px-1 text-[10px]", form.mode === "scan" ? "bg-black/20" : "bg-raised text-faint")}>整库 · 贵</span>
+            </button>
           </div>
           <p className="mt-1.5 text-[11.5px] text-faint">{meta.hint}</p>
         </section>
@@ -385,7 +406,27 @@ export function ReviewPanel() {
         </section>
 
         <div className="mt-4 flex items-center gap-2">
-          <Button variant="primary" size="lg" disabled={running} onClick={() => void startRun(resume?.sessionId)}>
+          <Button
+            variant="primary"
+            size="lg"
+            disabled={running}
+            onClick={async () => {
+              if (resume?.sessionId || !scan) {
+                void startRun(resume?.sessionId);
+                return;
+              }
+              // One measured single-file scan cost ~103K tokens and 3m36s, so a scan
+              // is not a "run it and see" operation. The count must come from the
+              // preview — and if the user never ran one, run it now: it is free.
+              const count = preview?.value ? keep.length : await runPreview();
+              if (count < 0) return;
+              if (count > SCAN_CONFIRM_AT) {
+                setConfirmScan(true);
+                return;
+              }
+              void startRun();
+            }}
+          >
             {resume?.sessionId ? <RotateCcw className="size-4" /> : <Play className="size-4" />}
             {running ? "审查运行中…" : resume?.sessionId ? "续跑未完成部分" : "开始审查"}
           </Button>
@@ -513,6 +554,38 @@ export function ReviewPanel() {
           </>
         )}
       </aside>
+
+      <ConfirmDialog
+        open={confirmScan}
+        onOpenChange={setConfirmScan}
+        title="这次扫描的规模不小"
+        confirmLabel="仍然开始"
+        danger
+        description={(() => {
+          const files = keep.length;
+          const conc = Math.max(1, Number(form.concurrency.trim()) || 8);
+          const minutes = (files * SCAN_MINUTES_PER_FILE) / conc;
+          return (
+            <span className="block space-y-1.5">
+              <span className="block">
+                全量扫描 <b className="text-ink">{files}</b> 个文件：每个文件先做一次预分析、再带着工具逐段读，按一次实测样本（单文件约 10 万 token、3–4 分钟）估算，这次大概要
+                <b className="text-ink"> {(files * SCAN_TOKENS_PER_FILE) / 10_000} 万 token</b>、
+                <b className="text-ink"> {minutes < 60 ? `${Math.round(minutes)} 分钟` : `${(minutes / 60).toFixed(1)} 小时`}</b>
+                （并发 {conc}）。
+              </span>
+              <span className="block text-faint">
+                {form.budget.trim() ? `你设的总 token 上限是 ${form.budget.trim()}，达到上限会保留已审结果并停下。` : "你没有设总 token 上限（0 = 不限），中途只能靠「取消」。"}
+                {form.timeout.trim() && form.timeout.trim() !== "0" ? ` 整体超时 ${form.timeout.trim()} 分钟，到点会变成部分完成，可用会话续跑。` : ""}
+              </span>
+              <span className="block text-faint">只想审改动的话，「工作区改动」或「分支对比」便宜一到两个数量级；整库审计建议按目录分几次跑（扫描路径填 PNOS.API/Controllers 这样）。</span>
+            </span>
+          );
+        })()}
+        onConfirm={() => {
+          setConfirmScan(false);
+          void startRun();
+        }}
+      />
     </div>
   );
 }
