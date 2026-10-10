@@ -44,9 +44,11 @@ CLI 很强，但一切都发生在终端里：读几十条行级意见、区分"
 
 ## 安装
 
-**方式 A — 安装包（推荐）。** 从 [Releases](../../releases) 下载 `ocr-desktop-<版本>-setup.exe` 双击安装。当前用户级安装，不需要管理员权限。因为**未做代码签名**，SmartScreen 可能提示"Windows 已保护你的电脑"→ 点「更多信息」→「仍要运行」。
+**方式 A — 安装包（推荐）。** 从 [Releases](../../releases) 下载对应版本的 `*-setup.exe` 双击安装。当前用户级安装，不需要管理员权限。因为**未做代码签名**，SmartScreen 可能提示"Windows 已保护你的电脑"→ 点「更多信息」→「仍要运行」。
 
-**方式 B — 免安装绿色版。** 直接运行 `ocr-desktop-<版本>-portable.exe`，无需安装。
+**方式 B — 免安装绿色版。** 直接运行 `*-portable.exe`，无需安装。
+
+> 从 v0.1.1 起产物命名为 `open-code-review-desktop-<版本>-*.exe`；**v0.1.0** 的资产仍是改名前的 `ocr-desktop-0.1.0-*.exe`（其下载链接未变化）。
 
 **方式 C — 源码运行。**
 

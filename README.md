@@ -42,9 +42,11 @@ The CLI is excellent but you live in a terminal: reading 40 line-level findings,
 
 ## Install
 
-**Option A — installer (recommended).** Download `ocr-desktop-<version>-setup.exe` from [Releases](../../releases) and run it. Per-user install, no administrator rights. Because it is unsigned, SmartScreen may warn — choose *More info → Run anyway*.
+**Option A — installer (recommended).** Download the `*-setup.exe` for the release you want from [Releases](../../releases) and run it. Per-user install, no administrator rights. Because it is unsigned, SmartScreen may warn — choose *More info → Run anyway*.
 
-**Option B — portable.** Run `ocr-desktop-<version>-portable.exe` directly, no installation.
+**Option B — portable.** Run the `*-portable.exe` directly, no installation.
+
+> Builds from v0.1.1 onwards are named `open-code-review-desktop-<version>-*.exe`; the **v0.1.0** assets are still `ocr-desktop-0.1.0-*.exe`, from before this project was renamed (its download URLs are unchanged).
 
 **Option C — from source.**
 

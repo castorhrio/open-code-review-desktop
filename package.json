@@ -1,5 +1,5 @@
 {
-  "name": "ocr-desktop",
+  "name": "open-code-review-desktop",
   "productName": "Open Code Review Desktop",
   "version": "0.1.0",
   "private": true,
@@ -93,7 +93,7 @@
           ]
         }
       ],
-      "artifactName": "ocr-desktop-${version}-setup.${ext}"
+      "artifactName": "open-code-review-desktop-${version}-setup.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -110,7 +110,7 @@
       "displayLanguageSelector": false
     },
     "portable": {
-      "artifactName": "ocr-desktop-${version}-portable.${ext}",
+      "artifactName": "open-code-review-desktop-${version}-portable.${ext}",
       "requestExecutionLevel": "user"
     }
   }
