@@ -46,7 +46,7 @@ The CLI is excellent but you live in a terminal: reading 40 line-level findings,
 
 **Option B — portable.** Run the `*-portable.exe` directly, no installation.
 
-> Builds from v0.1.1 onwards are named `open-code-review-desktop-<version>-*.exe`; the **v0.1.0** assets are still `ocr-desktop-0.1.0-*.exe`, from before this project was renamed (its download URLs are unchanged).
+> The v0.1.0 assets were renamed in place to `open-code-review-desktop-0.1.0-*.exe` after this project was renamed from `ocr-desktop`; the bytes are unchanged (verified by SHA-256), but the pre-rename download URLs now return 404.
 
 **Option C — from source.**
 
