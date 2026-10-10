@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { CheckCircle2, Copy, Download, KeyRound, PlugZap, RefreshCw, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
+import { cn } from "@/lib/cn";
 import { LANGUAGES } from "@/lib/spec";
+import type { ProviderEntry } from "@/lib/types";
 import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Switch } from "@/components/ui/form";
@@ -10,7 +12,7 @@ import { Badge, ConfirmDialog } from "@/components/ui/overlay";
 import { UpdateStatusLine } from "@/components/UpdateBanner";
 
 export function SettingsPanel() {
-  const { config, providers, saveConfig, unsetProvider, testLlm, info, update, checkUpdate, installUpdate, setUpdateEnabled, openReleases, llmTest } = useStore();
+  const { config, providers, saveConfig, unsetProvider, testLlm, info, update, checkUpdate, installUpdate, setUpdateEnabled, openReleases, llmTest, reloadConfig } = useStore();
   const [picked, setPicked] = useState("");
   const [model, setModel] = useState("");
   const [apiKey, setApiKey] = useState("");
@@ -21,6 +23,7 @@ export function SettingsPanel() {
   const [language, setLanguage] = useState("");
   const [maxTokens, setMaxTokens] = useState("");
   const [confirmUnset, setConfirmUnset] = useState(false);
+  const [pendingRemove, setPendingRemove] = useState<[string, ProviderEntry] | null>(null);
 
   useEffect(() => {
     if (!config) return;
@@ -34,6 +37,35 @@ export function SettingsPanel() {
     setMaxTokens(config.maxTokens ? String(config.maxTokens) : "");
     setApiKey("");
   }, [config, providers]);
+
+  const entries = config
+    ? Object.entries({ ...config.providers, ...config.customProviders })
+        .sort((a, b) => Number(b[0] === config.provider) - Number(a[0] === config.provider) || a[0].localeCompare(b[0]))
+    : [];
+
+  const use = async (name: string, model?: string) => {
+    const res = await api.useProvider(name, model);
+    if (!res.ok) toast.error("切换失败", { description: res.error });
+    else {
+      await reloadConfig();
+      toast.success(`当前使用已切到 ${name}`, { description: model ? `模型 ${model}` : "模型沿用该服务的保存值" });
+    }
+  };
+
+  const load = async () => {
+    await reloadConfig();
+    toast("配置已刷新");
+  };
+
+  const removeEntry = async () => {
+    if (!pendingRemove) return;
+    const res = await api.removeEntry(pendingRemove[0]);
+    if (!res.ok) toast.error("操作失败", { description: res.error });
+    else {
+      await reloadConfig();
+      toast.success(res.message || "已处理");
+    }
+  };
 
   if (!config) return <div className="p-6 text-[12.5px] text-faint">读取配置中…</div>;
 
@@ -57,7 +89,7 @@ export function SettingsPanel() {
       });
   };
 
-  const save = async () => {
+  const save = async (setActive: boolean) => {
     if (!name) {
       return;
     }
@@ -71,6 +103,7 @@ export function SettingsPanel() {
       effort,
       language,
       maxTokens: maxTokens.trim() ? Number(maxTokens) : "",
+      setActive,
     });
     if (ok) setApiKey("");
   };
@@ -160,8 +193,11 @@ export function SettingsPanel() {
         </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-2">
-          <Button variant="primary" size="lg" disabled={!name} onClick={() => void save()}>
-            保存配置
+          <Button variant="outline" size="lg" disabled={!name} onClick={() => void save(false)}>
+            仅保存该服务
+          </Button>
+          <Button variant="primary" size="lg" disabled={!name} onClick={() => void save(true)}>
+            保存并设为当前
           </Button>
           <Button variant="outline" size="lg" onClick={() => void testLlm()}>
             <PlugZap className="size-4" />
@@ -217,6 +253,80 @@ export function SettingsPanel() {
       </section>
       </div>
 
+      <section className="mt-4 overflow-hidden rounded-md border border-line">
+        <div className="flex items-center gap-2 bg-raised px-3 py-1.5">
+          <h3 className="text-[12.5px] font-semibold text-ink">已配置的服务</h3>
+          <span className="text-[11px] text-faint">可同时存在多个，审查页能按次临时切换</span>
+          <Button variant="ghost" size="sm" className="ml-auto" onClick={() => void load()}>
+            刷新
+          </Button>
+        </div>
+        {entries.length === 0 ? (
+          <p className="px-3 py-2.5 text-[11.5px] text-faint">还没有配置任何服务。上面选一个内置服务、填 Key 保存即可。</p>
+        ) : (
+          <table className="w-full border-collapse text-[12px]">
+            <thead>
+              <tr className="text-left text-[11px] text-faint">
+                <th className="px-3 py-1 font-normal">服务</th>
+                <th className="px-3 py-1 font-normal">协议</th>
+                <th className="px-3 py-1 font-normal">模型</th>
+                <th className="px-3 py-1 font-normal">Key</th>
+                <th className="px-3 py-1 text-right font-normal">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map(([name, e]) => {
+                const active = config.provider === name;
+                const isCustom = Boolean(config.customProviders[name]);
+                return (
+                  <tr key={name} className={cn("border-t border-line/70", active && "bg-accent-soft/50")}>
+                    <td className="px-3 py-1.5">
+                      <span className="font-mono text-[11.5px] text-ink">{name}</span>
+                      {active && <Badge tone="accent" className="ml-2">当前使用</Badge>}
+                      {isCustom && <span className="ml-1.5 text-[10.5px] text-faint">自定义</span>}
+                    </td>
+                    <td className="px-3 py-1.5 text-[11.5px] text-muted">{e.protocol || (isCustom ? "自定义" : "内置默认")}</td>
+                    <td className="px-3 py-1.5 font-mono text-[11.5px] text-muted">{e.model || <span className="text-faint">未填</span>}</td>
+                    <td className="px-3 py-1.5 text-[11.5px]">
+                      {e.hasKey ? <span className="font-mono text-ok">{e.keyPreview || "已设置"}</span> : <span className="text-bad">缺</span>}
+                    </td>
+                    <td className="px-3 py-1.5 text-right">
+                      {!active && (
+                        <Button variant="ghost" size="sm" onClick={() => void use(name, e.model)}>
+                          设为当前
+                        </Button>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setPicked(isCustom || providers.some((p) => p.name === name) ? name : "__custom__");
+                          if (!providers.some((p) => p.name === name)) setCustomName(name);
+                          setModel(e.model || "");
+                          setCustomUrl(e.url || "");
+                          if (e.protocol) setCustomProtocol(e.protocol);
+                          setApiKey("");
+                          toast("已载入该服务到上方表单", { description: "留空 API Key 即保持不变" });
+                        }}
+                      >
+                        编辑
+                      </Button>
+                      <Button variant="ghost" size="sm" className="text-bad" onClick={() => setPendingRemove([name, e])}>
+                        {isCustom ? "删除" : "清空 Key"}
+                      </Button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+        <p className="border-t border-line/70 bg-surface px-3 py-1.5 text-[11px] leading-relaxed text-faint">
+          内置服务无法从配置里删除（CLI 的 <code className="font-mono">config unset</code> 不支持
+          <code className="font-mono"> providers.&lt;name&gt;</code>），只能清空它的 Key 与模型；自定义服务可以彻底删除。
+        </p>
+      </section>
+
       <section className="mt-4 rounded-md border border-line bg-surface p-3">
         <div className="mb-2 flex items-center gap-2">
           <h3 className="text-[12.5px] font-semibold text-ink">更新</h3>
@@ -254,6 +364,21 @@ export function SettingsPanel() {
           <p className="mt-2 text-[11.5px] text-faint">开发模式下不检查更新，也不会下载任何文件。</p>
         )}
       </section>
+
+      <ConfirmDialog
+        open={Boolean(pendingRemove)}
+        onOpenChange={(v) => !v && setPendingRemove(null)}
+        title={pendingRemove && config.customProviders[pendingRemove[0]] ? "删除自定义服务" : "清空该服务的配置"}
+        danger
+        confirmLabel={pendingRemove && config.customProviders[pendingRemove[0]] ? "删除" : "清空"}
+        description={
+          <>
+            <code className="font-mono text-[11px]">{pendingRemove?.[0]}</code> 的
+            {pendingRemove && config.customProviders[pendingRemove[0]] ? " URL、协议、模型与 API Key 都会被删除，无法恢复。" : " API Key 与模型会被清空（内置服务无法删除）。它若是当前使用的服务，切换前请先选好替代。"}
+          </>
+        }
+        onConfirm={() => void removeEntry()}
+      />
 
       <ConfirmDialog
         open={confirmUnset}

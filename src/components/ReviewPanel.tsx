@@ -89,9 +89,29 @@ export function ReviewPanel() {
     dismissResume,
     rulesOutput,
     rulesCheck,
+    config,
+    providers,
   } = useStore();
   const meta = MODE_META[form.mode];
   const scan = form.mode === "scan";
+
+  const configured = { ...(config?.providers || {}), ...(config?.customProviders || {}) };
+  const modelOptions = form.runProvider
+    ? [...(configured[form.runProvider]?.models || []), configured[form.runProvider]?.model || ""].filter(Boolean)
+    : [];
+  const providerChoices = [
+    { value: "", label: config?.provider ? `跟随全局配置（${config.provider}${config.model ? " · " + config.model : ""}）` : "跟随全局配置（尚未配置服务）" },
+    ...Object.keys(configured)
+      .map((n) => ({ value: n, label: configured[n]?.hasKey ? `${n}（${configured[n].model || "未填模型"}）` : `${n}（缺 Key）`, group: "已配置" })),
+    ...providers
+      .filter((p) => !configured[p.name] || !configured[p.name]?.hasKey)
+      .map((p) => ({ value: p.name, label: p.name, group: "其他内置服务（需先到设置填 Key）" })),
+  ];
+  const modelHint = !form.runProvider
+    ? "先在左边选一个服务。"
+    : modelOptions.length
+      ? "该服务已有的模型名在下拉里。"
+      : "CLI 不提供模型目录，请按服务商的 API 模型名填写（不是控制台显示名）。";
   const [showRules, setShowRules] = useState(false);
   const [ruleProbe, setRuleProbe] = useState("");
 
@@ -183,6 +203,29 @@ export function ReviewPanel() {
               onChange={(e) => patchForm({ concurrency: e.target.value })}
             />
           </Field>
+
+          <Field label="本次使用的服务" hint="只影响这一次审查，不改全局配置（对应 --provider）。">
+            <Select
+              value={form.runProvider}
+              onValueChange={(v) => patchForm({ runProvider: v, runModel: "" })}
+              options={providerChoices}
+            />
+          </Field>
+          <Field label="本次使用的模型" hint={modelHint}>
+            <Input
+              value={form.runModel}
+              list="model-list"
+              spellCheck={false}
+              placeholder={form.runProvider ? "留空则用该服务已保存的模型" : "跟随全局配置"}
+              disabled={!form.runProvider}
+              onChange={(e) => patchForm({ runModel: e.target.value })}
+            />
+          </Field>
+          <datalist id="model-list">
+            {modelOptions.map((m) => (
+              <option key={m} value={m} />
+            ))}
+          </datalist>
         </section>
 
         <section className="mt-4 rounded-md border border-line bg-surface p-3">

@@ -34,6 +34,8 @@ export interface FormState {
   maxTokens: string;
   maxTools: string;
   rule: string;
+  runProvider: string;
+  runModel: string;
   noFilter: boolean;
   noPlan: boolean;
   noDedup: boolean;
@@ -57,6 +59,8 @@ export const EMPTY_FORM: FormState = {
   maxTokens: "",
   maxTools: "",
   rule: "",
+  runProvider: "",
+  runModel: "",
   noFilter: false,
   noPlan: false,
   noDedup: false,
@@ -227,6 +231,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       spec.maxTokens = intOrEmpty(form.maxTokens);
       spec.maxTools = intOrEmpty(form.maxTools);
       spec.rule = form.rule.trim();
+      // Only sent when the user picked one, so the CLI keeps using the globally
+      // configured provider/model otherwise.
+      if (form.runProvider) spec.provider = form.runProvider;
+      if (form.runModel) spec.model = form.runModel;
       if (resumeId) spec.resume = resumeId;
       return spec;
     },
@@ -303,11 +311,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
       startedAt.current = Date.now();
       tick.current = window.setInterval(() => setElapsed(Math.round((Date.now() - startedAt.current) / 1000)), 500);
       setRunLabel(resumeId ? "续跑中" : "审查运行中");
-      const id = await api.run(spec);
+      let id: string | null = null;
+      let ipcFailed = false;
+      try {
+        id = await api.run(spec);
+      } catch (err) {
+        // A rejected IPC call must not leave the UI stuck in "running".
+        ipcFailed = true;
+        toast.error("启动审查失败", { description: String((err as Error)?.message || err) });
+      }
       if (!id) {
         stopTimer();
         setRunLabel("启动失败");
-        toast.error("未找到 ocr 可执行文件", { description: "请在项目目录运行 npm install" });
+        if (!ipcFailed) toast.error("未找到 ocr 可执行文件", { description: "请在项目目录运行 npm install" });
         return;
       }
       runId.current = id;

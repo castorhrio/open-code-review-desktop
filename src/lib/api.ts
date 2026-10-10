@@ -12,6 +12,8 @@ import type {
   UpdateView,
 } from "./types";
 
+interface SaveResult { ok: boolean; error?: string; message?: string; cleared?: boolean; steps?: { key: string; ok: boolean; message: string }[]; config?: ConfigView }
+
 export interface Provider {
   name: string;
   protocol: string;
@@ -72,8 +74,11 @@ export interface Bridge {
     effort?: string;
     language?: string;
     maxTokens?: number | "";
-  }): Promise<{ ok: boolean; error?: string; steps?: { key: string; ok: boolean; message: string }[]; config?: ConfigView }>;
+    setActive?: boolean;
+  }): Promise<SaveResult>;
   unsetConfig(key: string): Promise<{ ok: boolean; error?: string; config?: ConfigView }>;
+  removeEntry(name: string): Promise<SaveResult>;
+  useProvider(name: string, model?: string): Promise<SaveResult>;
   testLlm(): Promise<{ ok: boolean; output: string }>;
   listSessions(repo: string, limit: number): Promise<Ok<SessionSummary[]>>;
   sessionComments(repo: string, sessionId: string): Promise<Ok<Finding[]>>;

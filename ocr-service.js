@@ -259,6 +259,7 @@ const HELP_HINTS = [
     "到「设置」点「测试连通」看完整报错。常见原因有两个：API Key 无效，或模型名填成了控制台显示名而不是 API 模型名。",
   ],
   [/supported API model names are/i, "模型名不被该服务接受：错误里列出的才是 API 模型名，别用控制台的显示名。"],
+  [/is set but not configured/i, "该服务还没有配置：到「设置」的已配置服务里选它填 Key，或先切回一个已配置的服务。"],
   [/unknown flag/, "该模式不支持这个参数，请把出错参数留空后重试。"],
   [/not a valid commit ref|unknown revision/, "分支或提交号无法解析：检查拼写，或直接从下拉列表里选。"],
   [/cannot be used together/, "预览模式不能与续跑同时使用，请先不带续跑地预览。"],
@@ -322,6 +323,9 @@ function startRun(spec, onLine, onExit) {
   if (!bin) return null;
   const id = `run-${++runSeq}`;
   const args = argList(spec, false);
+  // Surface the exact invocation: it is the wrapper's whole job, and without it
+  // a surprising run cannot be diagnosed. API keys never appear here.
+  onLine(id, `[cmd] ocr ${args.join(" ")}`);
   const child = spawn(bin, args, { cwd: spec.repo, windowsHide: true });
   running.set(id, child);
 
@@ -345,7 +349,7 @@ function startRun(spec, onLine, onExit) {
     lines.forEach((line) => {
       const t = line.trim();
       if (!t || /^error:/i.test(t) || isPayloadFragment(t)) return;
-      onLine(t);
+      onLine(id, t);
     });
   };
   child.stdout.on("data", (d) => {
@@ -354,17 +358,17 @@ function startRun(spec, onLine, onExit) {
   child.stderr.on("data", emit);
   child.on("error", (err) => {
     running.delete(id);
-    onExit({ code: -1, error: withHint(err.message), sessionId, command: args.join(" ") });
+    onExit(id, { code: -1, error: withHint(err.message), sessionId, command: args.join(" ") });
   });
   child.on("close", (code) => {
     const tail = stderrBuf.trim();
-    if (tail && !/^error:/i.test(tail) && !isPayloadFragment(tail)) onLine(tail);
+    if (tail && !/^error:/i.test(tail) && !isPayloadFragment(tail)) onLine(id, tail);
     running.delete(id);
     if (code !== 0) {
       // A failed run may still have published partial findings on stdout, so
       // report the error and the payload separately instead of picking one.
       const parsed = parseJson(stdout);
-      onExit({
+      onExit(id, {
         code,
         error: withHint(failureText({ code, stdout, stderr: stderrAll })),
         value: parsed.ok ? parsed.value : null,
@@ -375,10 +379,10 @@ function startRun(spec, onLine, onExit) {
     }
     const parsed = parseJson(stdout);
     if (!parsed.ok) {
-      onExit({ code, error: parsed.error, raw: parsed.raw, sessionId, command: args.join(" ") });
+      onExit(id, { code, error: parsed.error, raw: parsed.raw, sessionId, command: args.join(" ") });
       return;
     }
-    onExit({ code: 0, value: parsed.value, sessionId: parsed.value.session_id || sessionId, command: args.join(" ") });
+    onExit(id, { code: 0, value: parsed.value, sessionId: parsed.value.session_id || sessionId, command: args.join(" ") });
   });
   return id;
 }

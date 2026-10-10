@@ -196,6 +196,8 @@ export interface Spec {
   background?: string;
   backgroundFile?: string;
   rule?: string;
+  provider?: string;
+  model?: string;
   batch?: string;
   concurrency?: number | "";
   maxTokens?: number | "";

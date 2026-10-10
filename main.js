@@ -217,12 +217,11 @@ ipcMain.handle("repo:resolveRef", (_e, req) => git.resolveRef(req.repo, req.ref)
 ipcMain.handle("review:preview", (_e, spec) => ocr.preview(spec));
 
 ipcMain.handle("review:run", (_e, spec) => {
-  const id = ocr.startRun(
+  return ocr.startRun(
     spec,
-    (line) => send("run:log", { id, line }),
-    (result) => send("run:exit", { id, result })
+    (id, line) => send("run:log", { id, line }),
+    (id, result) => send("run:exit", { id, result })
   );
-  return id;
 });
 
 ipcMain.handle("review:cancel", (_e, id) => ocr.cancelRun(id));
@@ -277,8 +276,10 @@ ipcMain.handle("config:save", async (_e, form) => {
   }
   if (form.apiKey) pairs.push([`providers.${name}.api_key`, form.apiKey]);
   if (form.model) pairs.push([`providers.${name}.model`, form.model]);
-  pairs.push(["provider", name]);
-  if (form.model) pairs.push(["model", form.model]);
+  // Saving an entry must not silently switch the active service; the caller
+  // asks for that explicitly.
+  if (form.setActive !== false) pairs.push(["provider", name]);
+  if (form.model && form.setActive !== false) pairs.push(["model", form.model]);
   if (form.effort) pairs.push(["effort", form.effort]);
   if (form.language) pairs.push(["language", form.language]);
   if (form.maxTokens) pairs.push(["max_tokens", form.maxTokens]);
@@ -288,6 +289,33 @@ ipcMain.handle("config:save", async (_e, form) => {
   return failed
     ? { ok: false, error: `${failed.key}: ${ocr.withHint(failed.message)}`, steps }
     : { ok: true, steps, config: ocr.readConfigView() };
+});
+
+// Built-in provider entries cannot be removed (`config unset` rejects them), so
+// clearing their key and model is the equivalent of un-configuring them.
+ipcMain.handle("config:removeEntry", async (_e, req) => {
+  const name = (req.name || "").trim();
+  if (!name) return { ok: false, error: "未指定服务名" };
+  const isCustom = Boolean(ocr.readConfigView().customProviders[name]);
+  if (isCustom) return ocr.unsetConfig(`custom_providers.${name}`);
+  const steps = await ocr.setConfig([
+    [`providers.${name}.api_key`, ""],
+    [`providers.${name}.model`, ""],
+  ]);
+  const failed = steps.find((s) => !s.ok);
+  return failed
+    ? { ok: false, error: `${failed.key}: ${ocr.withHint(failed.message)}`, steps }
+    : { ok: true, cleared: true, message: `已清空 ${name} 的 Key 与模型（内置服务无法删除，仅能解除配置）`, config: ocr.readConfigView() };
+});
+
+ipcMain.handle("config:use", async (_e, req) => {
+  const pairs = [["provider", req.name]];
+  if (req.model) pairs.push(["model", req.model]);
+  const steps = await ocr.setConfig(pairs);
+  const failed = steps.find((s) => !s.ok);
+  return failed
+    ? { ok: false, error: `${failed.key}: ${ocr.withHint(failed.message)}`, steps }
+    : { ok: true, config: ocr.readConfigView() };
 });
 
 ipcMain.handle("config:unset", (_e, key) => ocr.unsetConfig(key));
