@@ -1,7 +1,7 @@
 {
   "name": "open-code-review-desktop",
   "productName": "Open Code Review Desktop",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "Desktop wrapper for the open-code-review (ocr) CLI",
   "author": "xyris",
@@ -117,10 +117,8 @@
     },
     "publish": [
       {
-        "provider": "github",
-        "owner": "castorhrio",
-        "repo": "open-code-review-desktop",
-        "releaseType": "release"
+        "provider": "generic",
+        "url": "https://github.com/castorhrio/open-code-review-desktop/releases/latest/download/"
       }
     ]
   }

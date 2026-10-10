@@ -83,12 +83,19 @@ function configure() {
   });
 }
 
+const CHECK_TIMEOUT_MS = 25000;
+
 async function check({ interactive } = {}) {
   if (!app.isPackaged && !process.env.OCR_DEV_UPDATE_TEST) {
     return setState({ phase: "unsupported", message: "开发模式不检查更新", fallbackUrl: RELEASES_URL });
   }
   try {
-    const res = await autoUpdater.checkForUpdates();
+    const res = await Promise.race([
+      autoUpdater.checkForUpdates(),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("检查超时（25 秒无响应，可能是网络或代理拦截）")), CHECK_TIMEOUT_MS)
+      ),
+    ]);
     if (!res) return setState({ phase: interactive ? "manual" : "idle", fallbackUrl: RELEASES_URL });
     if (res.updateInfo.version === app.getVersion() && interactive) {
       return setState({ phase: "up-to-date", version: res.updateInfo.version });
