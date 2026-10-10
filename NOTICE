@@ -1,0 +1,16 @@
+Open Code Review Desktop
+Copyright (c) 2026 The Open Code Review Desktop authors
+
+This product includes software developed at
+Alibaba Group (https://github.com/alibaba/open-code-review),
+licensed under the Apache License, Version 2.0.
+
+The desktop wrapper in `main.js`, `preload.js`, `ocr-service.js`, `git-service.js`
+and `src/` is original work of the authors above and is distributed under the same
+Apache License, Version 2.0. Source files that were started from upstream examples
+carry the matching `SPDX-License-Identifier: Apache-2.0` header.
+
+No source code from the upstream Go repository is vendored or modified in this
+repository. The review engine is used exclusively as an unmodified external binary
+shipped by the npm package `@alibaba-group/open-code-review`, invoked as a child
+process.

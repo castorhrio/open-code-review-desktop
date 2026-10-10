@@ -1,0 +1,17 @@
+# dependencies
+node_modules/
+
+# build output (electron-builder)
+dist/
+release/
+
+# scratch dirs used by local runs
+.tmp-audit/
+.tmp-home/
+
+# logs / editor / OS noise
+*.log
+npm-debug.log*
+Thumbs.db
+.DS_Store
+/out

@@ -1,0 +1,337 @@
+// SPDX-License-Identifier: Apache-2.0
+"use strict";
+
+const fs = require("fs");
+const path = require("path");
+const { app, BrowserWindow, dialog, ipcMain, shell, Menu } = require("electron");
+
+const ocr = require("./ocr-service");
+const git = require("./git-service");
+
+const DOCS_URL = "https://open-codereview.ai/docs";
+
+let mainWindow = null;
+
+const boundsFile = () => path.join(app.getPath("userData"), "window-bounds.json");
+
+function readBounds() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(boundsFile(), "utf8"));
+    if (Number.isFinite(raw.width) && Number.isFinite(raw.height) && raw.width > 400 && raw.height > 400) {
+      return raw;
+    }
+  } catch (_) {}
+  return { width: 1320, height: 880 };
+}
+
+function createWindow() {
+  const bounds = readBounds();
+  mainWindow = new BrowserWindow({
+    ...bounds,
+    minWidth: 1000,
+    minHeight: 660,
+    backgroundColor: "#0d1017",
+    title: "Open Code Review",
+    icon: path.join(__dirname, "assets", "icon.png"),
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  mainWindow.once("ready-to-show", () => mainWindow.show());
+  const devUrl = process.env.ELECTRON_RENDERER_URL;
+  if (devUrl) {
+    // `npm run dev` launches Vite and Electron together, so the dev server may
+    // not be listening yet on the first attempt.
+    const tryLoad = (attempt) => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      mainWindow.loadURL(devUrl).catch(() => {
+        if (attempt < 40) setTimeout(() => tryLoad(attempt + 1), 300);
+      });
+    };
+    tryLoad(0);
+  } else {
+    mainWindow.loadFile(path.join(__dirname, "out", "index.html"));
+  }
+  mainWindow.on("close", () => {
+    if (mainWindow.isMaximized() || mainWindow.isMinimized()) return;
+    try {
+      fs.writeFileSync(boundsFile(), JSON.stringify(mainWindow.getBounds()));
+    } catch (_) {}
+  });
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+  });
+}
+
+function send(channel, payload) {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
+}
+
+const parseProviderTable = (text) =>
+  text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => /^[a-z0-9-]+\s{2,}/.test(l))
+    .map((l) => {
+      const cols = l.split(/\s{2,}/);
+      return { name: cols[0], protocol: cols[1] || "", url: cols[2] || "" };
+    })
+    .filter((p) => p.name && p.name !== "NAME" && !/^-+$/.test(p.name));
+
+function buildMenu() {
+  const template = [
+    {
+      label: "文件",
+      submenu: [
+        {
+          label: "打开仓库…",
+          accelerator: "CmdOrCtrl+O",
+          click: () => send("menu:open-repo"),
+        },
+        { type: "separator" },
+        { role: "quit" },
+      ],
+    },
+    {
+      label: "视图",
+      submenu: [
+        { role: "reload" },
+        { role: "toggledevtools" },
+        { type: "separator" },
+        { role: "resetZoom" },
+        { role: "zoomIn" },
+        { role: "zoomOut" },
+        { type: "separator" },
+        { role: "togglefullscreen" },
+      ],
+    },
+    {
+      label: "帮助",
+      submenu: [
+        { label: "Open Code Review 文档", click: () => shell.openExternal(DOCS_URL) },
+        {
+          label: "打开配置文件所在目录",
+          click: () => shell.showItemInFolder(ocr.CONFIG_PATH),
+        },
+      ],
+    },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+/* ---------------- ipc: app ---------------- */
+
+ipcMain.handle("app:info", async () => {
+  const bin = ocr.binaryPath();
+  let version = "";
+  if (bin) {
+    const res = await ocr.exec(["version"]);
+    version = (res.stdout || res.stderr || "").trim().split(/\r?\n/).filter(Boolean)[0] || "";
+  }
+  return {
+    binary: bin,
+    version: version.replace(/^open-code-review\s*/, ""),
+    configPath: ocr.CONFIG_PATH,
+    docsUrl: DOCS_URL,
+    appVersion: app.getVersion(),
+    platform: process.platform,
+  };
+});
+
+ipcMain.handle("app:providers", async () => {
+  const res = await ocr.exec(["llm", "providers", "--color", "never"]);
+  if (res.code !== 0) return { ok: false, error: ocr.withHint(ocr.failureText(res)), value: [] };
+  return { ok: true, value: parseProviderTable(res.stdout) };
+});
+
+/* ---------------- ipc: repo ---------------- */
+
+ipcMain.handle("repo:pick", async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: "选择要审查的仓库目录",
+    buttonLabel: "选择此文件夹",
+    properties: ["openDirectory"],
+  });
+  if (result.canceled || !result.filePaths.length) return "";
+  return result.filePaths[0];
+});
+
+ipcMain.handle("repo:pickInside", async (_e, repo) => {
+  if (!repo) return { error: "请先选择仓库" };
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: "选择要扫描的子目录（可留空表示整个仓库）",
+    buttonLabel: "使用此目录",
+    defaultPath: repo,
+    properties: ["openDirectory"],
+  });
+  if (result.canceled || !result.filePaths.length) return {};
+  const picked = path.resolve(result.filePaths[0]);
+  const root = path.resolve(repo);
+  if (picked !== root && !picked.startsWith(root + path.sep)) {
+    return { error: "所选目录不在该仓库内" };
+  }
+  const rel = path.relative(root, picked).split(path.sep).join("/");
+  return { relPath: rel || "" };
+});
+
+ipcMain.handle("repo:pickFile", async (_e, opts) => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: (opts && opts.title) || "选择文件",
+    buttonLabel: "选择此文件",
+    properties: ["openFile"],
+    filters: (opts && opts.filters) || [{ name: "所有文件", extensions: ["*"] }],
+  });
+  if (result.canceled || !result.filePaths.length) return "";
+  return result.filePaths[0];
+});
+
+ipcMain.handle("repo:inspect", (_e, repo) => git.inspect(repo));
+
+ipcMain.handle("repo:resolveRef", (_e, req) => git.resolveRef(req.repo, req.ref));
+
+/* ---------------- ipc: review ---------------- */
+
+ipcMain.handle("review:preview", (_e, spec) => ocr.preview(spec));
+
+ipcMain.handle("review:run", (_e, spec) => {
+  const id = ocr.startRun(
+    spec,
+    (line) => send("run:log", { id, line }),
+    (result) => send("run:exit", { id, result })
+  );
+  return id;
+});
+
+ipcMain.handle("review:cancel", (_e, id) => ocr.cancelRun(id));
+
+/* ---------------- ipc: files ---------------- */
+
+ipcMain.handle("file:read", async (_e, req) => {
+  if (req.ref && req.ref !== "HEAD") {
+    const at = await git.readFileAtRef(req.repo, req.path, req.ref, req.startLine, req.endLine, req.pad || 12);
+    if (at.ok) return at;
+  }
+  return git.readFileWindow(req.repo, req.path, req.startLine, req.endLine, req.pad || 12);
+});
+
+ipcMain.handle("file:open", (_e, absPath) => shell.openPath(absPath));
+
+ipcMain.handle("file:reveal", (_e, absPath) => {
+  shell.showItemInFolder(absPath);
+  return true;
+});
+
+ipcMain.handle("file:saveText", async (_e, req) => {
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: req.title || "保存",
+    defaultPath: req.suggestedName,
+    filters: req.filters || [{ name: "JSON", extensions: ["json"] }],
+  });
+  if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+  try {
+    fs.writeFileSync(result.filePath, req.text, "utf8");
+    return { ok: true, file: result.filePath };
+  } catch (err) {
+    return { ok: false, error: `写入失败：${err.message}` };
+  }
+});
+
+ipcMain.handle("file:openUrl", (_e, url) => {
+  if (!/^https?:\/\//i.test(url)) return false;
+  shell.openExternal(url);
+  return true;
+});
+
+/* ---------------- ipc: config ---------------- */
+
+ipcMain.handle("config:read", () => ocr.readConfigView());
+
+ipcMain.handle("config:save", async (_e, form) => {
+  const pairs = [];
+  const name = (form.provider || "").trim();
+  if (!name) return { ok: false, error: "未选择 provider", steps: [] };
+
+  if (form.isCustom) {
+    if (form.url) pairs.push([`providers.${name}.url`, form.url]);
+    if (form.protocol) pairs.push([`providers.${name}.protocol`, form.protocol]);
+  }
+  if (form.apiKey) pairs.push([`providers.${name}.api_key`, form.apiKey]);
+  if (form.model) pairs.push([`providers.${name}.model`, form.model]);
+  pairs.push(["provider", name]);
+  if (form.model) pairs.push(["model", form.model]);
+  if (form.effort) pairs.push(["effort", form.effort]);
+  if (form.language) pairs.push(["language", form.language]);
+  if (form.maxTokens) pairs.push(["max_tokens", form.maxTokens]);
+
+  const steps = await ocr.setConfig(pairs);
+  const failed = steps.find((s) => !s.ok);
+  return failed
+    ? { ok: false, error: `${failed.key}: ${ocr.withHint(failed.message)}`, steps }
+    : { ok: true, steps, config: ocr.readConfigView() };
+});
+
+ipcMain.handle("config:unset", (_e, key) => ocr.unsetConfig(key));
+
+ipcMain.handle("config:test", async () => {
+  const res = await ocr.exec(["llm", "test", "--color", "never"]);
+  return {
+    ok: res.code === 0,
+    output: ocr.withHint(
+      res.code === 0 ? (res.stdout + res.stderr).trim() : ocr.failureText(res)
+    ),
+  };
+});
+
+/* ---------------- ipc: sessions & rules ---------------- */
+
+ipcMain.handle("session:list", (_e, req) => ocr.listSessions(req.repo, req.limit));
+
+ipcMain.handle("session:comments", (_e, req) => ocr.sessionComments(req.repo, req.sessionId));
+
+ipcMain.handle("session:export", async (_e, req) => {
+  const save = await dialog.showSaveDialog(mainWindow, {
+    title: "导出会话报告",
+    defaultPath: `ocr-${req.sessionId.slice(0, 8)}.html`,
+    filters: [{ name: "HTML 报告", extensions: ["html"] }],
+  });
+  if (save.canceled || !save.filePath) return { ok: false, canceled: true };
+  const res = await ocr.exportSession(req.repo, req.sessionId, save.filePath);
+  return res.ok ? { ...res, opened: await shell.openPath(save.filePath) === "" } : res;
+});
+
+ipcMain.handle("session:delete", (_e, req) => ocr.deleteSession(req.sessionId, req.repo));
+
+ipcMain.handle("rules:check", (_e, req) => ocr.rulesCheck(req.repo, req.path, req.rule));
+
+/* ---------------- lifecycle ---------------- */
+
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  // Without this Windows groups the taskbar entry under Electron's host and
+  // shows the stock Electron icon even when BrowserWindow.icon is set.
+  if (process.platform === "win32") app.setAppUserModelId("com.xyris.open-code-review-desktop");
+
+  app.on("second-instance", () => {
+    if (!mainWindow) return createWindow();
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  });
+
+  app.whenReady().then(() => {
+    buildMenu();
+    createWindow();
+    app.on("activate", () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
+  });
+}
+
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") app.quit();
+});
