@@ -79,7 +79,7 @@ export interface Bridge {
   unsetConfig(key: string): Promise<{ ok: boolean; error?: string; config?: ConfigView }>;
   removeEntry(name: string): Promise<SaveResult>;
   useProvider(name: string, model?: string): Promise<SaveResult>;
-  testLlm(): Promise<{ ok: boolean; output: string }>;
+  testLlm(form?: { name?: string; url: string; protocol: string; model: string; apiKey: string }): Promise<{ ok: boolean; output: string; via: "form" | "saved" }>;
   listSessions(repo: string, limit: number): Promise<Ok<SessionSummary[]>>;
   sessionComments(repo: string, sessionId: string): Promise<Ok<Finding[]>>;
   exportSession(repo: string, sessionId: string): Promise<{ ok: boolean; file?: string; opened?: boolean; canceled?: boolean; error?: string }>;

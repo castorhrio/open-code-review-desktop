@@ -320,13 +320,52 @@ ipcMain.handle("config:use", async (_e, req) => {
 
 ipcMain.handle("config:unset", (_e, key) => ocr.unsetConfig(key));
 
-ipcMain.handle("config:test", async () => {
+// `ocr llm test` reads only the saved config, so "test what I just typed" runs
+// the CLI against an empty temp HOME with OCR_LLM_* set: the config in the real
+// HOME would otherwise win and the test would prove nothing about the form.
+ipcMain.handle("config:test", async (_e, req) => {
+  const form = req && req.form;
+  if (form) {
+    const missing = [
+      ["url", "Base URL"],
+      ["protocol", "协议"],
+      ["model", "模型名"],
+    ]
+      .filter(([key]) => !String(form[key] || "").trim())
+      .map(([, label]) => label);
+    const apiKey = String(form.apiKey || "").trim() || ocr.savedKeyFor(form.name, form.url);
+    if (missing.length || !apiKey) {
+      const parts = missing.length ? `还缺 ${missing.join("、")}` : "该服务还没有已保存的 Key，请把 Key 填进来";
+      return {
+        ok: false,
+        via: "form",
+        output: `${parts}，无法按当前填写的值测试。补齐后再点，或先保存再测已保存的配置。`,
+      };
+    }
+    let home = "";
+    try {
+      home = fs.mkdtempSync(path.join(app.getPath("temp"), "ocr-llmtest-"));
+      const res = await ocr.exec(
+        ["llm", "test", "--color", "never"],
+        undefined,
+        ocr.llmTestEnv({ ...form, apiKey }, home)
+      );
+      return {
+        ok: res.code === 0,
+        via: "form",
+        output: ocr.withHint(res.code === 0 ? (res.stdout + res.stderr).trim() : ocr.failureText(res)),
+      };
+    } catch (err) {
+      return { ok: false, via: "form", output: `测试没有跑起来：${err.message}` };
+    } finally {
+      if (home) fs.rmSync(home, { recursive: true, force: true });
+    }
+  }
   const res = await ocr.exec(["llm", "test", "--color", "never"]);
   return {
     ok: res.code === 0,
-    output: ocr.withHint(
-      res.code === 0 ? (res.stdout + res.stderr).trim() : ocr.failureText(res)
-    ),
+    via: "saved",
+    output: ocr.withHint(res.code === 0 ? (res.stdout + res.stderr).trim() : ocr.failureText(res)),
   };
 });
 

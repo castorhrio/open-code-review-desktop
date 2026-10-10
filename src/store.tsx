@@ -109,10 +109,10 @@ interface Store {
   deleteSession: (s: SessionSummary) => Promise<void>;
   saveConfig: (form: Parameters<typeof api.saveConfig>[0]) => Promise<boolean>;
   unsetProvider: () => Promise<void>;
-  testLlm: () => Promise<void>;
+  testLlm: (form?: { name?: string; url: string; protocol: string; model: string; apiKey: string }) => Promise<void>;
   rulesCheck: (path: string) => Promise<void>;
   rulesOutput: string;
-  llmTest: { ok: boolean; output: string } | null;
+  llmTest: { ok: boolean; output: string; via: "form" | "saved" } | null;
   update: UpdateView | null;
   checkUpdate: () => Promise<void>;
   installUpdate: () => Promise<void>;
@@ -148,7 +148,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [history, setHistory] = useState<SessionSummary[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [rulesOutput, setRulesOutput] = useState("");
-  const [llmTest, setLlmTest] = useState<{ ok: boolean; output: string } | null>(null);
+  const [llmTest, setLlmTest] = useState<{ ok: boolean; output: string; via: "form" | "saved" } | null>(null);
   const [update, setUpdate] = useState<Store["update"]>(null);
 
   useEffect(() => {
@@ -434,14 +434,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     toast.success("已清除当前服务选择");
   }, [config]);
 
-  const testLlm = useCallback(async () => {
+  const testLlm = useCallback(async (form?: { name?: string; url: string; protocol: string; model: string; apiKey: string }) => {
     setLlmTest(null);
-    const res = await api.testLlm();
+    const res = await api.testLlm(form);
     // Keep the full text on screen and selectable: a toast cannot be copied and
     // disappears before the user finishes reading a long vendor error.
-    setLlmTest({ ok: res.ok, output: res.output });
+    setLlmTest({ ok: res.ok, output: res.output, via: res.via });
     if (res.ok) toast.success("连通正常", { description: res.output.split("\n")[0] });
-    else toast.error("连通失败", { description: res.output.split("\n").slice(0, 2).join(" ") });
+    else toast.error(res.via === "form" ? "按当前填写的值测不通" : "连通失败", { description: res.output.split("\n").slice(0, 2).join(" ") });
   }, []);
 
   const rulesCheck = useCallback(

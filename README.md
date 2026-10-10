@@ -40,6 +40,7 @@ The CLI is excellent but you live in a terminal: reading 40 line-level findings,
 | **Triage** | severity / category / text filters, `↑` `↓` or `j` `k` navigation, copy suggestion code, export JSON |
 | **First-run guidance** | a three-step guide, ref validation as you type, and Chinese hints translated from raw CLI errors |
 | **Many providers, per-run switching** | keep several providers configured at once; *Set as current* decides the default, and the review page can override provider and model for a single run (same as `--provider` / `--model`) without rewriting your config |
+| **Test before you save** | *Test connection* checks the values currently in the form — nothing is written, and saving then runs the check automatically. When a vendor rejects the model name, the names it accepts become clickable buttons that fill the field. |
 | **In-app updates** | The installed build checks the published release on launch, downloads in the background, verifies the SHA-512 checksum and restarts on your word — no returning to the browser |
 | **Local config stays local** | everything is written through `ocr config set` into `~/.opencodereview/config.json`; the app keeps no separate copy of your key and talks only to the endpoint you configure |
 
@@ -63,7 +64,7 @@ npm run dist     # build the Windows installer into release/
 ## First run
 
 1. Pick a repository in the top bar (must be a git repo root; Git ≥ 2.41 on `PATH`).
-2. In **Settings**, choose a provider, enter the API key and model name, then **Save and set as current** and **Test connection**. Several providers can stay configured at once — *Save only* stores one without taking over, and *Set as current* switches later.
+2. In **Settings**, choose a provider, enter the API key and model name and hit **Test connection** — it checks the values in the form, nothing needs to be saved first; saving runs it again automatically. Several providers can stay configured at once: *Save only* stores one without taking over, and *Set as current* switches later.
 3. Back in **Review**, click **Preview file list** (free), check the scope, then start the review.
 
 ## Architecture
@@ -87,7 +88,7 @@ Two constraints worth knowing before you touch the build:
 - **Auto-update applies to the NSIS setup build only.** The portable exe re-extracts to a temp dir each run and has no install root to replace, so it links to the releases page instead.
 - Releases must ship `latest.yml` and `*-setup.exe.blockmap` next to the binaries; without them the updater cannot see a version at all.
 - Installers are **unsigned**, so SmartScreen will warn on first launch.
-- The CLI exposes no model catalogue, so the model name is still typed by hand (see [alibaba/open-code-review#1694](https://github.com/alibaba/open-code-review/issues/1694)).
+- The CLI exposes no model catalogue, so the model name is still typed by hand — a rejected name makes the vendor turn its accepted names into clickable buttons (see [alibaba/open-code-review#1694](https://github.com/alibaba/open-code-review/issues/1694)).
 - The dev instance and the installed app share one user-data directory, so the **single-instance lock makes whichever starts second exit silently**.
 
 ## Not affiliated

@@ -28,7 +28,7 @@ contextBridge.exposeInMainWorld("api", {
   unsetConfig: (key) => ipcRenderer.invoke("config:unset", key),
   removeEntry: (name) => ipcRenderer.invoke("config:removeEntry", { name }),
   useProvider: (name, model) => ipcRenderer.invoke("config:use", { name, model }),
-  testLlm: () => ipcRenderer.invoke("config:test"),
+  testLlm: (form) => ipcRenderer.invoke("config:test", form ? { form } : undefined),
 
   listSessions: (repo, limit) => ipcRenderer.invoke("session:list", { repo, limit }),
   sessionComments: (repo, sessionId) => ipcRenderer.invoke("session:comments", { repo, sessionId }),

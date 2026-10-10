@@ -57,6 +57,25 @@ function stripEntry(entry) {
 const mapSection = (section) =>
   Object.fromEntries(Object.entries(section || {}).map(([k, v]) => [k, stripEntry(v)]));
 
+// The Key never travels to the renderer: the settings page asks "may I reuse
+// what is already saved for this service?" and only gets a value back when the
+// endpoint being tested is the one that Key belongs to. Sending a saved Key to
+// a URL the user just typed would leak it to another host.
+function savedKeyFor(name, url) {
+  let raw = {};
+  try {
+    raw = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
+  } catch (_) {
+    return "";
+  }
+  const entry = (raw.providers || {})[name] || (raw.custom_providers || {})[name];
+  if (!entry) return "";
+  const saved = String(entry.url || "").trim().replace(/\/+$/, "");
+  const target = String(url || "").trim().replace(/\/+$/, "");
+  if (saved && saved !== target) return "";
+  return String(entry.api_key || entry.auth_token || "");
+}
+
 function readConfigView() {
   let raw = {};
   let fileExists = false;
@@ -195,14 +214,18 @@ function argList(spec, preview) {
   return args;
 }
 
-function exec(args, cwd) {
+function exec(args, cwd, env) {
   return new Promise((resolve) => {
     const bin = binaryPath();
     if (!bin) {
       resolve({ code: -1, stdout: "", stderr: "", error: MISSING_BINARY });
       return;
     }
-    const child = spawn(bin, args, { cwd, windowsHide: true });
+    const child = spawn(bin, args, {
+      cwd,
+      windowsHide: true,
+      env: env ? { ...process.env, ...env } : process.env,
+    });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (d) => {
@@ -214,6 +237,27 @@ function exec(args, cwd) {
     child.on("error", (err) => resolve({ code: -1, stdout, stderr, error: err.message }));
     child.on("close", (code) => resolve({ code, stdout, stderr }));
   });
+}
+
+// `ocr llm test` takes no flags, and its OCR_LLM_* overrides are only honoured
+// when the config selects no provider — a saved Key silently wins over the env
+// (verified). So testing values that were never saved means running the CLI
+// against an empty HOME, not just setting the variables.
+const LLM_ENV_KEYS = { url: "OCR_LLM_URL", protocol: "OCR_LLM_PROTOCOL", model: "OCR_LLM_MODEL", apiKey: "OCR_LLM_TOKEN" };
+
+function llmTestEnv(form, homeDir) {
+  const env = {
+    USERPROFILE: homeDir,
+    HOME: homeDir,
+    APPDATA: path.join(homeDir, "AppData", "Roaming"),
+    LOCALAPPDATA: path.join(homeDir, "AppData", "Local"),
+    OneDrive: homeDir,
+  };
+  for (const [field, key] of Object.entries(LLM_ENV_KEYS)) {
+    const value = String(form[field] || "").trim();
+    if (value) env[key] = value;
+  }
+  return env;
 }
 
 const MISSING_BINARY = "未找到 ocr 可执行文件，请在项目目录运行 npm install";
@@ -464,6 +508,8 @@ module.exports = {
   CONFIG_PATH,
   readConfigView,
   exec,
+  llmTestEnv,
+  savedKeyFor,
   preview,
   startRun,
   cancelRun,

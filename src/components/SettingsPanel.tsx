@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { CheckCircle2, Copy, Download, KeyRound, PlugZap, RefreshCw, Trash2 } from "lucide-react";
+import { CheckCircle2, Copy, Download, Eye, EyeOff, KeyRound, PlugZap, RefreshCw, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { LANGUAGES } from "@/lib/spec";
@@ -11,11 +11,17 @@ import { Field, Input, Select, Switch } from "@/components/ui/form";
 import { Badge, ConfirmDialog } from "@/components/ui/overlay";
 import { UpdateStatusLine } from "@/components/UpdateBanner";
 
+// The CLI ships 29 built-ins; most users need a handful. Anything already
+// configured stays visible so the picker can never hide the entry you are on.
+const POPULAR = ["deepseek", "openai", "anthropic", "gemini", "kimi", "z-ai", "dashscope", "siliconflow-cn", "openrouter", "ollama-cloud"];
+
 export function SettingsPanel() {
   const { config, providers, saveConfig, unsetProvider, testLlm, info, update, checkUpdate, installUpdate, setUpdateEnabled, openReleases, llmTest, reloadConfig } = useStore();
   const [picked, setPicked] = useState("");
   const [model, setModel] = useState("");
   const [apiKey, setApiKey] = useState("");
+  const [showKey, setShowKey] = useState(false);
+  const [showAllProviders, setShowAllProviders] = useState(false);
   const [customName, setCustomName] = useState("");
   const [customUrl, setCustomUrl] = useState("");
   const [customProtocol, setCustomProtocol] = useState("openai");
@@ -72,13 +78,37 @@ export function SettingsPanel() {
   const isCustomTarget = picked === "__custom__";
   const name = isCustomTarget ? customName.trim() : picked;
   const entry = config.providers[name] || config.customProviders[name] || {};
+  const builtIn = providers.find((p) => p.name === name);
+  const configuredNames = new Set([...Object.keys(config.providers), ...Object.keys(config.customProviders)]);
+  const pickable = providers.filter((p) => !config.customProviders[p.name]);
+  const visibleProviders = showAllProviders
+    ? pickable
+    : pickable.filter((p) => POPULAR.includes(p.name) || configuredNames.has(p.name) || p.name === picked);
   const options = [
-    ...providers
-      .filter((p) => !config.customProviders[p.name])
-      .map((p) => ({ value: p.name, label: `${p.name} — ${p.protocol}`, group: "内置服务" })),
+    ...visibleProviders.map((p) => ({
+      value: p.name,
+      label: configuredNames.has(p.name) ? `${p.name} — ${p.protocol}（已配置）` : `${p.name} — ${p.protocol}`,
+      group: showAllProviders ? "全部内置服务" : "常用服务",
+    })),
     ...Object.keys(config.customProviders).map((n) => ({ value: n, label: n, group: "已保存的自定义服务" })),
     { value: "__custom__", label: "＋ 新建自定义服务 / 私有网关", group: "" },
   ];
+
+  // Values as typed, for the no-save connectivity test. url/protocol come from
+  // the CLI's own built-in table so a brand-new provider can be tested too.
+  const formValues = {
+    name,
+    url: (isCustomTarget ? customUrl : builtIn?.url || entry.url || "").trim(),
+    protocol: (isCustomTarget ? customProtocol : builtIn?.protocol || entry.protocol || "").trim(),
+    model: model.trim(),
+    apiKey: apiKey.trim(),
+  };
+  const formTestable = Boolean(formValues.url && formValues.protocol && formValues.model);
+  const modelSuggestions = (() => {
+    if (!llmTest || llmTest.ok) return [];
+    const found = llmTest.output.match(/supported API model names are\s+([A-Za-z0-9._\-]+(?:\s*,\s*[A-Za-z0-9._\-]+)*)/i);
+    return found ? found[1].split(",").map((s) => s.trim()).filter(Boolean).slice(0, 8) : [];
+  })();
 
   const revealConfig = async () => {
     const res = await api.revealFile(config.path);
@@ -93,6 +123,7 @@ export function SettingsPanel() {
     if (!name) {
       return;
     }
+    const payload = { ...formValues };
     const ok = await saveConfig({
       provider: name,
       isCustom: isCustomTarget,
@@ -105,7 +136,14 @@ export function SettingsPanel() {
       maxTokens: maxTokens.trim() ? Number(maxTokens) : "",
       setActive,
     });
-    if (ok) setApiKey("");
+    if (!ok) return;
+    setApiKey("");
+    // A save that is never verified turns a typo into a mystery an hour later,
+    // so test right here. The typed Key is passed along before the field clears;
+    // an empty one resolves to the value just saved, inside the main process.
+    if (formTestable) await testLlm(payload);
+    else if (setActive) await testLlm();
+    else toast("已保存", { description: "该服务没有可用的端点信息，暂不支持按填写值测试；设为当前后可测已保存配置。" });
   };
 
   return (
@@ -127,9 +165,37 @@ export function SettingsPanel() {
         <div className="grid grid-cols-2 gap-x-4 gap-y-3">
           <Field label="模型服务">
             <Select value={picked} onValueChange={setPicked} options={options} placeholder="（未选择）" />
+            <button
+              type="button"
+              className="text-left text-[11px] text-accent hover:underline"
+              onClick={() => setShowAllProviders((v) => !v)}
+            >
+              {showAllProviders ? "只看常用服务" : `显示全部 ${providers.length} 个内置服务`}
+            </button>
           </Field>
-          <Field label="模型名" hint="CLI 不提供模型目录接口，请按服务商控制台里的写法填写，例如 claude-sonnet-4-5、qwen3-coder-plus。">
-            <Input value={model} spellCheck={false} placeholder="claude-sonnet-4-5" onChange={(e) => setModel(e.target.value)} />
+          <Field label="模型名" hint="区分大小写，必须是服务商 API 认的名字（不是控制台里的显示名）。填错时测试会把可用名字列出来，点一下就填好。">
+            <Input value={model} spellCheck={false} placeholder="deepseek-v4-pro" onChange={(e) => setModel(e.target.value)} />
+            {modelSuggestions.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[11px] text-faint">服务商说可用的是：</span>
+                {modelSuggestions.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    className={cn(
+                      "rounded-sm border px-1.5 py-0.5 font-mono text-[11px] transition-colors duration-150",
+                      m === model ? "border-accent bg-accent-soft text-accent" : "border-line bg-raised text-muted hover:border-accent/50 hover:text-ink"
+                    )}
+                    onClick={() => {
+                      setModel(m);
+                      toast("已填入模型名", { description: "点「测试连通」验证这一个" });
+                    }}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+            )}
           </Field>
 
           <div className="col-span-2">
@@ -137,13 +203,27 @@ export function SettingsPanel() {
               <div className="flex items-center gap-2">
                 <KeyRound className="size-4 shrink-0 text-faint" />
                 <Input
-                  type="password"
+                  type={showKey ? "text" : "password"}
                   value={apiKey}
                   autoComplete="off"
                   spellCheck={false}
                   placeholder={entry.hasKey ? "保持不变请留空" : "sk-…"}
                   onChange={(e) => setApiKey(e.target.value)}
                 />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 shrink-0"
+                  disabled={!apiKey}
+                  title={showKey ? "隐藏 Key" : "显示 Key"}
+                  onClick={() => setShowKey((v) => !v)}
+                >
+                  {showKey ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                  {showKey ? "隐藏" : "查看"}
+                </Button>
+                {apiKey && (
+                  <span className="shrink-0 font-mono text-[11px] text-faint tnum">{apiKey.length} 位</span>
+                )}
               </div>
             </Field>
           </div>
@@ -199,14 +279,27 @@ export function SettingsPanel() {
           <Button variant="primary" size="lg" disabled={!name} onClick={() => void save(true)}>
             保存并设为当前
           </Button>
-          <Button variant="outline" size="lg" onClick={() => void testLlm()}>
+          <Button
+            variant="outline"
+            size="lg"
+            disabled={!formTestable}
+            title={formTestable ? "按上方填写的值直接测，不需要先保存" : "先选好服务并填模型名，才能按填写值测试"}
+            onClick={() => void testLlm(formValues)}
+          >
             <PlugZap className="size-4" />
             测试连通
+          </Button>
+          <Button variant="ghost" size="lg" onClick={() => void testLlm()}>
+            测已保存配置
           </Button>
           <Button variant="danger" size="lg" disabled={!config.provider} onClick={() => setConfirmUnset(true)}>
             <Trash2 className="size-4" />
             清除当前服务
           </Button>
+          <p className="basis-full text-[11px] leading-snug text-faint">
+            「测试连通」用你当前填写的值，不写配置、也不需要先保存；保存成功后会自动测一次。
+            测已保存配置则按现在生效的那个服务测。
+          </p>
           {config.envSources.length > 0 && (
             <span className="ml-auto text-[11px] text-faint">检测到环境变量端点：{config.envSources.join(", ")}（优先于该文件）</span>
           )}
@@ -216,7 +309,9 @@ export function SettingsPanel() {
         <div className="mt-4 overflow-hidden rounded-md border border-line">
           <div className="flex items-center gap-2 bg-raised px-3 py-1.5">
             <Badge tone={llmTest.ok ? "ok" : "bad"}>{llmTest.ok ? "连通正常" : "连通失败"}</Badge>
-            <span className="text-[11.5px] text-faint">测试输出（可全选复制）</span>
+            <span className="text-[11.5px] text-faint">
+              {llmTest.via === "form" ? "按当前填写的值测试（未写配置）" : "按已保存配置测试"}　输出可全选复制
+            </span>
             <Button
               variant="ghost"
               size="sm"
