@@ -110,7 +110,7 @@ async function check({ interactive } = {}) {
 function install() {
   if (!supportsAutoUpdate() || state.phase !== "ready") return false;
   // Let the run/session bookkeeping flush before the process dies.
-  setImmediate(() => autoUpdater.quitAndInstall(false, true));
+  setImmediate(() => autoUpdater.quitAndInstall(true, true));
   return true;
 }
 
