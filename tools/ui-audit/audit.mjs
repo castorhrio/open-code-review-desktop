@@ -586,6 +586,42 @@ await shoot(page, "33-update-ready", {
     if (!/忽略此版本/.test(text)) out.push("the dismiss action does not say what it actually does");
     if (/稍后/.test(text)) out.push("the dismiss action still reads 稍后, which is not what it does");
 
+    // The banner is the only place a `size="sm"` primary button sits on a
+    // tinted surface, and that is where the variant colour turned out to be
+    // missing: tailwind-merge filed `text-body` (a font size) and
+    // `text-accent-ink` (a colour) in the same group, and since `size` is
+    // emitted after `variant`, every small button inherited its container's
+    // colour instead. Compare against the token rather than a literal, so this
+    // keeps meaning something if the palette moves.
+    const buttons = await page.evaluate(() => {
+      const strip = document.querySelector("main").previousElementSibling;
+      const root = getComputedStyle(document.documentElement);
+      const norm = (v) => {
+        const el = document.createElement("span");
+        el.style.color = v.trim();
+        document.body.appendChild(el);
+        const out = getComputedStyle(el).color;
+        el.remove();
+        return out;
+      };
+      const find = (label) => [...strip.querySelectorAll("button")].find((b) => b.textContent.includes(label));
+      const primary = find("重启并更新");
+      const ghost = find("忽略此版本");
+      return {
+        primaryColor: getComputedStyle(primary).color,
+        ghostColor: getComputedStyle(ghost).color,
+        wantPrimary: norm(root.getPropertyValue("--accent-ink")),
+        wantGhost: norm(root.getPropertyValue("--muted")),
+        inherited: getComputedStyle(strip).color,
+      };
+    });
+    if (buttons.primaryColor !== buttons.wantPrimary)
+      out.push(
+        `the primary button does not use --accent-ink: got ${buttons.primaryColor}, want ${buttons.wantPrimary}` +
+          (buttons.primaryColor === buttons.inherited ? " (it inherited the banner's colour)" : "")
+      );
+    if (buttons.ghostColor !== buttons.wantGhost)
+      out.push(`the ghost button does not use --muted: got ${buttons.ghostColor}, want ${buttons.wantGhost}`);
     return out;
   },
 });
