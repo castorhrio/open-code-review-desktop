@@ -83,6 +83,9 @@ export interface Bridge {
   removeEntry(name: string): Promise<SaveResult>;
   useProvider(name: string, model?: string): Promise<SaveResult>;
   testLlm(form?: { name?: string; url: string; protocol: string; model: string; apiKey: string }): Promise<{ ok: boolean; output: string; via: "form" | "saved" }>;
+  /** `limit` caps the rows returned; `0` means every session. The CLI reads
+   *  them all to sort by start time, so a cap costs the same and only hides
+   *  data — callers should pass 0. */
   listSessions(repo: string, limit: number): Promise<Ok<SessionSummary[]>>;
   sessionComments(repo: string, sessionId: string): Promise<Ok<Finding[]>>;
   exportSession(repo: string, sessionId: string): Promise<{ ok: boolean; file?: string; opened?: boolean; canceled?: boolean; error?: string }>;

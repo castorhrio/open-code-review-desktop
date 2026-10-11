@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Download, FolderClock, RotateCcw, Trash2, Eye } from "lucide-react";
 import { MODE_LABEL, STATUS, humanDuration, humanTime, sessionState } from "@/lib/format";
 import { useStore } from "@/store";
@@ -7,9 +7,23 @@ import { Card, EmptyState, Page, Section } from "@/components/ui/layout";
 import { Badge, ConfirmDialog } from "@/components/ui/overlay";
 import type { SessionSummary } from "@/lib/types";
 
+// The fetch is deliberately unbounded — a cap buys nothing (the CLI reads every
+// session file to sort) and silently hides older sessions. Mounting thousands
+// of rows would still cost layout time, so the *list* reveals itself in pages
+// and always says how many rows are still behind the button.
+const PAGE = 50;
+
 export function HistoryPanel() {
   const { repo, history, historyLoading, refreshHistory, loadSession, exportSession, deleteSession, startRun, patchForm, form } = useStore();
   const [pendingDelete, setPendingDelete] = useState<SessionSummary | null>(null);
+  const [shown, setShown] = useState(PAGE);
+
+  // A refresh replaces the array, so start again from the newest page rather
+  // than keeping a window that may now point past the end.
+  useEffect(() => setShown(PAGE), [history]);
+
+  const visible = history.slice(0, shown);
+  const hidden = history.length - visible.length;
 
   const resumeFrom = (s: SessionSummary) => {
     if (s.review_mode === "full_scan") patchForm({ ...form, mode: "scan", scanPath: "" });
@@ -35,7 +49,11 @@ export function HistoryPanel() {
       <Page>
         <Section
           title="历史会话"
-          hint={historyLoading ? "读取中…" : `${history.length} 条 · 由官方 CLI 持久化，可续跑 / 导出 / 删除`}
+          hint={
+            historyLoading
+              ? "读取中…"
+              : `${history.length} 条 · 由官方 CLI 持久化，可续跑 / 导出 / 删除`
+          }
           actions={
             <Button variant="ghost" size="sm" onClick={() => void refreshHistory()}>
               刷新
@@ -43,13 +61,17 @@ export function HistoryPanel() {
           }
         >
           <Card padded={false}>
+            {historyLoading && history.length === 0 && (
+              <p className="px-4 py-6 text-center text-body text-muted">正在读取 ~/.opencodereview/sessions/…</p>
+            )}
+
             {!historyLoading && history.length === 0 && (
               <p className="px-4 py-6 text-center text-body text-muted">
                 这个仓库还没有历史会话。跑一次审查后会自动记录，可随时回看、导出报告或续跑未完成的部分。
               </p>
             )}
 
-            {history.map((s) => {
+            {visible.map((s) => {
               const st = sessionState(s);
               const status = STATUS[st] || { label: st, cls: "border-line bg-raised text-muted" };
               const scope =
@@ -102,6 +124,16 @@ export function HistoryPanel() {
                 </div>
               );
             })}
+
+            {hidden > 0 && (
+              // No top border: the last rendered row still carries its own
+              // `border-b`, which is only suppressed when it really is last.
+              <div className="px-4 py-2 text-center">
+                <Button variant="ghost" size="sm" onClick={() => setShown((n) => n + PAGE)}>
+                  显示更多（还有 {hidden} 条）
+                </Button>
+              </div>
+            )}
           </Card>
         </Section>
       </Page>

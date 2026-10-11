@@ -374,7 +374,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return;
     }
     setHistoryLoading(true);
-    const res = await api.listSessions(repoRef.current, 50);
+    // 0 = every session the CLI knows about. Capping this hid older sessions
+    // with no indication that more existed, and saved no work: the CLI reads
+    // all of them to sort by start time either way.
+    const res = await api.listSessions(repoRef.current, 0);
     setHistoryLoading(false);
     if (res.ok) setHistory(res.value || []);
     else toast.error(`读取历史失败`, { description: res.error });
