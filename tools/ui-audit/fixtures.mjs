@@ -320,6 +320,13 @@ export function serve(port) {
   return new Promise((resolve) => {
     const server = http.createServer((req, res) => {
       const url = (req.url || "/").split("?")[0];
+      // The browser asks for a favicon unprompted; answering 404 puts a red
+      // console error in every run and buries the ones that matter.
+      if (url === "/favicon.ico") {
+        res.writeHead(204);
+        res.end();
+        return;
+      }
       const rel = url === "/" ? "index.html" : url.replace(/^\/+/, "");
       const file = path.join(OUT, rel);
       if (!file.startsWith(OUT) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
