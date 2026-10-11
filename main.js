@@ -3,11 +3,13 @@
 
 const fs = require("fs");
 const path = require("path");
+const { pathToFileURL } = require("url");
 const { spawn } = require("child_process");
 const { app, BrowserWindow, dialog, ipcMain, shell, Menu } = require("electron");
 
 const ocr = require("./ocr-service");
 const git = require("./git-service");
+const { installNavigationGuards } = require("./security");
 const updater = require("./update-service");
 
 const DOCS_URL = "https://open-codereview.ai/docs";
@@ -487,4 +489,12 @@ if (!gotLock) {
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
+});
+
+// Deny window.open and any navigation off the app's own document; see
+// security.js for why. The URL is whatever createWindow() is about to load.
+installNavigationGuards({
+  app,
+  shell,
+  appUrl: process.env.ELECTRON_RENDERER_URL || pathToFileURL(path.join(__dirname, "out", "index.html")).href,
 });

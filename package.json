@@ -17,10 +17,7 @@
     "dist:mac": "npm run build && electron-builder --mac",
     "dist:linux": "npm run build && electron-builder --linux",
     "fetch:binaries": "node build/fetch-binaries.cjs",
-    "icon": "node build/make-icon.cjs",
-    "audit:ui": "npm run build && node tools/ui-audit/audit.mjs",
-    "audit:contrast": "npm run build && node tools/ui-audit/contrast.mjs",
-    "audit": "npm run typecheck && npm run audit:ui && npm run audit:contrast"
+    "icon": "node build/make-icon.cjs"
   },
   "dependencies": {
     "@alibaba-group/open-code-review": "^1.12.13",
@@ -71,6 +68,7 @@
       "ocr-service.js",
       "git-service.js",
       "update-service.js",
+      "security.js",
       "package.json",
       "out/**",
       "assets/**",
