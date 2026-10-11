@@ -133,14 +133,17 @@ The UI once drifted, one reasonable-looking change at a time, into three differe
 Everything is checked by rendering the real bundle against a stubbed IPC bridge in headless Edge — no Electron, no desktop — plus one check that drives the actual Electron process, because some behaviour only exists there.
 
 ```
-npm run audit           # typecheck + all four checks below
+npm run audit           # typecheck + all five checks below
 npm run audit:packaging # every runtime module is in the build.files allowlist
+npm run audit:service   # the real CLI: arg building and output parsing, all 4 modes
 npm run audit:ui        # 28 states x 3 window sizes x 2 themes
 npm run audit:contrast  # WCAG AA for every text/background pair
 npm run audit:guards    # navigation + window-open policy, in real Electron
 ```
 
 All of them exit non-zero on findings, so they work as a gate rather than a log, and each states what it inspected — a check that reports "0 problems" without saying what it looked at manufactures confidence rather than providing it, so they refuse to pass vacuously.
+
+**`audit:service`** covers the layer that is the app's whole job: turning a spec into CLI arguments and turning the CLI's output back into something the UI can render. It runs the real binary against a throwaway git repo, using `--preview` so no API key or network is needed. It asserts all four modes parse into the expected shape and find files, that mode-specific flags do not leak into another mode (the CLI would reject the run), that a bad ref fails with an error rather than an empty preview the UI would render as "nothing to review", and that a non-repo directory is reported as such.
 
 **`audit:ui`** asserts the declared measure cap, document overflow, and content that is clipped without an ellipsis. It prints `FAIL` with the offending element. It renders three fixture sets, selected by query string:
 
