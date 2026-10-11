@@ -40,26 +40,37 @@ export function TopBar() {
       </div>
 
       {repoInfo?.ok && (
-        <div className="hidden shrink-0 items-center gap-1.5 xl:flex">
-          <Badge>
-            <CircleDot className="size-3" />
-            {repoInfo.branch}
+        <div className="hidden min-w-0 shrink-0 items-center gap-1.5 xl:flex">
+          {/* Every value here comes from the repository and has no length
+              bound: branch names can be long, and `origin/<branch>` doubles
+              them. Without a cap the badges are `nowrap` flex items that
+              refuse to shrink, so one long branch pushed this header to
+              2673px inside a 1440px window and silently clipped the rest of
+              the app. Cap each badge and ellipsise; the full value stays
+              reachable via the tooltip. */}
+          <Badge title={repoInfo.branch} className="max-w-[200px]">
+            <CircleDot className="size-3 shrink-0" />
+            <span className="min-w-0 truncate">{repoInfo.branch}</span>
           </Badge>
           {(repoInfo.dirtyCount ?? 0) > 0 && <Badge tone="warn">{repoInfo.dirtyCount} 处未提交</Badge>}
           {repoInfo.upstream && (
-            <Badge>
-              <CloudUpload className="size-3" />
-              {repoInfo.upstream}
+            <Badge title={repoInfo.upstream} className="max-w-[240px]">
+              <CloudUpload className="size-3 shrink-0" />
+              <span className="min-w-0 truncate">{repoInfo.upstream}</span>
             </Badge>
           )}
         </div>
       )}
-      {repo && repoInfo && !repoInfo.ok && <span className="shrink-0 text-meta text-bad">{repoInfo.error}</span>}
+      {repo && repoInfo && !repoInfo.ok && (
+        <span title={repoInfo.error} className="min-w-0 max-w-[320px] shrink truncate text-meta text-bad">
+          {repoInfo.error}
+        </span>
+      )}
 
-      <button onClick={() => setView("settings")} title={config?.path} className="shrink-0">
-        <Badge tone={ready ? "ok" : "warn"} className={cn(!ready && "cursor-pointer")}>
-          <span className={cn("size-1.5 rounded-full", ready ? "bg-ok" : "bg-warn")} />
-          {label}
+      <button onClick={() => setView("settings")} title={config?.path} className="min-w-0 shrink-0">
+        <Badge tone={ready ? "ok" : "warn"} className={cn("max-w-[260px]", !ready && "cursor-pointer")}>
+          <span className={cn("size-1.5 shrink-0 rounded-full", ready ? "bg-ok" : "bg-warn")} />
+          <span className="min-w-0 truncate">{label}</span>
         </Badge>
       </button>
       {info?.version && <span className="hidden shrink-0 font-mono text-meta text-faint lg:block">{info.version}</span>}

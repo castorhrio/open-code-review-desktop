@@ -81,10 +81,13 @@ export function Badge({
   children,
   className,
   tone = "neutral",
+  title,
 }: {
   children: React.ReactNode;
   className?: string;
   tone?: "neutral" | "ok" | "warn" | "bad" | "accent";
+  /** Badges are `nowrap` and often truncate; this keeps the full value reachable. */
+  title?: string;
 }) {
   const tones = {
     neutral: "border-line bg-raised text-muted",
@@ -95,6 +98,7 @@ export function Badge({
   } as const;
   return (
     <span
+      title={title}
       className={cn(
         "inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-meta font-medium",
         tones[tone],

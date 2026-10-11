@@ -165,8 +165,6 @@ const MANY_SESSIONS = [
   })),
 ];
 
-const SESSION_SETS = { default: SESSIONS, many: MANY_SESSIONS };
-
 const CONFIG = {
   path: "C:\\Users\\x\\.opencodereview\\config.json",
   fileExists: true,
@@ -217,9 +215,45 @@ const REPO_INFO = {
   dirtyCount: 3,
 };
 
+// ---------------------------------------------------------------------------
+// Pathological payloads (?stress=1)
+// Real data is not tidy: vendor errors arrive as one unbroken 200-char token,
+// branch names run long, model ids get prefixed with a whole org path, and
+// paths nest deeply. A flex/grid child without `min-w-0` refuses to shrink
+// below its min-content width, and an unbreakable string is the fastest way to
+// find the places that forgot. Swapping these in lets the harness's `clipped`
+// probe look for the damage instead of me guessing at it from source.
+const LONG = "Supercalifragilisticexpialidocious".repeat(3); // 102 chars, no break opportunity
+const LONG_PATH = "/home/developer/" + "deeply-nested-directory/".repeat(6) + "login.go";
+const LONG_BRANCH = "feature/" + "tenant-scoped-rate-limiting-and-quota/".repeat(3) + "final";
+
+const STRESS = {
+  INFO: { ...INFO, binary: LONG_PATH, installDir: "/opt/" + LONG, configPath: "/home/developer/.opencodereview/" + LONG },
+  CONFIG: {
+    ...CONFIG,
+    model: LONG,
+    llm: { ...CONFIG.llm, url: "https://gateway.internal.example.com/" + LONG + "/v1" },
+    providers: { ...CONFIG.providers, deepseek: { ...CONFIG.providers.deepseek, model: LONG } },
+  },
+  REPO_INFO: { ...REPO_INFO, branch: LONG_BRANCH, upstream: "origin/" + LONG_BRANCH },
+  SESSIONS: SESSIONS.map((s, i) => ({
+    ...s,
+    git_branch: LONG_BRANCH,
+    model: i % 2 ? LONG : "vendor-partner-org/team-name/" + LONG,
+    diff_from: LONG_BRANCH,
+    diff_to: LONG_BRANCH,
+  })),
+  FINDINGS: FINDINGS.map((f) => ({ ...f, path: LONG_PATH })),
+};
+const NORMAL = { INFO, CONFIG, REPO_INFO, SESSIONS, FINDINGS };
+
 export const BRIDGE = `
-window.api = {
-  info: async () => (${JSON.stringify(INFO)}),
+window.api = (() => {
+  const q = new URLSearchParams(location.search);
+  const D = q.get("stress") === "1" ? ${JSON.stringify(STRESS)} : ${JSON.stringify(NORMAL)};
+  const SETS = { default: D.SESSIONS, many: ${JSON.stringify(MANY_SESSIONS)} };
+  return {
+  info: async () => (D.INFO),
   providers: async () => ({ ok: true, value: [
     { name: "deepseek", protocol: "openai", url: "https://api.deepseek.com/v1" },
     { name: "anthropic", protocol: "anthropic", url: "https://api.anthropic.com" },
@@ -232,17 +266,16 @@ window.api = {
     { name: "openrouter", protocol: "openai", url: "https://openrouter.ai/api/v1" },
     { name: "ollama-cloud", protocol: "openai", url: "https://ollama.com/v1" },
   ]}),
-  readConfig: async () => (${JSON.stringify(CONFIG)}),
+  readConfig: async () => (D.CONFIG),
   updateState: async () => ({ phase: "idle", current: "0.1.9", enabled: true, packaged: true, portable: false, releasesUrl: "https://github.com/alibaba/open-code-review/releases" }),
-  inspect: async () => (${JSON.stringify(REPO_INFO)}),
+  inspect: async () => (D.REPO_INFO),
   listSessions: async () => {
     // ?sessions=many swaps in the 65-session set, so the history panel's paging
     // can be exercised without a second harness.
-    const want = new URLSearchParams(location.search).get("sessions");
-    const sets = ${JSON.stringify(SESSION_SETS)};
-    return { ok: true, value: sets[want] || sets.default };
+    const want = q.get("sessions");
+    return { ok: true, value: SETS[want] || SETS.default };
   },
-  sessionComments: async () => ({ ok: true, value: ${JSON.stringify(FINDINGS)} }),
+  sessionComments: async () => ({ ok: true, value: D.FINDINGS }),
   preview: async () => ({ ok: true, value: { files: ${JSON.stringify(PREVIEW_FILES)}, total_insertions: 171, total_deletions: 27, total_files: 8, reviewable_count: 5, excluded_count: 3 } }),
   resolveRef: async (_r, ref) => ({ ok: true, sha: "8c1de4f9a2b3c4d5e6f708192a3b4c5d6e7f8091" }),
   run: async () => "run-1",
@@ -275,7 +308,8 @@ window.api = {
   onExit: () => () => {},
   onProgress: () => () => {},
   onMenuOpenRepo: () => () => {},
-};
+  };
+})();
 `;
 
 export const STORAGE = { "last-repo": "/home/x/work/payments-api", "guide-dismissed": "1" };

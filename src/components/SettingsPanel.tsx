@@ -403,16 +403,34 @@ export function SettingsPanel() {
                     return (
                       <tr key={name} className={cn("border-t border-line/70", active && "bg-accent-soft/50")}>
                         <td className="px-4 py-2">
-                          <span className="font-mono text-body text-ink">{name}</span>
-                          {active && (
-                            <Badge tone="accent" className="ml-2">
-                              当前使用
-                            </Badge>
-                          )}
-                          {isCustom && <span className="ml-1.5 text-meta text-faint">自定义</span>}
+                          {/* Both cells hold arbitrary vendor text. With
+                              table-layout:auto an unbreakable model id sizes
+                              the column to its content, pushing the table past
+                              the card — which then clips it, because Card is
+                              overflow-hidden. Cap the two unbounded cells and
+                              keep the full value in the tooltip. */}
+                          <div className="flex max-w-[240px] items-center gap-1.5">
+                            <span className="min-w-0 truncate font-mono text-body text-ink" title={name}>
+                              {name}
+                            </span>
+                            {active && (
+                              <Badge tone="accent" className="shrink-0">
+                                当前使用
+                              </Badge>
+                            )}
+                            {isCustom && <span className="shrink-0 text-meta text-faint">自定义</span>}
+                          </div>
                         </td>
                         <td className="px-4 py-2 text-body text-muted">{e.protocol || (isCustom ? "自定义" : "内置默认")}</td>
-                        <td className="px-4 py-2 font-mono text-body text-muted">{e.model || <span className="text-faint">未填</span>}</td>
+                        <td className="px-4 py-2 font-mono text-body text-muted">
+                          {e.model ? (
+                            <span className="block max-w-[280px] truncate" title={e.model}>
+                              {e.model}
+                            </span>
+                          ) : (
+                            <span className="text-faint">未填</span>
+                          )}
+                        </td>
                         <td className="px-4 py-2 text-body">
                           {e.hasKey ? <span className="font-mono text-ok">{e.keyPreview || "已设置"}</span> : <span className="text-bad">缺</span>}
                         </td>

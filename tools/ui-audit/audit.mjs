@@ -27,23 +27,64 @@ const PROBE = `(() => {
       break;
     }
   }
+  // Forgive content that overflows inside a *real* horizontal scroll container
+  // (the code pane). The earlier version only looked at overflow-x, which is a
+  // trap: when overflow-y is auto and overflow-x is visible, CSS computes
+  // overflow-x to auto as well, so the page's vertical scroller made every
+  // element in <main> look horizontally scrollable and silently exempted the
+  // whole subtree. Requiring actual horizontal overflow fixes that.
   const scrollable = (el) => {
     for (let n = el.parentElement; n && n !== document.body; n = n.parentElement) {
-      const ox = getComputedStyle(n).overflowX;
-      if (ox === "auto" || ox === "scroll") return true;
+      const cs = getComputedStyle(n);
+      if ((cs.overflowX === "auto" || cs.overflowX === "scroll") && n.scrollWidth > n.clientWidth + 1) return true;
     }
     return false;
   };
+  // A box that only overflows because of an absolutely/fixed positioned
+  // descendant is not clipped — it paints outside on purpose. Corner
+  // notification badges are the normal case. Static overflow is the real
+  // signal: it means an unbreakable string pushed a sibling out.
+  const onlyPositionedOverflow = (el) => {
+    const box = el.getBoundingClientRect();
+    let staticOverflow = false;
+    const walk = (node) => {
+      for (const child of node.children) {
+        const r = child.getBoundingClientRect();
+        if (r.right > box.right + 1 || r.left < box.left - 1) {
+          const pos = getComputedStyle(child).position;
+          if (pos !== "absolute" && pos !== "fixed") staticOverflow = true;
+        }
+        if (!staticOverflow) walk(child);
+      }
+    };
+    walk(el);
+    return !staticOverflow;
+  };
   const clipped = [];
-  for (const el of document.querySelectorAll("main *")) {
+  // Whole document, not just <main>: the first version of this probe scanned
+  // main only and therefore never looked at the top bar or the nav rail, which
+  // is exactly where a long unbreakable value was silently cut off.
+  for (const el of document.querySelectorAll("body *")) {
+    // Form controls scroll their own value by design, and datalist never
+    // renders — neither is a layout defect.
+    if (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "DATALIST") continue;
     if (el.scrollWidth > el.clientWidth + 1 && el.clientWidth > 0) {
       const cs = getComputedStyle(el);
       // text-overflow:ellipsis means overflow is intended, not a defect.
       if (cs.textOverflow === "ellipsis") continue;
+      // sr-only clips on purpose: it is the standard way to give an icon-only
+      // control an accessible name. className is an SVGAnimatedString on SVG
+      // nodes, so normalise before testing.
+      const cls = typeof el.className === "string" ? el.className : el.getAttribute("class") || "";
+      if (/(^|\s)sr-only(\s|$)/.test(cls)) continue;
       // Horizontal scrolling inside a scroll container is intended (code pane).
       if (scrollable(el)) continue;
-      if (cs.overflowX === "visible" || cs.overflowX === "hidden") {
-        clipped.push(((el.className || "") + "").slice(0, 60) + " " + el.scrollWidth + ">" + el.clientWidth);
+      // overflow:visible hides nothing; only complain when the overflow is
+      // static, or when a clipping box is genuinely cutting content off.
+      const clips = cs.overflowX === "hidden" || cs.overflowX === "clip";
+      if (!clips && onlyPositionedOverflow(el)) continue;
+      if (clips || cs.overflowX === "visible") {
+        clipped.push(el.tagName.toLowerCase() + "." + cls.slice(0, 50) + " " + el.scrollWidth + ">" + el.clientWidth);
       }
     }
   }
@@ -241,6 +282,18 @@ await shoot(page, "22-history-many", {
     return out;
   },
 });
+
+// Pathological data: unbreakable 100+ char tokens in every slot a real payload
+// can put them. Real vendor errors, org-prefixed model ids and deep paths all
+// produce strings with no break opportunity, and a flex/grid child missing
+// `min-w-0` will push its container wide instead of shrinking.
+for (const [name, view] of [
+  ["23-stress-review", "审查"],
+  ["24-stress-settings", "设置"],
+  ["25-stress-history", "历史"],
+]) {
+  await shoot(page, name, { query: "?stress=1", after: nav(view) });
+}
 
 await browser.close();
 server.close();

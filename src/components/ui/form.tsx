@@ -99,7 +99,17 @@ export function Select({
     >
       <SelectPrimitive.Trigger
         id={id}
-        className={cn(base, "flex h-8 items-center justify-between gap-2 data-[disabled]:opacity-45", className)}
+        className={cn(
+          base,
+          "flex h-8 min-w-0 items-center justify-between gap-2 data-[disabled]:opacity-45",
+          // The selected value is arbitrary user/vendor text (a custom provider
+          // model id can easily be 60+ chars with no break opportunity). As a
+          // plain flex item it refuses to shrink below its min-content width and
+          // pushes straight out of the trigger. Radix renders Value as the first
+          // child span, so constrain that one and leave the chevron alone.
+          "[&>span:first-child]:min-w-0 [&>span:first-child]:truncate",
+          className
+        )}
       >
         <SelectPrimitive.Value placeholder={placeholder} />
         <SelectPrimitive.Icon>

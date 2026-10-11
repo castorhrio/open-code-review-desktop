@@ -82,14 +82,17 @@ export function HistoryPanel() {
                   className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-line/70 px-4 py-2.5 last:border-b-0 hover:bg-hover/50"
                 >
                   <div className="min-w-[260px] flex-1">
-                    <div className="flex items-center gap-2">
+                    <div className="flex min-w-0 items-center gap-2">
                       <span className="shrink-0 text-body text-ink">{MODE_LABEL[s.review_mode || ""] || s.review_mode}</span>
-                      <span className="truncate font-mono text-meta text-muted">{scope || "—"}</span>
+                      <span className="min-w-0 truncate font-mono text-meta text-muted">{scope || "—"}</span>
                     </div>
-                    <div className="tnum mt-0.5 flex flex-wrap items-center gap-x-2 font-mono text-meta text-faint">
+                    {/* min-w-0 + truncate on the model: it is the one unbounded
+                        value here, and a long vendor model id would otherwise
+                        push the row past the card and get clipped. */}
+                    <div className="tnum mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 font-mono text-meta text-faint">
                       <span>{humanTime(s.start_time)}</span>
                       <span>{humanDuration(s.duration_ns)}</span>
-                      <span>{s.model || "无模型"}</span>
+                      <span className="min-w-0 truncate">{s.model || "无模型"}</span>
                       {s.resumed_from && <span>续跑自 {s.resumed_from.slice(0, 8)}</span>}
                     </div>
                   </div>
