@@ -16,17 +16,7 @@
 ;      于是用户在安装过程中看不到任何输出。这里重新打开面板，并在安装段末尾
 ;      补上用户真正关心的结论（装到哪、建了哪些快捷方式、怎么卸载）。
 ;
-;   3. 进度条中途回退。成因有两处，都在模板里：
-;        a) common.nsh 的 setSpaceRequired 把「段总量」设成解压后体积
-;           （APP_64_UNPACKED_SIZE = 打包目录的 dirSize），
-;           而 NSIS 自己只把 File 指令写入的字节计入已用量 —— 这里只有内嵌的
-;           app-64.7z，大约是解压后体积的三分之一。刻度不一致，第一格就冲到
-;           三成多；
-;        b) 解压由 nsis7z.dll 完成，该插件会自己 FindWindowExW + SendMessageW
-;           去驱动进度条（插件作者原话：“plugin will move progress bar during
-;           unpack operation”），结束后 NSIS 再按自己的刻度画回去，于是看到回退。
-;      这里在「解压前」把段总量临时放大、在「解压后」收回，让两段刻度接上，
-;      并保证收尾时停在 100%。
+;   3. 进度条中途回退（见下面「进度条为什么不能靠 SectionSetSize 校准」）。
 ;
 ;   4. 开始菜单里，在应用快捷方式旁边再放一个「卸载」入口，
 ;      卸载不再依赖用户去「设置 → 应用」里翻；
@@ -48,90 +38,110 @@
   ShowInstDetails show
 !macroend
 
-; —— 解压前：把「段总量」临时放大 ——
-; 挂一个立刻 Abort 的自定义页（用户看不到它），只为拿到一个「已离开目录页、
-; 即将进入安装页」的执行点：这时改段总量不会影响目录页的「所需空间」显示。
-; 放大之后，第一个 File（把内嵌的 app-64.7z 写进 $PLUGINSDIR）只占很小一格，
-; nsis7z 插件接管进度条时不会出现「26.6% → 0%」的回退。
+; —— 安装页的 SHOW 回调 + 进度条处理 ——
+;
+; 位置很关键：它展开在 assistedInstaller.nsh 第 43 行，紧挨着第 46 行的
+; !insertmacro MUI_PAGE_INSTFILES —— MUI2 的 MUI_PAGE_CUSTOMFUNCTION_*
+; 是「由下一个页面宏消费一次」的语义（Pages.nsh:105 的
+; MUI_PAGE_FUNCTION_CUSTOM 里 Call 完立刻 !undef），所以只有定义在这个位置
+; 才会落在安装页上，而不是被前面某个页面宏先吃掉。
+;
+; 另外，这个位置已经在 !include "MUI2.nsh"（installer.nsi 第 9 行）之后，
+; 因此下面函数体里的 ${If} / LogicLib 是可用的。
 !macro customPageAfterChangeDir
-  !ifdef allowToChangeInstallationDirectory
-    Page custom OcrCalibrateProgressBeforeInstall
-  !endif
+  !insertmacro ocrDefineInstFilesIntro
+  !define MUI_PAGE_CUSTOMFUNCTION_SHOW ocrInstFilesShow
 !macroend
 
-!macro ocrDefineProgressProbe
-  Function OcrCalibrateProgressBeforeInstall
-    !ifdef APP_64_UNPACKED_SIZE
-      ; 段下标写死 0：模板只声明了一个段（installer.nsi 的 Section "install"），
-      ; 而它是第 94 行才声明的 —— 这个宏被插在第 43 行，此时模板那个
-      ; ${INSTALL_SECTION_ID} 还没有定义（实测报 warning 6000），只能用字面量。
-      ; 放大 10 倍：内嵌 7z 实测约占其 1/10，进度条此刻几乎不动，
-      ; 插件从接近 0% 的地方接管，看不到回退。
-      IntOp $0 ${APP_64_UNPACKED_SIZE} * 10
-      SectionSetSize 0 $0
-    !endif
-    ; 解压那 30 秒里 NSIS 不会让我们插话（installSection.nsh 一进来就
-    ; SetDetailsPrint none），唯一能提前落进详情面板的就是段的标题行。
-    ; 顺手把它改成用户看得懂的话；若某版 NSIS 不打印标题行，这行也只是无副作用。
-    SectionSetText 0 "正在安装 Open Code Review，请勿关闭窗口…"
-    Abort ; 这一页只是挂载点，本身不显示
+; —— 进度条为什么不能靠 SectionSetSize 校准 ——
+;
+; 用户报告的现象：进度条在安装中途回退。实测（v0.1.9 装机 + 逐帧取色）确认：
+;
+;   File(app-64.7z)  0% → 37%     约 1.0s   （安装段自己按字节数推进）
+;   nsis7z 插件接管  37% → 0%     瞬间     ← 用户看到的「回退」
+;   nsis7z 插件      0% → 100%    约 2.5s   （插件自己 FindWindow + SendMessage）
+;
+; 直觉上只要把「段总量」放大，让第一段占比趋近 0 就行。**这条路是死的**，
+; 三次实验都证明 SectionSetSize 对进度条刻度完全无效：
+;
+;   a) 在「目录页之后、安装页之前」的自定义页里放大 10 倍
+;      → SectionGetSize 立刻返回 3,542,360，但第一段照样 0%→37%；
+;   b) 在 preInit（.onInit 内，紧跟模板的 setInstallSectionSpaceRequired）放大
+;      → 同上，刻度纹丝不动；
+;   c) 解压结束后把总量收小到 1/4 → 结尾位置也没有变化。
+;
+; 结论：模板进度条的刻度不是运行时从 SectionGetSize 读的，改段总量只影响
+; 「所需空间」的显示，不影响已经算好的刻度。而且第一段本身就无解 ——
+; 只要 app-64.7z 是用 File 写进去的，NSIS 就会把它计入已用量，
+; 插件接管时又必然从 0 重新开始（插件作者原话：“plugin will move progress
+; bar during unpack operation”）。
+;
+; 因此这里换一个思路：**让第一段根本不显示百分比**。
+; 安装页一显示就把进度条切成 marquee（不确定进度）模式，
+; 插件那些 PBM_SETPOS 在 marquee 模式下会被系统忽略，于是
+; 「37% → 0%」这一步在视觉上不存在；等安装段收尾时再切回确定模式并置满。
+; 如果目标系统的 comctl32 不支持 marquee，样式位不会被接受，
+; 行为退回今天的样子，不会更糟。
+!macro ocrDefineInstFilesIntro
+  Function ocrInstFilesShow
+    ; 详情面板：安装段一开头就 SetDetailsPrint none，逐文件的回显全被吞掉，
+    ; 而真正耗时的解压由插件完成、期间 NSIS 脚本是阻塞的，根本轮不到
+    ; DetailPrint。唯一可用的时机就是这里 —— 安装页已经显示、段还没开始跑，
+    ; 而且 MUI2 的 SHOW 回调是在 GetDlgItem 拿到详情列表句柄（控件 1016）
+    ; 之后才调用的（InstallFiles.nsh:103-107），所以列表已经存在，写得进去。
+    ; 这些文字会一直留在列表里，陪用户度过整个安装过程。
+    ;
+    ; 顺序有讲究：进度条上方那行状态文字（控件 1006）显示的是**最后一条**
+    ; DetailPrint，所以把「正在做什么」放在最后，让状态行在整个安装期间
+    ; 都说人话，而不是停在「完成后会…」这种像已经结束的句子上。
+    SetDetailsPrint both
+    DetailPrint "安装位置：$INSTDIR"
+    DetailPrint "解压期间窗口可能短暂无响应，请勿关闭。"
+    DetailPrint "完成后会自动创建桌面与开始菜单快捷方式。"
+    DetailPrint "正在释放程序文件，这一步占绝大部分时间，请稍候…"
+
+    ; 进度条切到 marquee。取句柄的方式与 MUI2 自己一致
+    ; （InstallFiles.nsh:101-104）：安装页对话框是主窗口下唯一的 #32770，
+    ; 进度条是它的控件 1004。
+    Push $0
+    Push $1
+    Push $2
+    FindWindow $0 "#32770" "" $HWNDPARENT
+    GetDlgItem $0 $0 1004
+    ${If} $0 != 0
+      System::Call 'user32::GetWindowLongW(p r0, i -16) i .r1'
+      IntOp $2 $1 & 0x8
+      ${If} $2 != 0x8
+        IntOp $1 $1 + 0x8
+        System::Call 'user32::SetWindowLongW(p r0, i -16, i r1) i .r3'
+      ${EndIf}
+      System::Call 'user32::SendMessageW(p r0, i 0x40A, w 1, i 30)'  ; PBM_SETMARQUEE on
+      System::Call 'user32::InvalidateRect(p r0, p 0, i 1)'
+    ${EndIf}
+    Pop $2
+    Pop $1
+    Pop $0
   FunctionEnd
 !macroend
 
-; 必须连同 !ifndef BUILD_UNINSTALLER 一起守卫：模板把 customPageAfterChangeDir
-; 放在 assistedInstaller.nsh 的 !ifndef BUILD_UNINSTALLER 里，编译卸载器那一趟
-; 不会展开它；若这里仍然定义函数，就会报 warning 6010「not referenced」，
-; 而 makensis 带 -WX，警告即失败。
-!ifdef allowToChangeInstallationDirectory
-  !ifndef BUILD_UNINSTALLER
-    !insertmacro ocrDefineProgressProbe
-  !endif
-!endif
-
-; —— 解压后：把「段总量」收回到 NSIS 真正会计数完的量 ——
-; 此宏由 extractAppPackage.nsh 的 custom_files_post_decompression 调用，
-; 位置在「解压 + 复制到 $INSTDIR」之后、写卸载器之前，正是 NSIS 重新接管
-; 进度条的那一刻。收小总量 => 进度条直接停在 100%，不会再掉回去。
-; 同时把详情输出打开，让后续的 File / 注册表 / 快捷方式步骤有回显。
-; 注：electron-builder 只有在配置了 nsis.preCompressedFileExtensions 时才会
-; 自己生成同名宏，本项目没有配置，所以这里由我们独占定义。
-; 这里用 ${INSTALL_SECTION_ID} 而不是字面量：本宏展开于安装段内部
-; （installer.nsi 第 122 行，晚于第 94 行的 Section 声明），模板那个 define
-; 此时已经存在。
+; —— 为什么到这里就收手 ——
+; 试过在解压结束后把 marquee 关掉、量程改成 0..100 并置满，让进度条以
+; 「满格」收尾。实测不可靠：关 marquee 要先清 PBS_MARQUEE 样式位
+; （GetWindowLong / SetWindowLong），而 nsis7z 插件在解压期间自己也在
+; 反复 SendMessage 驱动同一个控件，样式位经常被抢回去，结果是进度条
+; 在 marquee 和确定态之间来回跳 —— 比原来更难看。
 ;
-; 取 1/4 的由来（v0.1.9 实测）：段总量 APP_64_UNPACKED_SIZE = 354,230 KB，
-; 而 NSIS 自己只累计 File 写入量 —— 内嵌的 app-64.7z 为 96,332,424 B ≈ 94,074 KB，
-; 占 26.6%。取 1/4 = 88,557 KB 略小于已用量，进度条在插件交还控制权的瞬间
-; 直接封顶 100%，不再从 100% 掉回 26.6%。比值将来变大也只是继续封顶；
-; 变小则最多停在八九成，到段末补满，同样不会回退。
-!macro ocrSetSizeAfterDecompress SIZE
-  IntOp $0 ${SIZE} / 4
-  SectionSetSize ${INSTALL_SECTION_ID} $0
-  SetDetailsPrint both
-  DetailPrint "程序文件已释放到：$INSTDIR"
-!macroend
-
-!macro customFiles_x64
-  !ifdef APP_64_UNPACKED_SIZE
-    !insertmacro ocrSetSizeAfterDecompress ${APP_64_UNPACKED_SIZE}
-  !endif
-!macroend
-
-!macro customFiles_ia32
-  !ifdef APP_32_UNPACKED_SIZE
-    !insertmacro ocrSetSizeAfterDecompress ${APP_32_UNPACKED_SIZE}
-  !endif
-!macroend
-
-!macro customFiles_arm64
-  !ifdef APP_ARM64_UNPACKED_SIZE
-    !insertmacro ocrSetSizeAfterDecompress ${APP_ARM64_UNPACKED_SIZE}
-  !endif
-!macroend
+; 反正安装段收尾紧跟着就是完成页，进度条以什么状态结束没人看得到，
+; 所以这里只保留「一开始就切 marquee」这一步，不再折腾收尾。
+; 用户能读到的结论都在完成页和详情面板里。
 
 ; —— 安装段收尾：补上结论信息 + 一个「卸载」开始菜单项 ——
 ; 此宏在 addStartMenuLink / addDesktopLink 之后执行，$SMPROGRAMS 已指向当前
 ; 用户的开始菜单（package.json 里 menuCategory 为 false，快捷方式直接放在该目录）。
+;
+; 注：这几行 DetailPrint 到得很晚（安装段已经跑到最后，紧接着就是完成页），
+; 实测在详情面板里只停留一帧左右。它们的价值是给日志留档，用户真正会读的
+; 是完成页；面板里全程可见的是 ocrInstFilesShow 写的那四行。
 !macro customInstall
   CreateShortCut "$SMPROGRAMS\卸载 ${SHORTCUT_NAME}.lnk" "$INSTDIR\${UNINSTALL_FILENAME}" "" "$INSTDIR\${UNINSTALL_FILENAME}" 0 "" "" "卸载 ${SHORTCUT_NAME}"
   ; 交给 WinShell 登记成「卸载快捷方式」，Windows 才会把它和程序正确关联。
@@ -139,8 +149,8 @@
   ClearErrors
 
   ; installSection.nsh 在安装段开头执行了 SetDetailsPrint none，逐文件的
-  ; File / CopyFiles 输出全被吞掉，详情面板因此始终空白。上面解压完成时已经
-  ; 重新打开开关，这里再把用户真正关心的结论写进去。
+  ; File / CopyFiles 输出全被吞掉，详情面板因此始终空白。这里重新打开开关，
+  ; 把用户真正关心的结论写进去。
   SetDetailsPrint both
   DetailPrint "程序文件：$INSTDIR"
   DetailPrint "桌面快捷方式：已创建"
@@ -158,6 +168,18 @@
 ; —— 完成页：告知安装结果，并提供「立即启动」——
 ; 一旦定义了 customFinishPage，模板自带的默认完成页会被整体跳过，所以这里必须
 ; 完整复刻模板的 StartApp 逻辑（含 --updated 透传与以用户身份启动），不能省略。
+;
+; 文案长度受硬约束，但约束是可以抬高的：MUI2 给 MUI_FINISHPAGE_TEXT 的标签
+; 默认只有 40 个对话框单位高（Finish.nsh:286，因为有「立即启动」勾选框，
+; 走的是 MUI_FINISHPAGE_TEXT_HEIGHT_BUTTONS 这一支），约合 4 行；
+; v0.1.9 实测第 4 行就被勾选框压掉半句，连安装路径都被截在
+; 「…\Open Code」上。定义 MUI_FINISHPAGE_TEXT_LARGE 后高度变成 60 单位
+; （约 6 行），勾选框的位置是按 TEXT_BOTTOM_BUTTONS 算出来的，
+; 会自己跟着下移，不需要我们摆控件。这个 define 全项目只有这一处消费。
+;
+; 即便如此仍留了余量：安装路径长度由用户决定，是本页唯一可能折行的内容，
+; 所以正文压到「安装到哪 + 下一步做什么」两件事，详细的安装结果
+; （快捷方式、卸载入口、配置文件位置）都在安装页的详情面板里，不在这里重复。
 !macro customFinishPage
   Function StartApp
     ${if} ${isUpdated}
@@ -172,6 +194,7 @@
   !define MUI_FINISHPAGE_RUN_FUNCTION "StartApp"
   !define MUI_FINISHPAGE_RUN_TEXT "立即启动 Open Code Review"
   !define MUI_FINISHPAGE_TITLE "安装完成"
-  !define MUI_FINISHPAGE_TEXT "Open Code Review 已安装到：$\r$\n$INSTDIR$\r$\n$\r$\n桌面与开始菜单的快捷方式已创建，开始菜单里还多了一个「卸载」入口。$\r$\n$\r$\n首次启动后，请到「设置」页选择模型服务并填入 API Key。"
+  !define MUI_FINISHPAGE_TEXT_LARGE
+  !define MUI_FINISHPAGE_TEXT "Open Code Review 已安装到：$\r$\n$INSTDIR$\r$\n$\r$\n桌面与开始菜单的快捷方式已创建。$\r$\n首次启动请在「设置」页选择模型服务并填入 API Key。"
   !insertmacro MUI_PAGE_FINISH
 !macroend
