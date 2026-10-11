@@ -165,7 +165,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const repoRef = useRef("");
   repoRef.current = repo;
 
-  const patchForm = useCallback((patch: Partial<FormState>) => setForm((f) => ({ ...f, ...patch })), []);
+  /**
+   * Form fields that change *which files* a run would touch. The preview panel
+   * prints "进入审查 N 个文件" and the run button uses that count to decide
+   * whether to ask before spending, so a preview that outlives an edit to one
+   * of these is a lie about the scope — it used to survive all of them, and
+   * switching from 工作区改动 to 分支对比 left the previous count on screen as
+   * if it were current. Fields that only affect *how* the run is performed
+   * (effort, concurrency, budget, timeout, model, …) deliberately keep it.
+   */
+  const PREVIEW_KEYS = [
+    "mode",
+    "from",
+    "to",
+    "commit",
+    "scanPath",
+    "exclude",
+    "rule",
+    "noFilter",
+  ] as const;
+
+  const patchForm = useCallback(
+    (patch: Partial<FormState>) => {
+      setForm((f) => ({ ...f, ...patch }));
+      if (PREVIEW_KEYS.some((k) => k in patch && patch[k] !== form[k])) setPreview(null);
+    },
+    [form]
+  );
 
   const loadConfig = useCallback(async () => {
     setConfig(await api.readConfig());

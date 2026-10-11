@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox, Field, Input, Select, Textarea } from "@/components/ui/form";
 import { Card, FieldGrid, Page, Section } from "@/components/ui/layout";
 import { Badge, ConfirmDialog } from "@/components/ui/overlay";
+import { toast } from "sonner";
 import { GuideCard } from "@/components/GuideCard";
 
 // A whole-file scan costs roughly one LLM round trip per file *plus* a planning
@@ -127,6 +128,42 @@ export function ReviewPanel() {
 
   const keep = (preview?.value?.files || []).filter((f) => f.will_review);
   const drop = (preview?.value?.files || []).filter((f) => !f.will_review);
+
+  /**
+   * Start a run, or say why it would do nothing.
+   *
+   * The file count has to come from the preview: it is the only thing that
+   * knows, and it costs no tokens. The *cached* preview is free to reuse but
+   * cannot see edits the user made in their own editor since it was taken, so
+   * it is trusted only when it says something is there (any change to the
+   * scope itself already clears it). Anything else is re-checked — a run that
+   * quietly reviews nothing is worse than a second of work.
+   */
+  const startOrExplain = async () => {
+    // Resuming continues a session whose scope is already fixed.
+    if (resume?.sessionId) {
+      void startRun(resume.sessionId);
+      return;
+    }
+    const cached = preview?.value ? keep.length : null;
+    const count = cached && cached > 0 ? cached : await runPreview();
+    if (count < 0) return;
+    if (count === 0) {
+      toast.warning(scan ? "没有文件需要通读" : "当前范围没有文件可审查", {
+        description: scan
+          ? "换个「扫描路径」，或改用「工作区改动」这类按改动的模式。"
+          : "工作区没有改动时属正常，可改用「分支对比」或「单个提交」。",
+      });
+      return;
+    }
+    // A scan costs roughly one LLM round trip per file, so its size is worth
+    // confirming before it is spent.
+    if (scan && count > SCAN_CONFIRM_AT) {
+      setConfirmScan(true);
+      return;
+    }
+    void startRun();
+  };
 
   return (
     <>
@@ -449,22 +486,7 @@ export function ReviewPanel() {
             variant="primary"
             size="lg"
             disabled={running}
-            onClick={async () => {
-              if (resume?.sessionId || !scan) {
-                void startRun(resume?.sessionId);
-                return;
-              }
-              // One measured single-file scan cost ~103K tokens and 3m36s, so a scan
-              // is not a "run it and see" operation. The count must come from the
-              // preview — and if the user never ran one, run it now: it is free.
-              const count = preview?.value ? keep.length : await runPreview();
-              if (count < 0) return;
-              if (count > SCAN_CONFIRM_AT) {
-                setConfirmScan(true);
-                return;
-              }
-              void startRun();
-            }}
+            onClick={() => void startOrExplain()}
           >
             {resume?.sessionId ? <RotateCcw className="size-4" /> : <Play className="size-4" />}
             {running ? "审查运行中…" : resume?.sessionId ? "续跑未完成部分" : "开始审查"}

@@ -246,7 +246,12 @@ const STRESS = {
   FINDINGS: FINDINGS.map((f) => ({ ...f, path: LONG_PATH })),
   PREVIEW_FILES: PREVIEW_FILES.map((f) => ({ ...f, path: LONG_PATH })),
 };
-const NORMAL = { INFO, CONFIG, REPO_INFO, SESSIONS, FINDINGS };
+// PREVIEW_FILES belongs here. It was missing from the normal set, so every
+// screenshot of the preview panel — a core flow, "预览清单" is one of the two
+// buttons on the form — was taken against `files: undefined` and therefore
+// showed "进入审查 0" with the "nothing entered the review" explanation. The
+// panel looked plausible, so nothing noticed; the fixture was simply wrong.
+const NORMAL = { INFO, CONFIG, REPO_INFO, SESSIONS, FINDINGS, PREVIEW_FILES };
 
 export const BRIDGE = `
 window.api = (() => {
@@ -282,7 +287,15 @@ window.api = (() => {
     return { ok: true, value: SETS[want] || SETS.default };
   },
   sessionComments: async () => ({ ok: true, value: D.FINDINGS }),
-  preview: async () => ({ ok: true, value: { files: D.PREVIEW_FILES, total_insertions: 171, total_deletions: 27, total_files: 8, reviewable_count: 5, excluded_count: 3 } }),
+  preview: async () => {
+    // ?empty=1 is the state where the scope legitimately contains nothing to
+    // review — a clean working tree, or a ref range that touches no source.
+    // The app has to say so rather than spend a run discovering it.
+    if (q.get("empty") === "1") {
+      return { ok: true, value: { files: D.PREVIEW_FILES.map((f) => ({ ...f, will_review: false })), total_insertions: 0, total_deletions: 0, total_files: D.PREVIEW_FILES.length, reviewable_count: 0, excluded_count: D.PREVIEW_FILES.length } };
+    }
+    return { ok: true, value: { files: D.PREVIEW_FILES, total_insertions: 171, total_deletions: 27, total_files: 8, reviewable_count: 5, excluded_count: 3 } };
+  },
   resolveRef: async (_r, ref) => ({ ok: true, sha: "8c1de4f9a2b3c4d5e6f708192a3b4c5d6e7f8091" }),
   run: async () => "run-1",
   cancel: async () => true,

@@ -141,7 +141,7 @@ Everything is checked by rendering the real bundle against a stubbed IPC bridge 
 npm run audit           # typecheck + all five checks below
 npm run audit:packaging # every runtime module is in the build.files allowlist
 npm run audit:service   # the real CLI: arg building and output parsing, all 4 modes
-npm run audit:ui        # 31 states x 3 window sizes x 2 themes
+npm run audit:ui        # 32 states x 3 window sizes x 2 themes
 npm run audit:contrast  # WCAG AA for every text/background pair
 npm run audit:guards    # navigation + window-open policy, in real Electron
 ```

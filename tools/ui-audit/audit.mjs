@@ -213,6 +213,24 @@ const expectCodeStacked = async (page) => {
   return out;
 };
 
+/**
+ * The preview panel is one of the two buttons on the form, so it is a core
+ * flow — and it had no assertion at all, which is how it came to be
+ * screenshotted for months against a fixture whose normal payload had no file
+ * list at all (`files: undefined`). Every shot showed "进入审查 0 / 共 8" and
+ * the "nothing entered the review" explanation, which looks like a perfectly
+ * plausible state. Assert the contents, not just the layout.
+ */
+const expectPreviewListed = async (page) => {
+  const out = [];
+  const text = await page.locator("main").innerText();
+  if (!/进入审查 5 \/ 共 8 个文件/.test(text)) out.push("the preview header does not report 5 of 8");
+  if (!/以下 3 个不进入审查/.test(text)) out.push("the excluded files are not listed");
+  const rows = await page.locator("main").getByText(/· [+-]\d+ \/ -\d+/).count();
+  if (rows < 5) out.push(`only ${rows} reviewable file rows rendered, expected 5`);
+  return out;
+};
+
 const browser = await chromium.launch({ channel: CHANNEL });
 const page = await browser.newPage({ deviceScaleFactor: 1 });
 await page.addInitScript(BRIDGE);
@@ -275,6 +293,7 @@ await shoot(page, "13-review-preview", {
       if (el) el.scrollTop = el.scrollHeight;
     });
   },
+  expect: expectPreviewListed,
 });
 
 // 1000x660 is the window minimum declared in main.js — the tightest the app
@@ -393,6 +412,7 @@ await shoot(page, "28-stress-preview", {
     await page.locator("main").getByRole("button", { name: /预览清单/ }).first().click();
     await page.waitForTimeout(900);
   },
+  expect: expectPreviewListed,
 });
 
 // The first-run guide is the app's only onboarding surface, and every other
@@ -481,6 +501,49 @@ await shoot(page, "31-toast-error", {
   },
 });
 await page.emulateMedia({ colorScheme: null });
+
+// A scope that legitimately contains nothing to review. Two behaviours matter
+// and neither is visible in a screenshot of the happy path:
+//   * the preview count must not outlive an edit to the scope — it used to
+//     survive switching from 工作区改动 to 分支对比, printing the old count as
+//     if it were current;
+//   * pressing 开始审查 with nothing to review must say so, not spend a run.
+await shoot(page, "32-review-empty-scope", {
+  query: "?empty=1",
+  after: async (page) => {
+    await nav("审查")(page);
+    await page.waitForTimeout(300);
+    await page.getByRole("button", { name: /预览清单/ }).click();
+    await page.waitForTimeout(700);
+  },
+  expect: async (page) => {
+    const out = [];
+    const text = await page.locator("main").innerText();
+    if (!/进入审查 0 \/ 共 8 个文件/.test(text)) out.push("the empty preview did not report 0 of 8");
+    if (!/没有文件进入审查/.test(text)) out.push("no explanation for the empty scope");
+
+    // Change the scope: the stale count must go, not linger as if current.
+    await page.getByRole("button", { name: /分支对比/ }).click();
+    await page.waitForTimeout(400);
+    if ((await page.locator("main").getByText("文件清单").count()) !== 0)
+      out.push("the preview survived a change of scope, so its count is now stale");
+
+    // And pressing run with nothing to review must explain, not start.
+    await nav("审查")(page);
+    await page.waitForTimeout(200);
+    await page.getByRole("button", { name: /工作区改动/ }).click();
+    await page.waitForTimeout(200);
+    await page.getByRole("button", { name: /预览清单/ }).click();
+    await page.waitForTimeout(700);
+    await page.getByRole("button", { name: /开始审查/ }).click();
+    await page.waitForTimeout(900);
+    const toastText = await page.locator("[data-sonner-toast]").innerText().catch(() => "");
+    if (!/没有文件可审查/.test(toastText)) out.push(`running an empty scope was not explained (toast: "${toastText.slice(0, 60)}")`);
+    if (!(await page.getByRole("button", { name: /开始审查/ }).count()))
+      out.push("the run started anyway and left the form page");
+    return out;
+  },
+});
 
 await browser.close();
 server.close();
