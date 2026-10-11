@@ -221,6 +221,33 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* ---------- toast (the app's error surface) ----------
+   Errors from the CLI are structured: a summary line, then indented
+   `caused by:` / `hint:` continuations. Sonner renders the description as an
+   ordinary block, so HTML collapsed every newline into a space and the one
+   message a user needs to act on arrived as a single run-on sentence —
+   "…index caused by: open /home/x/…jsonl: permission denied hint: run …".
+   `pre-wrap` keeps the line structure and the indentation, and the height cap
+   means a pathological multi-hundred-line payload scrolls instead of covering
+   the window.
+
+   The width override needs `!important` and that is not an accident: sonner
+   writes `--width: 356px` as an *inline* style on the container, so no author
+   rule and no `style` prop can win. 356px is cramped for a 12.5px error whose
+   body carries absolute paths — it wraps a single path across two lines.
+   Override the custom property, not `width`: both the container and each
+   `[data-sonner-toast]` size themselves from `var(--width)`, so setting only
+   `width` widens the container while the toast stays 356px and drifts off
+   centre. (Measured — the first attempt did exactly that.) */
+[data-sonner-toaster] {
+  --width: min(520px, 92vw) !important;
+}
+[data-sonner-toast] [data-description] {
+  white-space: pre-wrap;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
 @utility fade-in {
   animation: fadeIn 0.16s var(--ease-out);
 }

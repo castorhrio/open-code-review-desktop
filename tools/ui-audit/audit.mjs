@@ -68,6 +68,13 @@ const PROBE = `(() => {
     // Form controls scroll their own value by design, and datalist never
     // renders — neither is a layout defect.
     if (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "DATALIST") continue;
+    // sonner's own icon slot is a deliberate 16px box holding a 20px glyph that
+    // it optically centres with -1px margins, so the glyph necessarily
+    // overflows its box by a pixel or two. That is the library's design and not
+    // ours to correct — but only this one slot is exempt, so a genuine overflow
+    // inside a toast (an unbreakable path in an error message, say) still gets
+    // reported.
+    if (el.matches("[data-sonner-toast] [data-icon]")) continue;
     if (el.scrollWidth > el.clientWidth + 1 && el.clientWidth > 0) {
       const cs = getComputedStyle(el);
       // text-overflow:ellipsis means overflow is intended, not a defect.
@@ -412,6 +419,68 @@ for (const [name, storage] of [
     },
   });
 }
+
+// The error toast is this app's only failure surface — CLI errors, rejected
+// refs, "cannot open <path>" — and it had no coverage at all: every fixture
+// succeeded at everything, so it was never rendered. Two things are asserted
+// rather than eyeballed, because both were wrong before:
+//   * `body` sets `user-select: none`, so the error text could not be copied;
+//   * the toaster was pinned to `theme="system"` while the app had its own
+//     preference, so a light-theme app on a dark desktop styled its errors dark.
+// The shot deliberately runs the app in light theme with the OS emulated dark,
+// which is the only combination where the two can disagree.
+await page.emulateMedia({ colorScheme: "dark" });
+await shoot(page, "31-toast-error", {
+  storage: { ...STORAGE, "ocr-theme-pref": "light" },
+  query: "?toast=1",
+  after: async (page) => {
+    await nav("历史")(page);
+    await page.waitForTimeout(900);
+  },
+  expect: async (page) => {
+    const out = [];
+    const info = await page.evaluate(() => {
+      const layer = document.querySelector("[data-sonner-theme]");
+      const toast = document.querySelector("[data-sonner-toast]");
+      const desc = document.querySelector("[data-sonner-toast] [data-description]");
+      return {
+        appTheme: document.documentElement.dataset.theme,
+        toastTheme: layer?.getAttribute("data-sonner-theme") || null,
+        userSelect: toast ? getComputedStyle(toast).userSelect : null,
+        // sonner writes `--width: 356px` inline, so this also guards the
+        // `!important` override that widens it for path-carrying errors. It is
+        // the *toast* that must be wide: sizing only the container leaves the
+        // toast at 356px and drifts it off centre, which is what the first
+        // attempt at this fix did.
+        width: toast ? Math.round(toast.getBoundingClientRect().width) : 0,
+        offsetFromCentre: toast
+          ? Math.round(toast.getBoundingClientRect().x + toast.getBoundingClientRect().width / 2 - window.innerWidth / 2)
+          : 0,
+        whiteSpace: desc ? getComputedStyle(desc).whiteSpace : null,
+        // innerText reflects rendered line breaks, so this measures what the
+        // user actually sees rather than what the string contains.
+        renderedLines: desc ? desc.innerText.split("\n").length : 0,
+        text: toast ? toast.innerText : "",
+      };
+    });
+    if (!info.toastTheme) return ["no toast was rendered, so the error surface is untested"];
+    if (info.toastTheme !== info.appTheme)
+      out.push(`toast theme ${info.toastTheme} does not follow the app's ${info.appTheme}`);
+    if (info.userSelect !== "text")
+      out.push(`toast text is not selectable (user-select: ${info.userSelect}), so the error cannot be copied`);
+    if (info.width < 460)
+      out.push(`toast is ${info.width}px wide, back to wrapping absolute paths (the override stopped applying?)`);
+    if (Math.abs(info.offsetFromCentre) > 2)
+      out.push(`toast is ${info.offsetFromCentre}px off centre — the container was widened without the toast`);
+    if (!/permission denied/.test(info.text)) out.push(`the error body did not reach the toast: ${info.text.slice(0, 60)}`);
+    // The CLI's errors are multi-line on purpose; collapsing them into one
+    // paragraph is what made them unreadable.
+    if (info.renderedLines < 3)
+      out.push(`the multi-line error was collapsed into ${info.renderedLines} line(s) (white-space: ${info.whiteSpace})`);
+    return out;
+  },
+});
+await page.emulateMedia({ colorScheme: null });
 
 await browser.close();
 server.close();

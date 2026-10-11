@@ -2,8 +2,7 @@ import { History, Moon, ScanSearch, Settings, Sun, MonitorSmartphone, Inbox } fr
 import { useStore, type View } from "@/store";
 import { Tooltip } from "@/components/ui/overlay";
 import { cn } from "@/lib/cn";
-import { readPref, savePref, applyPref, watchSystem, type ThemePref } from "@/lib/theme";
-import { useEffect, useState } from "react";
+import { setThemePref, useThemePref, type ThemePref } from "@/lib/theme";
 
 const ITEMS: { view: View; label: string; icon: typeof ScanSearch }[] = [
   { view: "review", label: "审查", icon: ScanSearch },
@@ -18,12 +17,7 @@ const THEME_ICON = { system: MonitorSmartphone, dark: Moon, light: Sun };
 
 export function NavRail() {
   const { view, setView, comments, running } = useStore();
-  const [pref, setPref] = useState<ThemePref>(() => readPref());
-
-  useEffect(() => {
-    applyPref(pref);
-    return watchSystem(() => applyPref(readPref()));
-  }, [pref]);
+  const pref = useThemePref();
 
   const Icon = THEME_ICON[pref];
 
@@ -66,11 +60,7 @@ export function NavRail() {
       <div className="mt-auto flex flex-col items-center gap-1">
         <Tooltip content={`主题：${THEME_LABEL[pref]}（点击切换）`}>
           <button
-            onClick={() => {
-              const next = CYCLE[(CYCLE.indexOf(pref) + 1) % CYCLE.length];
-              setPref(next);
-              savePref(next);
-            }}
+            onClick={() => setThemePref(CYCLE[(CYCLE.indexOf(pref) + 1) % CYCLE.length])}
             aria-label="切换主题"
             className="flex size-9 items-center justify-center rounded-md text-faint transition-colors hover:bg-hover hover:text-ink"
           >

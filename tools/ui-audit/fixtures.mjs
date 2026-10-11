@@ -272,8 +272,13 @@ window.api = (() => {
   inspect: async () => (D.REPO_INFO),
   listSessions: async () => {
     // ?sessions=many swaps in the 65-session set, so the history panel's paging
-    // can be exercised without a second harness.
+    // can be exercised without a second harness. ?toast=1 makes the call fail
+    // instead, which is the only way to get the app's error surface — a toast —
+    // on screen for inspection; every other fixture succeeds at everything.
     const want = q.get("sessions");
+    if (q.get("toast") === "1") {
+      return { ok: false, error: "error: failed to read session index\\n  caused by: open /home/x/.opencodereview/sessions/demo/index.jsonl: permission denied\\n  hint: run 'ocr sessions --rebuild' to regenerate the index" };
+    }
     return { ok: true, value: SETS[want] || SETS.default };
   },
   sessionComments: async () => ({ ok: true, value: D.FINDINGS }),

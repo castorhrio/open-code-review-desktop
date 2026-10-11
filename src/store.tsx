@@ -279,7 +279,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setRunLabel("审查失败");
         // The log area is selectable; a toast is not, and it disappears.
         setLog((l) => [...l, "[error] " + r.error]);
-        toast.error(r.error.split("\n")[0], { description: r.error.split("\n").slice(1).join(" ") || undefined, duration: 15000 });
+        toast.error(r.error.split("\n")[0], { description: r.error.split("\n").slice(1).join("\n") || undefined, duration: 15000 });
       } else {
         setRunLabel("完成");
         toast.success("审查完成", { description: `${r.value?.comments?.length ?? 0} 条评论` });

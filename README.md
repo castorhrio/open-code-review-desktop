@@ -130,6 +130,7 @@ The UI once drifted, one reasonable-looking change at a time, into three differe
 - **One card recipe.** `Card` with `tone` and an optional header row. Do not hand-roll `rounded-md border border-line bg-surface`.
 - **Unbounded text needs a bound.** Anything fed by a branch name, model id, provider name or path can arrive as one long unbreakable token. A flex/grid child defaults to `min-width: auto`, which refuses to shrink below its min-content width, so such a value pushes its container wide and something upstream clips it — the top bar once stretched to 2673px inside a 1440px window. Give the shrinking child `min-w-0` and `truncate`, cap the box (`max-w-[…]`), and put the full value in a `title`. In a `table-layout:auto` table the cell needs the cap too, or the column sizes to content.
 - **Two accent roles.** `--accent` is for text, borders and focus rings; `--accent-solid` is the fill behind light ink (primary buttons, checked controls). White on the bright accent is only 3.7:1 in dark mode, so a single token cannot serve both.
+- **The toast is a first-class surface, not a notification.** It is the only place a failure is ever reported — CLI errors, rejected refs, `cannot open <path>` — and it had drifted in three ways at once: it was pinned to `theme="system"` while the app had its own preference (a light app on a dark desktop styled its errors dark), `body`'s `user-select: none` made the error text uncopyable, and the CLI's multi-line `caused by:` / `hint:` structure was collapsed into one run-on sentence. All three are asserted in `audit:ui` against a deliberately failing fixture (`?toast=1`) rather than left to inspection. The theme preference itself now lives in `src/lib/theme.ts` with a `useSyncExternalStore` subscription instead of inside `NavRail`, so the toast layer and the app cannot disagree.
 - **The ink ramp is measured, not eyeballed.** `--ink` / `--muted` / `--faint` land at 16.9 / 6.8 / 4.7:1 on canvas in light and 15.9 / 7.8 / 5.6:1 in dark. Keep the three steps apart, and re-measure if you add a surface.
 
 ### Verifying changes
@@ -140,7 +141,7 @@ Everything is checked by rendering the real bundle against a stubbed IPC bridge 
 npm run audit           # typecheck + all five checks below
 npm run audit:packaging # every runtime module is in the build.files allowlist
 npm run audit:service   # the real CLI: arg building and output parsing, all 4 modes
-npm run audit:ui        # 30 states x 3 window sizes x 2 themes
+npm run audit:ui        # 31 states x 3 window sizes x 2 themes
 npm run audit:contrast  # WCAG AA for every text/background pair
 npm run audit:guards    # navigation + window-open policy, in real Electron
 ```
