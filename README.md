@@ -122,6 +122,7 @@ The UI once drifted, one reasonable-looking change at a time, into three differe
 - **Container-responsive forms.** `FieldGrid` is `repeat(auto-fit, minmax(var(--field-min), 1fr))` — two columns when the measure allows, one when it does not, without viewport breakpoints. Wide children use `col-span-full`, never `col-span-2`, which would create an implicit track and overflow once the grid collapses.
 - **Four type steps, defined in `styles.css`.** `text-meta` 11px (hints, paths, timestamps, badges), `text-body` 12px (secondary prose, table cells), `text-strong` 13px (primary text, control values, section titles), `text-stat` 20px (figures). Arbitrary `text-[12.5px]` values are what produced the original ten-step ramp.
 - **One card recipe.** `Card` with `tone` and an optional header row. Do not hand-roll `rounded-md border border-line bg-surface`.
+- **Unbounded text needs a bound.** Anything fed by a branch name, model id, provider name or path can arrive as one long unbreakable token. A flex/grid child defaults to `min-width: auto`, which refuses to shrink below its min-content width, so such a value pushes its container wide and something upstream clips it — the top bar once stretched to 2673px inside a 1440px window. Give the shrinking child `min-w-0` and `truncate`, cap the box (`max-w-[…]`), and put the full value in a `title`. In a `table-layout:auto` table the cell needs the cap too, or the column sizes to content.
 - **Two accent roles.** `--accent` is for text, borders and focus rings; `--accent-solid` is the fill behind light ink (primary buttons, checked controls). White on the bright accent is only 3.7:1 in dark mode, so a single token cannot serve both.
 - **The ink ramp is measured, not eyeballed.** `--ink` / `--muted` / `--faint` land at 16.9 / 6.8 / 4.7:1 on canvas in light and 15.9 / 7.8 / 5.6:1 in dark. Keep the three steps apart, and re-measure if you add a surface.
 
@@ -130,13 +131,23 @@ The UI once drifted, one reasonable-looking change at a time, into three differe
 Layout and contrast are checked by rendering the real bundle against a stubbed IPC bridge in headless Edge — no Electron, no desktop. The harness is `tools/ui-audit/`, and it drives the system Edge/Chrome rather than a downloaded Chromium, so Playwright itself is deliberately **not** a project dependency (installing it would pull a browser toolchain the app never uses). Resolve it one of three ways — `PLAYWRIGHT_MODULE=<path>`, a local `npm i -D playwright`, or `NODE_PATH` — and the harness will tell you which it could not find.
 
 ```
-npm run audit:ui        # 22 states x 3 window sizes x 2 themes; asserts the
+npm run audit:ui        # 25 states x 3 window sizes x 2 themes; asserts the
                         # measure cap, document overflow and clipped content
 npm run audit:contrast  # WCAG AA audit of every text/background pair
 npm run audit           # typecheck, then both of the above
 ```
 
 Both exit non-zero on findings, so they work as a gate rather than a log. `audit:ui` prints `FAIL` with the offending element when a page exceeds its declared measure or content is clipped without an ellipsis. `audit:contrast` prints one line per unique sub-AA colour pair and states how many text instances it scanned — a harness that reports "0 problems" without saying what it inspected manufactures confidence rather than providing it, so it also refuses to pass vacuously.
+
+`audit:ui` renders three kinds of fixture set, selected by query string:
+
+| Query | What it exercises |
+| --- | --- |
+| *(none)* | Normal payloads — the everyday look of every screen |
+| `?sessions=many` | 65 sessions, so the history panel's paging and count are real |
+| `?stress=1` | 100+ char unbreakable tokens in every slot that holds arbitrary text |
+
+The stress set is the one that earns its keep. Any slot fed by a branch name, model id, provider name or filesystem path can receive a string with no break opportunity, and a flex/grid child missing `min-w-0` will push its container wide instead of shrinking — after which something upstream clips it and the damage is invisible in normal use. It found the top bar stretching to 2673px inside a 1440px window, a select overflowing by 93px, and a settings table pushing 193px past its card.
 
 Run them before and after any layout or token change. Several real defects were only visible this way, including a settings page that ran at two widths at once, a grid track that overflowed its container by 57px, a preview panel that was unreachable below 1536px, and 234 text instances below AA contrast.
 
