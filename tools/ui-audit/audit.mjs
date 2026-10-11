@@ -295,6 +295,35 @@ for (const [name, view] of [
   await shoot(page, name, { query: "?stress=1", after: nav(view) });
 }
 
+// The results view holds the most arbitrary text of any screen: file paths,
+// finding bodies, and code. Stress it too, and in the minimum window where
+// the three panes have the least room.
+await shoot(page, "26-stress-findings", {
+  query: "?stress=1",
+  after: async (page) => {
+    await openFindings(page);
+    await selectFirstFinding(page);
+  },
+});
+await shoot(page, "27-stress-findings-min", {
+  width: 1000,
+  height: 660,
+  query: "?stress=1",
+  after: async (page) => {
+    await openFindings(page);
+    await selectFirstFinding(page);
+  },
+});
+await shoot(page, "28-stress-preview", {
+  query: "?stress=1",
+  after: async (page) => {
+    await nav("审查")(page);
+    await page.waitForTimeout(400);
+    await page.locator("main").getByRole("button", { name: /预览清单/ }).first().click();
+    await page.waitForTimeout(900);
+  },
+});
+
 await browser.close();
 server.close();
 

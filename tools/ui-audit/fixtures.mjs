@@ -244,6 +244,7 @@ const STRESS = {
     diff_to: LONG_BRANCH,
   })),
   FINDINGS: FINDINGS.map((f) => ({ ...f, path: LONG_PATH })),
+  PREVIEW_FILES: PREVIEW_FILES.map((f) => ({ ...f, path: LONG_PATH })),
 };
 const NORMAL = { INFO, CONFIG, REPO_INFO, SESSIONS, FINDINGS };
 
@@ -276,7 +277,7 @@ window.api = (() => {
     return { ok: true, value: SETS[want] || SETS.default };
   },
   sessionComments: async () => ({ ok: true, value: D.FINDINGS }),
-  preview: async () => ({ ok: true, value: { files: ${JSON.stringify(PREVIEW_FILES)}, total_insertions: 171, total_deletions: 27, total_files: 8, reviewable_count: 5, excluded_count: 3 } }),
+  preview: async () => ({ ok: true, value: { files: D.PREVIEW_FILES, total_insertions: 171, total_deletions: 27, total_files: 8, reviewable_count: 5, excluded_count: 3 } }),
   resolveRef: async (_r, ref) => ({ ok: true, sha: "8c1de4f9a2b3c4d5e6f708192a3b4c5d6e7f8091" }),
   run: async () => "run-1",
   cancel: async () => true,
