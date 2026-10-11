@@ -99,12 +99,19 @@ const PROBE = `(() => {
   };
 })()`;
 
-async function shoot(page, name, { width = 1440, height = 900, storage = STORAGE, after, expect, query = "" } = {}) {
+async function shoot(page, name, { width = 1440, height = 900, storage = STORAGE, clearStorage = false, after, expect, query = "" } = {}) {
   await page.setViewportSize({ width, height });
   await page.goto(`http://127.0.0.1:${PORT}/${query}`, { waitUntil: "load" });
-  await page.evaluate((s) => {
-    for (const [k, v] of Object.entries(s)) localStorage.setItem(k, v);
-  }, storage);
+  // localStorage survives navigation within an origin, so a shot that needs a
+  // *clean* profile has to say so — otherwise it inherits `guide-dismissed`
+  // from whichever shot ran first.
+  await page.evaluate(
+    ({ s, clear }) => {
+      if (clear) localStorage.clear();
+      for (const [k, v] of Object.entries(s)) localStorage.setItem(k, v);
+    },
+    { s: storage, clear: clearStorage }
+  );
   await page.reload({ waitUntil: "load" });
   await page.waitForTimeout(700);
   if (after) await after(page);
@@ -148,6 +155,57 @@ const server = await serve(PORT);
 fs.mkdirSync(SHOTS, { recursive: true });
 const passed = [];
 const failed = [];
+
+/**
+ * The results screen is the one master-detail view, and its column count is a
+ * function of the width it has, not of the viewport. Both halves of that
+ * contract are worth asserting, because the failure mode is silent: the panes
+ * still "fit" (nothing overflows) while the code — the thing the user opened
+ * the screen for — is cut off mid-line.
+ *
+ * Measured on the built UI before this check existed: the code column was 337px
+ * at the 1000px window floor and 568px at 1440px, while the widest line of the
+ * fixture needs 561px of text plus the gutter. So the numbers below are the
+ * observed requirement, not a preference.
+ */
+const CODE_NEEDS = 620;
+
+function resultsGrid(page) {
+  return page.evaluate((need) => {
+    const grid = [...document.querySelectorAll("main .grid")].find((g) => (g.getAttribute("class") || "").includes("grid-cols-[minmax(240px"));
+    if (!grid) return { error: "no results grid" };
+    const vis = [...grid.children].filter((el) => getComputedStyle(el).display !== "none");
+    const last = vis[vis.length - 1];
+    const code = last.querySelector("pre");
+    // The widest code line, so the assertion is about real content rather than
+    // a hard-coded pixel count.
+    let widest = 0;
+    for (const s of code ? code.querySelectorAll("div > span:nth-child(2)") : []) widest = Math.max(widest, s.scrollWidth);
+    return { cols: vis.length, widths: vis.map((el) => Math.round(el.getBoundingClientRect().width)), codeW: code ? code.clientWidth : 0, widest, need };
+  }, CODE_NEEDS);
+}
+
+/** Wide: three columns, and the code column clears the widest line. */
+const expectThreePanes = async (page) => {
+  const g = await resultsGrid(page);
+  if (g.error) return [g.error];
+  const out = [];
+  if (g.cols !== 3) out.push(`expected 3 panes at this width, got ${g.cols} (${g.widths.join("/")})`);
+  if (g.codeW < g.need) out.push(`code pane ${g.codeW}px < ${g.need}px needed by a ${g.widest}px line`);
+  return out;
+};
+
+/** Narrow: two columns, with the code stacked in the detail column, still full width. */
+const expectCodeStacked = async (page) => {
+  const g = await resultsGrid(page);
+  if (g.error) return [g.error];
+  const out = [];
+  if (g.cols !== 2) out.push(`expected the code to fold into the detail column, got ${g.cols} panes (${g.widths.join("/")})`);
+  if (!g.codeW) out.push("the code viewer is not rendered at all in the narrow layout");
+  else if (g.codeW < g.widest) out.push(`stacked code is ${g.codeW}px wide but a line needs ${g.widest}px`);
+  return out;
+};
+
 const browser = await chromium.launch({ channel: CHANNEL });
 const page = await browser.newPage({ deviceScaleFactor: 1 });
 await page.addInitScript(BRIDGE);
@@ -189,6 +247,7 @@ await shoot(page, "09-results-findings", {
     await openFindings(page);
     await selectFirstFinding(page);
   },
+  expect: expectThreePanes,
 });
 await shoot(page, "10-review-narrow", { width: 1100, height: 780 });
 await shoot(page, "11-settings-narrow", { width: 1100, height: 780, after: nav("设置") });
@@ -212,7 +271,9 @@ await shoot(page, "13-review-preview", {
 });
 
 // 1000x660 is the window minimum declared in main.js — the tightest the app
-// can ever get, and where the 3-pane results grid is most likely to overflow.
+// can ever get. The three-column grid cannot be satisfied down here (the
+// minimums alone come to ~1180px), so the code folds into the detail column
+// rather than being clipped to a third of a line.
 await shoot(page, "14-min-review", { width: 1000, height: 660, after: nav("审查") });
 await shoot(page, "15-min-settings", { width: 1000, height: 660, after: nav("设置") });
 await shoot(page, "16-min-results", {
@@ -223,6 +284,7 @@ await shoot(page, "16-min-results", {
     await openFindings(page);
     await selectFirstFinding(page);
   },
+  expect: expectCodeStacked,
 });
 await shoot(page, "17-min-history", { width: 1000, height: 660, after: nav("历史") });
 
@@ -248,6 +310,7 @@ await shoot(page, "21-light-findings", {
     await openFindings(page);
     await selectFirstFinding(page);
   },
+  expect: expectThreePanes,
 });
 
 // Regression guard for silent history truncation: the panel used to ask the CLI
@@ -313,6 +376,7 @@ await shoot(page, "27-stress-findings-min", {
     await openFindings(page);
     await selectFirstFinding(page);
   },
+  expect: expectCodeStacked,
 });
 await shoot(page, "28-stress-preview", {
   query: "?stress=1",
@@ -323,6 +387,31 @@ await shoot(page, "28-stress-preview", {
     await page.waitForTimeout(900);
   },
 });
+
+// The first-run guide is the app's only onboarding surface, and every other
+// shot in this file dismissed it (STORAGE carries `guide-dismissed: 1`), so it
+// had no visual coverage at all — a regression in it would have shipped
+// silently. Both halves matter: with a repo already chosen, and cold.
+for (const [name, storage] of [
+  ["29-guide-first-run", { "last-repo": "/home/x/work/payments-api" }],
+  ["30-guide-cold", {}],
+]) {
+  await shoot(page, name, {
+    storage,
+    clearStorage: true,
+    after: nav("审查"),
+    expect: async (page) => {
+      const out = [];
+      const card = page.locator("main").getByRole("heading", { name: "三步开始第一次审查" });
+      if (!(await card.count())) return ["the guide card is not rendered for a user who has not dismissed it"];
+      const text = await page.locator("main").innerText();
+      for (const step of ["选择要审查的仓库目录", "配置模型服务与 API Key", "先预览文件清单，再开始审查"])
+        if (!text.includes(step)) out.push(`guide step missing: ${step}`);
+      if (!text.includes("不再提示")) out.push("no way to dismiss the guide");
+      return out;
+    },
+  });
+}
 
 await browser.close();
 server.close();

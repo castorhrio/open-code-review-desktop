@@ -70,6 +70,77 @@ function MarkdownLite({ text, className }: { text: string; className?: string })
   );
 }
 
+/**
+ * The file around a finding. Two homes, because the 3-pane grid only has room
+ * for it above 1240px of container width:
+ *
+ *   pane     its own grid column (wide).
+ *   stacked  its own row under the finding, inside the detail column (narrow).
+ *
+ * Either way the viewer is a flex column that fills its box, so the toolbar is
+ * always on screen and the code scrolls in its own region — no `sticky`, and a
+ * long line scrolls sideways inside the code region instead of turning the
+ * whole detail column into a sideways scroller.
+ *
+ * Why this exists at all: measured on the built UI, the code column was 337px
+ * at the 1000px window floor and 568px at 1440px, while the widest line in the
+ * fixture needs 629px — so on a 1280px laptop most lines of the very thing the
+ * user came to read were cut off.
+ */
+function FileViewer({ current, file, variant }: { current: Finding; file: FileWindow | null; variant: "pane" | "stacked" }) {
+  const stacked = variant === "stacked";
+  if (!file) return <p className={cn("text-body text-faint", stacked ? "px-4 py-3" : "p-4")}>读取文件中…</p>;
+  if (!file.ok) return <p className={cn("text-body text-bad", stacked ? "px-4 py-3" : "p-4")}>{file.error}</p>;
+  return (
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
+      <div className={cn("flex min-w-0 shrink-0 items-center gap-2 border-b border-line bg-surface py-2", stacked ? "px-4" : "px-3")}>
+        <Wrench className="size-3.5 shrink-0 text-faint" />
+        <span className="min-w-0 flex-1 truncate font-mono text-meta text-muted">{current.path}</span>
+        <Badge>{file.source === "git" ? `来自 ${file.ref}` : "工作区当前内容"}</Badge>
+        {file.absPath && (
+          <>
+            <Button variant="ghost" size="sm" onClick={() => void copyText(file.absPath || "", "文件绝对路径")}>
+              复制路径
+            </Button>
+            <Button variant="ghost" size="sm" title="用系统默认程序打开" onClick={() => file.absPath && void api.openFile(file.absPath)}>
+              <ExternalLink className="size-3.5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              title="在文件夹中显示"
+              onClick={async () => {
+                if (!file.absPath) return;
+                const res = await api.revealFile(file.absPath);
+                if (!res.ok) toast.error("无法打开", { description: res.error });
+                else if (res.action === "open-parent")
+                  toast("这个文件在工作区里不存在", { description: `可能是被审查的 ref 才有它，已打开：${res.path}` });
+              }}
+            >
+              <FolderOpen className="size-3.5" />
+            </Button>
+          </>
+        )}
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto">
+        <pre className="w-max min-w-full px-2 py-2 font-mono text-meta leading-[1.6]">
+          {file.lines?.map((l) => {
+            const inRange = l.n >= current.start_line && l.n <= (current.end_line || current.start_line);
+            return (
+              <div key={l.n} className={cn("flex gap-3 rounded-xs px-2", inRange && "bg-hit")}>
+                {/* On the highlight the gutter needs one step more contrast
+                    than `faint`, which lands at 4.1:1 over `--hit`. */}
+                <span className={cn("tnum w-10 shrink-0 text-right", inRange ? "text-muted" : "text-faint")}>{l.n}</span>
+                <span className="whitespace-pre text-ink">{l.content || " "}</span>
+              </div>
+            );
+          })}
+        </pre>
+      </div>
+    </div>
+  );
+}
+
 export function ResultsPanel() {
   const { result, resultOrigin, comments, form, repo, exportSession, history, resume, running, elapsed, runLabel, progress, cancelRun, startRun, setView } = useStore();
   const [sevOn, setSevOn] = useState<Set<string>>(() => new Set(SEVERITIES));
@@ -232,7 +303,10 @@ export function ResultsPanel() {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    // `@container` so the master-detail grid below can respond to the width it
+    // actually has, not to the viewport. The nav rail is a fixed 48px, so a
+    // viewport media query would silently drift the moment that changes.
+    <div className="@container flex h-full min-h-0 flex-col">
       <PanelHeader>
         <Badge className={status.cls}>{status.label}</Badge>
         {resultOrigin?.kind === "session" && <Badge tone="accent">历史会话</Badge>}
@@ -376,8 +450,15 @@ export function ResultsPanel() {
       </PanelHeader>
 
       {/* Master-detail: the one screen that legitimately uses the whole window.
-          Minimums sum to 820px, which leaves slack at the 1000px window floor. */}
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(240px,300px)_minmax(280px,1fr)_minmax(300px,1.1fr)] divide-x divide-line">
+          Above 1240px of container width the three columns fit and the code gets
+          its own pane with at least 620px — measured, that is what a line of
+          real Go needs before it starts clipping. Below that the three tracks
+          cannot be satisfied at all (240 + 340 + 620 is already 1200), so the
+          code stops being a column and is stacked under the finding instead:
+          same content, nothing hidden behind a breakpoint, and at 1000px the
+          reading column ends up ~660px wide — wider than the 568px the code
+          pane got at 1440px before this. */}
+      <div className="grid min-h-0 flex-1 divide-x divide-line grid-cols-[minmax(240px,300px)_minmax(320px,1fr)_minmax(620px,1.25fr)] @max-[1240px]:grid-cols-[minmax(240px,300px)_minmax(0,1fr)]">
         <div className="min-h-0 overflow-y-auto">
           {filtered.length === 0 && <p className="p-6 text-center text-body text-faint">没有匹配的评论。</p>}
           {filtered.map(({ c, i }) => {
@@ -410,97 +491,69 @@ export function ResultsPanel() {
           })}
         </div>
 
-        <div className="min-h-0 overflow-y-auto px-4 py-3">
-          {!current && <p className="pt-10 text-center text-body text-faint">在左侧选择一条评论。</p>}
+        {/* The reading column. Narrow: split into two rows so the code is
+            always on screen instead of sitting below the fold — the finding
+            block and the code each scroll on their own. Wide: one scroller, and
+            the code lives in its own column. */}
+        <div
+          className={cn(
+            "min-h-0 overflow-y-auto",
+            current && "@max-[1240px]:grid @max-[1240px]:grid-rows-[minmax(0,0.46fr)_minmax(0,0.54fr)] @max-[1240px]:overflow-hidden"
+          )}
+        >
+          <div className={cn("px-4 py-3", current && "@max-[1240px]:min-h-0 @max-[1240px]:overflow-y-auto")}>
+            {!current && <p className="pt-10 text-center text-body text-faint">在左侧选择一条评论。</p>}
+            {current && (
+              <>
+                <div className="mb-3 flex flex-wrap items-center gap-1.5">
+                  <Badge className={cn("border-transparent", SEVERITY_TEXT[current.severity || ""], "bg-transparent px-0 font-semibold")}>
+                    {current.severity || "未标注严重级"}
+                  </Badge>
+                  {current.category && <Badge>{current.category}</Badge>}
+                  <span className="font-mono text-meta text-faint">
+                    {current.path} · L{current.start_line}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="ml-auto"
+                    title="复制这一条（Markdown），含当前代码与建议改法"
+                    onClick={() => void copyText(findingToMarkdown(current), "这条评论（Markdown）", "可直接粘贴到 PR / MR 评论")}
+                  >
+                    <Copy className="size-3.5" />
+                    复制这条
+                  </Button>
+                </div>
+                <div className="rounded-md border-l-2 border-accent bg-raised px-3 py-2.5 selectable">
+                  <MarkdownLite text={current.content} className="text-strong text-ink" />
+                </div>
+                {current.existing_code && <CodeBlock title="当前代码" tone="bad" text={current.existing_code} />}
+                {current.suggestion_code && <CodeBlock title="建议改为" tone="ok" text={current.suggestion_code} />}
+                {current.thinking && (
+                  <details className="mt-3 text-body text-muted">
+                    <summary className="cursor-pointer text-faint hover:text-ink">
+                      <Sparkles className="mr-1 inline size-3" />
+                      模型判断过程
+                    </summary>
+                    <div className="mt-2 whitespace-pre-wrap">{current.thinking}</div>
+                  </details>
+                )}
+              </>
+            )}
+          </div>
           {current && (
-            <>
-              <div className="mb-3 flex flex-wrap items-center gap-1.5">
-                <Badge className={cn("border-transparent", SEVERITY_TEXT[current.severity || ""], "bg-transparent px-0 font-semibold")}>
-                  {current.severity || "未标注严重级"}
-                </Badge>
-                {current.category && <Badge>{current.category}</Badge>}
-                <span className="font-mono text-meta text-faint">
-                  {current.path} · L{current.start_line}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="ml-auto"
-                  title="复制这一条（Markdown），含当前代码与建议改法"
-                  onClick={() => void copyText(findingToMarkdown(current), "这条评论（Markdown）", "可直接粘贴到 PR / MR 评论")}
-                >
-                  <Copy className="size-3.5" />
-                  复制这条
-                </Button>
-              </div>
-              <div className="rounded-md border-l-2 border-accent bg-raised px-3 py-2.5 selectable">
-                <MarkdownLite text={current.content} className="text-strong text-ink" />
-              </div>
-              {current.existing_code && <CodeBlock title="当前代码" tone="bad" text={current.existing_code} />}
-              {current.suggestion_code && <CodeBlock title="建议改为" tone="ok" text={current.suggestion_code} />}
-              {current.thinking && (
-                <details className="mt-3 text-body text-muted">
-                  <summary className="cursor-pointer text-faint hover:text-ink">
-                    <Sparkles className="mr-1 inline size-3" />
-                    模型判断过程
-                  </summary>
-                  <div className="mt-2 whitespace-pre-wrap">{current.thinking}</div>
-                </details>
-              )}
-            </>
+            <div className="min-h-0 min-w-0 border-t border-line bg-canvas @min-[1240px]:hidden">
+              <FileViewer current={current} file={file} variant="stacked" />
+            </div>
           )}
         </div>
 
-        <div className="min-h-0 overflow-auto bg-canvas">
-          {current && file?.ok && (
-            <>
-              <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-line bg-surface px-3 py-2">
-                <Wrench className="size-3.5 text-faint" />
-                <span className="min-w-0 flex-1 truncate font-mono text-meta text-muted">{current.path}</span>
-                <Badge>{file.source === "git" ? `来自 ${file.ref}` : "工作区当前内容"}</Badge>
-                {file.absPath && (
-                  <>
-                    <Button variant="ghost" size="sm" onClick={() => void copyText(file.absPath || "", "文件绝对路径")}>
-                      复制路径
-                    </Button>
-                    <Button variant="ghost" size="sm" title="用系统默认程序打开" onClick={() => file.absPath && void api.openFile(file.absPath)}>
-                      <ExternalLink className="size-3.5" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      title="在文件夹中显示"
-                      onClick={async () => {
-                        if (!file.absPath) return;
-                        const res = await api.revealFile(file.absPath);
-                        if (!res.ok) toast.error("无法打开", { description: res.error });
-                        else if (res.action === "open-parent")
-                          toast("这个文件在工作区里不存在", { description: `可能是被审查的 ref 才有它，已打开：${res.path}` });
-                      }}
-                    >
-                      <FolderOpen className="size-3.5" />
-                    </Button>
-                  </>
-                )}
-              </div>
-              <pre className="px-2 py-2 font-mono text-meta leading-[1.6]">
-                {file.lines?.map((l) => {
-                  const inRange = l.n >= current.start_line && l.n <= (current.end_line || current.start_line);
-                  return (
-                    <div key={l.n} className={cn("flex gap-3 rounded-xs px-2", inRange && "bg-hit")}>
-                      {/* On the highlight the gutter needs one step more contrast
-                          than `faint`, which lands at 4.1:1 over `--hit`. */}
-                      <span className={cn("tnum w-10 shrink-0 text-right", inRange ? "text-muted" : "text-faint")}>{l.n}</span>
-                      <span className="whitespace-pre text-ink">{l.content || " "}</span>
-                    </div>
-                  );
-                })}
-              </pre>
-            </>
+        <div className="hidden min-h-0 bg-canvas @min-[1240px]:block">
+          {current ? (
+            <FileViewer current={current} file={file} variant="pane" />
+          ) : (
+            <p className="p-4 text-body text-faint">选中评论后在这里显示对应代码位置。</p>
           )}
-          {current && file && !file.ok && <p className="p-4 text-body text-bad">{file.error}</p>}
-          {current && !file && <p className="p-4 text-body text-faint">读取文件中…</p>}
-          {!current && <p className="p-4 text-body text-faint">选中评论后在这里显示对应代码位置。</p>}
         </div>
       </div>
     </div>

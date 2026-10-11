@@ -123,6 +123,7 @@ electron-builder's assisted-installer template hides the install log and lets th
 The UI once drifted, one reasonable-looking change at a time, into three different content widths, five different card recipes, ad-hoc margins (`mb-4` next to `mt-4` next to `mb-2.5`) and ten font sizes between 10 and 14px. The fix was not a restyle — it was to give the decisions an owner. **`src/components/ui/layout.tsx` is that owner**; read its header comment before adding a screen.
 
 - **One measure per page.** `Page` / `PageBody` centre `--page-max` (1080px). Full-bleed forms are the specific failure mode: at 1920px they stretch an input to ~900px and pull every label hundreds of pixels away from its control. Results is the one deliberate exception — a master-detail view legitimately uses the whole window.
+- **The one full-width screen is container-responsive, not viewport-responsive.** Results is a `@container`, and its column count follows the width it actually has: three columns only above 1240px, where `minmax(620px, …)` can be honoured for the code pane. Below that the code stops being a column and becomes a second row of the detail column (the finding and the code then split the height 46/54 and scroll independently). Measured on the built UI, the three-pane grid was 337px of code at the 1000px window floor and 568px at 1440px while a line of the fixture needs 629px — so on a 1280px laptop most lines of the thing the user came to read were cut off, and *nothing overflowed*, which is exactly why the layout assertions in `audit:ui` check column count and code width rather than just "does anything clip".
 - **Rhythm from the parent, not from margins.** `PageBody` is a `gap-6` stack, so `Section` and `Card` carry no vertical margins at all. Spacing uses Tailwind's 4px steps only: 4 icon↔text, 8 control↔control, 12 label↔control, 16 page gutter / card padding / field↔field, 24 section↔section.
 - **Container-responsive forms.** `FieldGrid` is `repeat(auto-fit, minmax(var(--field-min), 1fr))` — two columns when the measure allows, one when it does not, without viewport breakpoints. Wide children use `col-span-full`, never `col-span-2`, which would create an implicit track and overflow once the grid collapses.
 - **Four type steps, defined in `styles.css`.** `text-meta` 11px (hints, paths, timestamps, badges), `text-body` 12px (secondary prose, table cells), `text-strong` 13px (primary text, control values, section titles), `text-stat` 20px (figures). Arbitrary `text-[12.5px]` values are what produced the original ten-step ramp.
@@ -139,7 +140,7 @@ Everything is checked by rendering the real bundle against a stubbed IPC bridge 
 npm run audit           # typecheck + all five checks below
 npm run audit:packaging # every runtime module is in the build.files allowlist
 npm run audit:service   # the real CLI: arg building and output parsing, all 4 modes
-npm run audit:ui        # 28 states x 3 window sizes x 2 themes
+npm run audit:ui        # 30 states x 3 window sizes x 2 themes
 npm run audit:contrast  # WCAG AA for every text/background pair
 npm run audit:guards    # navigation + window-open policy, in real Electron
 ```
@@ -148,7 +149,7 @@ All of them exit non-zero on findings, so they work as a gate rather than a log,
 
 **`audit:service`** covers the layer that is the app's whole job: turning a spec into CLI arguments and turning the CLI's output back into something the UI can render. It runs the real binary against a throwaway git repo, using `--preview` so no API key or network is needed. It asserts all four modes parse into the expected shape and find files, that mode-specific flags do not leak into another mode (the CLI would reject the run), that a bad ref fails with an error rather than an empty preview the UI would render as "nothing to review", and that a non-repo directory is reported as such.
 
-**`audit:ui`** asserts the declared measure cap, document overflow, and content that is clipped without an ellipsis. It prints `FAIL` with the offending element. It renders three fixture sets, selected by query string:
+**`audit:ui`** asserts the declared measure cap, document overflow, and content that is clipped without an ellipsis. It prints `FAIL` with the offending element. It also asserts the results screen's *responsive contract* rather than only its absence of overflow: at 1440px there must be three panes and the code pane must clear the widest code line in the fixture; at 1000x660 there must be two panes with the code stacked and still at least one full line wide. A layout that silently clips the code satisfies "nothing overflows", so that is the check that matters. It renders three fixture sets, selected by query string:
 
 | Query | What it exercises |
 | --- | --- |
