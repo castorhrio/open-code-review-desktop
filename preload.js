@@ -6,6 +6,8 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("api", {
   info: () => ipcRenderer.invoke("app:info"),
   providers: () => ipcRenderer.invoke("app:providers"),
+  openInstallDir: () => ipcRenderer.invoke("app:openInstallDir"),
+  uninstall: () => ipcRenderer.invoke("app:uninstall"),
 
   pickRepo: () => ipcRenderer.invoke("repo:pick"),
   pickScanDir: (repo) => ipcRenderer.invoke("repo:pickInside", repo),

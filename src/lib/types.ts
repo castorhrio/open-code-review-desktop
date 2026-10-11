@@ -193,6 +193,16 @@ export interface AppInfo {
   docsUrl: string;
   appVersion: string;
   platform: string;
+  /** Where the app itself is installed ("" for dev / portable runs). */
+  installDir: string;
+  /** Electron's per-user data dir, where window bounds and settings live. */
+  userData: string;
+  /** The running executable. */
+  executable: string;
+  packaged: boolean;
+  portable: boolean;
+  /** Whether an NSIS uninstaller was found (Windows installed builds only). */
+  canUninstall: boolean;
 }
 
 export interface Spec {

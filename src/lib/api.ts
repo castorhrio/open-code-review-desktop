@@ -37,6 +37,8 @@ export interface FileWindow {
 export interface Bridge {
   info(): Promise<AppInfo>;
   providers(): Promise<{ ok: boolean; error?: string; value: Provider[] }>;
+  openInstallDir(): Promise<{ ok: boolean; error?: string }>;
+  uninstall(): Promise<{ ok: boolean; error?: string }>;
   pickRepo(): Promise<string>;
   pickScanDir(repo: string): Promise<{ relPath?: string; error?: string }>;
   pickFile(opts: { title?: string; filters?: { name: string; extensions: string[] }[] }): Promise<string>;

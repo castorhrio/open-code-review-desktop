@@ -8,30 +8,91 @@ const { spawn } = require("child_process");
 
 let cachedBinary = null;
 
+// Mirrors @alibaba-group/open-code-review's own platform map. Keeping a copy
+// here means the fallback search below works even if the CLI package's layout
+// changes, and it is what makes macOS/Linux resolution explicit rather than
+// "Windows plus an afterthought".
+const PLATFORM_PACKAGES = {
+  "darwin-arm64": "@alibaba-group/ocr-darwin-arm64",
+  "darwin-x64": "@alibaba-group/ocr-darwin-x64",
+  "linux-arm64": "@alibaba-group/ocr-linux-arm64",
+  "linux-x64": "@alibaba-group/ocr-linux-x64",
+  "win32-arm64": "@alibaba-group/ocr-win32-arm64",
+  "win32-x64": "@alibaba-group/ocr-win32-x64",
+};
+
+const BINARY_FILENAME = process.platform === "win32" ? "opencodereview.exe" : "opencodereview";
+
+// The CLI's postinstall chmods the binary, but that mode does not survive a
+// Windows-authored package or a zip round-trip. Re-asserting it here keeps the
+// macOS/Linux builds from failing with a bare EACCES on first run.
+function ensureExecutable(file) {
+  if (process.platform === "win32") return file;
+  try {
+    fs.accessSync(file, fs.constants.X_OK);
+  } catch (_) {
+    try {
+      fs.chmodSync(file, 0o755);
+    } catch (_) {}
+  }
+  return file;
+}
+
+// `node_modules` sits next to this file in both the dev tree and the packaged
+// (asar:false) app; the second candidate covers a portable extraction that
+// nests the app one level deeper.
+function platformPackageDir(name) {
+  const candidates = [
+    path.join(__dirname, "node_modules", name),
+    process.resourcesPath ? path.join(process.resourcesPath, "app", "node_modules", name) : "",
+  ];
+  for (const dir of candidates) {
+    if (dir && fs.existsSync(path.join(dir, "bin", BINARY_FILENAME))) return dir;
+  }
+  return null;
+}
+
+function globalRoots() {
+  return [
+    process.platform === "win32" && process.env.APPDATA ? path.join(process.env.APPDATA, "npm", "node_modules") : "",
+    "/usr/local/lib/node_modules",
+    "/usr/lib/node_modules",
+    path.join(os.homedir(), ".npm-global", "lib", "node_modules"),
+    path.join(os.homedir(), ".local", "lib", "node_modules"),
+  ].filter(Boolean);
+}
+
 function binaryPath() {
   if (cachedBinary) return cachedBinary;
+  const name = PLATFORM_PACKAGES[`${process.platform}-${process.arch}`];
+
+  // 1) Let the CLI resolve its own platform package — it knows its layout best.
   try {
     const { resolveNativeBinary } = require("@alibaba-group/open-code-review/scripts/platform");
     const resolved = resolveNativeBinary();
-    if (resolved && resolved.path) {
-      cachedBinary = resolved.path;
+    if (resolved && resolved.path && fs.existsSync(resolved.path)) {
+      cachedBinary = ensureExecutable(resolved.path);
       return cachedBinary;
     }
   } catch (_) {}
-  const globalRoot = process.platform === "win32" ? process.env.APPDATA : null;
-  if (globalRoot) {
-    const guess = path.join(
-      globalRoot,
-      "npm",
-      "node_modules",
-      "@alibaba-group",
-      `ocr-win32-${process.arch === "arm64" ? "arm64" : "x64"}`,
-      "bin",
-      "opencodereview.exe"
-    );
-    if (fs.existsSync(guess)) {
-      cachedBinary = guess;
+
+  // 2) Look for the current platform's package beside this file.
+  if (name) {
+    const dir = platformPackageDir(name);
+    if (dir) {
+      cachedBinary = ensureExecutable(path.join(dir, "bin", BINARY_FILENAME));
       return cachedBinary;
+    }
+  }
+
+  // 3) Last resort: a global npm install of the platform package.
+  if (name) {
+    for (const root of globalRoots()) {
+      const guess = path.join(root, name, "bin", BINARY_FILENAME);
+      if (fs.existsSync(guess)) {
+        cachedBinary = ensureExecutable(guess);
+        return cachedBinary;
+      }
     }
   }
   return null;
@@ -260,7 +321,9 @@ function llmTestEnv(form, homeDir) {
   return env;
 }
 
-const MISSING_BINARY = "未找到 ocr 可执行文件，请在项目目录运行 npm install";
+const MISSING_BINARY =
+  `未找到 ocr 可执行文件（当前平台 ${process.platform}-${process.arch}）。` +
+  "源码运行时请先在项目目录执行 npm install；安装版请重新安装以补齐该平台的二进制。";
 
 // On failure the CLI prints the JSON payload to BOTH stdout and stderr, so
 // taking "whichever stream is non-empty" yields a JSON blob as the error text.

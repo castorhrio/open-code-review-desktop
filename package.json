@@ -12,7 +12,11 @@
     "build": "vite build",
     "typecheck": "tsc --noEmit",
     "pack": "npm run build && electron-builder --dir",
-    "dist": "npm run build && electron-builder",
+    "dist": "npm run build && electron-builder --win",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:linux": "npm run build && electron-builder --linux",
+    "fetch:binaries": "node build/fetch-binaries.cjs",
     "icon": "node build/make-icon.cjs"
   },
   "dependencies": {
@@ -79,6 +83,7 @@
     ],
     "asar": false,
     "npmRebuild": false,
+    "afterPack": "build/after-pack.cjs",
     "win": {
       "icon": "build/icon.ico",
       "target": [
@@ -100,20 +105,88 @@
     "nsis": {
       "oneClick": false,
       "perMachine": false,
-      "allowElevation": false,
+      "allowElevation": true,
       "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
+      "createDesktopShortcut": "always",
       "createStartMenuShortcut": true,
+      "menuCategory": false,
       "shortcutName": "Open Code Review",
+      "uninstallDisplayName": "Open Code Review ${version}",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "displayLanguageSelector": false,
+      "language": "2052",
+      "installerLanguages": [
+        "zh_CN",
+        "en_US"
+      ],
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico",
       "installerHeaderIcon": "build/icon.ico",
-      "deleteAppDataOnUninstall": false,
-      "displayLanguageSelector": false
+      "include": "build/installer.nsh",
+      "differentialPackage": true
     },
     "portable": {
       "artifactName": "open-code-review-desktop-${version}-portable.${ext}",
       "requestExecutionLevel": "user"
+    },
+    "mac": {
+      "icon": "build/icon.png",
+      "category": "public.app-category.developer-tools",
+      "darkModeSupport": true,
+      "identity": null,
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "artifactName": "open-code-review-desktop-${version}-mac-${arch}.${ext}"
+    },
+    "dmg": {
+      "title": "Open Code Review ${version}",
+      "artifactName": "open-code-review-desktop-${version}-mac-${arch}.${ext}"
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "category": "Development",
+      "maintainer": "xyris",
+      "synopsis": "open-code-review (ocr) CLI 的桌面图形界面",
+      "description": "open-code-review (ocr) 命令行工具的跨平台桌面封装：可视化配置模型服务、预览审查范围、运行审查、浏览结果与历史会话。",
+      "desktop": {
+        "entry": {
+          "Name": "Open Code Review",
+          "Comment": "AI 代码审查桌面客户端",
+          "Categories": "Development;"
+        }
+      },
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "artifactName": "open-code-review-desktop-${version}-linux-${arch}.${ext}"
     },
     "publish": [
       {

@@ -3,6 +3,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const { spawn } = require("child_process");
 const { app, BrowserWindow, dialog, ipcMain, shell, Menu } = require("electron");
 
 const ocr = require("./ocr-service");
@@ -101,8 +102,42 @@ function revealPath(target) {
   return { ok: true, action: "open-parent", path: existing, missing: target };
 }
 
+/* Where the app itself lives, as opposed to where its config lives. The
+ * renderer shows these so "打开安装目录 / 卸载" never needs a user to guess a
+ * path. `resourcesPath` is `<install>/resources`, so its parent is the root the
+ * NSIS installer created. A portable build extracts to a temp dir each launch,
+ * which is why it is reported separately instead of being called an install. */
+function installInfo() {
+  const packaged = app.isPackaged;
+  const portable = Boolean(process.env.PORTABLE_EXECUTABLE_DIR);
+  const installDir = packaged && !portable ? path.dirname(process.resourcesPath) : "";
+  return {
+    packaged,
+    portable,
+    installDir,
+    userData: app.getPath("userData"),
+    executable: app.getPath("exe"),
+    canUninstall: process.platform === "win32" && Boolean(uninstallerPath(installDir)),
+  };
+}
+
+// NSIS writes `Uninstall <productName>.exe` into the install root; scanning for
+// it is more robust than re-deriving the name from productName.
+function uninstallerPath(installDir) {
+  if (process.platform !== "win32" || !installDir || !fs.existsSync(installDir)) return "";
+  try {
+    const hit = fs.readdirSync(installDir).find((f) => /^Uninstall.*\.exe$/i.test(f));
+    return hit ? path.join(installDir, hit) : "";
+  } catch (_) {
+    return "";
+  }
+}
+
 function buildMenu() {
   const template = [
+    // macOS puts the app name and Quit in a mandatory first menu; without it the
+    // system menu bar has no way to quit the app.
+    ...(process.platform === "darwin" ? [{ role: "appMenu" }] : []),
     {
       label: "文件",
       submenu: [
@@ -112,7 +147,7 @@ function buildMenu() {
           click: () => send("menu:open-repo"),
         },
         { type: "separator" },
-        { role: "quit" },
+        ...(process.platform === "darwin" ? [{ role: "close" }] : [{ role: "quit" }]),
       ],
     },
     {
@@ -158,7 +193,40 @@ ipcMain.handle("app:info", async () => {
     docsUrl: DOCS_URL,
     appVersion: app.getVersion(),
     platform: process.platform,
+    ...installInfo(),
   };
+});
+
+/* ---------------- ipc: install ---------------- */
+
+ipcMain.handle("app:openInstallDir", async () => {
+  const dir = installInfo().installDir;
+  if (!dir || !fs.existsSync(dir)) return { ok: false, error: "当前形态没有安装目录（免安装版运行时解压在临时目录）" };
+  const err = await shell.openPath(dir);
+  return err ? { ok: false, error: err } : { ok: true };
+});
+
+ipcMain.handle("app:uninstall", async () => {
+  const info = installInfo();
+  const target = uninstallerPath(info.installDir);
+  if (!target) {
+    return {
+      ok: false,
+      error: info.portable
+        ? "免安装版没有卸载器：直接删除该 exe 即可，程序不写注册表。"
+        : "没有找到卸载程序，请到「设置 → 应用」中卸载。",
+    };
+  }
+  // The uninstaller deletes the directory this process runs from, so the app has
+  // to be gone first — otherwise Windows keeps the files locked and the
+  // uninstaller reports them as in use.
+  try {
+    spawn(target, [], { detached: true, stdio: "ignore", windowsHide: false }).unref();
+  } catch (err) {
+    return { ok: false, error: `启动卸载程序失败：${err.message}` };
+  }
+  setTimeout(() => app.quit(), 400);
+  return { ok: true };
 });
 
 ipcMain.handle("app:providers", async () => {
