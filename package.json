@@ -17,7 +17,12 @@
     "dist:mac": "npm run build && electron-builder --mac",
     "dist:linux": "npm run build && electron-builder --linux",
     "fetch:binaries": "node build/fetch-binaries.cjs",
-    "icon": "node build/make-icon.cjs"
+    "icon": "node build/make-icon.cjs",
+    "audit": "npm run typecheck && npm run audit:packaging && npm run audit:ui && npm run audit:contrast && npm run audit:guards",
+    "audit:packaging": "node tools/check-packaging.mjs",
+    "audit:ui": "npm run build && node tools/ui-audit/audit.mjs",
+    "audit:contrast": "npm run build && node tools/ui-audit/contrast.mjs",
+    "audit:guards": "npm run build && node tools/electron-guards.mjs"
   },
   "dependencies": {
     "@alibaba-group/open-code-review": "^1.12.13",

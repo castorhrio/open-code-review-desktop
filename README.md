@@ -88,19 +88,21 @@ src/                     React 19 + TypeScript + Tailwind v4 + Radix UI (built b
 src/components/ui/       Primitives: button, form, overlay, and layout.tsx — the layout/design spec
 src/styles.css           Design tokens: surfaces, ink ramp, 4-step type ramp, layout measures
 main.js                  Electron main process, IPC handlers, window state
+security.js              Navigation / window-creation policy for the renderer
 ocr-service.js           The wrapper contract: flag whitelist per mode, output parsing, sessions
 git-service.js           Repository metadata, ref resolution, reading a file at a given ref
 preload.js               Typed contextBridge surface
 build/installer.nsh      NSIS customisation: welcome/finish copy, details panel, progress calibration, Start-menu uninstall entry
 build/after-pack.cjs     Prunes the ocr binaries that don't match the target platform/arch
 build/fetch-binaries.cjs Downloads the ocr binary for platforms npm didn't install
-tools/ui-audit/          Layout + contrast harnesses (see "Verifying UI changes")
+tools/                   The checks described under "Verifying changes"
 ```
 
 Two constraints worth knowing before you touch the build:
 
 - **`asar` must stay `false`.** With asar enabled, `resolveNativeBinary()` returns an `app.asar\…` path, `fs.existsSync()` lies (Electron patches only `fs`), and `spawn()` fails with `ENOENT` — every review silently breaks.
 - The UI bundle goes to **`out/`**, not `dist/`, and is loaded with `base: './'` so it works over `file://`.
+- **`build.files` is an allowlist.** A new main-process module is silently omitted unless it is added there, and the failure only shows up in a packaged build — `npm run dev` never notices. `npm run audit:packaging` walks the require graph and fails if anything is missing.
 
 ### What `build/installer.nsh` works around
 
@@ -126,20 +128,21 @@ The UI once drifted, one reasonable-looking change at a time, into three differe
 - **Two accent roles.** `--accent` is for text, borders and focus rings; `--accent-solid` is the fill behind light ink (primary buttons, checked controls). White on the bright accent is only 3.7:1 in dark mode, so a single token cannot serve both.
 - **The ink ramp is measured, not eyeballed.** `--ink` / `--muted` / `--faint` land at 16.9 / 6.8 / 4.7:1 on canvas in light and 15.9 / 7.8 / 5.6:1 in dark. Keep the three steps apart, and re-measure if you add a surface.
 
-### Verifying UI changes
+### Verifying changes
 
-Layout and contrast are checked by rendering the real bundle against a stubbed IPC bridge in headless Edge — no Electron, no desktop. The harness is `tools/ui-audit/`, and it drives the system Edge/Chrome rather than a downloaded Chromium, so Playwright itself is deliberately **not** a project dependency (installing it would pull a browser toolchain the app never uses). Resolve it one of three ways — `PLAYWRIGHT_MODULE=<path>`, a local `npm i -D playwright`, or `NODE_PATH` — and the harness will tell you which it could not find.
+Everything is checked by rendering the real bundle against a stubbed IPC bridge in headless Edge — no Electron, no desktop — plus one check that drives the actual Electron process, because some behaviour only exists there.
 
 ```
-npm run audit:ui        # 25 states x 3 window sizes x 2 themes; asserts the
-                        # measure cap, document overflow and clipped content
-npm run audit:contrast  # WCAG AA audit of every text/background pair
-npm run audit           # typecheck, then both of the above
+npm run audit           # typecheck + all four checks below
+npm run audit:packaging # every runtime module is in the build.files allowlist
+npm run audit:ui        # 28 states x 3 window sizes x 2 themes
+npm run audit:contrast  # WCAG AA for every text/background pair
+npm run audit:guards    # navigation + window-open policy, in real Electron
 ```
 
-Both exit non-zero on findings, so they work as a gate rather than a log. `audit:ui` prints `FAIL` with the offending element when a page exceeds its declared measure or content is clipped without an ellipsis. `audit:contrast` prints one line per unique sub-AA colour pair and states how many text instances it scanned — a harness that reports "0 problems" without saying what it inspected manufactures confidence rather than providing it, so it also refuses to pass vacuously.
+All of them exit non-zero on findings, so they work as a gate rather than a log, and each states what it inspected — a check that reports "0 problems" without saying what it looked at manufactures confidence rather than providing it, so they refuse to pass vacuously.
 
-`audit:ui` renders three kinds of fixture set, selected by query string:
+**`audit:ui`** asserts the declared measure cap, document overflow, and content that is clipped without an ellipsis. It prints `FAIL` with the offending element. It renders three fixture sets, selected by query string:
 
 | Query | What it exercises |
 | --- | --- |
@@ -149,7 +152,13 @@ Both exit non-zero on findings, so they work as a gate rather than a log. `audit
 
 The stress set is the one that earns its keep. Any slot fed by a branch name, model id, provider name or filesystem path can receive a string with no break opportunity, and a flex/grid child missing `min-w-0` will push its container wide instead of shrinking — after which something upstream clips it and the damage is invisible in normal use. It found the top bar stretching to 2673px inside a 1440px window, a select overflowing by 93px, and a settings table pushing 193px past its card.
 
-Run them before and after any layout or token change. Several real defects were only visible this way, including a settings page that ran at two widths at once, a grid track that overflowed its container by 57px, a preview panel that was unreachable below 1536px, and 234 text instances below AA contrast.
+**`audit:guards`** runs the app in real Electron and asserts that `window.open` is denied (and never reaches the OS shell for a non-http scheme), that navigation off the app's own document is blocked, and that the app's own bundle still loads and reloads. It also asserts that *our handler* is what blocked a navigation, rather than the CSP or Chromium's own rules — otherwise the suite could pass while the guard did nothing.
+
+It needs the Electron binary, and on a machine with no GPU or a restrictive sandbox it retries once with `--no-sandbox`, saying so. Override with `PW_ELECTRON_ARGS`.
+
+`audit:ui` and `audit:contrast` drive the system Edge/Chrome rather than a downloaded Chromium, so Playwright is deliberately **not** a project dependency — installing it would pull a browser toolchain the app never uses. Resolve it via `PLAYWRIGHT_MODULE=<path>`, a local `npm i -D playwright`, or `NODE_PATH`; the harness reports which paths it searched when it cannot find one.
+
+Run these before and after any layout, token, or main-process change. Several real defects were only visible this way: a settings page that ran at two widths at once, a grid track that overflowed its container by 57px, a preview panel unreachable below 1536px, 234 text instances below AA contrast, and a navigation guard that blocked the app's own startup and would have shipped a blank window.
 
 ## Known limitations
 
