@@ -150,6 +150,8 @@ All of them exit non-zero on findings, so they work as a gate rather than a log,
 
 **`audit:service`** covers the layer that is the app's whole job: turning a spec into CLI arguments and turning the CLI's output back into something the UI can render. It runs the real binary against a throwaway git repo, using `--preview` so no API key or network is needed. It asserts all four modes parse into the expected shape and find files, that mode-specific flags do not leak into another mode (the CLI would reject the run), that a bad ref fails with an error rather than an empty preview the UI would render as "nothing to review", and that a non-repo directory is reported as such.
 
+Two of the fixtures are not invented: `ocr session list --json` was run against real repositories on this machine, and the shapes it returns are what the fixtures encode — including a pre-manifest session (`legacy: true`, no `run_manifest`) whose 27 of 27 files failed. That is the session that exposed `sessionState()` returning `"complete"` for every manifest-less record, i.e. a green 完成 badge on a run that failed outright.
+
 **`audit:ui`** asserts the declared measure cap, document overflow, and content that is clipped without an ellipsis. It prints `FAIL` with the offending element. It also asserts the results screen's *responsive contract* rather than only its absence of overflow: at 1440px there must be three panes and the code pane must clear the widest code line in the fixture; at 1000x660 there must be two panes with the code stacked and still at least one full line wide. A layout that silently clips the code satisfies "nothing overflows", so that is the check that matters. It renders three fixture sets, selected by query string:
 
 | Query | What it exercises |

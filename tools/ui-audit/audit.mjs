@@ -254,7 +254,28 @@ await shoot(page, "04-review-advanced", {
   },
 });
 await shoot(page, "05-results-empty", { after: nav("结果") });
-await shoot(page, "06-history", { after: nav("历史") });
+await shoot(page, "06-history", {
+  after: nav("历史"),
+  // A session written before the run-manifest format has no recorded terminal
+  // state. The list used to call every one of them 完成 — an affirmative claim
+  // about an outcome nobody recorded — and on a real machine it labelled a run
+  // whose 27 of 27 files had failed as complete, in green. The fixture now
+  // carries that exact session, so the honest label is asserted rather than
+  // left to the default.
+  expect: async (page) => {
+    const out = [];
+    // innerText puts each flex child on its own line, so read the row's
+    // textContent: span "0/27" -> stats cluster -> the row.
+    const rowText = await page.evaluate(() => {
+      const span = [...document.querySelectorAll("main span")].find((s) => s.textContent.trim() === "0/27");
+      return span ? span.parentElement.parentElement.textContent : null;
+    });
+    if (!rowText) return ["the legacy session row (0/27) is missing from the fixture"];
+    if (/完成/.test(rowText)) out.push(`a legacy session with 27/27 failures is labelled 完成: "${rowText.slice(0, 90)}"`);
+    if (!/失败/.test(rowText)) out.push(`the legacy session's failure is not surfaced at all: "${rowText.slice(0, 90)}"`);
+    return out;
+  },
+});
 await shoot(page, "07-settings-top", { after: nav("设置") });
 await shoot(page, "08-settings-bottom", {
   after: async (page) => {

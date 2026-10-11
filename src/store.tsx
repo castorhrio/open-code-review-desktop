@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { api, type Provider } from "@/lib/api";
-import { coverageOf, needsContinuation, terminalState } from "@/lib/format";
+import { coverageOf, needsContinuation, sessionState, terminalState } from "@/lib/format";
 import { intOrEmpty, validateSpec } from "@/lib/spec";
 import type {
   AppInfo,
@@ -416,7 +416,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         toast.error("读取会话失败", { description: res.error });
         return;
       }
-      const st = (s.run_manifest && s.run_manifest.terminal_state) || (s.aborted ? "aborted" : "complete");
+      // Manifest first, then the fallback — which infers from the file counts
+      // for sessions written before the manifest format existed. It used to say
+      // "complete" for all of them, including one that had failed every file.
+      const st = (s.run_manifest && s.run_manifest.terminal_state) || sessionState(s);
       applyResult(
         {
           comments: res.value || [],

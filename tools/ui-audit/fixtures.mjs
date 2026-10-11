@@ -139,14 +139,38 @@ const SESSIONS = [
     total_comments: 0,
     run_manifest: { schema_version: "1", run_id: "77aa88bb", operation: "review", terminal_state: "success" },
   },
+  // A session from before the run-manifest format existed, taken from a real
+  // machine's `ocr session list --json`: no manifest, no terminal_state, and
+  // every selected file failed. The history list used to label it 完成 with a
+  // green badge, which is an affirmative claim about an outcome nobody
+  // recorded — and, here, the wrong one.
+  {
+    session_id: "5c1d2e3f4a5b60718293a4b5c6d7e8f9",
+    file_path: "/home/x/.opencodereview/sessions/demo/5c1d2e3f.jsonl",
+    repo_dir: "/home/x/work/payments-api",
+    git_branch: "main",
+    model: "gpt-4o",
+    review_mode: "range",
+    diff_from: "main",
+    diff_to: "HEAD",
+    start_time: iso(1000 * 60 * 60 * 74),
+    duration_ns: 2_100_000_000,
+    selected_files: 27,
+    completed_files: 0,
+    failed_files: 27,
+    total_comments: 0,
+    legacy: true,
+    aborted: false,
+  },
 ];
 
 // The history list is unbounded by design, so the only thing that must hold is
 // that every session stays reachable and the count stays honest. 65 sessions
-// crosses the panel's 50-row page boundary on purpose.
+// crosses the panel's 50-row page boundary on purpose — the bulk count is
+// derived from SESSIONS so the total stays 65 when a case is added above.
 const MANY_SESSIONS = [
   ...SESSIONS,
-  ...Array.from({ length: 61 }, (_, i) => ({
+  ...Array.from({ length: 65 - SESSIONS.length }, (_, i) => ({
     session_id: `bulk${String(i).padStart(4, "0")}deadbeefcafe0011223344`,
     file_path: `/home/x/.opencodereview/sessions/demo/bulk${i}.jsonl`,
     repo_dir: "/home/x/work/payments-api",

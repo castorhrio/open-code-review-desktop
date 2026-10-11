@@ -28,6 +28,7 @@ export const STATUS: Record<string, { label: string; cls: string }> = {
   failed: { label: "失败", cls: "border-bad/40 bg-bad/10 text-bad" },
   skipped: { label: "已跳过", cls: "border-line bg-raised text-muted" },
   aborted: { label: "已中断", cls: "border-warn/40 bg-warn/10 text-warn" },
+  unknown: { label: "状态未记录", cls: "border-line bg-raised text-muted" },
 };
 
 export const EXCLUDE_REASON: Record<string, string> = {
@@ -57,9 +58,27 @@ export function terminalState(value: RunResult | null | undefined): string {
   return (value.manifest && value.manifest.terminal_state) || value.status || "";
 }
 
+/**
+ * The terminal state of a session, from the best evidence available.
+ *
+ * Sessions written before the run-manifest format (`legacy: true`) carry no
+ * `terminal_state` at all. This used to return "complete" for every one of
+ * them, which is not a neutral default — it is an affirmative claim, and on a
+ * real machine it was wrong: a session whose 27 of 27 files had failed was
+ * listed as 完成 with a green badge. The counts *are* recorded even for those
+ * sessions, so infer from them, and say "unknown" rather than guess when even
+ * they are empty.
+ */
 export function sessionState(s: SessionSummary): string {
   if (s.aborted) return "aborted";
-  return (s.run_manifest && s.run_manifest.terminal_state) || "complete";
+  if (s.run_manifest?.terminal_state) return s.run_manifest.terminal_state;
+  const selected = s.selected_files || 0;
+  const done = (s.completed_files || 0) + (s.reused_files || 0);
+  const failed = s.failed_files || 0;
+  if (failed && selected && failed >= selected) return "failed";
+  if (failed) return "partial";
+  if (selected && done >= selected) return "complete";
+  return "unknown";
 }
 
 export function coverageOf(value: RunResult | null | undefined, kind: "failed" | "waived") {
