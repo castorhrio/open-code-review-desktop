@@ -30,8 +30,10 @@ export function UpdateBanner() {
           <Button variant="primary" size="sm" onClick={() => void installUpdate()}>
             重启并更新
           </Button>
+          {/* "稍后" was the label, but the choice is written to settings and
+              survives restarts — the version is skipped, not deferred. Say so. */}
           <Button variant="ghost" size="sm" onClick={() => void ignoreUpdate()}>
-            稍后
+            忽略此版本
           </Button>
         </>
       )}
@@ -59,6 +61,16 @@ export function UpdateStatusLine() {
       </span>
     );
   }
+  // `suppressed` carries its own sentence. Appending "（该版本已忽略）" to the
+  // phase text produced "还没检查过更新（该版本已忽略）" — the opposite of what
+  // happened, and a state that was unreachable until the ignore path was fixed.
+  if (update?.suppressed) {
+    return (
+      <span className="text-meta text-muted">
+        已忽略 v{update.version ?? ""}，不再提示这个版本
+      </span>
+    );
+  }
   const map: Record<string, string> = {
     idle: "还没检查过更新",
     checking: "正在检查…",
@@ -68,5 +80,5 @@ export function UpdateStatusLine() {
     manual: "当前形态不支持自动更新",
     unsupported: "开发模式下不检查更新",
   };
-  return <span className="text-meta text-muted">{map[phase] ?? "—"}{update?.suppressed ? "（该版本已忽略）" : ""}</span>;
+  return <span className="text-meta text-muted">{map[phase] ?? "—"}</span>;
 }

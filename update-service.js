@@ -15,7 +15,6 @@ const isPortable = () => Boolean(process.env.PORTABLE_EXECUTABLE_DIR);
 
 let emit = () => {};
 let state = { phase: "idle", current: app.getVersion() };
-let downloadedVersion = "";
 
 function readSettings() {
   try {
@@ -35,9 +34,31 @@ function writeSettings(patch) {
 }
 
 function setState(next) {
-  state = { ...state, ...next, current: app.getVersion() };
+  // `suppressed` describes the state being entered, not a sticky flag, so it is
+  // cleared by default: the moment the updater starts talking about a version
+  // the user did not ignore, the "已忽略" note has to go with it. Callers that
+  // mean it pass `suppressed` explicitly.
+  state = { ...state, suppressed: false, ...next, current: app.getVersion() };
   emit(state);
   return state;
+}
+
+const ignoredVersion = () => readSettings().ignoredVersion || "";
+
+/**
+ * Honour a dismissal that has already been made.
+ *
+ * Persisting `ignoredVersion` is not enough on its own. `autoDownload` is on, so
+ * the build is already on disk by the time anyone can be told about it, and
+ * `autoInstallOnAppQuit` would apply it the next time the app closes — which is
+ * precisely the thing the user just declined. So an ignored version switches
+ * both off and parks the machine in `idle`; the banner stays shut and nothing
+ * installs behind the user's back.
+ */
+function suppress(version) {
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = false;
+  return setState({ phase: "idle", version, suppressed: true });
 }
 
 function supportsAutoUpdate() {
@@ -57,20 +78,36 @@ function configure() {
   if (process.env.OCR_DEV_UPDATE_TEST) autoUpdater.forceDevUpdateConfig = true;
 
   autoUpdater.on("checking-for-update", () => setState({ phase: "checking" }));
+  // The signal that a check finished and found nothing newer. There was no
+  // listener for it, so the phase stayed at "checking" for the rest of the
+  // session: a launch check that found nothing left Settings reporting
+  // 正在检查… indefinitely, a spinner nobody ever saw finish.
+  autoUpdater.on("update-not-available", (info) =>
+    setState({ phase: "up-to-date", version: (info && info.version) || app.getVersion() })
+  );
   autoUpdater.on("update-available", (info) => {
-    downloadedVersion = info.version;
+    if (info.version && info.version === ignoredVersion()) return suppress(info.version);
+    // Paired with `suppress()` below, which switches both flags off. Without
+    // this, ignoring one version would leave `autoDownload` off for the rest of
+    // the session — and the next release would be announced as "正在下载" while
+    // nothing downloaded at all.
+    autoUpdater.autoDownload = true;
+    autoUpdater.autoInstallOnAppQuit = true;
     setState({ phase: "downloading", version: info.version, notes: info.releaseNotes || "" });
   });
-  autoUpdater.on("download-progress", (p) =>
+  autoUpdater.on("download-progress", (p) => {
+    // An ignored build has no cancel API, so it keeps downloading — but its
+    // progress must not re-open the banner the user just dismissed.
+    if (state.suppressed) return;
     setState({
       phase: "downloading",
       percent: Math.round(p.percent || 0),
       transferred: Math.round((p.transferred || 0) / 1048576),
       total: Math.round((p.total || 0) / 1048576),
-    })
-  );
+    });
+  });
   autoUpdater.on("update-downloaded", (info) => {
-    downloadedVersion = info.version;
+    if (info.version && info.version === ignoredVersion()) return suppress(info.version);
     setState({ phase: "ready", version: info.version });
   });
   autoUpdater.on("error", (err) => {
@@ -99,12 +136,24 @@ async function check({ interactive } = {}) {
       ),
     ]);
     if (!res) return setState({ phase: interactive ? "manual" : "idle", fallbackUrl: RELEASES_URL });
-    if (res.updateInfo.version === app.getVersion() && interactive) {
-      return setState({ phase: "up-to-date", version: res.updateInfo.version });
+    const latest = (res.updateInfo && res.updateInfo.version) || "";
+    // Belt and braces for the event above: a check that resolves on the current
+    // version must not leave the phase at "checking", whether or not the updater
+    // emitted its own signal first. Only acts when the check has produced no
+    // verdict of its own — "checking" is still in flight, "idle" means the
+    // updater emitted nothing at all.
+    if (latest === app.getVersion() && (state.phase === "checking" || state.phase === "idle")) {
+      setState({ phase: "up-to-date", version: latest });
     }
     return state;
   } catch (err) {
-    if (interactive) return setState({ phase: "error", message: (err && err.message) || String(err), fallbackUrl: RELEASES_URL });
+    const message = (err && err.message) || String(err);
+    // A portable build cannot auto-update in any form, so it gets the same
+    // "download it by hand" message the `error` event produces. It used to
+    // depend on how the failure arrived: an emitted error said 无法自动更新,
+    // while a rejected check said 检查失败 in red — same situation, two answers.
+    if (isPortable()) return setState({ phase: "manual", message, fallbackUrl: RELEASES_URL });
+    if (interactive) return setState({ phase: "error", message, fallbackUrl: RELEASES_URL });
     return setState({ phase: "idle" });
   }
 }
@@ -118,7 +167,7 @@ function install() {
 
 function ignore(version) {
   if (version) writeSettings({ ignoredVersion: version });
-  return setState({ phase: "idle" });
+  return suppress(version || "");
 }
 
 ipcMain.handle("update:state", () => ({
@@ -152,15 +201,19 @@ function init(sendState) {
 
 // Delayed so an update check never competes with the first paint or a run the
 // user starts immediately after launch.
+//
+// There used to be a `suppressed` check here, reading `downloadedVersion`
+// straight after firing the check. It could never fire: `downloadedVersion` is
+// only assigned once the updater has answered, which is network time away, so
+// the comparison always ran against "". Suppression now happens in the handlers
+// that actually learn the version.
 function scheduleLaunchCheck() {
   if (readSettings().checkOnLaunch === false) return;
-  setTimeout(() => {
-    const s = readSettings();
-    check({ interactive: false });
-    if (s.ignoredVersion && s.ignoredVersion === downloadedVersion) {
-      setState({ phase: "idle", suppressed: true });
-    }
-  }, 6000);
+  setTimeout(() => check({ interactive: false }), 6000);
 }
 
-module.exports = { init, scheduleLaunchCheck, state: () => state, RELEASES_URL };
+// `check` is exported for `tools/update-state.mjs`. The IPC channel only ever
+// asks for an interactive check, so without this the silent launch path — the
+// one that must stay quiet on failure and must still clear "checking" — is
+// reachable only by waiting out the 6s launch delay in a real app.
+module.exports = { init, scheduleLaunchCheck, check, state: () => state, RELEASES_URL };

@@ -566,6 +566,83 @@ await shoot(page, "32-review-empty-scope", {
   },
 });
 
+// The update banner and its status line. Every fixture reported `idle`, and the
+// banner only renders for downloading / ready / manual, so none of these states
+// had ever been on screen — which is how the dismiss button came to be labelled
+// 稍后 while actually writing the version to settings and skipping it for good,
+// and how the status line came to append "（该版本已忽略）" to "还没检查过更新".
+// `?update=<phase>` renders each one.
+await shoot(page, "33-update-ready", {
+  storage: { ...STORAGE, "ocr-theme-pref": "dark" },
+  query: "?update=ready",
+  after: nav("审查"),
+  expect: async (page) => {
+    const out = [];
+    const text = await page.locator("body").innerText();
+    if (!/v0\.2\.0 已下载完成，重启后生效/.test(text)) out.push("the ready banner does not name the version");
+    if (!/重启并更新/.test(text)) out.push("no 重启并更新 action");
+    // The label must match the effect: the choice is persisted, so the release
+    // is skipped rather than deferred.
+    if (!/忽略此版本/.test(text)) out.push("the dismiss action does not say what it actually does");
+    if (/稍后/.test(text)) out.push("the dismiss action still reads 稍后, which is not what it does");
+
+    return out;
+  },
+});
+
+await shoot(page, "34-update-downloading", {
+  storage: { ...STORAGE, "ocr-theme-pref": "dark" },
+  query: "?update=downloading",
+  after: nav("审查"),
+  expect: async (page) => {
+    const out = [];
+    const text = await page.locator("body").innerText();
+    if (!/正在下载 v0\.2\.0… 42%（38 \/ 90 MB）/.test(text))
+      out.push(`the progress banner does not report percent and size: "${text.slice(0, 80)}"`);
+    return out;
+  },
+});
+
+// A portable build has no version to name — the error path sets a message and
+// no version — so this is the shape the banner has to cope with.
+await shoot(page, "35-update-manual", {
+  storage: { ...STORAGE, "ocr-theme-pref": "dark" },
+  query: "?update=manual",
+  after: nav("审查"),
+  expect: async (page) => {
+    const out = [];
+    const text = await page.locator("body").innerText();
+    if (!/这个版本无法自动更新/.test(text)) out.push("the portable build was not told it cannot auto-update");
+    if (!/打开下载页/.test(text)) out.push("no 打开下载页 escape hatch");
+    return out;
+  },
+});
+
+// The state a user reaches by dismissing a release, at the window floor. It was
+// unreachable before the ignore path was fixed, so its copy was never read.
+await shoot(page, "36-update-suppressed", {
+  storage: { ...STORAGE, "ocr-theme-pref": "dark" },
+  width: 1000,
+  height: 660,
+  query: "?update=suppressed",
+  after: async (page) => {
+    await nav("设置")(page);
+    await page.waitForTimeout(400);
+    const line = page.getByText(/已忽略 v0\.2\.0/);
+    if (await line.count()) await line.first().scrollIntoViewIfNeeded();
+    await page.waitForTimeout(200);
+  },
+  expect: async (page) => {
+    const out = [];
+    const text = await page.locator("main").innerText();
+    if (!/已忽略 v0\.2\.0/.test(text)) out.push("the suppressed state has no sentence of its own");
+    if (/还没检查过更新/.test(text)) out.push("an ignored version still claims 还没检查过更新");
+    if ((await page.locator("body").innerText()).includes("已下载完成"))
+      out.push("a suppressed release is still being announced in the banner");
+    return out;
+  },
+});
+
 await browser.close();
 server.close();
 

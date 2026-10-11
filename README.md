@@ -138,10 +138,11 @@ The UI once drifted, one reasonable-looking change at a time, into three differe
 Everything is checked by rendering the real bundle against a stubbed IPC bridge in headless Edge — no Electron, no desktop — plus one check that drives the actual Electron process, because some behaviour only exists there.
 
 ```
-npm run audit           # typecheck + all five checks below
+npm run audit           # typecheck + all six checks below
 npm run audit:packaging # every runtime module is in the build.files allowlist
 npm run audit:service   # the real CLI: arg building and output parsing, all 4 modes
-npm run audit:ui        # 32 states x 3 window sizes x 2 themes
+npm run audit:update    # the update state machine, with the updater stubbed
+npm run audit:ui        # 36 states x 3 window sizes x 2 themes
 npm run audit:contrast  # WCAG AA for every text/background pair
 npm run audit:guards    # navigation + window-open policy, in real Electron
 ```
@@ -152,6 +153,13 @@ All of them exit non-zero on findings, so they work as a gate rather than a log,
 
 Two of the fixtures are not invented: `ocr session list --json` was run against real repositories on this machine, and the shapes it returns are what the fixtures encode — including a pre-manifest session (`legacy: true`, no `run_manifest`) whose 27 of 27 files failed. That is the session that exposed `sessionState()` returning `"complete"` for every manifest-less record, i.e. a green 完成 badge on a run that failed outright.
 
+**`audit:update`** drives `update-service.js` with the updater stubbed — no network, no Electron, no release. It exists because that state machine had no test and it showed: two of its states could not be reached or could not be left, and neither is visible in a development build.
+
+- `suppressed` — the "已忽略" state — was assigned in exactly one place, from a synchronous comparison against a version the asynchronous check had not yet learned. So 忽略此版本 did nothing: the next launch announced the same release again, and `autoInstallOnAppQuit` applied it the next time the app closed. Suppression now happens in the two handlers that actually learn the version, and it switches `autoInstallOnAppQuit` off — persisting the choice is not the same as honouring it.
+- A launch check that found nothing left the phase at `checking` forever, because nothing listened for `update-not-available`. Settings reported 正在检查… for the rest of the session: a spinner nobody ever saw finish.
+
+It also pins down the parts that are easy to break while fixing those: that a release the user did *not* ignore is still offered (the flags `suppress()` turns off must come back on), that the 已忽略 note does not leak onto a different version, that a silent launch failure stays quiet while an explicit one is reported, and that a portable build is told to download by hand whether the failure arrives as an event or as a rejected check.
+
 **`audit:ui`** asserts the declared measure cap, document overflow, and content that is clipped without an ellipsis. It prints `FAIL` with the offending element. It also asserts the results screen's *responsive contract* rather than only its absence of overflow: at 1440px there must be three panes and the code pane must clear the widest code line in the fixture; at 1000x660 there must be two panes with the code stacked and still at least one full line wide. A layout that silently clips the code satisfies "nothing overflows", so that is the check that matters. It renders three fixture sets, selected by query string:
 
 | Query | What it exercises |
@@ -159,6 +167,7 @@ Two of the fixtures are not invented: `ocr session list --json` was run against 
 | *(none)* | Normal payloads — the everyday look of every screen |
 | `?sessions=many` | 65 sessions, so the history panel's paging and count are real |
 | `?stress=1` | 100+ char unbreakable tokens in every slot that holds arbitrary text |
+| `?update=<phase>` | The update banner and status line — `downloading` / `ready` / `manual` / `suppressed` |
 
 The stress set is the one that earns its keep. Any slot fed by a branch name, model id, provider name or filesystem path can receive a string with no break opportunity, and a flex/grid child missing `min-w-0` will push its container wide instead of shrinking — after which something upstream clips it and the damage is invisible in normal use. It found the top bar stretching to 2673px inside a 1440px window, a select overflowing by 93px, and a settings table pushing 193px past its card.
 

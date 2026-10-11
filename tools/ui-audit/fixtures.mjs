@@ -297,7 +297,26 @@ window.api = (() => {
     { name: "ollama-cloud", protocol: "openai", url: "https://ollama.com/v1" },
   ]}),
   readConfig: async () => (D.CONFIG),
-  updateState: async () => ({ phase: "idle", current: "0.1.9", enabled: true, packaged: true, portable: false, releasesUrl: "https://github.com/alibaba/open-code-review/releases" }),
+  // ?update=<phase> renders the update banner and its status line, which are
+  // otherwise unreachable here: the banner only shows for downloading / ready /
+  // manual, and every other fixture reports idle. Those three states had
+  // therefore never been looked at — which is how a button labelled 稍后 came to
+  // mean "never tell me about this release again".
+  updateState: async () => {
+    const base = { current: "0.1.9", enabled: true, packaged: true, portable: false, releasesUrl: "https://github.com/alibaba/open-code-review/releases" };
+    const state = {
+      idle: { phase: "idle" },
+      downloading: { phase: "downloading", version: "0.2.0", percent: 42, transferred: 38, total: 90 },
+      ready: { phase: "ready", version: "0.2.0" },
+      // A portable build has no version to name — the error handler sets a
+      // message and no version, so that is what the banner has to cope with.
+      manual: { phase: "manual", portable: true, message: "portable builds re-extract to a temp directory on every launch" },
+      // The state the user reaches by dismissing a release. Unreachable until
+      // the ignore path was fixed, so it was never on screen either.
+      suppressed: { phase: "idle", suppressed: true, version: "0.2.0" },
+    }[q.get("update") || "idle"];
+    return { ...base, ...state };
+  },
   inspect: async () => (D.REPO_INFO),
   listSessions: async () => {
     // ?sessions=many swaps in the 65-session set, so the history panel's paging
