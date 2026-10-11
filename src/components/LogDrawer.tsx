@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronRight, ClipboardCopy, Eraser } from "lucide-react";
 import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
+import { copyText } from "@/lib/clipboard";
 import { cn } from "@/lib/cn";
 
 export function LogDrawer() {
@@ -35,7 +36,7 @@ export function LogDrawer() {
         </button>
         {log.length > 0 && (
           <div className="ml-auto flex items-center gap-1">
-            <Button variant="ghost" size="sm" onClick={() => void navigator.clipboard.writeText(log.join("\n"))}>
+            <Button variant="ghost" size="sm" onClick={() => void copyText(log.join("\n"), ` ${log.length} 行运行日志`)}>
               <ClipboardCopy className="size-3" />
               复制全部
             </Button>

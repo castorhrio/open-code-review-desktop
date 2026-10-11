@@ -137,7 +137,9 @@ export function ReviewPanel() {
           title="审查范围"
           actions={<code className="rounded-xs bg-raised px-1.5 py-0.5 font-mono text-meta text-faint">{meta.command}</code>}
         >
-          <div className="flex gap-1 rounded-md border border-line bg-raised p-1">
+          {/* Half the measure, so the control's segments stay a comfortable width
+              and its right edge lines up with the first form column below it. */}
+          <div className="flex max-w-[calc((100%-1rem)/2)] gap-1 rounded-md border border-line bg-raised p-1">
             {Object.entries(MODE_META)
               .filter(([mode]) => mode !== "scan")
               .map(([mode, m]) => (

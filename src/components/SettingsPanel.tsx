@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { CheckCircle2, Copy, Download, Eye, EyeOff, FolderOpen, KeyRound, PlugZap, RefreshCw, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
+import { copyText } from "@/lib/clipboard";
 import { cn } from "@/lib/cn";
 import { LANGUAGES } from "@/lib/spec";
 import type { ProviderEntry } from "@/lib/types";
@@ -184,7 +185,7 @@ export function SettingsPanel() {
             </p>
 
             <FieldGrid>
-              <Field label="模型服务" hint={showAllProviders ? undefined : `内置 ${providers.length} 个，默认只列出常用的。`}>
+              <Field label="模型服务">
                 <Select value={picked} onValueChange={setPicked} options={options} placeholder="（未选择）" />
                 <button
                   type="button"
@@ -340,10 +341,7 @@ export function SettingsPanel() {
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => {
-                  void navigator.clipboard.writeText(llmTest.output);
-                  toast.success("已复制完整输出");
-                }}
+                onClick={() => void copyText(llmTest.output, "完整测试输出")}
               >
                 <Copy className="size-3.5" />
                 复制

@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Download, ExternalLink, FileCode2, FolderOpen, Search, Sparkles, Wrench } from "lucide-react";
+import { Download, ExternalLink, FileCode2, FolderOpen, Search, Sparkles, Wrench, Copy } from "lucide-react";
 import { api, type FileWindow } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { SEVERITY_DOT, SEVERITY_TEXT, STATUS, coverageOf, firstLine, terminalState } from "@/lib/format";
+import { copyText } from "@/lib/clipboard";
+import type { Finding } from "@/lib/types";
 import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
 import { EmptyState, PageBody, PanelHeader } from "@/components/ui/layout";
@@ -10,6 +12,21 @@ import { Badge } from "@/components/ui/overlay";
 import { toast } from "sonner";
 
 const SEVERITIES = ["critical", "high", "medium", "low", ""] as const;
+
+/**
+ * The end of this app's workflow is pasting findings into a PR/MR, a chat, or a
+ * ticket — and until now the only ways out were a JSON dump and a standalone
+ * HTML report. Findings are already written in light markdown by the CLI, so a
+ * markdown block pastes cleanly into GitHub/GitLab without re-formatting.
+ */
+function findingToMarkdown(c: Finding): string {
+  const line = c.end_line && c.end_line !== c.start_line ? `L${c.start_line}-${c.end_line}` : `L${c.start_line}`;
+  const tags = [c.severity, c.category].filter(Boolean).join(" · ");
+  const out = [`### \`${c.path}\` ${line}${tags ? ` — ${tags}` : ""}`, "", c.content.trim()];
+  if (c.existing_code) out.push("", "当前代码：", "```", c.existing_code.trimEnd(), "```");
+  if (c.suggestion_code) out.push("", "建议改为：", "```", c.suggestion_code.trimEnd(), "```");
+  return out.join("\n");
+}
 
 /**
  * Minimal markdown for the CLI's own prose. The CLI writes findings and the
@@ -251,6 +268,20 @@ export function ResultsPanel() {
           {(result.warnings?.length ?? 0) > 0 && <span className="text-warn">{result.warnings?.length} 条警告</span>}
         </div>
         <div className="ml-auto flex items-center gap-1.5">
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={filtered.length === 0}
+            title="把当前筛选出的评论按 Markdown 复制，可直接粘贴到 PR / MR 评论"
+            onClick={() => void copyText(
+              filtered.map(({ c }) => findingToMarkdown(c)).join("\n\n---\n\n"),
+              ` ${filtered.length} 条评论（Markdown）`,
+              "可直接粘贴到 PR / MR 评论"
+            )}
+          >
+            <Copy className="size-3.5" />
+            复制全部
+          </Button>
           {sessionId && session && (
             <Button variant="ghost" size="sm" onClick={() => void exportSession(session)}>
               <FileCode2 className="size-3.5" />
@@ -391,6 +422,16 @@ export function ResultsPanel() {
                 <span className="font-mono text-meta text-faint">
                   {current.path} · L{current.start_line}
                 </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="ml-auto"
+                  title="复制这一条（Markdown），含当前代码与建议改法"
+                  onClick={() => void copyText(findingToMarkdown(current), "这条评论（Markdown）", "可直接粘贴到 PR / MR 评论")}
+                >
+                  <Copy className="size-3.5" />
+                  复制这条
+                </Button>
               </div>
               <div className="rounded-md border-l-2 border-accent bg-raised px-3 py-2.5 selectable">
                 <MarkdownLite text={current.content} className="text-strong text-ink" />
@@ -419,7 +460,7 @@ export function ResultsPanel() {
                 <Badge>{file.source === "git" ? `来自 ${file.ref}` : "工作区当前内容"}</Badge>
                 {file.absPath && (
                   <>
-                    <Button variant="ghost" size="sm" onClick={() => void navigator.clipboard.writeText(file.absPath || "")}>
+                    <Button variant="ghost" size="sm" onClick={() => void copyText(file.absPath || "", "文件绝对路径")}>
                       复制路径
                     </Button>
                     <Button variant="ghost" size="sm" title="用系统默认程序打开" onClick={() => file.absPath && void api.openFile(file.absPath)}>
@@ -471,7 +512,7 @@ function CodeBlock({ title, tone, text }: { title: string; tone: "ok" | "bad"; t
     <div className="mt-3 overflow-hidden rounded-md border border-line">
       <div className="flex items-center justify-between bg-raised px-3 py-1">
         <span className={cn("text-meta font-medium", tone === "ok" ? "text-ok" : "text-bad")}>{title}</span>
-        <Button variant="ghost" size="sm" onClick={() => void navigator.clipboard.writeText(text)}>
+        <Button variant="ghost" size="sm" onClick={() => void copyText(text, `「${title}」代码`)}>
           复制
         </Button>
       </div>
