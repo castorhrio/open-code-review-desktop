@@ -13,7 +13,7 @@ export function Tooltip({ content, children }: { content: React.ReactNode; child
         <TooltipPrimitive.Portal>
           <TooltipPrimitive.Content
             sideOffset={6}
-            className="z-50 max-w-64 rounded-sm border border-line bg-surface px-2 py-1 text-[11.5px] text-muted shadow-lg shadow-black/30 data-[state=delayed-open]:animate-in"
+            className="z-50 max-w-64 rounded-sm border border-line bg-surface px-2 py-1 text-meta text-muted shadow-lg shadow-black/30 data-[state=delayed-open]:animate-in"
           >
             {content}
             <TooltipPrimitive.Arrow className="fill-[var(--surface)]" />
@@ -45,15 +45,15 @@ export function ConfirmDialog({
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/55 backdrop-blur-[2px]" />
-        <DialogPrimitive.Content className="fixed left-1/2 top-1/2 z-50 w-[min(420px,90vw)] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-line bg-surface p-4 shadow-2xl shadow-black/40">
-          <DialogPrimitive.Title className="text-[14px] font-semibold text-ink">{title}</DialogPrimitive.Title>
+        <DialogPrimitive.Content className="fixed left-1/2 top-1/2 z-50 w-[min(440px,90vw)] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-line bg-surface p-5 shadow-2xl shadow-black/40">
+          <DialogPrimitive.Title className="text-strong font-semibold text-ink">{title}</DialogPrimitive.Title>
           <DialogPrimitive.Description asChild>
-            <div className="mt-2 text-[12.5px] leading-relaxed text-muted">{description}</div>
+            <div className="mt-2 text-body leading-relaxed text-muted">{description}</div>
           </DialogPrimitive.Description>
           <DialogPrimitive.Close className="absolute right-3 top-3 text-faint hover:text-ink">
             <X className="size-4" />
           </DialogPrimitive.Close>
-          <div className="mt-4 flex justify-end gap-2">
+          <div className="mt-5 flex justify-end gap-2">
             <DialogPrimitive.Close asChild>
               <Button variant="ghost">取消</Button>
             </DialogPrimitive.Close>
@@ -96,7 +96,7 @@ export function Badge({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-medium",
+        "inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-meta font-medium",
         tones[tone],
         className
       )}

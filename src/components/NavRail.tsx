@@ -53,7 +53,7 @@ export function NavRail() {
                   <span className="absolute right-1 top-1 size-1.5 animate-pulse rounded-full bg-accent" />
                 )}
                 {v === "results" && comments.length > 0 && (
-                  <span className="absolute -right-0.5 -top-0.5 min-w-[16px] rounded-full bg-accent px-1 text-center text-[9.5px] font-semibold leading-4 text-accent-ink tnum">
+                  <span className="absolute -right-0.5 -top-0.5 min-w-[16px] rounded-full bg-accent-solid px-1 text-center text-meta font-semibold leading-4 text-accent-ink tnum">
                     {comments.length > 99 ? "99+" : comments.length}
                   </span>
                 )}

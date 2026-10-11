@@ -24,10 +24,10 @@ export function LogDrawer() {
 
   return (
     <section className="shrink-0 border-t border-line bg-surface">
-      <div className="flex h-8 items-center gap-2 px-3">
+      <div className="flex h-8 items-center gap-2 px-4">
         <button
           onClick={() => setOpen((o) => !o)}
-          className="flex items-center gap-1.5 text-[11.5px] text-muted transition-colors hover:text-ink"
+          className="flex items-center gap-1.5 text-meta text-muted transition-colors hover:text-ink"
         >
           <ChevronRight className={cn("size-3.5 transition-transform duration-150", open && "rotate-90")} />
           运行日志
@@ -35,11 +35,11 @@ export function LogDrawer() {
         </button>
         {log.length > 0 && (
           <div className="ml-auto flex items-center gap-1">
-            <Button variant="ghost" size="sm" className="h-6" onClick={() => void navigator.clipboard.writeText(log.join("\n"))}>
+            <Button variant="ghost" size="sm" onClick={() => void navigator.clipboard.writeText(log.join("\n"))}>
               <ClipboardCopy className="size-3" />
               复制全部
             </Button>
-            <Button variant="ghost" size="sm" className="h-6" onClick={clearLog}>
+            <Button variant="ghost" size="sm" onClick={clearLog}>
               <Eraser className="size-3" />
               清空
             </Button>
@@ -49,7 +49,7 @@ export function LogDrawer() {
       {open && (
         <pre
           ref={body}
-          className="max-h-40 overflow-auto border-t border-line bg-canvas px-3 py-2 font-mono text-[11px] leading-relaxed text-muted selectable"
+          className="max-h-40 overflow-auto border-t border-line bg-canvas px-4 py-2 font-mono text-meta text-muted selectable"
         >
           {log.length ? log.join("\n") : "（暂无输出）"}
         </pre>

@@ -2,7 +2,7 @@
 
 # Open Code Review Desktop
 
-An **unofficial Windows desktop GUI** for [`alibaba/open-code-review`](https://github.com/alibaba/open-code-review) (`ocr`) — Alibaba's AI code review CLI, 45k+ stars.
+An **unofficial cross-platform desktop GUI** for [`alibaba/open-code-review`](https://github.com/alibaba/open-code-review) (`ocr`) — Alibaba's AI code review CLI, 45k+ stars. Ships for **Windows, macOS and Linux**.
 
 The review engine is the official, **unmodified** `ocr` binary. This project only wraps it: it builds the command line, streams progress, parses the JSON output, and gives you a GUI for scoping, cost control, findings triage, and session history. No review logic is reimplemented here.
 
@@ -51,19 +51,28 @@ The CLI is excellent but you live in a terminal: reading 40 line-level findings,
 
 ## Install
 
-**Option A — installer (recommended).** Download the `*-setup.exe` for the release you want from [Releases](../../releases) and run it. Per-user install, no administrator rights. Because it is unsigned, SmartScreen may warn — choose *More info → Run anyway*.
+**Option A — Windows installer (recommended).** Download the `*-setup.exe` for the release you want from [Releases](../../releases) and run it. The wizard lets you pick the install directory, shows the install path when it finishes, offers to launch the app, and creates desktop + Start-menu shortcuts **plus a Start-menu "卸载 / Uninstall" entry**. Per-user install by default, no administrator rights. Because it is unsigned, SmartScreen may warn — choose *More info → Run anyway*.
 
-**Option B — portable.** Run the `*-portable.exe` directly, no installation.
+**Option B — Windows portable.** Run the `*-portable.exe` directly, no installation. It extracts to a temp dir each run, writes nothing to the registry, and has no uninstaller — just delete the exe.
+
+**Option C — macOS.** Open the `*-mac-<arch>.dmg` and drag the app to *Applications* (`x64` for Intel, `arm64` for Apple Silicon). The build is **unsigned**, so the first launch needs *System Settings → Privacy & Security → Open Anyway*, or right-click → *Open*.
+
+**Option D — Linux.** `chmod +x` the `*-linux-<arch>.AppImage` and run it, or install the `.deb` (`sudo apt install ./…deb`).
+
+> Uninstalling never removes `~/.opencodereview/` (your API key and session history live there), so a reinstall keeps working. On Windows you can uninstall from the Start menu, from *Settings → About & Uninstall* inside the app, or from *Settings → Apps*.
 
 > The v0.1.0 assets were renamed in place to `open-code-review-desktop-0.1.0-*.exe` after this project was renamed from `ocr-desktop`; the bytes are unchanged (verified by SHA-256), but the pre-rename download URLs now return 404.
 
-**Option C — from source.**
+**Option E — from source.**
 
 ```bash
-npm install      # downloads the native ocr binary (~55 MB)
-npm run dev      # Vite HMR + Electron
-npm start        # build the UI, then run it
-npm run dist     # build the Windows installer into release/
+npm install              # downloads the native ocr binary for THIS platform (~55 MB)
+npm run dev              # Vite HMR + Electron
+npm start                # build the UI, then run it
+npm run dist             # Windows installer + portable into release/
+npm run fetch:binaries   # pull the other platforms' binaries (needed to cross-build)
+npm run dist:mac         # macOS dmg + zip      (build on macOS)
+npm run dist:linux       # Linux AppImage + deb (build on Linux/WSL)
 ```
 
 ## First run
@@ -76,10 +85,15 @@ npm run dist     # build the Windows installer into release/
 
 ```
 src/                     React 19 + TypeScript + Tailwind v4 + Radix UI (built by Vite into out/)
+src/components/ui/       Primitives: button, form, overlay, and layout.tsx — the layout/design spec
+src/styles.css           Design tokens: surfaces, ink ramp, 4-step type ramp, layout measures
 main.js                  Electron main process, IPC handlers, window state
 ocr-service.js           The wrapper contract: flag whitelist per mode, output parsing, sessions
 git-service.js           Repository metadata, ref resolution, reading a file at a given ref
 preload.js               Typed contextBridge surface
+build/installer.nsh      NSIS customisation: welcome/finish copy, details panel, progress calibration, Start-menu uninstall entry
+build/after-pack.cjs     Prunes the ocr binaries that don't match the target platform/arch
+build/fetch-binaries.cjs Downloads the ocr binary for platforms npm didn't install
 ```
 
 Two constraints worth knowing before you touch the build:
@@ -87,12 +101,48 @@ Two constraints worth knowing before you touch the build:
 - **`asar` must stay `false`.** With asar enabled, `resolveNativeBinary()` returns an `app.asar\…` path, `fs.existsSync()` lies (Electron patches only `fs`), and `spawn()` fails with `ENOENT` — every review silently breaks.
 - The UI bundle goes to **`out/`**, not `dist/`, and is loaded with `base: './'` so it works over `file://`.
 
+### What `build/installer.nsh` works around
+
+electron-builder's assisted-installer template hides the install log and miscalibrates the progress bar. Both are fixed from the custom include, and both rely on *where* each macro gets expanded — so read the comments in that file before reordering anything. `makensis` runs with `-WX`, i.e. any warning fails the build.
+
+- **Blank details panel.** `templates/nsis/common.nsh` hard-codes `ShowInstDetails nevershow` and `installSection.nsh` runs `SetDetailsPrint none`. `customHeader` is expanded *after* `common.nsh`, so its `ShowInstDetails show` wins; `customInstall` then re-enables details and prints the install path, shortcuts and uninstall entry. During the `nsis7z` decompression itself no hook exists, so the log stays quiet by design.
+- **Progress bar jumping backwards.** `setSpaceRequired` sets the section total to the *unpacked* size (`APP_64_UNPACKED_SIZE`, 354,230 KB for v0.1.9), while NSIS only counts bytes written by `File` instructions — here just the embedded `app-64.7z` (96,332,424 B ≈ 94,074 KB, i.e. **26.6%**). On top of that, `nsis7z.dll` drives the progress bar itself during unpacking, so handing control back to NSIS snapped the bar down to 26.6%. The include inflates the section total before decompression (×10, via an aborted page inserted by `customPageAfterChangeDir` so the directory page's "space required" stays correct) and shrinks it after (÷4, via `customFiles_x64`, which runs after extraction and before the uninstaller is written), so both segments meet.
+
+### Cross-platform binaries
+
+`@alibaba-group/open-code-review` ships its native binary through `optionalDependencies`, and npm installs **only the host platform's** copy. To package for another OS, run `npm run fetch:binaries` first — it downloads the missing binaries from the official GitHub release and verifies each `sha256`. All six then live under `node_modules/@alibaba-group/ocr-*`, and `build/after-pack.cjs` strips the ones a given build cannot run before the installer is produced (otherwise every package would carry ~270 MB of dead binaries).
+
+## UI layout & design spec
+
+The UI once drifted, one reasonable-looking change at a time, into three different content widths, five different card recipes, ad-hoc margins (`mb-4` next to `mt-4` next to `mb-2.5`) and ten font sizes between 10 and 14px. The fix was not a restyle — it was to give the decisions an owner. **`src/components/ui/layout.tsx` is that owner**; read its header comment before adding a screen.
+
+- **One measure per page.** `Page` / `PageBody` centre `--page-max` (1080px). Full-bleed forms are the specific failure mode: at 1920px they stretch an input to ~900px and pull every label hundreds of pixels away from its control. Results is the one deliberate exception — a master-detail view legitimately uses the whole window.
+- **Rhythm from the parent, not from margins.** `PageBody` is a `gap-6` stack, so `Section` and `Card` carry no vertical margins at all. Spacing uses Tailwind's 4px steps only: 4 icon↔text, 8 control↔control, 12 label↔control, 16 page gutter / card padding / field↔field, 24 section↔section.
+- **Container-responsive forms.** `FieldGrid` is `repeat(auto-fit, minmax(var(--field-min), 1fr))` — two columns when the measure allows, one when it does not, without viewport breakpoints. Wide children use `col-span-full`, never `col-span-2`, which would create an implicit track and overflow once the grid collapses.
+- **Four type steps, defined in `styles.css`.** `text-meta` 11px (hints, paths, timestamps, badges), `text-body` 12px (secondary prose, table cells), `text-strong` 13px (primary text, control values, section titles), `text-stat` 20px (figures). Arbitrary `text-[12.5px]` values are what produced the original ten-step ramp.
+- **One card recipe.** `Card` with `tone` and an optional header row. Do not hand-roll `rounded-md border border-line bg-surface`.
+- **Two accent roles.** `--accent` is for text, borders and focus rings; `--accent-solid` is the fill behind light ink (primary buttons, checked controls). White on the bright accent is only 3.7:1 in dark mode, so a single token cannot serve both.
+- **The ink ramp is measured, not eyeballed.** `--ink` / `--muted` / `--faint` land at 16.9 / 6.8 / 4.7:1 on canvas in light and 15.9 / 7.8 / 5.6:1 in dark. Keep the three steps apart, and re-measure if you add a surface.
+
+### Verifying UI changes
+
+Layout and contrast are checked by rendering the real bundle against a stubbed IPC bridge in headless Edge — no Electron, no desktop. The harness lives in `.tmp-audit/` (gitignored, and excluded from the packaged app); it needs Playwright resolvable from `~/.workbuddy-ai/binaries/node/workspace/`.
+
+```
+npm run build
+node .tmp-audit/audit.mjs      # 21 states x 3 window sizes x 2 themes; asserts the
+                               # measure cap, document overflow and clipped content
+node .tmp-audit/contrast.mjs   # WCAG AA audit of every text/background pair
+```
+
+`audit.mjs` prints `FAIL` with the offending element when a page exceeds its declared measure or content is clipped without an ellipsis. `contrast.mjs` prints one line per unique sub-AA colour pair; it should report `0 sub-AA text instances`. Both are worth running before and after any layout or token change — several real defects were only visible this way, including a settings page that ran at two widths at once, a grid track that overflowed its container by 57px, and 234 text instances below AA contrast.
+
 ## Known limitations
 
-- Built and verified on Windows x64 only; Git must be on `PATH`.
-- **Auto-update applies to the NSIS setup build only.** The portable exe re-extracts to a temp dir each run and has no install root to replace, so it links to the releases page instead.
-- Releases must ship `latest.yml` and `*-setup.exe.blockmap` next to the binaries; without them the updater cannot see a version at all.
-- Installers are **unsigned**, so SmartScreen will warn on first launch.
+- Git must be on `PATH`. Windows packages are built and verified on Windows x64; macOS dmg builds must run on macOS and Linux AppImage/deb builds on Linux (or WSL/Docker), because each target needs its own host tooling.
+- **Auto-update applies to the NSIS setup build only.** The portable exe re-extracts to a temp dir each run and has no install root to replace, so it links to the releases page instead. macOS/Linux builds are unsigned against a generic update feed, so treat in-app updates as Windows-installed-build-only for now.
+- Releases must ship `latest.yml` (plus `latest-mac.yml` / `latest-linux.yml` for those platforms) and the `*-setup.exe.blockmap` next to the binaries; without them the updater cannot see a version at all.
+- Installers are **unsigned**, so SmartScreen (Windows) and Gatekeeper (macOS) will warn on first launch.
 - The CLI exposes no model catalogue, so the model name is still typed by hand — a rejected name makes the vendor turn its accepted names into clickable buttons (see [alibaba/open-code-review#1694](https://github.com/alibaba/open-code-review/issues/1694)).
 - The dev instance and the installed app share one user-data directory, so the **single-instance lock makes whichever starts second exit silently**.
 

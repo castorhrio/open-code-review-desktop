@@ -6,7 +6,7 @@ import { Check, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/cn";
 
 const base =
-  "w-full rounded-sm border border-line bg-raised px-2.5 text-[13px] text-ink " +
+  "w-full rounded-sm border border-line bg-raised px-2.5 text-strong text-ink " +
   "transition-colors duration-150 placeholder:text-faint hover:border-line-strong " +
   "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent disabled:opacity-45";
 
@@ -19,11 +19,21 @@ Input.displayName = "Input";
 
 export const Textarea = React.forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement>>(
   ({ className, ...props }, ref) => (
-    <textarea ref={ref} className={cn(base, "min-h-[58px] py-1.5 leading-relaxed", className)} {...props} />
+    <textarea ref={ref} className={cn(base, "min-h-[58px] py-1.5", className)} {...props} />
   )
 );
 Textarea.displayName = "Textarea";
 
+/**
+ * One labelled control, stacked label-over-value.
+ *
+ * This deliberately is NOT a `<label>` wrapper. Several call sites put a
+ * `Select` trigger, a `Checkbox` or a `<Button>` inside it, and interactive
+ * content nested in a `<label>` is invalid and confuses assistive tech (one
+ * click on the caption would fire the inner button). When `htmlFor` is given we
+ * emit a real `<label>`; otherwise the field becomes a named group so the
+ * caption is still announced.
+ */
 export function Field({
   label,
   hint,
@@ -37,12 +47,25 @@ export function Field({
   className?: string;
   children: React.ReactNode;
 }) {
+  const autoId = React.useId();
+  const groupLabelId = htmlFor || !label ? undefined : `${autoId}-label`;
   return (
-    <label htmlFor={htmlFor} className={cn("flex min-w-0 flex-col gap-1.5", className)}>
-      {label && <span className="text-[11.5px] font-medium tracking-wide text-muted">{label}</span>}
+    <div
+      className={cn("flex min-w-0 flex-col gap-1.5", className)}
+      role={groupLabelId ? "group" : undefined}
+      aria-labelledby={groupLabelId}
+    >
+      {label &&
+        (htmlFor ? (
+          <label htmlFor={htmlFor} className="text-body font-medium text-muted">
+            {label}
+          </label>
+        ) : (
+          <span className="text-body font-medium text-muted">{label}</span>
+        ))}
       {children}
-      {hint && <span className="text-[11px] leading-snug text-faint">{hint}</span>}
-    </label>
+      {hint && <span className="text-meta text-faint">{hint}</span>}
+    </div>
   );
 }
 
@@ -56,6 +79,7 @@ export function Select({
   options,
   placeholder,
   disabled,
+  id,
   className,
 }: {
   value: string;
@@ -63,6 +87,7 @@ export function Select({
   options: { value: string; label: string; group?: string }[];
   placeholder?: string;
   disabled?: boolean;
+  id?: string;
   className?: string;
 }) {
   const groups = [...new Set(options.map((o) => o.group || ""))];
@@ -73,6 +98,7 @@ export function Select({
       disabled={disabled}
     >
       <SelectPrimitive.Trigger
+        id={id}
         className={cn(base, "flex h-8 items-center justify-between gap-2 data-[disabled]:opacity-45", className)}
       >
         <SelectPrimitive.Value placeholder={placeholder} />
@@ -89,14 +115,14 @@ export function Select({
           <SelectPrimitive.Viewport className="p-1">
             {groups.map((g) => (
               <SelectPrimitive.Group key={g || "default"}>
-                {g && <SelectPrimitive.Label className="px-2 pt-2 pb-1 text-[11px] text-faint">{g}</SelectPrimitive.Label>}
+                {g && <SelectPrimitive.Label className="px-2 pt-2 pb-1 text-meta text-faint">{g}</SelectPrimitive.Label>}
                 {options
                   .filter((o) => (o.group || "") === g)
                   .map((o) => (
                     <SelectPrimitive.Item
                       key={o.value || "none"}
                       value={o.value === "" ? NONE : o.value}
-                      className="relative flex cursor-default select-none items-center gap-2 rounded-xs px-2 py-1.5 text-[12.5px] text-ink outline-none data-[highlighted]:bg-hover"
+                      className="relative flex cursor-default select-none items-center gap-2 rounded-xs px-2 py-1.5 text-body text-ink outline-none data-[highlighted]:bg-hover"
                     >
                       <SelectPrimitive.ItemIndicator className="absolute left-0.5 flex size-4 items-center justify-center">
                         <Check className="size-3 text-accent" />
@@ -127,7 +153,7 @@ export function Switch({
       id={id}
       checked={checked}
       onCheckedChange={onCheckedChange}
-      className="relative h-[18px] w-8 shrink-0 rounded-full border border-line bg-raised transition-colors duration-150 data-[state=checked]:border-accent data-[state=checked]:bg-accent"
+      className="relative h-[18px] w-8 shrink-0 rounded-full border border-line bg-raised transition-colors duration-150 data-[state=checked]:border-accent data-[state=checked]:bg-accent-solid"
     >
       <SwitchPrimitive.Thumb className="block size-3 translate-x-[2px] rounded-full bg-muted transition-transform duration-150 data-[state=checked]:translate-x-[14px] data-[state=checked]:bg-white" />
     </SwitchPrimitive.Root>
@@ -146,11 +172,11 @@ export function Checkbox({
   className?: string;
 }) {
   return (
-    <label className={cn("flex cursor-pointer items-center gap-2 text-[12.5px] text-ink select-none", className)}>
+    <label className={cn("flex cursor-pointer items-center gap-2 text-body text-ink select-none", className)}>
       <CheckboxPrimitive.Root
         checked={checked}
         onCheckedChange={(v) => onCheckedChange(v === true)}
-        className="flex size-4 shrink-0 items-center justify-center rounded-[3px] border border-line bg-raised transition-colors data-[state=checked]:border-accent data-[state=checked]:bg-accent"
+        className="flex size-4 shrink-0 items-center justify-center rounded-[3px] border border-line bg-raised transition-colors data-[state=checked]:border-accent data-[state=checked]:bg-accent-solid"
       >
         <CheckboxPrimitive.Indicator className="text-white">
           <Check className="size-3" strokeWidth={3} />

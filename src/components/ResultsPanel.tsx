@@ -5,13 +5,18 @@ import { cn } from "@/lib/cn";
 import { SEVERITY_DOT, SEVERITY_TEXT, STATUS, coverageOf, firstLine, terminalState } from "@/lib/format";
 import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
+import { EmptyState, PageBody, PanelHeader } from "@/components/ui/layout";
 import { Badge } from "@/components/ui/overlay";
 import { toast } from "sonner";
 
 const SEVERITIES = ["critical", "high", "medium", "low", ""] as const;
 
-/** Minimal markdown for the CLI's own summary text: headings, lists, **bold**. */
-function MarkdownLite({ text }: { text: string }) {
+/**
+ * Minimal markdown for the CLI's own prose. The CLI writes findings and the
+ * project summary in light markdown, so rendering them raw leaks `**` and `-`
+ * into the primary reading surface.
+ */
+function MarkdownLite({ text, className }: { text: string; className?: string }) {
   const inline = (s: string, key: string) =>
     s.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
       part.startsWith("**") && part.endsWith("**") ? (
@@ -23,14 +28,14 @@ function MarkdownLite({ text }: { text: string }) {
       )
     );
   return (
-    <div className="space-y-1.5 text-[12px] leading-relaxed text-muted">
+    <div className={cn("space-y-1.5 text-body text-muted", className)}>
       {text.split(/\r?\n/).map((line, i) => {
         const t = line.trim();
         if (!t) return null;
         const heading = /^(#{1,4})\s+(.*)$/.exec(t);
         if (heading)
           return (
-            <p key={i} className="text-[12.5px] font-semibold text-ink">
+            <p key={i} className="text-strong font-semibold text-ink">
               {inline(heading[2], "h" + i)}
             </p>
           );
@@ -38,7 +43,7 @@ function MarkdownLite({ text }: { text: string }) {
         if (item)
           return (
             <p key={i} className="flex gap-1.5 pl-1">
-              <span className="shrink-0 text-faint tnum">{item[1].replace(".", "")}</span>
+              <span className="tnum shrink-0 text-faint">{item[1].replace(".", "")}</span>
               <span className="min-w-0">{inline(item[2], "i" + i)}</span>
             </p>
           );
@@ -116,35 +121,35 @@ export function ResultsPanel() {
     const total = progress?.reviewing ?? 0;
     return (
       <div className="flex h-full flex-col">
-        <div className="flex shrink-0 items-center gap-2 border-b border-line bg-surface px-4 py-2">
+        <PanelHeader>
           <Badge tone="accent">{runLabel || "审查运行中"}</Badge>
-          <span className="tnum text-[11.5px] text-muted">已运行 {elapsed}s</span>
+          <span className="tnum text-meta text-muted">已运行 {elapsed}s</span>
           <Button variant="ghost" size="sm" className="ml-auto text-bad" onClick={() => void cancelRun()}>
             取消
           </Button>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6">
-          <div className="mx-auto max-w-xl space-y-4">
-            <p className="text-[13px] font-medium text-ink">正在审查，下面这些数字会一直动</p>
-            <div className="grid grid-cols-3 gap-2 text-center">
+        </PanelHeader>
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <PageBody narrow>
+            <p className="text-strong font-medium text-ink">正在审查，下面这些数字会一直动</p>
+            <div className="grid grid-cols-3 gap-3 text-center">
               {[
                 { label: "进入审查的文件", value: total || "—" },
                 { label: "已完成的工具调用", value: tools },
                 { label: "已产出的评论", value: progress?.comments ?? 0 },
               ].map((cell) => (
-                <div key={cell.label} className="rounded-md border border-line bg-surface px-2 py-3">
-                  <div className="tnum text-[18px] font-semibold text-ink">{cell.value}</div>
-                  <div className="mt-0.5 text-[11px] leading-tight text-faint">{cell.label}</div>
+                <div key={cell.label} className="rounded-md border border-line bg-surface px-3 py-4">
+                  <div className="tnum text-stat font-semibold text-ink">{cell.value}</div>
+                  <div className="mt-1 text-meta text-faint">{cell.label}</div>
                 </div>
               ))}
             </div>
-            {progress?.cost && <p className="rounded-md border border-line bg-raised px-3 py-2 font-mono text-[11.5px] text-muted">{progress.cost}</p>}
-            {progress?.excluded ? <p className="text-[11.5px] text-faint">另有 {progress.excluded} 个文件被规则排除（原因见运行日志）。</p> : null}
-            <p className="text-[11.5px] leading-relaxed text-faint">
+            {progress?.cost && <p className="rounded-md border border-line bg-raised px-3 py-2 font-mono text-meta text-muted">{progress.cost}</p>}
+            {progress?.excluded ? <p className="text-meta text-faint">另有 {progress.excluded} 个文件被规则排除（原因见运行日志）。</p> : null}
+            <p className="text-meta text-faint">
               每个文件要先做一次预分析、再带着工具去审，所以前几分钟通常一条评论都没有——这不是卡住。
               底部「运行日志」里有 CLI 的原始输出，可整段复制。中断可以用「历史」里的会话续跑，已审完的文件不会重复计费。
             </p>
-          </div>
+          </PageBody>
         </div>
       </div>
     );
@@ -153,31 +158,41 @@ export function ResultsPanel() {
   if (!result) {
     if (resume) {
       return (
-        <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-          <Badge tone="warn">这次运行没有产出结果</Badge>
-          <p className="max-w-md text-[12px] leading-relaxed text-muted">
-            会话 <code className="font-mono text-[11px]">{resume.sessionId.slice(0, 12)}…</code> 已经中断
-            {resume.failed ? `（${resume.failed} 个文件失败）` : ""}。保持同样的范围与模型服务点「续跑未完成部分」，已经审完的文件不会重复计费。
-          </p>
-          <Button variant="primary" onClick={() => void startRun(resume.sessionId)}>
-            续跑未完成部分
-          </Button>
-          <p className="text-[11px] text-faint">也可以回「审查」页改小范围（按目录、按 diff）再跑一次。</p>
-        </div>
+        <EmptyState
+          icon={<Badge tone="warn">这次运行没有产出结果</Badge>}
+          description={
+            <p className="text-body text-muted">
+              会话 <code className="font-mono text-meta">{resume.sessionId.slice(0, 12)}…</code> 已经中断
+              {resume.failed ? `（${resume.failed} 个文件失败）` : ""}。保持同样的范围与模型服务点「续跑未完成部分」，已经审完的文件不会重复计费。
+            </p>
+          }
+          action={
+            <>
+              <Button variant="primary" onClick={() => void startRun(resume.sessionId)}>
+                续跑未完成部分
+              </Button>
+              <p className="text-meta text-faint">也可以回「审查」页改小范围（按目录、按 diff）再跑一次。</p>
+            </>
+          }
+        />
       );
     }
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
-        <FileCode2 className="size-8 text-faint" />
-        <div>
-          <p className="text-[13px] text-muted">还没有结果。</p>
-          <p className="mt-1 text-[11.5px] text-faint">运行一次审查，或到「历史」里打开旧会话。</p>
-          <p className="mt-1 text-[11.5px] text-faint">刚取消的运行也会留下会话，在「历史」里能续跑或导出报告。</p>
-        </div>
-        <Button variant="outline" size="sm" onClick={() => setView("history")}>
-          去历史
-        </Button>
-      </div>
+      <EmptyState
+        icon={<FileCode2 className="size-8 text-faint" />}
+        title="还没有结果"
+        description={
+          <>
+            <p className="text-meta text-faint">运行一次审查，或到「历史」里打开旧会话。</p>
+            <p className="text-meta text-faint">刚取消的运行也会留下会话，在「历史」里能续跑或导出报告。</p>
+          </>
+        }
+        action={
+          <Button variant="outline" size="sm" onClick={() => setView("history")}>
+            去历史
+          </Button>
+        }
+      />
     );
   }
 
@@ -201,10 +216,10 @@ export function ResultsPanel() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line bg-surface px-4 py-2">
-        <Badge className={cn("h-6", status.cls)}>{status.label}</Badge>
+      <PanelHeader>
+        <Badge className={status.cls}>{status.label}</Badge>
         {resultOrigin?.kind === "session" && <Badge tone="accent">历史会话</Badge>}
-        <div className="tnum flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-muted">
+        <div className="tnum flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-muted">
           <span>
             <b className="text-ink">{s.files_reviewed ?? "—"}</b> 文件
           </span>
@@ -247,31 +262,31 @@ export function ResultsPanel() {
             导出 JSON
           </Button>
         </div>
-      </div>
+      </PanelHeader>
 
       {(failed.length > 0 || waived.length > 0) && (
-        <div className="shrink-0 border-b border-warn/25 bg-warn/5 px-4 py-2">
-          <div className="mb-1 text-[11.5px] font-medium text-warn">
+        <div className="shrink-0 border-b border-warn/25 bg-warn/5 px-4 py-2.5">
+          <div className="mb-1 text-body font-medium text-warn">
             有 {failed.length + waived.length} 个文件没有完成，{resultOrigin?.kind === "session" ? "该会话" : "本次结果"}不等于全量审查
           </div>
           <div className="flex flex-wrap gap-x-4 gap-y-1">
             {[...failed.map((f) => ({ f, kind: "未审" })), ...waived.map((f) => ({ f, kind: "跳过" }))].map(({ f, kind }) => (
-              <span key={f.item_id} className="font-mono text-[11px] text-muted">
+              <span key={f.item_id} className="font-mono text-meta text-muted">
                 <span className={kind === "未审" ? "text-bad" : "text-low"}>{kind}</span> {f.path || f.item_id}
                 {f.reason && <span className="text-faint"> · {f.reason}</span>}
               </span>
             ))}
           </div>
-          {resume && <p className="mt-1 text-[11px] text-faint">点上方「续跑未完成部分」可接着跑，已完成的部分不会重复付费。</p>}
+          {resume && <p className="mt-1 text-meta text-faint">点上方「续跑未完成部分」可接着跑，已完成的部分不会重复付费。</p>}
         </div>
       )}
 
       {result.project_summary && (
         <div className="shrink-0 border-b border-line bg-surface px-4 py-3">
-          <div className="mb-1.5 flex items-center gap-1.5">
+          <div className="mb-2 flex items-center gap-1.5">
             <Sparkles className="size-3.5 text-accent" />
-            <h3 className="text-[12.5px] font-semibold text-ink">这次审查的要点</h3>
-            <span className="text-[11px] text-faint">由 CLI 汇总，不是本程序生成的</span>
+            <h3 className="text-strong font-semibold text-ink">这次审查的要点</h3>
+            <span className="text-meta text-faint">由 CLI 汇总，不是本程序生成的</span>
           </div>
           <div className="max-h-52 overflow-y-auto pr-1">
             <MarkdownLite text={result.project_summary} />
@@ -279,7 +294,7 @@ export function ResultsPanel() {
         </div>
       )}
 
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line bg-canvas px-4 py-2">
+      <PanelHeader tone="canvas">
         <div className="flex items-center gap-1">
           {SEVERITIES.map((sev) => (
             <button
@@ -293,7 +308,7 @@ export function ResultsPanel() {
                 })
               }
               className={cn(
-                "flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition-colors",
+                "flex items-center gap-1 rounded-full border px-2 py-0.5 text-meta transition-colors",
                 sevOn.has(sev) ? "border-line-strong bg-raised text-ink" : "border-line bg-transparent text-faint"
               )}
             >
@@ -305,7 +320,7 @@ export function ResultsPanel() {
         <select
           value={cat}
           onChange={(e) => setCat(e.target.value)}
-          className="h-7 rounded-sm border border-line bg-raised px-2 text-[12px] text-ink outline-none"
+          className="h-7 rounded-sm border border-line bg-raised px-2 text-body text-ink outline-none"
         >
           <option value="">全部类别</option>
           {cats.map((c) => (
@@ -320,18 +335,20 @@ export function ResultsPanel() {
             value={text}
             onChange={(e) => setText(e.target.value)}
             placeholder="搜索评论内容…"
-            className="min-w-0 flex-1 bg-transparent text-[12px] outline-none placeholder:text-faint"
+            className="min-w-0 flex-1 bg-transparent text-body outline-none placeholder:text-faint"
           />
         </div>
-        <span className="tnum text-[11.5px] text-faint">
+        <span className="tnum text-meta text-faint">
           {filtered.length}/{comments.length}
         </span>
-        <span className="hidden text-[10.5px] text-faint xl:inline">↑↓ / j k 切换</span>
-      </div>
+        <span className="hidden text-meta text-faint xl:inline">↑↓ / j k 切换</span>
+      </PanelHeader>
 
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(260px,300px)_minmax(300px,1fr)_minmax(320px,1.1fr)] divide-x divide-line">
+      {/* Master-detail: the one screen that legitimately uses the whole window.
+          Minimums sum to 820px, which leaves slack at the 1000px window floor. */}
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(240px,300px)_minmax(280px,1fr)_minmax(300px,1.1fr)] divide-x divide-line">
         <div className="min-h-0 overflow-y-auto">
-          {filtered.length === 0 && <p className="p-6 text-center text-[12px] text-faint">没有匹配的评论。</p>}
+          {filtered.length === 0 && <p className="p-6 text-center text-body text-faint">没有匹配的评论。</p>}
           {filtered.map(({ c, i }) => {
             const sev = c.severity || "";
             return (
@@ -345,8 +362,10 @@ export function ResultsPanel() {
               >
                 <span className={cn("mt-1 w-0.5 shrink-0 self-stretch rounded-full", SEVERITY_DOT[sev])} />
                 <span className="min-w-0 flex-1">
-                  <span className="line-clamp-2 text-[12.5px] leading-snug text-ink">{firstLine(c.content)}</span>
-                  <span className="mt-1 flex items-center gap-2 font-mono text-[10.5px] text-faint">
+                  <span className="line-clamp-2 text-body text-ink">{firstLine(c.content)}</span>
+                  {/* `faint` over `--accent-soft` is 4.2:1, so the selected row's
+                      metadata steps up to `muted`. */}
+                  <span className={cn("mt-1 flex items-center gap-2 font-mono text-meta", i === selected ? "text-muted" : "text-faint")}>
                     <span className="truncate">{c.path}</span>
                     <span className="tnum shrink-0">
                       L{c.start_line}
@@ -354,39 +373,37 @@ export function ResultsPanel() {
                     </span>
                   </span>
                 </span>
-                {c.category && <span className="shrink-0 self-start rounded-xs border border-line px-1 text-[10px] text-muted">{c.category}</span>}
+                {c.category && <span className="shrink-0 self-start rounded-xs border border-line px-1 text-meta text-muted">{c.category}</span>}
               </button>
             );
           })}
         </div>
 
         <div className="min-h-0 overflow-y-auto px-4 py-3">
-          {!current && <p className="pt-10 text-center text-[12px] text-faint">在左侧选择一条评论。</p>}
+          {!current && <p className="pt-10 text-center text-body text-faint">在左侧选择一条评论。</p>}
           {current && (
             <>
-              <div className="mb-2 flex flex-wrap items-center gap-1.5">
+              <div className="mb-3 flex flex-wrap items-center gap-1.5">
                 <Badge className={cn("border-transparent", SEVERITY_TEXT[current.severity || ""], "bg-transparent px-0 font-semibold")}>
                   {current.severity || "未标注严重级"}
                 </Badge>
                 {current.category && <Badge>{current.category}</Badge>}
-                <span className="font-mono text-[11px] text-faint">
+                <span className="font-mono text-meta text-faint">
                   {current.path} · L{current.start_line}
                 </span>
               </div>
-              <div className="rounded-md border-l-2 border-accent bg-raised px-3 py-2.5 text-[13px] leading-relaxed whitespace-pre-wrap text-ink selectable">
-                {current.content}
+              <div className="rounded-md border-l-2 border-accent bg-raised px-3 py-2.5 selectable">
+                <MarkdownLite text={current.content} className="text-strong text-ink" />
               </div>
-              {current.existing_code && (
-                <CodeBlock title="当前代码" tone="bad" text={current.existing_code} />
-              )}
+              {current.existing_code && <CodeBlock title="当前代码" tone="bad" text={current.existing_code} />}
               {current.suggestion_code && <CodeBlock title="建议改为" tone="ok" text={current.suggestion_code} />}
               {current.thinking && (
-                <details className="mt-3 text-[11.5px] text-muted">
+                <details className="mt-3 text-body text-muted">
                   <summary className="cursor-pointer text-faint hover:text-ink">
                     <Sparkles className="mr-1 inline size-3" />
                     模型判断过程
                   </summary>
-                  <div className="mt-1.5 leading-relaxed whitespace-pre-wrap">{current.thinking}</div>
+                  <div className="mt-2 whitespace-pre-wrap">{current.thinking}</div>
                 </details>
               )}
             </>
@@ -396,21 +413,22 @@ export function ResultsPanel() {
         <div className="min-h-0 overflow-auto bg-canvas">
           {current && file?.ok && (
             <>
-              <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-line bg-surface px-3 py-1.5">
+              <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-line bg-surface px-3 py-2">
                 <Wrench className="size-3.5 text-faint" />
-                <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted">{current.path}</span>
+                <span className="min-w-0 flex-1 truncate font-mono text-meta text-muted">{current.path}</span>
                 <Badge>{file.source === "git" ? `来自 ${file.ref}` : "工作区当前内容"}</Badge>
                 {file.absPath && (
                   <>
                     <Button variant="ghost" size="sm" onClick={() => void navigator.clipboard.writeText(file.absPath || "")}>
                       复制路径
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => file.absPath && void api.openFile(file.absPath)}>
+                    <Button variant="ghost" size="sm" title="用系统默认程序打开" onClick={() => file.absPath && void api.openFile(file.absPath)}>
                       <ExternalLink className="size-3.5" />
                     </Button>
                     <Button
                       variant="ghost"
                       size="sm"
+                      title="在文件夹中显示"
                       onClick={async () => {
                         if (!file.absPath) return;
                         const res = await api.revealFile(file.absPath);
@@ -424,25 +442,24 @@ export function ResultsPanel() {
                   </>
                 )}
               </div>
-              <pre className="px-2 py-2 font-mono text-[11.5px] leading-[1.6]">
-                {file.lines?.map((l) => (
-                  <div
-                    key={l.n}
-                    className={cn(
-                      "flex gap-3 rounded-xs px-2",
-                      l.n >= current.start_line && l.n <= (current.end_line || current.start_line) && "bg-hit"
-                    )}
-                  >
-                    <span className="tnum w-10 shrink-0 text-right text-faint">{l.n}</span>
-                    <span className="whitespace-pre text-ink">{l.content || " "}</span>
-                  </div>
-                ))}
+              <pre className="px-2 py-2 font-mono text-meta leading-[1.6]">
+                {file.lines?.map((l) => {
+                  const inRange = l.n >= current.start_line && l.n <= (current.end_line || current.start_line);
+                  return (
+                    <div key={l.n} className={cn("flex gap-3 rounded-xs px-2", inRange && "bg-hit")}>
+                      {/* On the highlight the gutter needs one step more contrast
+                          than `faint`, which lands at 4.1:1 over `--hit`. */}
+                      <span className={cn("tnum w-10 shrink-0 text-right", inRange ? "text-muted" : "text-faint")}>{l.n}</span>
+                      <span className="whitespace-pre text-ink">{l.content || " "}</span>
+                    </div>
+                  );
+                })}
               </pre>
             </>
           )}
-          {current && file && !file.ok && <p className="p-4 text-[12px] text-bad">{file.error}</p>}
-          {current && !file && <p className="p-4 text-[12px] text-faint">读取文件中…</p>}
-          {!current && <p className="p-4 text-[12px] text-faint">选中评论后在这里显示对应代码位置。</p>}
+          {current && file && !file.ok && <p className="p-4 text-body text-bad">{file.error}</p>}
+          {current && !file && <p className="p-4 text-body text-faint">读取文件中…</p>}
+          {!current && <p className="p-4 text-body text-faint">选中评论后在这里显示对应代码位置。</p>}
         </div>
       </div>
     </div>
@@ -452,13 +469,13 @@ export function ResultsPanel() {
 function CodeBlock({ title, tone, text }: { title: string; tone: "ok" | "bad"; text: string }) {
   return (
     <div className="mt-3 overflow-hidden rounded-md border border-line">
-      <div className="flex items-center justify-between bg-raised px-2.5 py-1">
-        <span className={cn("text-[11px] font-medium", tone === "ok" ? "text-ok" : "text-bad")}>{title}</span>
+      <div className="flex items-center justify-between bg-raised px-3 py-1">
+        <span className={cn("text-meta font-medium", tone === "ok" ? "text-ok" : "text-bad")}>{title}</span>
         <Button variant="ghost" size="sm" onClick={() => void navigator.clipboard.writeText(text)}>
           复制
         </Button>
       </div>
-      <pre className="overflow-x-auto px-2.5 py-2 font-mono text-[11.5px] leading-relaxed whitespace-pre text-ink selectable">{text}</pre>
+      <pre className="overflow-x-auto px-3 py-2 font-mono text-meta whitespace-pre text-ink selectable">{text}</pre>
     </div>
   );
 }

@@ -15,6 +15,7 @@
   --color-muted: var(--muted);
   --color-faint: var(--faint);
   --color-accent: var(--accent);
+  --color-accent-solid: var(--accent-solid);
   --color-accent-ink: var(--accent-ink);
   --color-accent-soft: var(--accent-soft);
   --color-ok: var(--ok);
@@ -38,8 +39,65 @@
   --radius-lg: 12px;
 
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* ---------- type ramp ----------
+     Four steps and nothing else. Before this, the app used ten sizes between
+     10 and 14px in half-pixel increments, which is what made every screen look
+     slightly unrelated to every other one. Role -> step:
+       meta    hints, timestamps, paths, badges, counts, small buttons
+       body    secondary prose, table cells, list rows
+       strong  primary prose, control values, section titles (semibold)
+       stat    the few large figures (run counters)
+     Line heights are set here so `text-meta` alone never changes rhythm. */
+  --text-meta: 11px;
+  --text-meta--line-height: 1.45;
+  --text-body: 12px;
+  --text-body--line-height: 1.55;
+  --text-strong: 13px;
+  --text-strong--line-height: 1.5;
+  --text-stat: 20px;
+  --text-stat--line-height: 1.1;
 }
 
+/* ---------- layout spec ----------
+   Read together with `src/components/ui/layout.tsx`, which is the only place
+   that consumes these. Kept as plain custom properties (not `@theme`) so they
+   are emitted verbatim and stay usable inside arbitrary values such as
+   `grid-cols-[repeat(auto-fit,minmax(var(--field-min),1fr))]`. */
+:root {
+  /* One measure for every scrolling page. Microsoft's Windows app guidance
+     puts settings-style pages at a "constrained max width (around 1000-1100
+     px)"; below that, full-width forms stretch inputs to ~900px and detach
+     every label from its control. Results is the one exception: a
+     master-detail view legitimately uses the whole window. */
+  --page-max: 1080px;
+  /* Centered empty / loading / error states read better narrow. */
+  --page-max-narrow: 640px;
+  /* Minimum width of one form column. The form grids are
+     `repeat(auto-fit, minmax(var(--field-min), 1fr))`, which yields two
+     columns whenever the measure allows and one when it does not - so the
+     layout responds to its own container instead of to viewport breakpoints. */
+  --field-min: 380px;
+  /* Spacing scale, in Tailwind's own 4px steps, so no custom utilities are
+     needed. Documented here because consistency is the whole point:
+       1 =  4px  icon <-> its text
+       2 =  8px  control <-> control, button gap, card header <-> body
+       3 = 12px  label <-> control, row padding
+       4 = 16px  page gutter, card padding, field <-> field
+       6 = 24px  section <-> section, page top/bottom */
+}
+
+/* Ink ramp, measured rather than eyeballed.
+   Every value below was checked against the surfaces it actually lands on with
+   `.tmp-audit/contrast.mjs` (WCAG 2.1 relative luminance). The previous ramp put
+   `faint` at 2.6-3.8:1 on canvas / surface / raised / accent-soft, which made
+   every hint, timestamp and path in the app marginal-to-unreadable — 200-odd
+   text instances. The ramp now reads, against canvas:
+                        light     dark
+     ink               16.9:1   15.9:1
+     muted              6.8:1    7.8:1
+     faint              4.7:1    5.6:1
+   Keep those three steps apart. If you add a surface, re-run the audit. */
 :root,
 [data-theme="dark"] {
   --canvas: #0d1017;
@@ -50,11 +108,15 @@
   --line: #232b38;
   --line-strong: #33404f;
   --ink: #e6ebf3;
-  --muted: #8d9ab0;
-  --faint: #61708a;
+  --muted: #9aa7bd;
+  --faint: #7f8ca6;
   --accent: #5b7cfa;
+  /* White on `--accent` is only 3.7:1, so primary buttons take a slightly
+     deeper blue that clears 4.5:1 while `--accent` stays bright for text,
+     borders and focus rings. */
+  --accent-solid: #4a68e6;
   --accent-ink: #ffffff;
-  --accent-soft: #1b2440;
+  --accent-soft: #161d33;
   --ok: #3ecf8e;
   --warn: #f0a35e;
   --bad: #f2555a;
@@ -78,18 +140,19 @@
   --line: #e0e4ea;
   --line-strong: #c8d0da;
   --ink: #16191f;
-  --muted: #5c6675;
-  --faint: #8a94a3;
-  --accent: #4f6bed;
+  --muted: #4e5867;
+  --faint: #66717f;
+  --accent: #3f5ce0;
+  --accent-solid: #3f5ce0;
   --accent-ink: #ffffff;
   --accent-soft: #e8ecfd;
-  --ok: #158456;
-  --warn: #b26a12;
+  --ok: #10704a;
+  --warn: #9a5a0c;
   --bad: #c4292f;
   --info: #2f6f9f;
   --critical: #c4292f;
-  --high: #b26a12;
-  --medium: #97742a;
+  --high: #9a5a0c;
+  --medium: #8a6a1e;
   --low: #6b7684;
   --add: #157f52;
   --del: #b23a3f;
@@ -111,7 +174,7 @@
     background: var(--canvas);
     color: var(--ink);
     font-family: var(--font-sans);
-    font-size: 13.5px;
+    font-size: 13px;
     line-height: 1.55;
     -webkit-font-smoothing: antialiased;
     user-select: none;

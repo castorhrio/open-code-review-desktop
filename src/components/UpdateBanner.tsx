@@ -22,7 +22,7 @@ export function UpdateBanner() {
         : `这个版本无法自动更新${version ? `（v${version}）` : ""}，请到下载页取安装包`;
 
   return (
-    <div className="flex shrink-0 items-center gap-3 border-b border-accent/25 bg-accent-soft px-4 py-1.5 text-[12px] text-ink fade-in">
+    <div className="flex shrink-0 items-center gap-2 border-b border-accent/25 bg-accent-soft px-4 py-2 text-body text-ink fade-in">
       {phase === "downloading" ? <Download className="size-3.5 text-accent" /> : <RefreshCw className="size-3.5 text-accent" />}
       <span className="tnum min-w-0 flex-1 truncate">{copy}</span>
       {phase === "ready" && (
@@ -50,7 +50,7 @@ export function UpdateStatusLine() {
   const phase = update?.phase ?? "idle";
   if (phase === "error") {
     return (
-      <span className="flex items-center gap-1.5 text-[11.5px] text-bad">
+      <span className="flex items-center gap-1.5 text-meta text-bad">
         <XCircle className="size-3.5" />
         检查失败：{update?.message?.slice(0, 70) || "未知错误"}
         <button className="link text-accent" onClick={() => void openReleases()}>
@@ -68,5 +68,5 @@ export function UpdateStatusLine() {
     manual: "当前形态不支持自动更新",
     unsupported: "开发模式下不检查更新",
   };
-  return <span className="text-[11.5px] text-muted">{map[phase] ?? "—"}{update?.suppressed ? "（该版本已忽略）" : ""}</span>;
+  return <span className="text-meta text-muted">{map[phase] ?? "—"}{update?.suppressed ? "（该版本已忽略）" : ""}</span>;
 }
