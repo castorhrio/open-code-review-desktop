@@ -94,6 +94,7 @@ preload.js               Typed contextBridge surface
 build/installer.nsh      NSIS customisation: welcome/finish copy, details panel, progress calibration, Start-menu uninstall entry
 build/after-pack.cjs     Prunes the ocr binaries that don't match the target platform/arch
 build/fetch-binaries.cjs Downloads the ocr binary for platforms npm didn't install
+tools/ui-audit/          Layout + contrast harnesses (see "Verifying UI changes")
 ```
 
 Two constraints worth knowing before you touch the build:
@@ -126,16 +127,18 @@ The UI once drifted, one reasonable-looking change at a time, into three differe
 
 ### Verifying UI changes
 
-Layout and contrast are checked by rendering the real bundle against a stubbed IPC bridge in headless Edge — no Electron, no desktop. The harness lives in `.tmp-audit/` (gitignored, and excluded from the packaged app); it needs Playwright resolvable from `~/.workbuddy-ai/binaries/node/workspace/`.
+Layout and contrast are checked by rendering the real bundle against a stubbed IPC bridge in headless Edge — no Electron, no desktop. The harness is `tools/ui-audit/`, and it drives the system Edge/Chrome rather than a downloaded Chromium, so Playwright itself is deliberately **not** a project dependency (installing it would pull a browser toolchain the app never uses). Resolve it one of three ways — `PLAYWRIGHT_MODULE=<path>`, a local `npm i -D playwright`, or `NODE_PATH` — and the harness will tell you which it could not find.
 
 ```
-npm run build
-node .tmp-audit/audit.mjs      # 21 states x 3 window sizes x 2 themes; asserts the
-                               # measure cap, document overflow and clipped content
-node .tmp-audit/contrast.mjs   # WCAG AA audit of every text/background pair
+npm run audit:ui        # 22 states x 3 window sizes x 2 themes; asserts the
+                        # measure cap, document overflow and clipped content
+npm run audit:contrast  # WCAG AA audit of every text/background pair
+npm run audit           # typecheck, then both of the above
 ```
 
-`audit.mjs` prints `FAIL` with the offending element when a page exceeds its declared measure or content is clipped without an ellipsis. `contrast.mjs` prints one line per unique sub-AA colour pair; it should report `0 sub-AA text instances`. Both are worth running before and after any layout or token change — several real defects were only visible this way, including a settings page that ran at two widths at once, a grid track that overflowed its container by 57px, and 234 text instances below AA contrast.
+Both exit non-zero on findings, so they work as a gate rather than a log. `audit:ui` prints `FAIL` with the offending element when a page exceeds its declared measure or content is clipped without an ellipsis. `audit:contrast` prints one line per unique sub-AA colour pair and states how many text instances it scanned — a harness that reports "0 problems" without saying what it inspected manufactures confidence rather than providing it, so it also refuses to pass vacuously.
+
+Run them before and after any layout or token change. Several real defects were only visible this way, including a settings page that ran at two widths at once, a grid track that overflowed its container by 57px, a preview panel that was unreachable below 1536px, and 234 text instances below AA contrast.
 
 ## Known limitations
 

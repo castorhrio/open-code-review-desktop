@@ -17,7 +17,10 @@
     "dist:mac": "npm run build && electron-builder --mac",
     "dist:linux": "npm run build && electron-builder --linux",
     "fetch:binaries": "node build/fetch-binaries.cjs",
-    "icon": "node build/make-icon.cjs"
+    "icon": "node build/make-icon.cjs",
+    "audit:ui": "npm run build && node tools/ui-audit/audit.mjs",
+    "audit:contrast": "npm run build && node tools/ui-audit/contrast.mjs",
+    "audit": "npm run typecheck && npm run audit:ui && npm run audit:contrast"
   },
   "dependencies": {
     "@alibaba-group/open-code-review": "^1.12.13",
@@ -77,7 +80,7 @@
       "!build/**",
       "!src/**",
       "!vibe_images/**",
-      "!.tmp-audit/**",
+      "!tools/**",
       "!.tmp-home/**",
       "!启动.bat"
     ],

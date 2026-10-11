@@ -10,6 +10,9 @@ release-*/
 .tmp-audit/
 .tmp-home/
 
+# regenerated on every ui-audit run; not review artifacts
+tools/ui-audit/shots/
+
 # logs / editor / OS noise
 *.log
 npm-debug.log*
