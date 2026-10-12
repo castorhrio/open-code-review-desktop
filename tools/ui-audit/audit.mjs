@@ -18,14 +18,15 @@ const PROBE = `(() => {
   // Find the page's declared measure: the first element in <main> carrying a
   // max-width cap (PageBody sets it from --page-max / --page-max-narrow).
   // The lower bound is what makes this a *column*: without it the probe latches
-  // onto the first capped chip it meets — a 180px badge on the results screen
-  // reported a measure of 180, and a check that compares a page against a badge
-  // is not checking anything.
+  // onto the first capped chip it meets — a 180px badge, then a 320px scope label
+  // on the results screen, each reported as "the page's measure", and a check
+  // that compares a page against a badge is not checking anything. 480 sits above
+  // every capped chip in the app and below the narrowest real measure (640).
   let measure = null;
   let cap = null;
   for (const el of document.querySelectorAll("main *")) {
     const mw = parseFloat(getComputedStyle(el).maxWidth);
-    if (Number.isFinite(mw) && mw >= 320 && mw <= 1200) {
+    if (Number.isFinite(mw) && mw >= 480 && mw <= 1200) {
       measure = Math.round(el.getBoundingClientRect().width);
       cap = mw;
       break;
@@ -911,6 +912,8 @@ await shoot(page, "38-results-lands-on-worst", {
     if (!/密码校验用了普通的字符串比较/.test(text)) out.push("the run did not land on the most severe finding");
     if (/在左侧选择一条评论/.test(text)) out.push("the detail pane is still empty after a result arrives");
     if (/选中评论后在这里显示对应代码位置/.test(text)) out.push("the code pane is still empty after a result arrives");
+    if (!/分支对比 main…feat\/tenant-rate-limit/.test(text))
+      out.push("the results header never says what the run covered, so two runs are indistinguishable");
     return out;
   },
 });
@@ -1023,6 +1026,9 @@ const expectReadableDocument = async (page) => {
   // exists for a live run and not for a session reopened from history. Assert
   // the part that must survive both paths: the run identity line.
   if (!/条评论/.test(doc.text)) out.push("the report lost the run's own header, so it cannot be read outside the app");
+  // A document someone forwards has to answer "of what was this a review".
+  if (!/分支对比 main…feat\/tenant-rate-limit/.test(doc.text))
+    out.push("the report does not name the scope it covers");
   if (!doc.scrolls) out.push("the report has no scroller, so a long review cannot be read to the end");
   return out;
 };

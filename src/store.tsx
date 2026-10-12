@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { toast } from "sonner";
 import { api, type Provider } from "@/lib/api";
 import { coverageOf, needsContinuation, sessionState, terminalState } from "@/lib/format";
-import { intOrEmpty, resumableMode, validateSpec } from "@/lib/spec";
+import { intOrEmpty, MODE_META, resumableMode, validateSpec } from "@/lib/spec";
 import type {
   AppInfo,
   ConfigView,
@@ -80,6 +80,15 @@ export interface ResultOrigin {
    * the one that was reviewed.
    */
   fileRef?: string;
+  /**
+   * What the run covered, as one human line — `分支对比 main…feat/x`. The
+   * reading view is the artifact a user forwards to someone else, and "which
+   * range was reviewed" is the first question that artifact has to answer.
+   * Computed where the scope is known rather than re-derived here, because the
+   * CLI's own vocabulary (`full_scan` for the scan mode) is not this file's to
+   * reinterpret.
+   */
+  scope?: string;
 }
 
 /**
@@ -230,6 +239,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // as it was at that ref.
   const runFileRef = useRef("");
   const runMode = useRef<string>("workspace");
+  const runScope = useRef("");
   const repoRef = useRef("");
   repoRef.current = repo;
 
@@ -364,7 +374,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         toast.success("审查完成", { description: `${r.value?.comments?.length ?? 0} 条评论` });
       }
       if (r.value) {
-        applyResult({ ...r.value, session_id: r.value.session_id || r.sessionId || "" }, { kind: "run", fileRef: runFileRef.current, resumable: canResume });
+        applyResult({ ...r.value, session_id: r.value.session_id || r.sessionId || "" }, { kind: "run", fileRef: runFileRef.current, scope: runScope.current, resumable: canResume });
         setView("results");
         // The session the run just wrote is what the results header exports as an
         // HTML report, and it used to be absent from `history` until the user
@@ -402,6 +412,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return;
       }
       runFileRef.current = spec.mode === "range" ? spec.to || "" : spec.mode === "commit" ? spec.commit || "" : "";
+      runScope.current =
+        spec.mode === "range" ? `${MODE_META.range.label} ${spec.from}…${spec.to}`
+        : spec.mode === "commit" ? `${MODE_META.commit.label} ${spec.commit}`
+        : spec.mode === "scan" ? MODE_META.scan.label
+        : `${MODE_META.workspace.label} ${spec.repo.split(/[\\/]/).pop() || spec.repo}`;
       runMode.current = spec.mode;
       setLog([]);
       setPreview(null);
@@ -529,6 +544,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         {
           kind: "session",
           label: s.session_id,
+          scope:
+            s.review_mode === "range" ? `${MODE_META.range.label} ${s.diff_from}…${s.diff_to}`
+            : s.review_mode === "commit" ? `${MODE_META.commit.label} ${s.diff_commit}`
+            : s.review_mode === "full_scan" ? MODE_META.scan.label
+            : `${MODE_META.workspace.label} ${s.git_branch || ""}`.trim(),
           fileRef: s.review_mode === "range" ? s.diff_to || "" : s.review_mode === "commit" ? s.diff_commit || "" : "",
           resumable: resumableMode(s.review_mode),
         }

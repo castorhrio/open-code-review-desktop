@@ -70,8 +70,8 @@ export function ReportView() {
         <Badge className={status.cls}>{status.label}</Badge>
         {resultOrigin?.kind === "session" && <Badge tone="accent">历史会话</Badge>}
         <span className="tnum min-w-0 truncate text-meta text-muted">
-          <b className="text-ink">{s.files_reviewed ?? "—"}</b> 文件 ·{" "}
-          <b className="text-ink">{s.comments ?? comments.length}</b> 条评论{facts && ` · ${facts}`}
+          <b className="text-ink">{s.files_reviewed ?? "—"}</b> 文件
+          {facts && ` · ${facts}`}
         </span>
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
           <Button
@@ -93,14 +93,23 @@ export function ReportView() {
 
       <div className="min-h-0 flex-1 overflow-y-auto bg-canvas">
         <PageBody>
-          {command && (
-            <div className="flex items-start gap-2">
-              <code className="min-w-0 flex-1 break-all font-mono text-meta text-faint selectable">{command}</code>
-              <Button variant="ghost" size="sm" className="shrink-0" title="复制这条命令" onClick={() => void copyText(command, "本次运行的命令")}>
-                复制命令
-              </Button>
-            </div>
-          )}
+          {/* A report has to open by saying what it covers. This document is the
+              version a user forwards, and the reader's first question is not
+              "how many comments" but "of what". */}
+          <div className="flex flex-col gap-1">
+            <h1 className="min-w-0 truncate text-stat font-semibold text-ink">
+              {resultOrigin?.scope || "审查结果"}
+              <span className="tnum ml-2 font-normal text-faint">{comments.length} 条评论</span>
+            </h1>
+            {command && (
+              <div className="flex items-start gap-2">
+                <code className="min-w-0 flex-1 break-all font-mono text-meta text-faint selectable">{command}</code>
+                <Button variant="ghost" size="sm" className="shrink-0" title="复制这条命令" onClick={() => void copyText(command, "本次运行的命令")}>
+                  复制命令
+                </Button>
+              </div>
+            )}
+          </div>
 
           {result.project_summary && (
             <Card

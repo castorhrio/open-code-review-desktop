@@ -47,7 +47,9 @@
        meta    hints, timestamps, paths, badges, counts, small buttons
        body    secondary prose, table cells, list rows
        strong  primary prose, control values, section titles (semibold)
-       stat    the few large figures (run counters)
+       stat    the few large figures (run counters), and the one document title
+               in the app — 阅读 needs a line that outranks its section headers,
+               and there is deliberately no step above 20px.
      Line heights are set here so `text-meta` alone never changes rhythm. */
   --text-meta: 11px;
   --text-meta--line-height: 1.45;

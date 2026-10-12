@@ -373,6 +373,14 @@ export function ResultsPanel() {
       <PanelHeader>
         <Badge className={status.cls}>{status.label}</Badge>
         {resultOrigin?.kind === "session" && <Badge tone="accent">历史会话</Badge>}
+        {/* The counts say how big the run was; nothing on this screen said what
+            it covered, which is the first thing to know once a second run has
+            replaced the first. */}
+        {resultOrigin?.scope && (
+          <span className="min-w-0 max-w-[320px] truncate text-meta text-ink" title={resultOrigin.scope}>
+            {resultOrigin.scope}
+          </span>
+        )}
         <div className="tnum flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-muted">
           <span>
             <b className="text-ink">{s.files_reviewed ?? "—"}</b> 文件
