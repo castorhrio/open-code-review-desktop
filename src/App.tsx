@@ -14,13 +14,15 @@ import { HistoryPanel } from "@/components/HistoryPanel";
 import { SettingsPanel } from "@/components/SettingsPanel";
 
 export function App() {
-  const { view, pickRepo, refreshHistory } = useStore();
+  const { view, repo, pickRepo, refreshHistory } = useStore();
   const theme = useResolvedTheme();
 
   useEffect(() => api.onMenuOpenRepo(() => void pickRepo()), [pickRepo]);
   useEffect(() => {
     if (view === "history") void refreshHistory();
-  }, [view, refreshHistory]);
+    // The list is per repository. Depending on `view` alone left the previous
+    // repo's sessions on screen when the repo changed from the 历史 page itself.
+  }, [view, repo, refreshHistory]);
 
   return (
     <div className="flex h-full overflow-hidden">

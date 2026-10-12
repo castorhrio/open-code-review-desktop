@@ -1231,6 +1231,26 @@ await shoot(page, "56-running-with-findings", {
   },
 });
 
+// Switching repositories while a run's findings are on screen. The results
+// header exports through the *current* repo, so keeping run A's findings under
+// repository B meant 导出 HTML would ask the CLI for A's session inside B.
+await shoot(page, "57-repo-switch-clears-results", {
+  after: async (page) => {
+    await openFindings(page);
+    await page.locator("header input").fill("/home/x/work/other-repo");
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(1200);
+  },
+  expect: async (page) => {
+    const text = await page.locator("main").innerText();
+    const out = [];
+    if (/密码校验用了普通的字符串比较/.test(text))
+      out.push("the previous repository's findings are still on screen after switching repos");
+    if (!/还没有结果/.test(text)) out.push("the results screen did not fall back to its empty state");
+    return out;
+  },
+});
+
 await browser.close();
 server.close();
 

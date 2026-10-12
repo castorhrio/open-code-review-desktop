@@ -300,6 +300,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       localStorage.setItem("last-repo", trimmed);
       setPreview(null);
       setResume(null);
+      // Everything below belongs to the repository it was produced from. The
+      // results header exports with `repoRef.current`, so leaving run A's
+      // findings on screen after switching to B meant "导出 HTML" would ask the
+      // CLI for A's session inside B — the same class of bug the run's own ref
+      // and the session's own ref were fixed for, from the other side.
+      setResult(null);
+      setResultOrigin(null);
+      setHistory([]);
       if (trimmed) void inspect(trimmed);
     },
     [inspect]
