@@ -275,6 +275,19 @@ function argList(spec, preview) {
   return args;
 }
 
+/*
+ * Node reports a spawn failure with the *program's* path even when what is
+ * missing is the working directory — so a repository that no longer exists
+ * surfaced as `spawn <binaryPath> ENOENT`, and a user (or a bug report) went
+ * looking for a missing executable. Say which of the two is actually gone.
+ */
+function spawnFailure(err, bin, cwd) {
+  if (err.code !== "ENOENT") return err.message;
+  if (bin && !fs.existsSync(bin)) return `未找到 ocr 可执行文件：${bin}`;
+  if (cwd && !fs.existsSync(cwd)) return `仓库目录已经不存在：${cwd}`;
+  return err.message;
+}
+
 function exec(args, cwd, env) {
   return new Promise((resolve) => {
     const bin = binaryPath();
@@ -295,7 +308,7 @@ function exec(args, cwd, env) {
     child.stderr.on("data", (d) => {
       stderr += d.toString("utf8");
     });
-    child.on("error", (err) => resolve({ code: -1, stdout, stderr, error: err.message }));
+    child.on("error", (err) => resolve({ code: -1, stdout, stderr, error: spawnFailure(err, bin, cwd) }));
     child.on("close", (code) => resolve({ code, stdout, stderr }));
   });
 }
@@ -372,6 +385,10 @@ const HELP_HINTS = [
   [/cannot be used together/, "预览模式不能与续跑同时使用，请先不带续跑地预览。"],
   [/resume requires --from\/--to or --commit/, "工作区改动无法续跑，请改用「分支对比」或「单个提交」。"],
   [/fatal: not a git repository/, "所选目录不是 git 仓库。请选仓库根目录，或改用「全量扫描」。"],
+  [
+    /仓库目录已经不存在/,
+    "上次用的目录已经不在了——临时目录被清掉、克隆被删、换过盘符都会这样。在顶部重新选一个仓库目录即可，其它设置不受影响。",
+  ],
 ];
 
 function withHint(text) {
@@ -649,7 +666,7 @@ function startRun(spec, onLine, onExit, onProgress) {
   child.on("error", (err) => {
     flushReport();
     running.delete(id);
-    onExit(id, { code: -1, error: withHint(err.message), sessionId, command: args.join(" ") });
+    onExit(id, { code: -1, error: withHint(spawnFailure(err, bin, spec.repo)), sessionId, command: args.join(" ") });
   });
   child.on("close", (code) => {
     const tail = stderrBuf.trim();

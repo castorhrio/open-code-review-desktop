@@ -99,7 +99,13 @@ const PROBE = `(() => {
       }
     }
   }
+  const root = document.getElementById("root");
   return {
+    // A page that rendered nothing passes every layout probe: no overflow, no
+    // clipping, no measure to compare. This happened for real when the stubbed
+    // bridge failed to parse — 20 shots reported "ok" over an empty window.
+    mounted: Boolean(root && root.childElementCount) && document.querySelectorAll("nav button").length >= 4,
+    mainText: (document.querySelector("main")?.innerText || "").trim().length,
     measure,
     cap,
     docScrollW: document.documentElement.scrollWidth,
@@ -138,6 +144,8 @@ async function shoot(page, name, { width = 1440, height = 900, storage = STORAGE
   await page.screenshot({ path: file, fullPage: false });
   const p = await page.evaluate(PROBE);
   const problems = [];
+  if (!p.mounted) problems.push("the app did not mount — nothing was rendered to measure");
+  else if (p.mainText < 10) problems.push(`<main> rendered ${p.mainText} characters, so the screen is effectively blank`);
   if (p.docScrollW > p.docClientW + 1) problems.push("doc-x-overflow");
   if (p.docScrollH > p.docClientH + 1) problems.push("doc-y-overflow");
   if (p.measure !== null && p.cap !== null && p.measure > p.cap + 1) problems.push(`measure ${p.measure}px > cap ${p.cap}px`);
@@ -393,7 +401,18 @@ await shoot(page, "04-review-tuning", {
     await page.waitForTimeout(300);
   },
 });
-await shoot(page, "05-results-empty", { after: nav("结果") });
+await shoot(page, "05-results-empty", {
+  after: nav("结果"),
+  expect: async (page) => {
+    const out = [];
+    // An empty state has to offer the action that ends it. With 去历史 as the
+    // only button, a user who has never run a review is sent to look at results
+    // that do not exist.
+    if (!(await page.getByRole("button", { name: /去审查页/ }).count()))
+      out.push("the empty results state does not offer to start a review");
+    return out;
+  },
+});
 await shoot(page, "06-history", {
   after: nav("历史"),
   // A session written before the run-manifest format has no recorded terminal
@@ -1015,6 +1034,53 @@ await shoot(page, "44-report-light", {
   after: openReport,
 });
 await shoot(page, "45-report-stress", { query: "?stress=1", after: openReport });
+
+// A repo with no model behind it. The run cannot do anything but fail, so the
+// page has to say which of its two preconditions is missing and get out of the
+// way — not disable 开始审查 into a tooltip and leave the count on screen as if
+// everything were ready.
+await shoot(page, "48-review-no-llm", {
+  query: "?nollm=1",
+  after: async (page) => {
+    await nav("审查")(page);
+    await page.waitForTimeout(1400);
+  },
+  expect: async (page) => {
+    const out = [];
+    const btn = page.getByRole("button", { name: /开始审查/ });
+    if (!(await btn.count())) out.push("the run action disappeared entirely");
+    else if (!(await btn.first().isDisabled())) out.push("a review with no configured model is still offered as clickable");
+    const text = await page.locator("main").innerText();
+    if (!/模型服务还没就绪/.test(text)) out.push("nothing on the page says why the run cannot start");
+    if (!/未选择模型服务/.test(text)) out.push("the blocker is not named, so the user cannot act on it");
+    if (!(await page.getByRole("button", { name: "去设置" }).count())) out.push("no way to fix the blocker from where it was found");
+    return out;
+  },
+});
+
+// The remembered repository no longer exists — a temp dir cleaned up, a clone
+// deleted. This was reachable on a real machine: the app restored `last-repo`,
+// every CLI call then failed with `spawn <binary> ENOENT` because Node names the
+// program when the *cwd* is what is missing, and 开始审查 stayed enabled so the
+// user could only discover that by trying.
+await shoot(page, "49-review-repo-gone", {
+  query: "?norepo=1",
+  after: async (page) => {
+    await nav("审查")(page);
+    await page.waitForTimeout(1400);
+  },
+  expect: async (page) => {
+    const out = [];
+    const btn = page.getByRole("button", { name: /开始审查/ });
+    if ((await btn.count()) && !(await btn.first().isDisabled()))
+      out.push("a run against a repository that no longer exists is still offered as clickable");
+    const text = await page.locator("main").innerText();
+    if (!/仓库目录现在打不开/.test(text)) out.push("nothing says the remembered repository is gone");
+    if (/opencodereview\.exe|ENOENT/.test(text)) out.push("the raw spawn error is shown instead of an explanation");
+    if (!(await page.getByRole("button", { name: "重新选择" }).count())) out.push("no way out of the dead repository from where it is reported");
+    return out;
+  },
+});
 
 await browser.close();
 server.close();

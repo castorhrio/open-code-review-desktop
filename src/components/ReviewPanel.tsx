@@ -102,6 +102,8 @@ export function ReviewPanel() {
     config,
     providers,
     buildSpec,
+    pickRepo,
+    setView,
   } = useStore();
   const meta = MODE_META[form.mode];
   const scan = form.mode === "scan";
@@ -195,6 +197,16 @@ export function ReviewPanel() {
   };
 
   const blocked = validateSpec(buildSpec());
+  // A remembered repository can stop existing — a temp directory cleaned up, a
+  // clone deleted, a drive letter that moved. `inspect()` already knows, and
+  // until now the page still offered 开始审查 for the dead path and surfaced the
+  // doomed spawn as a raw error line naming the *executable*.
+  const repoGone = repo && repoInfo && !repoInfo.ok ? repoInfo.error || "仓库目录打不开" : "";
+  // A run with no model behind it can only fail, and until now the app let it
+  // start and reported the CLI's `no valid LLM endpoint configured` as a toast
+  // after spawning a process. `ready` is the same predicate the top bar's badge
+  // already uses, so this is not a new guess about the CLI's state.
+  const llmBlocked = config && !config.ready ? config.blockedReason || "还没有配置模型服务" : "";
 
   const scopeSummary = running ? (
     <span className="flex items-center gap-2">
@@ -664,7 +676,29 @@ export function ReviewPanel() {
             on screen at all. It is pinned here so 范围 → 开始 is always one
             glance and one click, however the two regions above it scroll. */}
         <div className="flex shrink-0 flex-wrap items-center gap-3 border-t border-line bg-raised px-6 py-3">
-          <div className="min-w-0 flex-1 text-body text-muted">{scopeSummary}</div>
+          <div className="min-w-0 flex-1">
+            <div className="text-body text-muted">{scopeSummary}</div>
+            {(repoGone || llmBlocked) && (
+              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-warn">
+                {repoGone && (
+                  <>
+                    <span>仓库目录现在打不开：{repoGone}。</span>
+                    <Button variant="ghost" size="sm" onClick={() => void pickRepo()}>
+                      重新选择
+                    </Button>
+                  </>
+                )}
+                {llmBlocked && (
+                  <>
+                    <span>模型服务还没就绪：{llmBlocked}。</span>
+                    <Button variant="ghost" size="sm" onClick={() => setView("settings")}>
+                      去设置
+                    </Button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
           {running && (
             <Button variant="danger" size="lg" onClick={() => void cancelRun()}>
               <Square className="size-4" />
@@ -672,14 +706,15 @@ export function ReviewPanel() {
             </Button>
           )}
           {/* Disabled only when the run cannot start at all (no repo, a mode
-              missing its refs) — the bar's own text is the explanation, sitting
-              next to the button. A scope that is valid but empty stays
-              clickable, because clicking it explains what to change. */}
+              missing its refs, a repository that is gone, no model behind it) —
+              the bar's own text is the explanation, sitting next to the button.
+              A scope that is valid but empty stays clickable, because clicking
+              it explains what to change. */}
           <Button
             variant="primary"
             size="lg"
-            disabled={running || Boolean(blocked)}
-            title={blocked || undefined}
+            disabled={running || Boolean(blocked) || Boolean(repoGone) || Boolean(llmBlocked)}
+            title={blocked || repoGone || llmBlocked || undefined}
             onClick={() => void startOrExplain()}
           >
             {resuming ? <RotateCcw className="size-4" /> : <Play className="size-4" />}

@@ -328,9 +328,18 @@ export function ResultsPanel() {
           </>
         }
         action={
-          <Button variant="outline" size="sm" onClick={() => setView("history")}>
-            去历史
-          </Button>
+          // The one action that ends this state is running a review. 历史 is the
+          // way back in for someone who has run one before, so it is offered
+          // alongside — but a page whose only button says "go look at old
+          // results" is a dead end for the user who has none.
+          <div className="flex items-center gap-2">
+            <Button variant="primary" size="sm" onClick={() => setView("review")}>
+              去审查页开始一次
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setView("history")}>
+              去历史
+            </Button>
+          </div>
         }
       />
     );

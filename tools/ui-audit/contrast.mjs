@@ -1,4 +1,4 @@
-// WCAG contrast audit. Walks every rendered text node in all five views, in both
+// WCAG contrast audit. Walks every rendered text node in all six view states, in both
 // themes, resolves the effective background behind it, and reports pairs below
 // the AA thresholds. Rendered images are hard to judge by eye, so this reports
 // ratios instead of opinions. Run with `npm run audit:contrast` after a build.
@@ -82,6 +82,9 @@ const browser = await chromium.launch({ channel: CHANNEL });
 
 const VIEWS = [
   { name: "review", nav: null },
+  // The bar's blocker line is the one warn-coloured sentence on a raised
+  // surface, and it only renders when no model is configured.
+  { name: "no-llm", nav: null, query: "?nollm=1" },
   { name: "settings", nav: "设置" },
   { name: "history", nav: "历史" },
   { name: "results", nav: "历史", then: "main:/结果/" },
@@ -97,7 +100,10 @@ for (const theme of ["light", "dark"]) {
   for (const view of VIEWS) {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     await page.addInitScript(BRIDGE);
-    await page.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: "load" });
+    // The bridge reads location.search when it is installed, so the query has to
+    // be on the reload too — the first goto only seeds localStorage.
+    const url = `http://127.0.0.1:${PORT}/${view.query || ""}`;
+    await page.goto(url, { waitUntil: "load" });
     await page.evaluate(
       (s) => {
         for (const [k, v] of Object.entries(s)) localStorage.setItem(k, v);

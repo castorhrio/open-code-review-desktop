@@ -362,7 +362,16 @@ window.api = (() => {
     { name: "openrouter", protocol: "openai", url: "https://openrouter.ai/api/v1" },
     { name: "ollama-cloud", protocol: "openai", url: "https://ollama.com/v1" },
   ]}),
-  readConfig: async () => (D.CONFIG),
+  readConfig: async () => {
+    // ?nollm=1 is the state a fresh machine is actually in: a repo is chosen and
+    // the scope computes fine, but there is no model behind the run. The app
+    // knows this — "ready" is what the top-bar badge reads — and used to let the
+    // user discover it from a CLI error after spawning a process.
+    // (No backticks in here: this whole bridge is one template literal.)
+    if (q.get("nollm") === "1")
+      return { ...D.CONFIG, provider: "", model: "", configured: false, ready: false, blockedReason: "未选择模型服务" };
+    return D.CONFIG;
+  },
   // ?update=<phase> renders the update banner and its status line, which are
   // otherwise unreachable here: the banner only shows for downloading / ready /
   // manual, and every other fixture reports idle. Those three states had
@@ -383,7 +392,7 @@ window.api = (() => {
     }[q.get("update") || "idle"];
     return { ...base, ...state };
   },
-  inspect: async () => (D.REPO_INFO),
+  inspect: async () => (q.get("norepo") === "1" ? { ok: false, error: "路径不存在" } : D.REPO_INFO),
   listSessions: async () => {
     // ?sessions=many swaps in the 65-session set, so the history panel's paging
     // can be exercised without a second harness. ?toast=1 makes the call fail
@@ -402,6 +411,10 @@ window.api = (() => {
   },
   sessionComments: async () => (q.get("clean") === "1" ? { ok: true, value: [] } : { ok: true, value: D.FINDINGS }),
   preview: async () => {
+    // ?norepo=1 has to fail here too, or the shot renders a file list for a
+    // repository that does not exist and never shows what the region does.
+    if (q.get("norepo") === "1")
+      return { ok: false, error: "仓库目录已经不存在：/home/x/work/payments-api\\n→ 上次用的目录已经不在了。在顶部重新选一个仓库目录即可。" };
     // ?empty=1 is the state where the scope legitimately contains nothing to
     // review — a clean working tree, or a ref range that touches no source.
     // The app has to say so rather than spend a run discovering it.

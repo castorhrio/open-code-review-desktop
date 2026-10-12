@@ -102,6 +102,24 @@ const notRepo = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-nonrepo-"));
 const outside = await svc.preview({ repo: notRepo, mode: "workspace" });
 check("non-repo directory is reported", !outside.ok && Boolean(outside.error), outside.ok ? "resolved ok" : outside.error);
 
+// A directory that is gone entirely. Node's spawn reports a missing *cwd* by
+// naming the program it could not launch, so this used to come back as
+// `spawn <binaryPath> ENOENT` and send the reader looking for a missing
+// executable instead of the deleted repository.
+const gone = path.join(os.tmpdir(), "ocr-definitely-not-here-"+process.pid);
+const missing = await svc.preview({ repo: gone, mode: "workspace" });
+const missingText = String(missing.error || "");
+check(
+  "a deleted repository names the directory, not the binary",
+  !missing.ok && /仓库目录已经不存在/.test(missingText) && !/opencodereview\.exe/.test(missingText),
+  missingText.slice(0, 160)
+);
+check(
+  "and the hint says what to do about it",
+  /重新选一个仓库目录/.test(missingText),
+  missingText.slice(-160)
+);
+
 /* ---- sessions ---- */
 const sessions = await svc.listSessions(dir, 0);
 check("listSessions on a fresh repo returns an empty list", sessions.ok && Array.isArray(sessions.value) && sessions.value.length === 0, JSON.stringify(sessions).slice(0, 120));
