@@ -24,3 +24,7 @@ Thumbs.db
 dev-app-update.yml
 .tmp-upsrv/
 .tmp-ud*/
+
+# working notes for the improvement loop — local only, not part of the shipped repo
+AGENT_BACKLOG.md
+AGENT_NOTES.md
