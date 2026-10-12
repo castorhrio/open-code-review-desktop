@@ -191,7 +191,9 @@ function RunningView() {
       </div>
 
       <div className="shrink-0 border-t border-line bg-surface px-4 py-2 text-meta text-faint">
-        每个文件先做一次预分析、再带着工具逐段读，所以前几分钟通常一条评论都没有——这不是卡住。
+        {progress?.comments
+          ? `已经产出 ${progress.comments} 条评论，剩下的文件继续在同一处列出。`
+          : "每个文件先做一次预分析、再带着工具逐段读，所以前几分钟通常一条评论都没有——这不是卡住。"}
         {runResumable
           ? "中断后可在「历史」里续跑，已审完的文件不会重复计费。"
           : "但工作区改动的会话不支持续跑，中断了要重跑；想能续跑就改用「分支对比」或「单个提交」。"}

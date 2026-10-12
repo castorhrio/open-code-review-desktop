@@ -1205,6 +1205,26 @@ await shoot(page, "55-report-carries-command", {
   },
 });
 
+// Later in the same run: a comment has landed, and the footer's reassurance that
+// "the first few minutes usually produce nothing" now contradicts the counter
+// above it. Measured on a real 2m47s run, where that sentence was still on screen
+// beside 已产出评论 1.
+await shoot(page, "56-running-with-findings", {
+  after: async (page) => {
+    await nav("审查")(page);
+    await page.waitForTimeout(300);
+    await page.getByRole("button", { name: /开始审查/ }).click();
+    await page.waitForTimeout(2900);
+  },
+  expect: async (page) => {
+    const text = await page.locator("main").innerText();
+    const out = [];
+    if (!/已经产出 \d+ 条评论/.test(text)) out.push("the run footer never acknowledges the findings that have arrived");
+    if (/一条评论都没有/.test(text)) out.push("the footer still says no comments have arrived while the counter shows some");
+    return out;
+  },
+});
+
 await browser.close();
 server.close();
 
