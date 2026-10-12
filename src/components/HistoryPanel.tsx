@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Download, FolderClock, RotateCcw, Trash2, Eye } from "lucide-react";
 import { MODE_LABEL, STATUS, humanDuration, humanTime, sessionState } from "@/lib/format";
+import { resumableMode } from "@/lib/spec";
 import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
 import { Card, EmptyState, Page, Section } from "@/components/ui/layout";
@@ -104,7 +105,7 @@ export function HistoryPanel() {
                       <Eye className="size-3.5" />
                       结果
                     </Button>
-                    {s.review_mode !== "workspace" && (
+                    {resumableMode(s.review_mode) && (
                       <Button variant="ghost" size="sm" onClick={() => resumeSession(s)} title="按原范围续跑未完成部分">
                         <RotateCcw className="size-3.5" />
                         续跑

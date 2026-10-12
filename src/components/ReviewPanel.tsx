@@ -160,9 +160,17 @@ export function ReviewPanel() {
    * scope itself already clears it). Anything else is re-checked — a run that
    * quietly reviews nothing is worse than a second of work.
    */
+  /**
+   * The banner's session, but only when it can actually be continued. Offering
+   * 续跑 for a workspace session was not merely unhelpful — the CLI rejects it
+   * (`resume requires --from/--to or --commit`), so the button was a guaranteed
+   * failure on the mode most users are in.
+   */
+  const resuming = Boolean(resume && resume.sessionId && resume.resumable);
+
   const startOrExplain = async () => {
     // Resuming continues a session whose scope is already fixed.
-    if (resume?.sessionId) {
+    if (resuming && resume) {
       void startRun(resume.sessionId);
       return;
     }
@@ -621,7 +629,7 @@ export function ReviewPanel() {
                 <div className="flex items-start gap-2 p-4">
                   <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warn" />
                   <div className="min-w-0 flex-1 text-body text-ink">
-                    {meta.resumable ? (
+                    {resume.resumable ? (
                       <>
                         这次运行没有全部完成{resume.failed ? `（${resume.failed} 个文件失败）` : ""}，会话{" "}
                         <code className="font-mono text-meta text-muted">{resume.sessionId.slice(0, 12)}…</code>
@@ -680,8 +688,8 @@ export function ReviewPanel() {
             title={blocked || undefined}
             onClick={() => void startOrExplain()}
           >
-            {resume?.sessionId ? <RotateCcw className="size-4" /> : <Play className="size-4" />}
-            {running ? "审查运行中…" : resume?.sessionId ? "续跑未完成部分" : "开始审查"}
+            {resuming ? <RotateCcw className="size-4" /> : <Play className="size-4" />}
+            {running ? "审查运行中…" : resuming ? "续跑未完成部分" : "开始审查"}
           </Button>
         </div>
       </div>

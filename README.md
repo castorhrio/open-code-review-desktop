@@ -39,7 +39,7 @@ The CLI is excellent but you live in a terminal: reading 40 line-level findings,
 | **Zero-cost preview first** | list the files that will be reviewed, with the *reason* each file was excluded (binary, secret path, unsupported type…), before any token is spent |
 | **Cost guardrails** | `--max-tokens-budget` and `--timeout` are real inputs, not hidden flags; a scan large enough to matter is confirmed against them before it starts |
 | **Honest run status** | `complete / partial / failed / completed_with_errors` badges, plus the exact list of files that were **not** reviewed and why — a truncated run never looks like a clean one |
-| **Resume** | interrupted, cancelled or partially failed runs can be resumed via official sessions; already-reviewed files are not billed twice |
+| **Resume** | interrupted, cancelled or partially failed runs continue from the official session, and already-reviewed files are not billed twice — for range, commit and scan; a workspace session is saved but the CLI cannot resume it, and the UI says so instead of offering the button |
 | **Session history** | browse, load, resume, export a self-contained HTML report, delete |
 | **Accurate code context** | when a review targets a ref, the code pane reads that file *at that ref* (`git show`), not your working copy |
 | **Triage** | severity / category / text filters, `↑` `↓` or `j` `k` navigation, copy suggestion code, export JSON |

@@ -848,22 +848,45 @@ await shoot(page, "39-history-resume-scope", {
 // Stopping a run is an action the app itself offers, so it must not come back as
 // a crash. `?cancel=1` answers the cancel with the same non-zero exit a killed
 // child produces — which is what made 已取消 render as 审查失败.
+//
+// The pair also pins the resume promise: a workspace session is `aborted` on disk
+// and the CLI refuses to resume it (`resume requires --from/--to or --commit`),
+// so offering 续跑 there is a guaranteed failure — while a range session must
+// still offer it.
+const startAndCancel = async (page, mode) => {
+  await nav("审查")(page);
+  await page.waitForTimeout(300);
+  if (mode) {
+    await page.getByRole("button", { name: mode }).click();
+    await page.waitForTimeout(1400);
+  }
+  await page.getByRole("button", { name: /开始审查/ }).click();
+  await page.waitForTimeout(1200);
+  await page.getByRole("button", { name: "取消", exact: true }).first().click();
+  await page.waitForTimeout(1400);
+};
+
 await shoot(page, "40-run-cancelled", {
   query: "?cancel=1",
-  after: async (page) => {
-    await nav("审查")(page);
-    await page.waitForTimeout(300);
-    await page.getByRole("button", { name: /开始审查/ }).click();
-    await page.waitForTimeout(1200);
-    await page.getByRole("button", { name: "取消", exact: true }).first().click();
-    await page.waitForTimeout(1400);
-  },
+  after: (page) => startAndCancel(page),
   expect: async (page) => {
     const body = await page.locator("body").innerText();
     const out = [];
     if (/审查失败/.test(body)) out.push("a user-initiated cancel is reported as 审查失败");
     if (!/已取消/.test(body)) out.push("the cancel is not acknowledged anywhere on screen");
-    if (!/续跑/.test(body)) out.push("a cancelled run does not say the unfinished part can be resumed");
+    if ((await page.getByRole("button", { name: /续跑未完成部分/ }).count()) > 0)
+      out.push("a cancelled workspace run offers 续跑, which the CLI would reject");
+    if (!/不支持续跑/.test(body)) out.push("the cancel does not say this session cannot be continued");
+    return out;
+  },
+});
+await shoot(page, "41-cancel-resumable", {
+  query: "?cancel=1",
+  after: (page) => startAndCancel(page, "分支对比"),
+  expect: async (page) => {
+    const out = [];
+    if ((await page.getByRole("button", { name: /续跑未完成部分/ }).count()) === 0)
+      out.push("a cancelled range run stopped offering the resume it does support");
     return out;
   },
 });

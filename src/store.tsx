@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { toast } from "sonner";
 import { api, type Provider } from "@/lib/api";
 import { coverageOf, needsContinuation, sessionState, terminalState } from "@/lib/format";
-import { intOrEmpty, validateSpec } from "@/lib/spec";
+import { intOrEmpty, resumableMode, validateSpec } from "@/lib/spec";
 import type {
   AppInfo,
   ConfigView,
@@ -126,8 +126,7 @@ export function specFrom(f: FormState, repoDir: string, resumeId?: string): Spec
   return spec;
 }
 
-/** The form a session's own scope implies, so a resume re-runs the same thing. */
-function formForSession(f: FormState, s: SessionSummary): FormState {
+/** The form a session's own scope implies, so a resume re-runs the same thing. */function formForSession(f: FormState, s: SessionSummary): FormState {
   if (s.review_mode === "full_scan") return { ...f, mode: "scan", scanPath: "" };
   if (s.review_mode === "commit") return { ...f, mode: "commit", commit: s.diff_commit || "" };
   return { ...f, mode: "range", from: s.diff_from || "", to: s.diff_to || "" };
@@ -153,6 +152,8 @@ interface Store {
   elapsed: number;
   progress: RunProgress | null;
   runLabel: string;
+  /** Whether the run now in progress could be continued, for its own footer. */
+  runResumable: boolean;
   startRun: (resume?: string) => Promise<void>;
   resumeSession: (s: SessionSummary) => void;
   cancelRun: () => Promise<void>;
@@ -162,7 +163,7 @@ interface Store {
   resultOrigin: ResultOrigin | null;
   comments: Finding[];
   loadSession: (s: SessionSummary) => Promise<void>;
-  resume: { sessionId: string; reason: string; failed: number } | null;
+  resume: { sessionId: string; reason: string; failed: number; resumable: boolean } | null;
   dismissResume: () => void;
   history: SessionSummary[];
   historyLoading: boolean;
@@ -204,6 +205,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [elapsed, setElapsed] = useState(0);
   const [progress, setProgress] = useState<RunProgress | null>(null);
   const [runLabel, setRunLabel] = useState("");
+  const [runResumable, setRunResumable] = useState(true);
   const [log, setLog] = useState<string[]>([]);
   const [result, setResult] = useState<RunResult | null>(null);
   const [resultOrigin, setResultOrigin] = useState<ResultOrigin | null>(null);
@@ -227,6 +229,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // be edited while the run is going, and the findings still describe the code
   // as it was at that ref.
   const runFileRef = useRef("");
+  const runMode = useRef<string>("workspace");
   const repoRef = useRef("");
   repoRef.current = repo;
 
@@ -299,7 +302,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const buildSpec = useCallback((resumeId?: string): Spec => specFrom(form, repo, resumeId), [form, repo]);
 
-  const applyResult = useCallback((value: RunResult, origin: ResultOrigin) => {
+  const applyResult = useCallback((value: RunResult, origin: ResultOrigin & { resumable: boolean }) => {
     setResult(value);
     setResultOrigin(origin);
     const sessionId = value.session_id || "";
@@ -309,6 +312,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         sessionId,
         reason: terminalState(value),
         failed: failed.length,
+        resumable: origin.resumable,
       });
     } else {
       setResume(null);
@@ -336,14 +340,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // that matters: the part that did finish is still there.
       const cancelled = cancelRequested.current;
       cancelRequested.current = false;
+      const canResume = resumableMode(runMode.current);
       if (r.error) {
         setRunLabel(cancelled ? "已取消" : "审查失败");
         if (cancelled) {
           setLog((l) => [...l, "[cancelled] 这次审查已停止"]);
           toast("已取消这次审查", {
-            description: r.value
-              ? "已审完的部分保留在下方；未完成的部分可以续跑，不会重复计费。"
-              : "这次运行的会话已保存，到「历史」里可以续跑未完成的部分。",
+            description: !r.value && !canResume
+              ? "工作区改动的会话不支持续跑，只能重新运行。"
+              : r.value
+                ? canResume
+                  ? "已审完的部分保留在下方；未完成的部分可以续跑，不会重复计费。"
+                  : "已审完的部分保留在下方。工作区改动的会话不支持续跑，要接着审请改用「分支对比」或「单个提交」。"
+                : "这次运行的会话已保存，到「历史」里可以续跑未完成的部分。",
           });
         } else {
           // The log area is selectable; a toast is not, and it disappears.
@@ -355,7 +364,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         toast.success("审查完成", { description: `${r.value?.comments?.length ?? 0} 条评论` });
       }
       if (r.value) {
-        applyResult({ ...r.value, session_id: r.value.session_id || r.sessionId || "" }, { kind: "run", fileRef: runFileRef.current });
+        applyResult({ ...r.value, session_id: r.value.session_id || r.sessionId || "" }, { kind: "run", fileRef: runFileRef.current, resumable: canResume });
         setView("results");
         // The session the run just wrote is what the results header exports as an
         // HTML report, and it used to be absent from `history` until the user
@@ -363,7 +372,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // one moment a reader most wants it outside the app.
         void refreshHistory();
       } else if (r.sessionId) {
-        setResume({ sessionId: r.sessionId, reason: "failed", failed: 0 });
+        setResume({ sessionId: r.sessionId, reason: "failed", failed: 0, resumable: canResume });
       }
       runId.current = null;
     });
@@ -386,6 +395,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return;
       }
       runFileRef.current = spec.mode === "range" ? spec.to || "" : spec.mode === "commit" ? spec.commit || "" : "";
+      runMode.current = spec.mode;
       setLog([]);
       setPreview(null);
       setResume(null);
@@ -400,6 +410,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       startedAt.current = Date.now();
       tick.current = window.setInterval(() => setElapsed(Math.round((Date.now() - startedAt.current) / 1000)), 500);
       setRunLabel(spec.resume ? "续跑中" : "审查运行中");
+      setRunResumable(resumableMode(spec.mode));
       let id: string | null = null;
       let ipcFailed = false;
       try {
@@ -508,7 +519,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
             elapsed: s.duration_ns ? `${Math.round(s.duration_ns / 1e9)}s` : "",
           },
         },
-        { kind: "session", label: s.session_id, fileRef: s.review_mode === "range" ? s.diff_to || "" : s.review_mode === "commit" ? s.diff_commit || "" : "" }
+        {
+          kind: "session",
+          label: s.session_id,
+          fileRef: s.review_mode === "range" ? s.diff_to || "" : s.review_mode === "commit" ? s.diff_commit || "" : "",
+          resumable: resumableMode(s.review_mode),
+        }
       );
       setView("results");
     },
@@ -653,6 +669,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     elapsed,
     progress,
     runLabel,
+    runResumable,
     startRun,
     resumeSession,
     cancelRun,

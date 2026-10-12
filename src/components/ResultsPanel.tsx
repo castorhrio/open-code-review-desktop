@@ -178,7 +178,7 @@ function FileViewer({ current, file, variant }: { current: Finding; file: FileWi
  * counters above it are secondary orientation, not the main signal.
  */
 function RunningView() {
-  const { elapsed, runLabel, progress, cancelRun } = useStore();
+  const { elapsed, runLabel, progress, cancelRun, runResumable } = useStore();
   const feed = useRef<HTMLDivElement>(null);
   const activity = progress?.activity ?? [];
 
@@ -251,7 +251,10 @@ function RunningView() {
       </div>
 
       <div className="shrink-0 border-t border-line bg-surface px-4 py-2 text-meta text-faint">
-        每个文件先做一次预分析、再带着工具逐段读，所以前几分钟通常一条评论都没有——这不是卡住。中断后可在「历史」里续跑，已审完的文件不会重复计费。
+        每个文件先做一次预分析、再带着工具逐段读，所以前几分钟通常一条评论都没有——这不是卡住。
+        {runResumable
+          ? "中断后可在「历史」里续跑，已审完的文件不会重复计费。"
+          : "但工作区改动的会话不支持续跑，中断了要重跑；想能续跑就改用「分支对比」或「单个提交」。"}
       </div>
     </div>
   );
@@ -351,16 +354,23 @@ export function ResultsPanel() {
           description={
             <p className="text-body text-muted">
               会话 <code className="font-mono text-meta">{resume.sessionId.slice(0, 12)}…</code> 已经中断
-              {resume.failed ? `（${resume.failed} 个文件失败）` : ""}。保持同样的范围与模型服务点「续跑未完成部分」，已经审完的文件不会重复计费。
+              {resume.failed ? `（${resume.failed} 个文件失败）` : ""}。
+              {resume.resumable
+                ? "保持同样的范围与模型服务点「续跑未完成部分」，已经审完的文件不会重复计费。"
+                : "工作区改动的会话不支持续跑，只能重新运行；想保留可续跑的能力就改用「分支对比」或「单个提交」。"}
             </p>
           }
           action={
-            <>
-              <Button variant="primary" onClick={() => void startRun(resume.sessionId)}>
-                续跑未完成部分
-              </Button>
-              <p className="text-meta text-faint">也可以回「审查」页改小范围（按目录、按 diff）再跑一次。</p>
-            </>
+            resume.resumable ? (
+              <>
+                <Button variant="primary" onClick={() => void startRun(resume.sessionId)}>
+                  续跑未完成部分
+                </Button>
+                <p className="text-meta text-faint">也可以回「审查」页改小范围（按目录、按 diff）再跑一次。</p>
+              </>
+            ) : (
+              <p className="text-meta text-faint">回「审查」页改小范围（按目录、按 diff）再跑一次。</p>
+            )
           }
         />
       );
@@ -372,7 +382,9 @@ export function ResultsPanel() {
         description={
           <>
             <p className="text-meta text-faint">运行一次审查，或到「历史」里打开旧会话。</p>
-            <p className="text-meta text-faint">刚取消的运行也会留下会话，在「历史」里能续跑或导出报告。</p>
+            <p className="text-meta text-faint">
+              刚取消的运行也会留下会话，在「历史」里能回看与导出报告；分支对比、单个提交和全量扫描还能续跑未完成的部分。
+            </p>
           </>
         }
         action={

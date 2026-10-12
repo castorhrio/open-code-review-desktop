@@ -39,6 +39,23 @@ export const MODE_META: Record<
   },
 };
 
+/**
+ * Whether a run of this mode can be continued, from the mode the CLI recorded.
+ *
+ * Promised in several places and honoured in fewer until now: cancelling a
+ * workspace review leaves an `aborted` session the CLI refuses to resume
+ * (`resume requires --from/--to or --commit`), so "到「历史」里续跑" was a promise
+ * the default mode could not keep. `full_scan` is the CLI's spelling of `scan`.
+ */
+export function resumableMode(mode: string | undefined): boolean {
+  const key = mode === "full_scan" ? "scan" : (mode ?? "workspace");
+  // Looked up as a plain record: a mode this build has never seen must read as
+  // *not* resumable rather than throw, because the answer is a promise to the
+  // user that the CLI will accept the resume.
+  const meta = (MODE_META as Record<string, { resumable: boolean }>)[key];
+  return Boolean(meta?.resumable);
+}
+
 export const EFFORTS = [
   { value: "", label: "默认（跟随配置）" },
   { value: "low", label: "low — 更快更省" },
