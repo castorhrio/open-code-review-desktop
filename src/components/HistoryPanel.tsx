@@ -14,7 +14,7 @@ import type { SessionSummary } from "@/lib/types";
 const PAGE = 50;
 
 export function HistoryPanel() {
-  const { repo, history, historyLoading, refreshHistory, loadSession, exportSession, deleteSession, startRun, patchForm, form } = useStore();
+  const { repo, history, historyLoading, refreshHistory, loadSession, exportSession, deleteSession, resumeSession } = useStore();
   const [pendingDelete, setPendingDelete] = useState<SessionSummary | null>(null);
   const [shown, setShown] = useState(PAGE);
 
@@ -24,13 +24,6 @@ export function HistoryPanel() {
 
   const visible = history.slice(0, shown);
   const hidden = history.length - visible.length;
-
-  const resumeFrom = (s: SessionSummary) => {
-    if (s.review_mode === "full_scan") patchForm({ ...form, mode: "scan", scanPath: "" });
-    else if (s.review_mode === "commit") patchForm({ ...form, mode: "commit", commit: s.diff_commit || "" });
-    else patchForm({ ...form, mode: "range", from: s.diff_from || "", to: s.diff_to || "" });
-    void startRun(s.session_id);
-  };
 
   if (!repo) {
     return (
@@ -112,7 +105,7 @@ export function HistoryPanel() {
                       结果
                     </Button>
                     {s.review_mode !== "workspace" && (
-                      <Button variant="ghost" size="sm" onClick={() => resumeFrom(s)} title="按原范围续跑未完成部分">
+                      <Button variant="ghost" size="sm" onClick={() => resumeSession(s)} title="按原范围续跑未完成部分">
                         <RotateCcw className="size-3.5" />
                         续跑
                       </Button>

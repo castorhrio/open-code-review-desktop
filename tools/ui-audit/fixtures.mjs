@@ -410,7 +410,7 @@ window.api = (() => {
     return { ok: true, value: { files: D.PREVIEW_FILES, total_insertions: 171, total_deletions: 27, total_files: 8, reviewable_count: 5, excluded_count: 3 } };
   },
   resolveRef: async (_r, ref) => ({ ok: true, sha: "8c1de4f9a2b3c4d5e6f708192a3b4c5d6e7f8091" }),
-  run: async () => { replay(); return "run-1"; },
+  run: async (spec) => { window.__lastRunSpec = spec; replay(); return "run-1"; },
   cancel: async () => true,
   readFile: async () => ({ ok: true, path: "internal/service/auth/login.go", absPath: "/home/x/work/payments-api/internal/service/auth/login.go", source: "worktree", ref: "feat/tenant-rate-limit", totalLines: 180, firstLine: 72, lines: Array.from({length: 33}, (_, i) => ({ n: 72 + i, content: ["func (s *Service) Login(ctx context.Context, email, presented string) (*Token, error) {", "\tuser, err := s.repo.ByEmail(ctx, strings.ToLower(email))", "\tif err != nil {", "\t\treturn nil, ErrInvalidCredentials", "\t}", "\tstored, err := s.repo.PasswordHash(ctx, user.ID)", "\tif err != nil {", "\t\treturn nil, err", "\t}", "", "\t// TODO: constant-time compare", "\tif stored == presented {", "\t\treturn s.tokens.Issue(user)", "\t}", "\treturn nil, ErrInvalidCredentials", "}", "", "func (s *Service) Refresh(ctx context.Context, tok string) (*Token, error) {", "\tclaims, err := s.tokens.Verify(tok)", "\tif err != nil {", "\t\treturn nil, ErrInvalidCredentials", "\t}", "\treturn s.tokens.Issue(&model.User{ID: claims.Subject})", "}", "", "func (s *Service) Logout(ctx context.Context, tok string) error {", "\treturn s.tokens.Revoke(ctx, tok)", "}"][i % 29] || "" })) }),
   openFile: async () => "",

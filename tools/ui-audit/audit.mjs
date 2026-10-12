@@ -801,6 +801,29 @@ await shoot(page, "38-results-lands-on-worst", {
   },
 });
 
+// 续跑 must resume *that session's* scope. The row patches the review form and
+// then starts the run — but a React state update is not synchronous, so the spec
+// handed to the CLI is built from whatever the form was a moment earlier. This
+// asserts the spec itself rather than the form, because the spec is what runs.
+await shoot(page, "39-history-resume-scope", {
+  after: async (page) => {
+    await nav("历史")(page);
+    await page.waitForTimeout(700);
+    await page.locator("main").getByRole("button", { name: "续跑" }).first().click();
+    await page.waitForTimeout(500);
+  },
+  expect: async (page) => {
+    const spec = await page.evaluate(() => window.__lastRunSpec || null);
+    if (!spec) return ["续跑 never reached the CLI"];
+    const out = [];
+    if (spec.resume !== "9f2c41d0a7b34e58b1c6d7e8f9a0b1c2") out.push(`续跑 did not carry the session id (got ${JSON.stringify(spec.resume)})`);
+    if (spec.mode !== "range") out.push(`续跑 started a ${spec.mode} run instead of the session's range run`);
+    if (spec.from !== "main" || spec.to !== "feat/tenant-rate-limit")
+      out.push(`续跑 lost the session's scope (got ${JSON.stringify([spec.from, spec.to])})`);
+    return out;
+  },
+});
+
 await browser.close();
 server.close();
 

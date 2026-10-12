@@ -74,6 +74,57 @@ export interface ResultOrigin {
   label?: string;
 }
 
+/**
+ * The one place a spec is assembled.
+ *
+ * It is a free function rather than a closure over `form` because resuming a
+ * session has to build the spec from a form it is *about to* set: reading
+ * `form` right after `setForm` returns the previous value, and that is how
+ * 续跑 on a branch-comparison session came to launch a fresh workspace review
+ * with no `--resume` at all.
+ */
+export function specFrom(f: FormState, repoDir: string, resumeId?: string): Spec {
+  const scan = f.mode === "scan";
+  const spec: Spec = { repo: repoDir.trim(), mode: f.mode };
+  if (f.mode === "range") {
+    spec.from = f.from.trim();
+    spec.to = f.to.trim();
+  }
+  if (f.mode === "commit") spec.commit = f.commit.trim();
+  if (scan) {
+    spec.path = f.scanPath.trim();
+    spec.noPlan = f.noPlan;
+    spec.noDedup = f.noDedup;
+    spec.noSummary = f.noSummary;
+    spec.batch = f.batch;
+  } else {
+    spec.effort = f.effort;
+    spec.noFilter = f.noFilter;
+    spec.backgroundFile = f.backgroundFile.trim();
+  }
+  spec.exclude = f.exclude.trim();
+  spec.background = f.background.trim();
+  spec.concurrency = intOrEmpty(f.concurrency);
+  spec.maxTokensBudget = intOrEmpty(f.budget);
+  spec.timeout = f.timeout.trim() === "0" ? 0 : intOrEmpty(f.timeout);
+  spec.maxTokens = intOrEmpty(f.maxTokens);
+  spec.maxTools = intOrEmpty(f.maxTools);
+  spec.rule = f.rule.trim();
+  // Only sent when the user picked one, so the CLI keeps using the globally
+  // configured provider/model otherwise.
+  if (f.runProvider) spec.provider = f.runProvider;
+  if (f.runModel) spec.model = f.runModel;
+  if (resumeId) spec.resume = resumeId;
+  return spec;
+}
+
+/** The form a session's own scope implies, so a resume re-runs the same thing. */
+function formForSession(f: FormState, s: SessionSummary): FormState {
+  if (s.review_mode === "full_scan") return { ...f, mode: "scan", scanPath: "" };
+  if (s.review_mode === "commit") return { ...f, mode: "commit", commit: s.diff_commit || "" };
+  return { ...f, mode: "range", from: s.diff_from || "", to: s.diff_to || "" };
+}
+
 interface Store {
   view: View;
   setView: (v: View) => void;
@@ -95,6 +146,7 @@ interface Store {
   progress: RunProgress | null;
   runLabel: string;
   startRun: (resume?: string) => Promise<void>;
+  resumeSession: (s: SessionSummary) => void;
   cancelRun: () => Promise<void>;
   log: string[];
   clearLog: () => void;
@@ -232,43 +284,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (dir) setRepo(dir);
   }, [setRepo]);
 
-  const buildSpec = useCallback(
-    (resumeId?: string): Spec => {
-      const scan = form.mode === "scan";
-      const spec: Spec = { repo: repo.trim(), mode: form.mode };
-      if (form.mode === "range") {
-        spec.from = form.from.trim();
-        spec.to = form.to.trim();
-      }
-      if (form.mode === "commit") spec.commit = form.commit.trim();
-      if (scan) {
-        spec.path = form.scanPath.trim();
-        spec.noPlan = form.noPlan;
-        spec.noDedup = form.noDedup;
-        spec.noSummary = form.noSummary;
-        spec.batch = form.batch;
-      } else {
-        spec.effort = form.effort;
-        spec.noFilter = form.noFilter;
-        spec.backgroundFile = form.backgroundFile.trim();
-      }
-      spec.exclude = form.exclude.trim();
-      spec.background = form.background.trim();
-      spec.concurrency = intOrEmpty(form.concurrency);
-      spec.maxTokensBudget = intOrEmpty(form.budget);
-      spec.timeout = form.timeout.trim() === "0" ? 0 : intOrEmpty(form.timeout);
-      spec.maxTokens = intOrEmpty(form.maxTokens);
-      spec.maxTools = intOrEmpty(form.maxTools);
-      spec.rule = form.rule.trim();
-      // Only sent when the user picked one, so the CLI keeps using the globally
-      // configured provider/model otherwise.
-      if (form.runProvider) spec.provider = form.runProvider;
-      if (form.runModel) spec.model = form.runModel;
-      if (resumeId) spec.resume = resumeId;
-      return spec;
-    },
-    [form, repo]
-  );
+  const buildSpec = useCallback((resumeId?: string): Spec => specFrom(form, repo, resumeId), [form, repo]);
 
   const applyResult = useCallback((value: RunResult, origin: ResultOrigin) => {
     setResult(value);
@@ -330,9 +346,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   }, [applyResult, stopTimer]);
 
-  const startRun = useCallback(
-    async (resumeId?: string) => {
-      const spec = buildSpec(resumeId);
+  const runSpec = useCallback(
+    async (spec: Spec) => {
       const error = validateSpec(spec);
       if (error) {
         toast.warning(error);
@@ -354,7 +369,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setView("results");
       startedAt.current = Date.now();
       tick.current = window.setInterval(() => setElapsed(Math.round((Date.now() - startedAt.current) / 1000)), 500);
-      setRunLabel(resumeId ? "续跑中" : "审查运行中");
+      setRunLabel(spec.resume ? "续跑中" : "审查运行中");
       let id: string | null = null;
       let ipcFailed = false;
       try {
@@ -372,7 +387,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       runId.current = id;
     },
-    [buildSpec, stopTimer]
+    [stopTimer]
+  );
+
+  const startRun = useCallback(
+    async (resumeId?: string) => runSpec(buildSpec(resumeId)),
+    [buildSpec, runSpec]
+  );
+
+  /**
+   * Resume a session from the history list.
+   *
+   * The row used to patch the form and then start the run in the same tick, so
+   * the spec was built from the form as it was *before* the patch: 续跑 on a
+   * branch-comparison session launched a fresh workspace review, and because
+   * workspace is not resumable the `--resume` id was dropped on the way to the
+   * CLI — the user paid for a review of the wrong thing and their session stayed
+   * unfinished. The next form and the spec are now derived from one value.
+   */
+  const resumeSession = useCallback(
+    (s: SessionSummary) => {
+      const next = formForSession(form, s);
+      setForm(next);
+      void runSpec(specFrom(next, repo, s.session_id));
+    },
+    [form, repo, runSpec]
   );
 
   const cancelRun = useCallback(async () => {
@@ -584,6 +623,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     progress,
     runLabel,
     startRun,
+    resumeSession,
     cancelRun,
     log,
     clearLog: () => setLog([]),
