@@ -98,10 +98,11 @@ export function CodeBlock({ title, tone, text }: { title: string; tone: "ok" | "
   );
 }
 
-/** A finding as a block of reading: severity, where it is, prose, both code sides. */
+/** A finding as a block of reading: severity, where it is, prose, both code sides.
+ *  The 16px inset is `Card`'s own body padding, not a measure of its own. */
 export function FindingBlock({ finding: c }: { finding: Finding }) {
   return (
-    <article className="report-finding border-b border-line px-6 py-5 last:border-b-0">
+    <article className="border-b border-line px-4 py-4 last:border-b-0">
       <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1">
         <SeverityTag severity={c.severity} />
         {c.category && <span className="rounded-xs border border-line px-1 text-meta text-muted">{c.category}</span>}
@@ -112,7 +113,7 @@ export function FindingBlock({ finding: c }: { finding: Finding }) {
         <Button
           variant="ghost"
           size="sm"
-          className="ml-auto no-print"
+          className="ml-auto"
           title="复制这一条（Markdown），含当前代码与建议改法"
           onClick={() => void copyText(findingToMarkdown(c), "这条评论（Markdown）", "可直接粘贴到 PR / MR 评论")}
         >

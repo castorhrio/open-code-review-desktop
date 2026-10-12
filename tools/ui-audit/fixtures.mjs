@@ -403,13 +403,38 @@ window.api = (() => {
       return { ok: false, error: "error: failed to read session index\\n  caused by: open /home/x/.opencodereview/sessions/demo/index.jsonl: permission denied\\n  hint: run 'ocr sessions --rebuild' to regenerate the index" };
     }
     const set = SETS[want] || SETS.default;
+    // Keep the session's own comment count in step with ?many=1's payload, or
+    // the shot renders a header that disagrees with the list beneath it and the
+    // disagreement looks like the product's bug rather than the fixture's.
+    if (q.get("many") === "1")
+      return { ok: true, value: set.map((s, i) => (i ? s : { ...s, total_comments: 200 })) };
     // ?clean=1 pairs with the empty sessionComments below: a review that
     // found nothing has to be consistent across both calls, or the shot renders
     // a header promising 9 comments over a list that says there are none.
     if (q.get("clean") === "1") return { ok: true, value: set.map((s, i) => (i ? s : { ...s, total_comments: 0 })) };
     return { ok: true, value: set };
   },
-  sessionComments: async () => (q.get("clean") === "1" ? { ok: true, value: [] } : { ok: true, value: D.FINDINGS }),
+  sessionComments: async () => {
+    if (q.get("clean") === "1") return { ok: true, value: [] };
+    // ?many=1 is a full-repo scan's payload: a real 148-file session in the
+    // fixture set left 63 comments, and both results surfaces render every
+    // finding without virtualisation, so scale is the thing to check.
+    if (q.get("many") === "1")
+      return {
+        ok: true,
+        // Plain concatenation: this whole bridge is one template literal, so a
+        // nested backtick string or an interpolation would break the bundle.
+        value: Array.from({ length: 40 }, (_, i) => i).flatMap((i) =>
+          D.FINDINGS.map((f, j) => ({
+            ...f,
+            path: f.path.replace(/[^/]+$/, "dir" + i + "/") + i,
+            end_line: undefined,
+            category: f.category || "cat" + j,
+          }))
+        ),
+      };
+    return { ok: true, value: D.FINDINGS };
+  },
   preview: async () => {
     // ?norepo=1 has to fail here too, or the shot renders a file list for a
     // repository that does not exist and never shows what the region does.

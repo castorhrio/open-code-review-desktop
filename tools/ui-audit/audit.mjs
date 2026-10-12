@@ -1108,6 +1108,37 @@ await shoot(page, "50-stale-result-cleared", {
   },
 });
 
+// A full-repo scan's payload. Neither results surface virtualises, so this is
+// the scale at which an unbounded list stops being a layout question and becomes
+// a "did the screen survive" question — and the point where a header that
+// disagrees with the list beneath it would show.
+await shoot(page, "51-results-many", {
+  query: "?many=1",
+  after: openFindings,
+  expect: async (page) => {
+    const seen = await page.evaluate(() => {
+      const list = document.querySelector("main .grid > div:first-child");
+      return { rows: list ? list.querySelectorAll("button").length : 0, header: document.querySelector("main").innerText.match(/(\d+) 条评论/)?.[1] || "?" };
+    });
+    const out = [];
+    if (seen.rows < 200) out.push(`the findings list mounted ${seen.rows} of 200 rows`);
+    if (seen.header !== "200") out.push(`the header counts ${seen.header} while the list holds ${seen.rows}`);
+    return out;
+  },
+});
+await shoot(page, "52-report-many", {
+  query: "?many=1",
+  after: async (page) => {
+    await openFindings(page);
+    await page.getByRole("button", { name: "阅读", exact: true }).click();
+    await page.waitForTimeout(900);
+  },
+  expect: async (page) => {
+    const n = await page.evaluate(() => document.querySelectorAll("main article").length);
+    return n < 200 ? [`the reading view rendered ${n} of 200 findings`] : [];
+  },
+});
+
 await browser.close();
 server.close();
 

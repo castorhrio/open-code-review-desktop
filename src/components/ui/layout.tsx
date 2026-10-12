@@ -147,8 +147,14 @@ export function Card({
       {(title || actions) && (
         <div className={cn("flex items-center gap-2 border-b px-4 py-2.5", t.head, headerClassName)}>
           {icon}
-          {title && <h3 className="text-strong font-semibold text-ink">{title}</h3>}
-          {hint && <span className="text-meta text-faint">{hint}</span>}
+          {/* A card title is often fed by something with no length bound — a
+              file path, a model id. A flex child defaults to `min-width: auto`,
+              which refuses to shrink below its min-content width, so an
+              unbreakable title pushes the whole header past the card and the
+              card clips it. Both need `min-w-0` before `truncate` can do
+              anything; the full value belongs in a `title`. */}
+          {title && <h3 className="min-w-0 truncate text-strong font-semibold text-ink">{title}</h3>}
+          {hint && <span className="min-w-0 truncate text-meta text-faint">{hint}</span>}
           {actions && <div className="ml-auto flex shrink-0 items-center gap-1.5">{actions}</div>}
         </div>
       )}
