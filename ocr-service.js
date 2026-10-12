@@ -430,16 +430,157 @@ const isPayloadFragment = (line) => !line.startsWith("[ocr]") && /^[\s]*([[{\]},
 // renders as fifty.
 const splitLines = (text) => text.split(/[\r\n]/);
 
-// `[ocr]   ▶ file_read …` / `[ocr]   ✔ code_search (55ms)` is per-tool-call
-// chatter: 7 tool calls per file becomes 14 lines, and a 233-file scan becomes
-// thousands. Count it, surface a tally, keep the log for milestones.
-const TOOL_CHATTER = /^\[ocr\]\s*[▶✔✗•]\s*(\S+)/;
-const CHATTER_TALLY_EVERY = 25;
+/*
+ * Everything below is keyed to what `ocr` v1.12.13 actually prints, captured
+ * from a live single-file review (which took 3m48s and emitted nothing but the
+ * lines below for the whole time). That run is the reason this parser exists:
+ * the previous version matched only the *scan* wording for the file count, so
+ * across all three diff modes the UI's "进入审查的文件" never left "—", and the
+ * per-tool lines were thrown away except for a tally every 25 — which is how a
+ * working run came to look like a hung one.
+ */
 
-// Milestones worth telling the user about while a run is still going.
-// `[ocr] full-scan: 27 file(s) discovered, reviewing 27 in <repo>`
-const DISCOVERED_RE = /(\d+) file\(s\) discovered, reviewing (\d+)/;
-const COST_RE = /\[ocr\]\s*(estimated cost:[^\r\n]*)/;
+// How many files the run will actually read, and how many it found.
+//   `[ocr] 1 file(s) changed, reviewing 1 in <repo>`      — review modes
+//   `[ocr] full-scan: 27 file(s) discovered, reviewing 27 in <repo>` — scan
+const SCOPE_RE = /(\d+) file\(s\) (?:changed|discovered), reviewing (\d+)/;
+//   `[ocr] Resume <id>: reusing 3 file(s), reviewing 5 file(s)`
+const RESUME_RE = /reusing (\d+) file\(s\), reviewing (\d+) file\(s\)/;
+//   `[ocr] estimated cost: ~1.2M tokens`
+const COST_RE = /estimated cost:\s*([^\r\n]*)/;
+//   `[ocr] Summary: 1 file(s) reviewed, 6 comment(s), ~81601 token(s) used, 3m48s elapsed`
+const SUMMARY_RE = /Summary: (\d+) file\(s\) reviewed, (\d+) comment\(s\)(?:, ~(\d+) token\(s\) used)?(?:, ([^\r\n]*?))?$/;
+// Files the rules dropped, in one aggregate line rather than per-file.
+const FILTERED_RE = /(?:Filtered|Pre-filtered) (\d+) file\(s\)/;
+// `Skipping` is also how the CLI reports skipping a *phase*, so only the form
+// that names a path counts as an excluded file.
+const SKIP_FILE_RE = /^\[ocr\] Skipping (?!plan phase\b|LLM grouping\b|MCP server\b)\S+/;
+const GROUP_RE = /group "([^"]+)"/;
+const FILE_ARG_RE = /(?:^|\s)file_path=(\S+)/;
+
+// `[ocr]   ▶ file_read file_path=auth.js` / `[ocr]   ✔ code_search (55ms)` is
+// per-tool-call chatter. It used to be counted and discarded; it is now the
+// activity feed, because it is the only thing the CLI emits while it works, and
+// it is what tells a user the run is alive and on which file.
+const TOOL_CHATTER = /^\[ocr\]\s*([▶✔✗•])\s*(\S+)(.*)$/;
+const ACTIVITY_MAX = 80;
+
+function createProgress() {
+  return {
+    files: 0,
+    reviewing: 0,
+    tools: 0,
+    comments: 0,
+    excluded: 0,
+    cost: "",
+    current: "",
+    byTool: {},
+    activity: [],
+  };
+}
+
+/**
+ * Fold one `[ocr]` stderr line into the progress model.
+ *
+ * Returns the line unchanged when it is a milestone worth showing in the log,
+ * or `null` when it is tool chatter already represented in `progress.activity`
+ * — so the log stays a timeline of steps while the feed keeps every event.
+ */
+function feedProgressLine(progress, line) {
+  let m = line.match(SCOPE_RE) || line.match(RESUME_RE);
+  if (m) {
+    progress.files = Number(m[1]);
+    progress.reviewing = Number(m[2]);
+    pushActivity(progress, { kind: "note", text: `范围确定：${m[2]} 个文件进入审查` });
+    return line;
+  }
+  if ((m = line.match(COST_RE))) {
+    progress.cost = m[1].trim();
+    pushActivity(progress, { kind: "note", text: `预计成本 ${progress.cost}` });
+    return line;
+  }
+  if ((m = line.match(FILTERED_RE))) {
+    progress.excluded += Number(m[1]);
+    return line;
+  }
+  if (SKIP_FILE_RE.test(line)) {
+    progress.excluded += 1;
+    return line;
+  }
+  if ((m = line.match(SUMMARY_RE))) {
+    progress.comments = Number(m[2]) || progress.comments;
+    const elapsed = (m[4] || "").trim().replace(/\s+elapsed$/i, "");
+    pushActivity(progress, { kind: "note", text: `已完成 ${m[1]} 个文件，产出 ${m[2]} 条评论${elapsed ? ` · 耗时 ${elapsed}` : ""}` });
+    return line;
+  }
+  // The per-group plan lines are the closest thing the CLI gives to file-level
+  // progress, so they are worth a row: without them the feed is empty for the
+  // first ten seconds of every run, which is the window that reads as "hung".
+  if ((m = line.match(GROUP_RE))) {
+    progress.current = m[1];
+    if (/Plan completed/i.test(line)) pushActivity(progress, { kind: "note", text: `${m[1]}：规划完成，开始逐段读` });
+    else if (/Skipping plan phase/i.test(line)) pushActivity(progress, { kind: "note", text: `开始审查 ${m[1]}` });
+  }
+
+  const chatter = line.match(TOOL_CHATTER);
+  if (!chatter) {
+    // Not chatter, so it stays in the log verbatim. A warning is also worth a
+    // row in the feed, because the feed is what the user is watching.
+    if (/WARNING|ERROR|budget reached/i.test(line)) pushActivity(progress, { kind: "note", text: line.replace(/^\[ocr\]\s*/, ""), warn: true });
+    return line;
+  }
+  const [, mark, tool, rest] = chatter;
+  const args = rest.trim();
+  if (mark === "▶") {
+    const file = args.match(FILE_ARG_RE);
+    if (file) progress.current = file[1];
+    pushActivity(progress, { kind: "tool", tool, state: "running", args: argSummary(args) });
+    return null;
+  }
+  if (mark === "•") {
+    pushActivity(progress, { kind: "tool", tool, state: "running", args: argSummary(args) });
+    return null;
+  }
+  // Only `✔` is a completed call; counting `▶` as well would double every number.
+  const duration = /\(([^)]+)\)/.exec(args);
+  progress.tools += 1;
+  progress.byTool[tool] = (progress.byTool[tool] || 0) + 1;
+  if (tool === "code_comment") progress.comments += 1;
+  settleActivity(progress, tool, mark === "✗" ? "failed" : "done", duration ? duration[1] : "");
+  return null;
+}
+
+/** Keep the row short: the CLI dumps whole regexes and file lists into args. */
+function argSummary(args) {
+  const text = args.replace(/\s+/g, " ").trim();
+  return text.length > 90 ? `${text.slice(0, 89)}…` : text;
+}
+
+function pushActivity(progress, event) {
+  // Monotonic off the last row rather than off a sum of counters: once the feed
+  // hits its cap the length stops growing, so a length-derived id collides —
+  // and the rows are React keys.
+  const last = progress.activity[progress.activity.length - 1];
+  progress.activity.push({ ...event, id: last ? last.id + 1 : 0 });
+  if (progress.activity.length > ACTIVITY_MAX) progress.activity.shift();
+}
+
+/**
+ * `✔`/`✗` names the tool but not the call, so it closes the newest still-running
+ * row for that tool. Concurrent files interleave, which is why the match is by
+ * tool name rather than "the last row".
+ */
+function settleActivity(progress, tool, state, ms) {
+  for (let i = progress.activity.length - 1; i >= 0; i--) {
+    const row = progress.activity[i];
+    if (row.kind === "tool" && row.tool === tool && row.state === "running") {
+      row.state = state;
+      row.ms = ms;
+      return;
+    }
+  }
+  pushActivity(progress, { kind: "tool", tool, state, ms, args: "" });
+}
 
 function startRun(spec, onLine, onExit, onProgress) {
   const bin = binaryPath();
@@ -458,8 +599,28 @@ function startRun(spec, onLine, onExit, onProgress) {
   let stderrBuf = "";
   let stderrAll = "";
   let sessionId = "";
-  const progress = { files: 0, reviewing: 0, tools: 0, comments: 0, excluded: 0, cost: "", byTool: {} };
-  const report = () => onProgress && onProgress(id, { ...progress });
+  const progress = createProgress();
+  const snapshot = () => ({ ...progress, activity: progress.activity.slice() });
+  /**
+   * Every stderr line can move the feed, and a 233-file scan produces thousands
+   * of them — reporting per line would push a whole activity snapshot across IPC
+   * dozens of times a second. Coalesced to one send per 120ms, flushed before
+   * the exit event so the last rows are never dropped.
+   */
+  let reportTimer = null;
+  const report = () => {
+    if (!onProgress || reportTimer) return;
+    reportTimer = setTimeout(() => {
+      reportTimer = null;
+      onProgress(id, snapshot());
+    }, 120);
+  };
+  const flushReport = () => {
+    if (!reportTimer) return;
+    clearTimeout(reportTimer);
+    reportTimer = null;
+    if (onProgress) onProgress(id, snapshot());
+  };
 
   const emit = (chunk) => {
     const text = chunk.toString("utf8");
@@ -476,42 +637,9 @@ function startRun(spec, onLine, onExit, onProgress) {
     lines.forEach((line) => {
       const t = line.trim();
       if (!t || /^error:/i.test(t) || isPayloadFragment(t)) return;
-      const chatter = t.match(TOOL_CHATTER);
-      if (chatter) {
-        // Only the `✔` line is a completed call; `▶` is its start, so counting
-        // both would double every number the user sees.
-        if (t.includes("✔")) {
-          const tool = chatter[1];
-          progress.byTool[tool] = (progress.byTool[tool] || 0) + 1;
-          progress.tools += 1;
-          if (tool === "code_comment") progress.comments += 1;
-          if (progress.tools % CHATTER_TALLY_EVERY === 0) {
-            const parts = Object.entries(progress.byTool)
-              .sort((a, b) => b[1] - a[1])
-              .map(([k, v]) => `${k} ${v}`)
-              .join(" · ");
-            onLine(id, `[ocr] 已完成 ${progress.tools} 次工具调用（${parts}）`);
-          }
-          report();
-        }
-        return;
-      }
-      const found = t.match(DISCOVERED_RE);
-      if (found) {
-        progress.files = Number(found[1]);
-        progress.reviewing = Number(found[2]);
-        report();
-      }
-      const cost = t.match(COST_RE);
-      if (cost) {
-        progress.cost = cost[1];
-        report();
-      }
-      if (/^\[ocr\] Skipping /.test(t)) {
-        progress.excluded += 1;
-        report();
-      }
-      onLine(id, t);
+      const milestone = feedProgressLine(progress, t);
+      report();
+      if (milestone) onLine(id, milestone);
     });
   };
   child.stdout.on("data", (d) => {
@@ -519,12 +647,14 @@ function startRun(spec, onLine, onExit, onProgress) {
   });
   child.stderr.on("data", emit);
   child.on("error", (err) => {
+    flushReport();
     running.delete(id);
     onExit(id, { code: -1, error: withHint(err.message), sessionId, command: args.join(" ") });
   });
   child.on("close", (code) => {
     const tail = stderrBuf.trim();
     if (tail && !/^error:/i.test(tail) && !isPayloadFragment(tail)) onLine(id, tail);
+    flushReport();
     running.delete(id);
     if (code !== 0) {
       // A failed run may still have published partial findings on stdout, so
@@ -641,6 +771,8 @@ module.exports = {
   unsetConfig,
   withHint,
   failureText,
+  createProgress,
+  feedProgressLine,
   listSessions,
   sessionComments,
   exportSession,

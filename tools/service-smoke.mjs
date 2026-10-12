@@ -106,6 +106,113 @@ check("non-repo directory is reported", !outside.ok && Boolean(outside.error), o
 const sessions = await svc.listSessions(dir, 0);
 check("listSessions on a fresh repo returns an empty list", sessions.ok && Array.isArray(sessions.value) && sessions.value.length === 0, JSON.stringify(sessions).slice(0, 120));
 
+/* ---- progress parsing ----
+ * A replay of the stderr from one real single-file review (`ocr review` on a
+ * throwaway repo, 3m48s, 6 findings). The parser had no test at all, which is
+ * how it shipped matching only the scan wording — `changed, reviewing` never
+ * matched, so across all three diff modes the run screen showed "—" for the
+ * file count and nothing else for four minutes.
+ */
+const TRANSCRIPT = [
+  "[ocr] 1 file(s) changed, reviewing 1 in C:/Users/x/work/payments-api",
+  '[ocr] Skipping plan phase for group "auth.js" (1 file(s), max 9 lines, total 9 lines)',
+  "[ocr]   ▶ file_read file_path=auth.js",
+  "[ocr]   ✔ file_read (1ms)",
+  "[ocr]   ▶ code_search search_text=tokenFor",
+  "[ocr]   ✔ code_search (21ms)",
+  "[ocr]   ▶ code_search search_text=auth file_patterns=[*.js]",
+  "[ocr]   ✔ code_search (21ms)",
+  "[ocr]   ▶ code_search search_text=USERS",
+  "[ocr]   ✔ code_search (21ms)",
+  "[ocr]   ▶ file_find query_name=.",
+  "[ocr]   ✔ file_find (19ms)",
+  "[ocr]   ▶ code_comment",
+  "[ocr]   ✔ code_comment (0s)",
+  "[ocr]   ▶ file_read file_path=auth.js",
+  "[ocr]   ✔ file_read (1ms)",
+  "[ocr]   ▶ code_search search_text=tokenFor|require\\(.*auth use_perl_regexp=true",
+  "[ocr]   ✔ code_search (22ms)",
+  "[ocr]   ▶ code_comment",
+  "[ocr]   ✔ code_comment (0s)",
+  "[ocr]   ▶ code_comment",
+  "[ocr]   ✔ code_comment (1ms)",
+  "[ocr] Summary: 1 file(s) reviewed, 6 comment(s), ~81601 token(s) used, 3m48s elapsed",
+];
+const prog = svc.createProgress();
+const milestones = [];
+for (const line of TRANSCRIPT) {
+  const kept = svc.feedProgressLine(prog, line);
+  if (kept) milestones.push(kept);
+}
+check("review-mode scope line sets the file count", prog.files === 1 && prog.reviewing === 1, `${prog.files}/${prog.reviewing}`);
+check("tool calls are counted once each", prog.tools === 10, String(prog.tools));
+check("code_comment calls count as findings", prog.comments === 6, String(prog.comments));
+check("the file under review is tracked", prog.current === "auth.js", prog.current);
+check("activity feed holds the live rows", prog.activity.length >= 10, String(prog.activity.length));
+check(
+  "every settled activity row is closed, none left running",
+  prog.activity.filter((a) => a.kind === "tool" && a.state === "running").length === 0,
+  JSON.stringify(prog.activity.slice(-2))
+);
+check(
+  "the feed carries the tool's own arguments",
+  prog.activity.some((a) => a.tool === "code_search" && a.args.includes("search_text=USERS")),
+  JSON.stringify(prog.activity.slice(2, 4))
+);
+check("milestone log keeps the scope and summary lines", milestones.some((l) => /changed, reviewing/.test(l)) && milestones.some((l) => /Summary:/.test(l)), milestones.join(" | "));
+check("per-tool chatter stays out of the milestone log", !milestones.some((l) => /[▶✔✗•]/.test(l)), milestones.join(" | "));
+check("skipping a phase is not counted as an excluded file", prog.excluded === 0, String(prog.excluded));
+// The feed is capped and the rows are React keys, so a long run must keep
+// producing distinct ids once the cap is reached — an id derived from the array
+// length silently collided there.
+const longProg = svc.createProgress();
+for (let i = 0; i < 200; i++) {
+  svc.feedProgressLine(longProg, `[ocr]   ▶ file_read file_path=f${i}.go`);
+  svc.feedProgressLine(longProg, "[ocr]   ✔ file_read (1ms)");
+}
+check("the feed is bounded", longProg.activity.length === 80, String(longProg.activity.length));
+check(
+  "ids stay unique once the feed is at its cap",
+  new Set(longProg.activity.map((a) => a.id)).size === longProg.activity.length,
+  longProg.activity.map((a) => a.id).join(",")
+);
+check("the newest row is still the last", longProg.activity[79].state === "done", JSON.stringify(longProg.activity[79]));
+check(
+  "the closing summary reads as prose, not as a CLI line",
+  prog.activity.some((a) => a.kind === "note" && a.text === "已完成 1 个文件，产出 6 条评论 · 耗时 3m48s"),
+  JSON.stringify(prog.activity.slice(-1))
+);
+
+// The first ten seconds of a real run are the window that reads as "hung": the
+// CLI has printed its scope line and started planning, but no tool call has
+// finished yet. Observed live — the feed was empty while the log already had
+// three lines.
+const early = svc.createProgress();
+svc.feedProgressLine(early, "[ocr] 8 file(s) changed, reviewing 5 in /home/x/work/payments-api");
+svc.feedProgressLine(early, '[ocr] Skipping plan phase for group "internal/service/auth/login.go" (1 file(s), max 90 lines, total 90 lines)');
+check(
+  "the feed has something to show before the first tool call",
+  early.activity.length >= 2 && /范围确定/.test(early.activity[0].text),
+  JSON.stringify(early.activity)
+);
+check("and it already names the file being read", early.current === "internal/service/auth/login.go", early.current);
+
+// The other two scope wordings, both of which the CLI really prints.
+const scanProg = svc.createProgress();
+svc.feedProgressLine(scanProg, "[ocr] full-scan: 27 file(s) discovered, reviewing 27 in /repo");
+check("scan-mode scope line parses", scanProg.files === 27 && scanProg.reviewing === 27, `${scanProg.files}/${scanProg.reviewing}`);
+const resumeProg = svc.createProgress();
+svc.feedProgressLine(resumeProg, "[ocr] Resume 10b8a6bd: reusing 3 file(s), reviewing 5 file(s)");
+check("resume scope line parses", resumeProg.files === 3 && resumeProg.reviewing === 5, `${resumeProg.files}/${resumeProg.reviewing}`);
+const costProg = svc.createProgress();
+svc.feedProgressLine(costProg, "[ocr] estimated cost: ~1.2M tokens");
+svc.feedProgressLine(costProg, "[ocr] Skipping vendor/foo.js  binary file");
+check("cost and exclusions parse", costProg.cost === "~1.2M tokens" && costProg.excluded === 1, `${costProg.cost}/${costProg.excluded}`);
+const filteredProg = svc.createProgress();
+svc.feedProgressLine(filteredProg, "[ocr] Filtered 12 file(s) by include/exclude rules");
+check("aggregate filtered count parses", filteredProg.excluded === 12, String(filteredProg.excluded));
+
+
 /* ---- config / info ---- */
 const cfg = svc.readConfigView();
 check("readConfigView returns a usable shape", cfg && typeof cfg.path === "string" && typeof cfg.ready === "boolean" && typeof cfg.providers === "object", JSON.stringify(cfg)?.slice(0, 140));

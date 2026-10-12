@@ -92,6 +92,19 @@ export interface RunResult {
 }
 
 /** Live counters parsed out of the CLI's `[ocr]` progress stream. */
+/** One row of the live feed a running review writes to. */
+export interface ActivityEvent {
+  id: number;
+  /** `tool` is a tool call the agent made; `note` is a step worth reading. */
+  kind: "tool" | "note";
+  tool?: string;
+  args?: string;
+  state?: "running" | "done" | "failed";
+  ms?: string;
+  text?: string;
+  warn?: boolean;
+}
+
 export interface RunProgress {
   files: number;
   reviewing: number;
@@ -99,7 +112,10 @@ export interface RunProgress {
   comments: number;
   excluded: number;
   cost: string;
+  /** The file the agent is working on right now, as far as its tool calls reveal. */
+  current: string;
   byTool: Record<string, number>;
+  activity: ActivityEvent[];
 }
 
 /** agent.Preview — for `scan`, `insertions` is the file's line count and status is "scan". */
