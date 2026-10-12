@@ -223,6 +223,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const startedAt = useRef(0);
   const tick = useRef<number | null>(null);
   const cancelRequested = useRef(false);
+  // The ref a run read its diff from, kept for the results screen: the form can
+  // be edited while the run is going, and the findings still describe the code
+  // as it was at that ref.
+  const runFileRef = useRef("");
   const repoRef = useRef("");
   repoRef.current = repo;
 
@@ -351,7 +355,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         toast.success("审查完成", { description: `${r.value?.comments?.length ?? 0} 条评论` });
       }
       if (r.value) {
-        applyResult({ ...r.value, session_id: r.value.session_id || r.sessionId || "" }, { kind: "run" });
+        applyResult({ ...r.value, session_id: r.value.session_id || r.sessionId || "" }, { kind: "run", fileRef: runFileRef.current });
         setView("results");
         // The session the run just wrote is what the results header exports as an
         // HTML report, and it used to be absent from `history` until the user
@@ -381,6 +385,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         toast.warning("已有审查在运行中");
         return;
       }
+      runFileRef.current = spec.mode === "range" ? spec.to || "" : spec.mode === "commit" ? spec.commit || "" : "";
       setLog([]);
       setPreview(null);
       setResume(null);

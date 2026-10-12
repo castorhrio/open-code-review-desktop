@@ -258,7 +258,7 @@ function RunningView() {
 }
 
 export function ResultsPanel() {
-  const { result, resultOrigin, comments, form, repo, exportSession, resume, running, startRun, setView } = useStore();
+  const { result, resultOrigin, comments, repo, exportSession, resume, running, startRun, setView } = useStore();
   const [sevOn, setSevOn] = useState<Set<string>>(() => new Set(SEVERITIES));
   const [cat, setCat] = useState("");
   const [text, setText] = useState("");
@@ -310,10 +310,10 @@ export function ResultsPanel() {
       setSelected(index);
       const c = comments[index];
       if (!c) return;
-      // A session knows its own scope; the form on screen does not. Falling back
-      // to the form is only right for a run, where the form *is* what ran.
-      const ref =
-        resultOrigin?.fileRef ?? (form.mode === "range" ? form.to.trim() : form.mode === "commit" ? form.commit.trim() : "");
+      // The result carries the ref its own findings describe. Reading it back off
+      // the review form was wrong twice over: a session from history has no
+      // relation to the form, and the form can be edited while a run is going.
+      const ref = resultOrigin?.fileRef || "";
       const res = await api.readFile({
         repo,
         path: c.path,
@@ -324,7 +324,7 @@ export function ResultsPanel() {
       });
       setFile(res);
     },
-    [comments, form, repo, resultOrigin]
+    [comments, repo, resultOrigin]
   );
 
   useEffect(() => {
