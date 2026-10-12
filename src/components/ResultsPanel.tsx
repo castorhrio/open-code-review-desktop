@@ -111,7 +111,16 @@ function FileViewer({ current, file, variant }: { current: Finding; file: FileWi
       <div className={cn("flex min-w-0 shrink-0 items-center gap-2 border-b border-line bg-surface py-2", stacked ? "px-4" : "px-3")}>
         <Wrench className="size-3.5 shrink-0 text-faint" />
         <span className="min-w-0 flex-1 truncate font-mono text-meta text-muted">{current.path}</span>
-        <Badge>{file.source === "git" ? `来自 ${file.ref}` : "工作区当前内容"}</Badge>
+        {/* A ref is a branch name or a SHA the user typed, and a Badge is
+            `nowrap` and refuses to shrink: an uncapped one pushed this toolbar
+            past the code pane and clipped the pane itself. Cap the box and keep
+            the full value in the title, as the top bar does. */}
+        <Badge
+          title={file.source === "git" ? `来自 ${file.ref}` : "工作区当前内容"}
+          className="max-w-[180px] shrink-0"
+        >
+          <span className="min-w-0 truncate">{file.source === "git" ? `来自 ${file.ref}` : "工作区当前内容"}</span>
+        </Badge>
         {file.absPath && (
           <>
             <Button variant="ghost" size="sm" onClick={() => void copyText(file.absPath || "", "文件绝对路径")}>
@@ -300,7 +309,10 @@ export function ResultsPanel() {
       setSelected(index);
       const c = comments[index];
       if (!c) return;
-      const ref = form.mode === "range" ? form.to.trim() : form.mode === "commit" ? form.commit.trim() : "";
+      // A session knows its own scope; the form on screen does not. Falling back
+      // to the form is only right for a run, where the form *is* what ran.
+      const ref =
+        resultOrigin?.fileRef ?? (form.mode === "range" ? form.to.trim() : form.mode === "commit" ? form.commit.trim() : "");
       const res = await api.readFile({
         repo,
         path: c.path,
@@ -311,7 +323,7 @@ export function ResultsPanel() {
       });
       setFile(res);
     },
-    [comments, form, repo]
+    [comments, form, repo, resultOrigin]
   );
 
   useEffect(() => {

@@ -72,6 +72,14 @@ export const EMPTY_FORM: FormState = {
 export interface ResultOrigin {
   kind: "run" | "session";
   label?: string;
+  /**
+   * The ref the finding's code should be read from. A session carries its own
+   * scope, and the review form on screen has nothing to do with it — without
+   * this, opening a history session showed the working tree while the header
+   * said 历史会话, so the code beside a finding could be a different file than
+   * the one that was reviewed.
+   */
+  fileRef?: string;
 }
 
 /**
@@ -495,7 +503,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             elapsed: s.duration_ns ? `${Math.round(s.duration_ns / 1e9)}s` : "",
           },
         },
-        { kind: "session", label: s.session_id }
+        { kind: "session", label: s.session_id, fileRef: s.review_mode === "range" ? s.diff_to || "" : s.review_mode === "commit" ? s.diff_commit || "" : "" }
       );
       setView("results");
     },

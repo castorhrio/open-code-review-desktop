@@ -17,11 +17,15 @@ const PORT = 5199;
 const PROBE = `(() => {
   // Find the page's declared measure: the first element in <main> carrying a
   // max-width cap (PageBody sets it from --page-max / --page-max-narrow).
+  // The lower bound is what makes this a *column*: without it the probe latches
+  // onto the first capped chip it meets — a 180px badge on the results screen
+  // reported a measure of 180, and a check that compares a page against a badge
+  // is not checking anything.
   let measure = null;
   let cap = null;
   for (const el of document.querySelectorAll("main *")) {
     const mw = parseFloat(getComputedStyle(el).maxWidth);
-    if (Number.isFinite(mw) && mw > 0 && mw <= 1200) {
+    if (Number.isFinite(mw) && mw >= 320 && mw <= 1200) {
       measure = Math.round(el.getBoundingClientRect().width);
       cap = mw;
       break;
@@ -249,6 +253,19 @@ const expectRunningFeed = async (page) => {
   return out;
 };
 
+/**
+ * A session carries its own scope, and the review form on screen has nothing to
+ * do with it. The code pane used to resolve its ref from the form, so opening a
+ * history session showed the working tree beside a 历史会话 badge — the code next
+ * to a finding could be a different file than the one that was reviewed.
+ */
+const expectCodeFollowsSession = async (page) => {
+  const text = await page.locator("main").innerText();
+  return /来自 feat\/tenant-rate-limit/.test(text)
+    ? []
+    : ["the code pane is not read from the session's own ref, so it is showing the working tree"];
+};
+
 /** Wide: three columns, and the code column clears the widest line. */
 const expectThreePanes = async (page) => {  const g = await resultsGrid(page);
   if (g.error) return [g.error];
@@ -367,7 +384,11 @@ await shoot(page, "09-results-findings", {
     await openFindings(page);
     await selectFirstFinding(page);
   },
-  expect: async (page) => [...(await expectThreePanes(page)), ...(await expectCleanSummaries(page))],
+  expect: async (page) => [
+    ...(await expectThreePanes(page)),
+    ...(await expectCleanSummaries(page)),
+    ...(await expectCodeFollowsSession(page)),
+  ],
 });
 await shoot(page, "10-review-narrow", { width: 1100, height: 780, expect: expectRunActionVisible });
 await shoot(page, "11-settings-narrow", { width: 1100, height: 780, after: nav("设置") });
