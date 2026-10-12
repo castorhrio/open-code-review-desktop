@@ -52,6 +52,15 @@ const git = (cwd, args) =>
 
 async function makeRepo() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-e2e-"));
+  // A bare remote, so the working branch has a *remote-tracking* upstream. This
+  // is what a real clone looks like, and it is the shape that broke the default
+  // range base: `@{upstream}` is `origin/feature`, which names the same branch as
+  // `feature` but with a prefix, so a guard comparing them raw sees two
+  // different refs. Without an upstream the case is unreachable and the
+  // assertion below would pass against the bug.
+  const remote = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-e2e-remote-"));
+  await git(remote, ["init", "--bare", "-q"]);
+
   await git(dir, ["init", "-q"]);
   await git(dir, ["config", "user.email", "t@example.com"]);
   await git(dir, ["config", "user.name", "Test"]);
@@ -63,8 +72,11 @@ async function makeRepo() {
   fs.writeFileSync(path.join(dir, "b.go"), "package main\n\nfunc helper() int { return 1 }\n");
   await git(dir, ["add", "."]);
   await git(dir, ["commit", "-q", "-m", "add helper"]);
+  await git(dir, ["remote", "add", "origin", remote]);
+  await git(dir, ["push", "-q", "-u", "origin", "feature"]);
+  // Uncommitted change so `workspace` has something to report.
   fs.appendFileSync(path.join(dir, "a.go"), "\n// trailing\n");
-  return dir;
+  return { dir, remote };
 }
 
 // The renderer is a single page that reads `last-repo` from localStorage on
@@ -112,6 +124,7 @@ app.whenReady().then(async () => {
   let repo = null;
   try {
     repo = await makeRepo();
+    const repoPath = repo.dir;
 
     // main.js creates the window on its own whenReady; requiring it here means
     // this process *is* the app, with its real handlers registered.
@@ -128,7 +141,7 @@ app.whenReady().then(async () => {
 
     // Seed the repository, then reload so the app boots against it.
     await window.webContents.executeJavaScript(
-      `localStorage.setItem("last-repo", ${JSON.stringify(repo)}); localStorage.setItem("guide-dismissed", "1"); true`,
+      `localStorage.setItem("last-repo", ${JSON.stringify(repoPath)}); localStorage.setItem("guide-dismissed", "1"); true`,
       true
     );
     window.webContents.reload();
@@ -177,14 +190,49 @@ app.whenReady().then(async () => {
     // 3. Nothing may have leaked a placeholder into real text along the way.
     const leaked = preview.match(/\bundefined\b|\bNaN\b|\[object Object\]/g);
     check("no placeholder text survived the round trip", !leaked, leaked ? leaked.join(", ") : "");
+
+    // 4. 分支对比 against the *real* git-service and the *real* CLI.
+    //
+    // The default base is computed from `repo:inspect`, and it was computed wrong
+    // in a way only a real repository shows: `@{upstream}` is the current
+    // branch's own remote, so the guard against comparing a branch with itself
+    // never fired and the scope came out as `main..main` — 0 files, exit 0. The
+    // throwaway repo has no upstream configured, so the default here is `main`
+    // from the ref list, and the preview must find the file the branch adds.
+    await window.webContents.executeJavaScript(
+      `(() => { const b = [...document.querySelectorAll("main button")].find((x) => (x.textContent || "").trim() === "分支对比"); if (b) b.click(); return Boolean(b); })()`,
+      true
+    );
+
+    const range = await waitFor(
+      window,
+      `(() => {
+         const t = document.querySelector("main").innerText;
+         return /b\\.go/.test(t) ? t : null;
+       })()`,
+      { label: "the range-mode preview (b.go)", timeout: 60000 }
+    ).catch(async () => window.webContents.executeJavaScript(`document.querySelector("main").innerText`, true).catch(() => ""));
+
+    check(
+      "分支对比 in a real repository previews the branch's own change",
+      /b\.go/.test(range),
+      /b\.go/.test(range) ? "" : `the branch-comparison scope produced no b.go — the default base is probably still the target itself. Screen said:\n${range.slice(0, 600)}`
+    );
+    const fields = await window.webContents.executeJavaScript(
+      `(() => { const i = [...document.querySelectorAll("main input")]; return i.map((x) => x.value).filter(Boolean); })()`,
+      true
+    );
+    check("the range scope names two different refs", new Set(fields).size >= 2, `the scope fields hold ${JSON.stringify(fields)}`);
   } catch (err) {
     check("the end-to-end flow completed", false, String((err && err.message) || err));
   } finally {
     if (repo) {
-      try {
-        fs.rmSync(repo, { recursive: true, force: true });
-      } catch {
-        /* a leftover temp dir is not a failure */
+      for (const dir of [repo.dir, repo.remote]) {
+        try {
+          fs.rmSync(dir, { recursive: true, force: true });
+        } catch {
+          /* a leftover temp dir is not a failure */
+        }
       }
     }
     finish();
