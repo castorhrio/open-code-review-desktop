@@ -37,7 +37,7 @@ The CLI is excellent but you live in a terminal: reading 40 line-level findings,
 | --- | --- |
 | **Four scopes** | workspace changes · branch range (merge-base) · single commit · full-file scan |
 | **Zero-cost preview first** | list the files that will be reviewed, with the *reason* each file was excluded (binary, secret path, unsupported type…), before any token is spent |
-| **Cost guardrails** | `--max-tokens-budget` and `--timeout` are first-class inputs, not hidden flags |
+| **Cost guardrails** | `--max-tokens-budget` and `--timeout` are real inputs, not hidden flags; a scan large enough to matter is confirmed against them before it starts |
 | **Honest run status** | `complete / partial / failed / completed_with_errors` badges, plus the exact list of files that were **not** reviewed and why — a truncated run never looks like a clean one |
 | **Resume** | interrupted, cancelled or partially failed runs can be resumed via official sessions; already-reviewed files are not billed twice |
 | **Session history** | browse, load, resume, export a self-contained HTML report, delete |
@@ -79,7 +79,7 @@ npm run dist:linux       # Linux AppImage + deb (build on Linux/WSL)
 
 1. Pick a repository in the top bar (must be a git repo root; Git ≥ 2.41 on `PATH`).
 2. In **Settings**, choose a provider, enter the API key and model name and hit **Test connection** — it checks the values in the form, nothing needs to be saved first; saving runs it again automatically. Several providers can stay configured at once: *Save only* stores one without taking over, and *Set as current* switches later.
-3. Back in **Review**, click **Preview file list** (free), check the scope, then start the review.
+3. Back in **Review**, the file list is computed for you — a preview costs no tokens — so check how many files the scope actually pulls in, then press **Start review** in the bar pinned to the bottom of the page. Everything that tunes *how* the run happens (effort, concurrency, per-run provider, token budget, exclusions) sits collapsed underneath, and every field has a working default.
 
 ## Architecture
 
@@ -132,6 +132,8 @@ The UI once drifted, one reasonable-looking change at a time, into three differe
 - **Unbounded text needs a bound.** Anything fed by a branch name, model id, provider name or path can arrive as one long unbreakable token. A flex/grid child defaults to `min-width: auto`, which refuses to shrink below its min-content width, so such a value pushes its container wide and something upstream clips it — the top bar once stretched to 2673px inside a 1440px window. Give the shrinking child `min-w-0` and `truncate`, cap the box (`max-w-[…]`), and put the full value in a `title`. In a `table-layout:auto` table the cell needs the cap too, or the column sizes to content.
 - **Two accent roles.** `--accent` is for text, borders and focus rings; `--accent-solid` is the fill behind light ink (primary buttons, checked controls). White on the bright accent is only 3.7:1 in dark mode, so a single token cannot serve both.
 - **The toast is a first-class surface, not a notification.** It is the only place a failure is ever reported — CLI errors, rejected refs, `cannot open <path>` — and it had drifted in three ways at once: it was pinned to `theme="system"` while the app had its own preference (a light app on a dark desktop styled its errors dark), `body`'s `user-select: none` made the error text uncopyable, and the CLI's multi-line `caused by:` / `hint:` structure was collapsed into one run-on sentence. All three are asserted in `audit:ui` against a deliberately failing fixture (`?toast=1`) rather than left to inspection. The theme preference itself now lives in `src/lib/theme.ts` with a `useSyncExternalStore` subscription instead of inside `NavRail`, so the toast layer and the app cannot disagree.
+- **The review page is a flow, not a form.** It had become a wall of tuning knobs — effort, concurrency, per-run provider and model, token budget, timeout, then a collapsed drawer of twelve more — with 开始审查 underneath all of it. At the 1000x660 window minimum the primary action was not on screen at all: the whole visible page was configuration with no way to start a review. The page now reads top-to-bottom as 范围 → 文件清单 → 参数（收起）, and the run action lives in a bar pinned to the bottom of the window that also states, before anything is spent, how many files will be reviewed and how big the diff is. The file list computes itself: a preview costs no tokens, and the one number that turns "配置" into a decision should not require a click the user has to think of.
+- **A run needs a surface that moves.** One file costs ~100K tokens and measured 3m48s, during which the CLI prints nothing but per-tool lines. The run screen used to reduce those to three counters and a tally every 25 calls — so a working run looked identical to a hung one. It now shows the tool calls themselves, bottom-anchored like a terminal: which file, what it searched for, how long it took, with the in-flight call as a pulsing row. The counters are orientation, not the signal.
 - **The ink ramp is measured, not eyeballed.** `--ink` / `--muted` / `--faint` land at 16.9 / 6.8 / 4.7:1 on canvas in light and 15.9 / 7.8 / 5.6:1 in dark. Keep the three steps apart, and re-measure if you add a surface.
 
 ### Verifying changes
@@ -143,7 +145,7 @@ npm run audit           # typecheck + all six checks below
 npm run audit:packaging # every runtime module is in the build.files allowlist
 npm run audit:service   # the real CLI: arg building and output parsing, all 4 modes
 npm run audit:update    # the update state machine, with the updater stubbed
-npm run audit:ui        # 36 states x 3 window sizes x 2 themes
+npm run audit:ui        # 38 states x 3 window sizes x 2 themes
 npm run audit:contrast  # WCAG AA for every text/background pair
 npm run audit:guards    # navigation + window-open policy, in real Electron
 ```
@@ -154,6 +156,8 @@ All of them exit non-zero on findings, so they work as a gate rather than a log,
 
 Two of the fixtures are not invented: `ocr session list --json` was run against real repositories on this machine, and the shapes it returns are what the fixtures encode — including a pre-manifest session (`legacy: true`, no `run_manifest`) whose 27 of 27 files failed. That is the session that exposed `sessionState()` returning `"complete"` for every manifest-less record, i.e. a green 完成 badge on a run that failed outright.
 
+The progress parser is tested the same way — by replaying a transcript rather than by describing it. `audit:service` feeds `feedProgressLine()` the stderr of a real single-file review, captured live (3m48s, 6 findings, 10 tool calls), and asserts the numbers the run screen shows. That replay is what the parser had no equivalent of when it matched only the scan wording `N file(s) discovered, reviewing M`: across all three diff modes the CLI prints `N file(s) changed`, so 进入审查 never left "—", and the run screen was three zeros over an empty window for four minutes.
+
 **`audit:update`** drives `update-service.js` with the updater stubbed — no network, no Electron, no release. It exists because that state machine had no test and it showed: two of its states could not be reached or could not be left, and neither is visible in a development build.
 
 - `suppressed` — the "已忽略" state — was assigned in exactly one place, from a synchronous comparison against a version the asynchronous check had not yet learned. So 忽略此版本 did nothing: the next launch announced the same release again, and `autoInstallOnAppQuit` applied it the next time the app closed. Suppression now happens in the two handlers that actually learn the version, and it switches `autoInstallOnAppQuit` off — persisting the choice is not the same as honouring it.
@@ -161,13 +165,16 @@ Two of the fixtures are not invented: `ocr session list --json` was run against 
 
 It also pins down the parts that are easy to break while fixing those: that a release the user did *not* ignore is still offered (the flags `suppress()` turns off must come back on), that the 已忽略 note does not leak onto a different version, that a silent launch failure stays quiet while an explicit one is reported, and that a portable build is told to download by hand whether the failure arrives as an event or as a rejected check.
 
-**`audit:ui`** asserts the declared measure cap, document overflow, and content that is clipped without an ellipsis. It prints `FAIL` with the offending element. It also asserts the results screen's *responsive contract* rather than only its absence of overflow: at 1440px there must be three panes and the code pane must clear the widest code line in the fixture; at 1000x660 there must be two panes with the code stacked and still at least one full line wide. A layout that silently clips the code satisfies "nothing overflows", so that is the check that matters. It renders three fixture sets, selected by query string:
+**`audit:ui`** asserts the declared measure cap, document overflow, and content that is clipped without an ellipsis. It prints `FAIL` with the offending element. It also asserts the results screen's *responsive contract* rather than only its absence of overflow: at 1440px there must be three panes and the code pane must clear the widest code line in the fixture; at 1000x660 there must be two panes with the code stacked and still at least one full line wide. A layout that silently clips the code satisfies "nothing overflows", so that is the check that matters.
+
+Two of its checks exist because the harness itself was once the blind spot. The bridge used to stub `onProgress` with a no-op, so the running screen was only ever rendered with a null progress — three zeros over a void — and reported as passing; it now replays the real transcript through the real parser and asserts both that the counters arrive and that the activity feed is anchored to the bottom of the window rather than floating in it. And 开始审查 used to sit under every knob the review page owns, so at the 1000x660 minimum the primary action was not on screen at all; the button's position is asserted at three window sizes now. It renders three fixture sets, selected by query string:
 
 | Query | What it exercises |
 | --- | --- |
 | *(none)* | Normal payloads — the everyday look of every screen |
 | `?sessions=many` | 65 sessions, so the history panel's paging and count are real |
 | `?stress=1` | 100+ char unbreakable tokens in every slot that holds arbitrary text |
+| `?clean=1` | A finished review that found nothing — a result, not an empty screen |
 | `?update=<phase>` | The update banner and status line — `downloading` / `ready` / `manual` / `suppressed` |
 
 The stress set is the one that earns its keep. Any slot fed by a branch name, model id, provider name or filesystem path can receive a string with no break opportunity, and a flex/grid child missing `min-w-0` will push its container wide instead of shrinking — after which something upstream clips it and the damage is invisible in normal use. It found the top bar stretching to 2673px inside a 1440px window, a select overflowing by 93px, and a settings table pushing 193px past its card.

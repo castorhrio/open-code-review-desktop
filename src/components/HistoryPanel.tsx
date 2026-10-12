@@ -117,7 +117,7 @@ export function HistoryPanel() {
                         续跑
                       </Button>
                     )}
-                    <Button variant="ghost" size="sm" onClick={() => void exportSession(s)} title="导出自包含 HTML 报告">
+                    <Button variant="ghost" size="sm" onClick={() => void exportSession(s.session_id)} title="导出自包含 HTML 报告">
                       <Download className="size-3.5" />
                     </Button>
                     <Button variant="ghost" size="sm" className="text-bad" onClick={() => setPendingDelete(s)} title="删除这条会话">

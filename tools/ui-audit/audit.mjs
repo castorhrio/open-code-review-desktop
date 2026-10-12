@@ -192,9 +192,65 @@ function resultsGrid(page) {
   }, CODE_NEEDS);
 }
 
+/**
+ * The findings list is the navigation surface for the whole screen, and it was
+ * rendering the CLI's light markdown raw: rows read `**密码校验用了普通的字符串比较**`
+ * while the pane beside them rendered the same text bold. Every row showed
+ * punctuation that only exists to be consumed by a renderer. The detail pane is
+ * allowed to keep inline code styled; the list must not show the markers.
+ */
+const expectCleanSummaries = async (page) => {
+  const out = [];
+  const rows = await page.locator("main").evaluate(() => {
+    // The master list is the first column of the results grid: the buttons that
+    // carry a severity stripe.
+    const list = document.querySelector("main .grid > div:first-child");
+    if (!list) return null;
+    return [...list.querySelectorAll("button")].map((b) => b.innerText.replace(/\s+/g, " ").trim());
+  });
+  if (!rows) return ["the findings list column was not found"];
+  if (rows.length < 3) out.push(`only ${rows.length} finding rows rendered`);
+  for (const r of rows) {
+    if (r.includes("**")) out.push(`a finding summary shows literal bold markers: "${r.slice(0, 60)}"`);
+    if (r.includes("`")) out.push(`a finding summary shows literal backticks: "${r.slice(0, 60)}"`);
+  }
+  return out;
+};
+
+/**
+ * The screen a user watches for minutes while a review runs. The bridge used to
+ * stub `onProgress` with a no-op, so the audit only ever saw three zeros over an
+ * empty window and reported it as passing — while the real complaint against
+ * this screen is "I thought it had hung". Both halves are asserted: the data
+ * (a scope count that actually arrived) and the density (a feed that fills the
+ * screen rather than floating in it).
+ */
+const expectRunningFeed = async (page) => {
+  const seen = await page.evaluate(() => {
+    const main = document.querySelector("main");
+    const list = main.querySelector("ol");
+    const rows = list ? [...list.querySelectorAll("li")] : [];
+    const last = rows[rows.length - 1];
+    const box = list?.parentElement?.getBoundingClientRect();
+    const lb = last?.getBoundingClientRect();
+    return {
+      rows: rows.length,
+      text: main.innerText.replace(/\s+/g, " "),
+      cells: [...main.querySelectorAll(".tnum")].map((e) => e.textContent.trim()),
+      gapBelow: box && lb ? Math.round(box.bottom - lb.bottom) : -1,
+    };
+  });
+  const out = [];
+  if (seen.rows < 4) out.push(`the activity feed showed only ${seen.rows} rows — a run with nothing on screen reads as a hung app`);
+  if (seen.cells.includes("—")) out.push(`a run counter never left "—": ${seen.cells.join(", ")}`);
+  if (seen.cells.includes("…")) out.push(`a run counter never left its placeholder: ${seen.cells.join(", ")}`);
+  if (!/进入审查/.test(seen.text)) out.push("the run screen lost its scope counter");
+  if (seen.gapBelow > 60) out.push(`${seen.gapBelow}px of empty window under the last activity row — the feed floats instead of anchoring`);
+  return out;
+};
+
 /** Wide: three columns, and the code column clears the widest line. */
-const expectThreePanes = async (page) => {
-  const g = await resultsGrid(page);
+const expectThreePanes = async (page) => {  const g = await resultsGrid(page);
   if (g.error) return [g.error];
   const out = [];
   if (g.cols !== 3) out.push(`expected 3 panes at this width, got ${g.cols} (${g.widths.join("/")})`);
@@ -221,8 +277,24 @@ const expectCodeStacked = async (page) => {
  * the "nothing entered the review" explanation, which looks like a perfectly
  * plausible state. Assert the contents, not just the layout.
  */
-const expectPreviewListed = async (page) => {
-  const out = [];
+/**
+ * 开始审查 is the page's only primary action, and it used to sit underneath
+ * every knob the form owns: at the 1000x660 floor it was not on screen at all,
+ * so the smallest legal window showed a wall of configuration with no way to
+ * start a review. It is pinned now, and this is what keeps it pinned.
+ */
+const expectRunActionVisible = async (page) => {
+  const btn = page.getByRole("button", { name: /开始审查|续跑未完成部分/ });
+  if ((await btn.count()) === 0) return ["the run action is missing from the review page"];
+  const box = await btn.first().boundingBox();
+  const vp = page.viewportSize();
+  if (!box || !vp) return ["the run action could not be measured"];
+  if (box.y + box.height > vp.height + 1)
+    return [`the run action sits ${Math.round(box.y + box.height - vp.height)}px below the fold in a ${vp.height}px window`];
+  return [];
+};
+
+const expectPreviewListed = async (page) => {  const out = [];
   const text = await page.locator("main").innerText();
   if (!/进入审查 5 \/ 共 8 个文件/.test(text)) out.push("the preview header does not report 5 of 8");
   if (!/以下 3 个不进入审查/.test(text)) out.push("the excluded files are not listed");
@@ -239,7 +311,7 @@ page.on("console", (m) => {
 });
 page.on("pageerror", (e) => console.log("  [pageerror]", String(e).slice(0, 220)));
 
-await shoot(page, "01-review-wide", { after: nav("审查") });
+await shoot(page, "01-review-wide", { after: nav("审查"), expect: expectRunActionVisible });
 await shoot(page, "02-review-no-guide", { storage: { "last-repo": "" } });
 await shoot(page, "03-review-scan", {
   after: async (page) => {
@@ -247,9 +319,9 @@ await shoot(page, "03-review-scan", {
     await page.waitForTimeout(300);
   },
 });
-await shoot(page, "04-review-advanced", {
+await shoot(page, "04-review-tuning", {
   after: async (page) => {
-    await page.getByRole("button", { name: /高级参数/ }).click();
+    await page.getByRole("button", { name: /调整这次审查的参数/ }).click();
     await page.waitForTimeout(300);
   },
 });
@@ -282,7 +354,9 @@ await shoot(page, "08-settings-bottom", {
     await nav("设置")(page);
     await page.waitForTimeout(400);
     await page.evaluate(() => {
-      const el = document.querySelector("main > div");
+      const el = [...document.querySelectorAll("main *")].find(
+        (n) => n.scrollHeight > n.clientHeight + 4 && /auto|scroll/.test(getComputedStyle(n).overflowY)
+      );
       if (el) el.scrollTop = el.scrollHeight;
     });
   },
@@ -293,24 +367,26 @@ await shoot(page, "09-results-findings", {
     await openFindings(page);
     await selectFirstFinding(page);
   },
-  expect: expectThreePanes,
+  expect: async (page) => [...(await expectThreePanes(page)), ...(await expectCleanSummaries(page))],
 });
-await shoot(page, "10-review-narrow", { width: 1100, height: 780 });
+await shoot(page, "10-review-narrow", { width: 1100, height: 780, expect: expectRunActionVisible });
 await shoot(page, "11-settings-narrow", { width: 1100, height: 780, after: nav("设置") });
-await shoot(page, "12-review-xwide", { width: 1920, height: 1080 });
+await shoot(page, "12-review-xwide", { width: 1920, height: 1080, expect: expectRunActionVisible });
 
-// The preview used to render only inside a sidebar that existed above 1536px,
-// so this state was previously invisible on most screens.
+// The file list now computes itself as soon as the scope settles, so this shot
+// is the automatic path rather than a button press. The preview used to render
+// only inside a sidebar that existed above 1536px, which is what made the state
+// invisible on most screens.
 await shoot(page, "13-review-preview", {
   width: 1440,
   height: 900,
   after: async (page) => {
     await nav("审查")(page);
-    await page.waitForTimeout(300);
-    await page.getByRole("button", { name: /预览清单/ }).click();
-    await page.waitForTimeout(900);
+    await page.waitForTimeout(1400);
     await page.evaluate(() => {
-      const el = document.querySelector("main > div");
+      const el = [...document.querySelectorAll("main *")].find(
+        (n) => n.scrollHeight > n.clientHeight + 4 && /auto|scroll/.test(getComputedStyle(n).overflowY)
+      );
       if (el) el.scrollTop = el.scrollHeight;
     });
   },
@@ -321,7 +397,7 @@ await shoot(page, "13-review-preview", {
 // can ever get. The three-column grid cannot be satisfied down here (the
 // minimums alone come to ~1180px), so the code folds into the detail column
 // rather than being clipped to a third of a line.
-await shoot(page, "14-min-review", { width: 1000, height: 660, after: nav("审查") });
+await shoot(page, "14-min-review", { width: 1000, height: 660, after: nav("审查"), expect: expectRunActionVisible });
 await shoot(page, "15-min-settings", { width: 1000, height: 660, after: nav("设置") });
 await shoot(page, "16-min-results", {
   fullWidth: true,
@@ -344,6 +420,7 @@ await shoot(page, "18-results-running", {
     await page.getByRole("button", { name: /开始审查/ }).click();
     await page.waitForTimeout(1400);
   },
+  expect: expectRunningFeed,
 });
 await shoot(page, "19-light-review", { storage: { ...STORAGE, "ocr-theme-pref": "light" }, after: nav("审查") });
 await shoot(page, "20-light-settings", {
@@ -429,9 +506,7 @@ await shoot(page, "28-stress-preview", {
   query: "?stress=1",
   after: async (page) => {
     await nav("审查")(page);
-    await page.waitForTimeout(400);
-    await page.locator("main").getByRole("button", { name: /预览清单/ }).first().click();
-    await page.waitForTimeout(900);
+    await page.waitForTimeout(1400);
   },
   expect: expectPreviewListed,
 });
@@ -453,7 +528,7 @@ for (const [name, storage] of [
       const card = page.locator("main").getByRole("heading", { name: "三步开始第一次审查" });
       if (!(await card.count())) return ["the guide card is not rendered for a user who has not dismissed it"];
       const text = await page.locator("main").innerText();
-      for (const step of ["选择要审查的仓库目录", "配置模型服务与 API Key", "先预览文件清单，再开始审查"])
+      for (const step of ["选择要审查的仓库目录", "配置模型服务与 API Key", "点「开始审查」，结果在「结果」页"])
         if (!text.includes(step)) out.push(`guide step missing: ${step}`);
       if (!text.includes("不再提示")) out.push("no way to dismiss the guide");
       return out;
@@ -521,7 +596,10 @@ await shoot(page, "31-toast-error", {
     return out;
   },
 });
-await page.emulateMedia({ colorScheme: null });
+// Not `null`: that releases the override to the browser's own preference, which
+// left every shot after this one rendering dark while the light-theme pass at
+// 19–21 believed it had covered the other half.
+await page.emulateMedia({ colorScheme: "light" });
 
 // A scope that legitimately contains nothing to review. Two behaviours matter
 // and neither is visible in a screenshot of the happy path:
@@ -533,29 +611,30 @@ await shoot(page, "32-review-empty-scope", {
   query: "?empty=1",
   after: async (page) => {
     await nav("审查")(page);
-    await page.waitForTimeout(300);
-    await page.getByRole("button", { name: /预览清单/ }).click();
-    await page.waitForTimeout(700);
+    await page.waitForTimeout(1400);
   },
   expect: async (page) => {
     const out = [];
     const text = await page.locator("main").innerText();
     if (!/进入审查 0 \/ 共 8 个文件/.test(text)) out.push("the empty preview did not report 0 of 8");
     if (!/没有文件进入审查/.test(text)) out.push("no explanation for the empty scope");
+    // The bar under the fold used to be the only place that said what would be
+    // reviewed; it is on screen now, so the count has to be readable there.
+    if (!/当前范围没有文件进入审查/.test(text)) out.push("the pinned run bar does not state that the scope is empty");
 
-    // Change the scope: the stale count must go, not linger as if current.
+    // Change the scope: the stale count must go, not linger as if current. The
+    // list recomputes itself, so the window to observe that is the debounce.
     await page.getByRole("button", { name: /分支对比/ }).click();
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(250);
     if ((await page.locator("main").getByText("文件清单").count()) !== 0)
       out.push("the preview survived a change of scope, so its count is now stale");
+    await page.waitForTimeout(1400);
+    if ((await page.locator("main").getByText("文件清单").count()) === 0)
+      out.push("the preview never came back after the scope changed — the list is manual again");
 
     // And pressing run with nothing to review must explain, not start.
-    await nav("审查")(page);
-    await page.waitForTimeout(200);
     await page.getByRole("button", { name: /工作区改动/ }).click();
-    await page.waitForTimeout(200);
-    await page.getByRole("button", { name: /预览清单/ }).click();
-    await page.waitForTimeout(700);
+    await page.waitForTimeout(1400);
     await page.getByRole("button", { name: /开始审查/ }).click();
     await page.waitForTimeout(900);
     const toastText = await page.locator("[data-sonner-toast]").innerText().catch(() => "");
@@ -675,6 +754,41 @@ await shoot(page, "36-update-suppressed", {
     if (/还没检查过更新/.test(text)) out.push("an ignored version still claims 还没检查过更新");
     if ((await page.locator("body").innerText()).includes("已下载完成"))
       out.push("a suppressed release is still being announced in the banner");
+    return out;
+  },
+});
+
+// A review that finds nothing is still a finished review, and it used to render
+// the same sentence as a filter that had hidden everything — which reads as
+// "the tool broke", not "your code is clean".
+await shoot(page, "37-results-clean", {
+  query: "?clean=1",
+  after: openFindings,
+  expect: async (page) => {
+    const text = await page.locator("main").innerText();
+    const out = [];
+    if (!/这次审查没有提出问题/.test(text)) out.push("a clean review does not say so");
+    if (/没有匹配当前筛选/.test(text)) out.push("a clean review blames the filters");
+    const counted = [...text.matchAll(/(\d+) 条评论/g)].map((m) => m[1]);
+    if (counted.some((n) => n !== "0")) out.push(`the header still counts comments this review does not have: ${counted.join(",")}`);
+    if (/在左侧选择一条评论/.test(text)) out.push("an empty pane is telling the reader to select from a list that is empty");
+    return out;
+  },
+});
+
+// A finished review used to land on two empty panes ("在左侧选择一条评论"), so
+// the highest-value content needed a click before it existed on screen. Opening
+// the most severe finding is asserted here rather than assumed: the fixture's
+// first row is a `medium`, and the row that should be selected for free is the
+// `critical` one further down the list.
+await shoot(page, "38-results-lands-on-worst", {
+  after: openFindings,
+  expect: async (page) => {
+    const text = await page.locator("main").innerText();
+    const out = [];
+    if (!/密码校验用了普通的字符串比较/.test(text)) out.push("the run did not land on the most severe finding");
+    if (/在左侧选择一条评论/.test(text)) out.push("the detail pane is still empty after a result arrives");
+    if (/选中评论后在这里显示对应代码位置/.test(text)) out.push("the code pane is still empty after a result arrives");
     return out;
   },
 });

@@ -1,13 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Download, ExternalLink, FileCode2, FolderOpen, Search, Sparkles, Wrench, Copy } from "lucide-react";
 import { api, type FileWindow } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import { SEVERITY_DOT, SEVERITY_TEXT, STATUS, coverageOf, firstLine, terminalState } from "@/lib/format";
+import { SEVERITY_DOT, SEVERITY_LABEL, SEVERITY_RANK, SEVERITY_TEXT, STATUS, coverageOf, summaryLine, terminalState } from "@/lib/format";
 import { copyText } from "@/lib/clipboard";
 import type { Finding } from "@/lib/types";
 import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
-import { EmptyState, PageBody, PanelHeader } from "@/components/ui/layout";
+import { EmptyState, PanelHeader } from "@/components/ui/layout";
 import { Badge } from "@/components/ui/overlay";
 import { toast } from "sonner";
 
@@ -30,20 +30,35 @@ function findingToMarkdown(c: Finding): string {
 
 /**
  * Minimal markdown for the CLI's own prose. The CLI writes findings and the
- * project summary in light markdown, so rendering them raw leaks `**` and `-`
- * into the primary reading surface.
+ * project summary in light markdown, so rendering them raw leaks `**` into the
+ * primary reading surface. Findings name identifiers constantly, so inline code
+ * is the second construct worth handling — it was rendering as literal
+ * backticks in the one place a reader is trying to follow an argument about
+ * `subtle.ConstantTimeCompare`.
+ *
+ * Both are split in a single pass so a line that mixes them keeps its order.
+ * The length guards matter: a stray `**` in prose (no closing pair) must render
+ * as itself, not as an empty `<b>` that silently deletes it.
  */
+const INLINE = /(\*\*[^*]+\*\*|`[^`]+`)/g;
+
 function MarkdownLite({ text, className }: { text: string; className?: string }) {
   const inline = (s: string, key: string) =>
-    s.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
-      part.startsWith("**") && part.endsWith("**") ? (
-        <b key={key + i} className="font-semibold text-ink">
-          {part.slice(2, -2)}
-        </b>
-      ) : (
-        <span key={key + i}>{part}</span>
-      )
-    );
+    s.split(INLINE).map((part, i) => {
+      if (part.length > 4 && part.startsWith("**") && part.endsWith("**"))
+        return (
+          <b key={key + i} className="font-semibold text-ink">
+            {part.slice(2, -2)}
+          </b>
+        );
+      if (part.length > 2 && part.startsWith("`") && part.endsWith("`"))
+        return (
+          <code key={key + i} className="rounded-xs bg-raised px-1 font-mono text-ink">
+            {part.slice(1, -1)}
+          </code>
+        );
+      return <span key={key + i}>{part}</span>;
+    });
   return (
     <div className={cn("space-y-1.5 text-body text-muted", className)}>
       {text.split(/\r?\n/).map((line, i) => {
@@ -141,8 +156,99 @@ function FileViewer({ current, file, variant }: { current: Finding; file: FileWi
   );
 }
 
+/**
+ * The screen a user watches for minutes, and the reason it looks the way it
+ * does: a single-file review measured 3m48s end to end, during which the CLI
+ * emits nothing but per-tool lines. The previous version counted those into a
+ * tally every 25 and showed three zeros beside a paragraph — for a run that was
+ * working perfectly, which is exactly "the app has hung".
+ *
+ * So the CLI's own activity *is* the interface here: every tool call, with what
+ * it asked for and how long it took, growing downward and auto-following. The
+ * counters above it are secondary orientation, not the main signal.
+ */
+function RunningView() {
+  const { elapsed, runLabel, progress, cancelRun } = useStore();
+  const feed = useRef<HTMLDivElement>(null);
+  const activity = progress?.activity ?? [];
+
+  useEffect(() => {
+    const el = feed.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [activity.length]);
+
+  const cells = [
+    { label: "进入审查", value: progress ? progress.reviewing || progress.files || "—" : "…" },
+    { label: "工具调用", value: progress ? progress.tools : "…" },
+    { label: "已产出评论", value: progress ? progress.comments : 0 },
+    ...(progress && progress.excluded ? [{ label: "被规则排除", value: progress.excluded }] : []),
+  ];
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <PanelHeader>
+        <Badge tone="accent">{runLabel || "审查运行中"}</Badge>
+        <span className="tnum text-meta text-muted">已运行 {elapsed}s</span>
+        {progress?.current && (
+          <span className="flex min-w-0 items-center gap-1.5 text-meta text-faint">
+            正在
+            <span className="min-w-0 truncate font-mono text-body text-ink">{progress.current}</span>
+          </span>
+        )}
+        {progress?.cost && <span className="tnum hidden text-meta text-muted sm:inline">预计 {progress.cost}</span>}
+        <Button variant="ghost" size="sm" className="ml-auto shrink-0 text-bad" onClick={() => void cancelRun()}>
+          取消
+        </Button>
+      </PanelHeader>
+
+      <div className="grid shrink-0 grid-cols-[repeat(auto-fit,minmax(120px,1fr))] divide-x divide-line border-b border-line bg-surface">
+        {cells.map((cell) => (
+          <div key={cell.label} className="px-4 py-2.5">
+            <div className="tnum text-stat font-semibold text-ink">{cell.value}</div>
+            <div className="mt-0.5 text-meta text-faint">{cell.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Bottom-anchored, like a terminal: a feed of five rows would otherwise
+          float at the top of a tall window and leave the screen reading as a
+          void — the exact shape this rewrite exists to remove. */}
+      <div ref={feed} className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-3">
+        <ol className="mt-auto space-y-1">
+          {activity.length === 0 && (
+            <li className="text-body text-faint">正在启动 ocr…第一行输出到达后，这里会开始逐条显示它在读哪个文件、查了什么。</li>
+          )}
+          {activity.map((a) => (
+            <li key={a.id} className="flex items-baseline gap-2">
+              {a.kind === "note" ? (
+                <span className={cn("shrink-0 text-meta", a.warn ? "text-warn" : "text-accent")}>{a.warn ? "!" : "›"}</span>
+              ) : (
+                <span
+                  className={cn(
+                    "size-1.5 shrink-0 self-center rounded-full",
+                    a.state === "running" ? "animate-pulse bg-accent" : a.state === "failed" ? "bg-bad" : "bg-ok"
+                  )}
+                />
+              )}
+              <span className={cn("shrink-0 font-mono text-body", a.kind === "note" ? "text-ink" : "text-muted")}>
+                {a.kind === "note" ? a.text : a.tool}
+              </span>
+              {a.args && <span className="min-w-0 truncate font-mono text-meta text-faint">{a.args}</span>}
+              {a.ms && <span className="tnum shrink-0 font-mono text-meta text-faint">{a.ms}</span>}
+            </li>
+          ))}
+        </ol>
+      </div>
+
+      <div className="shrink-0 border-t border-line bg-surface px-4 py-2 text-meta text-faint">
+        每个文件先做一次预分析、再带着工具逐段读，所以前几分钟通常一条评论都没有——这不是卡住。中断后可在「历史」里续跑，已审完的文件不会重复计费。
+      </div>
+    </div>
+  );
+}
+
 export function ResultsPanel() {
-  const { result, resultOrigin, comments, form, repo, exportSession, history, resume, running, elapsed, runLabel, progress, cancelRun, startRun, setView } = useStore();
+  const { result, resultOrigin, comments, form, repo, exportSession, resume, running, startRun, setView } = useStore();
   const [sevOn, setSevOn] = useState<Set<string>>(() => new Set(SEVERITIES));
   const [cat, setCat] = useState("");
   const [text, setText] = useState("");
@@ -164,9 +270,27 @@ export function ResultsPanel() {
       .sort((a, b) => a.c.path.localeCompare(b.c.path) || a.c.start_line - b.c.start_line);
   }, [comments, sevOn, cat, text]);
 
+  /**
+   * Land on something. A finished review used to open on two empty panes and a
+   * line telling the reader to click a row — the payoff of the whole app was
+   * one click away from being unseen. The most severe finding is what the run
+   * was for, so that is what gets opened.
+   */
   useEffect(() => {
-    setSelected(-1);
-    setFile(null);
+    if (comments.length === 0) {
+      setSelected(-1);
+      setFile(null);
+      return;
+    }
+    const top = comments.reduce(
+      (best, c, i) =>
+        SEVERITY_RANK[c.severity || ""] < SEVERITY_RANK[comments[best].severity || ""] ? i : best,
+      0
+    );
+    void open(top);
+    // `open` and `comments` are current at the time `result` changes; re-running
+    // on their own identities would re-jump the reader mid-session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [result]);
 
   const current = selected >= 0 ? comments[selected] : null;
@@ -204,44 +328,7 @@ export function ResultsPanel() {
     return () => window.removeEventListener("keydown", onKey);
   }, [filtered, selected, open]);
 
-  if (running) {
-    const tools = progress?.tools ?? 0;
-    const total = progress?.reviewing ?? 0;
-    return (
-      <div className="flex h-full flex-col">
-        <PanelHeader>
-          <Badge tone="accent">{runLabel || "审查运行中"}</Badge>
-          <span className="tnum text-meta text-muted">已运行 {elapsed}s</span>
-          <Button variant="ghost" size="sm" className="ml-auto text-bad" onClick={() => void cancelRun()}>
-            取消
-          </Button>
-        </PanelHeader>
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <PageBody narrow>
-            <p className="text-strong font-medium text-ink">正在审查，下面这些数字会一直动</p>
-            <div className="grid grid-cols-3 gap-3 text-center">
-              {[
-                { label: "进入审查的文件", value: total || "—" },
-                { label: "已完成的工具调用", value: tools },
-                { label: "已产出的评论", value: progress?.comments ?? 0 },
-              ].map((cell) => (
-                <div key={cell.label} className="rounded-md border border-line bg-surface px-3 py-4">
-                  <div className="tnum text-stat font-semibold text-ink">{cell.value}</div>
-                  <div className="mt-1 text-meta text-faint">{cell.label}</div>
-                </div>
-              ))}
-            </div>
-            {progress?.cost && <p className="rounded-md border border-line bg-raised px-3 py-2 font-mono text-meta text-muted">{progress.cost}</p>}
-            {progress?.excluded ? <p className="text-meta text-faint">另有 {progress.excluded} 个文件被规则排除（原因见运行日志）。</p> : null}
-            <p className="text-meta text-faint">
-              每个文件要先做一次预分析、再带着工具去审，所以前几分钟通常一条评论都没有——这不是卡住。
-              底部「运行日志」里有 CLI 的原始输出，可整段复制。中断可以用「历史」里的会话续跑，已审完的文件不会重复计费。
-            </p>
-          </PageBody>
-        </div>
-      </div>
-    );
-  }
+  if (running) return <RunningView />;
 
   if (!result) {
     if (resume) {
@@ -290,7 +377,6 @@ export function ResultsPanel() {
   const failed = coverageOf(result, "failed");
   const waived = coverageOf(result, "waived");
   const sessionId = result.session_id || "";
-  const session = history.find((h) => h.session_id === sessionId);
 
   const exportJson = async () => {
     const res = await api.saveText({
@@ -356,8 +442,8 @@ export function ResultsPanel() {
             <Copy className="size-3.5" />
             复制全部
           </Button>
-          {sessionId && session && (
-            <Button variant="ghost" size="sm" onClick={() => void exportSession(session)}>
+          {sessionId && (
+            <Button variant="ghost" size="sm" title="导出自包含 HTML 报告，可单独打开或转发" onClick={() => void exportSession(sessionId)}>
               <FileCode2 className="size-3.5" />
               HTML 报告
             </Button>
@@ -412,13 +498,14 @@ export function ResultsPanel() {
                   return next;
                 })
               }
+              title={sev || "CLI 未标注严重级"}
               className={cn(
                 "flex items-center gap-1 rounded-full border px-2 py-0.5 text-meta transition-colors",
                 sevOn.has(sev) ? "border-line-strong bg-raised text-ink" : "border-line bg-transparent text-faint"
               )}
             >
               <span className={cn("size-1.5 rounded-full", SEVERITY_DOT[sev])} />
-              {sev || "未标注"}
+              {SEVERITY_LABEL[sev]}
             </button>
           ))}
         </div>
@@ -460,7 +547,37 @@ export function ResultsPanel() {
           pane got at 1440px before this. */}
       <div className="grid min-h-0 flex-1 divide-x divide-line grid-cols-[minmax(240px,300px)_minmax(320px,1fr)_minmax(620px,1.25fr)] @max-[1240px]:grid-cols-[minmax(240px,300px)_minmax(0,1fr)]">
         <div className="min-h-0 overflow-y-auto">
-          {filtered.length === 0 && <p className="p-6 text-center text-body text-faint">没有匹配的评论。</p>}
+          {filtered.length === 0 && (
+            <div className="p-6 text-center">
+              {comments.length === 0 ? (
+                <>
+                  {/* A review that found nothing is a result, not an empty screen.
+                      Saying only "没有匹配的评论" made a clean run look like a
+                      filter had eaten it. */}
+                  <p className="text-body text-ink">这次审查没有提出问题。</p>
+                  <p className="mt-1 text-meta text-faint">
+                    已审 {String(s.files_reviewed ?? "—")} 个文件。范围不对的话，换个模式或改小排除规则再跑一次。
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-body text-muted">没有匹配当前筛选的评论。</p>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="mt-2"
+                    onClick={() => {
+                      setSevOn(new Set(SEVERITIES));
+                      setCat("");
+                      setText("");
+                    }}
+                  >
+                    清除筛选
+                  </Button>
+                </>
+              )}
+            </div>
+          )}
           {filtered.map(({ c, i }) => {
             const sev = c.severity || "";
             return (
@@ -474,7 +591,7 @@ export function ResultsPanel() {
               >
                 <span className={cn("mt-1 w-0.5 shrink-0 self-stretch rounded-full", SEVERITY_DOT[sev])} />
                 <span className="min-w-0 flex-1">
-                  <span className="line-clamp-2 text-body text-ink">{firstLine(c.content)}</span>
+                  <span className="line-clamp-2 text-body text-ink">{summaryLine(c.content)}</span>
                   {/* `faint` over `--accent-soft` is 4.2:1, so the selected row's
                       metadata steps up to `muted`. */}
                   <span className={cn("mt-1 flex items-center gap-2 font-mono text-meta", i === selected ? "text-muted" : "text-faint")}>
@@ -502,12 +619,18 @@ export function ResultsPanel() {
           )}
         >
           <div className={cn("px-4 py-3", current && "@max-[1240px]:min-h-0 @max-[1240px]:overflow-y-auto")}>
-            {!current && <p className="pt-10 text-center text-body text-faint">在左侧选择一条评论。</p>}
+            {/* With no findings at all the list column already carries the one
+                sentence this state needs; two more placeholders in the empty
+                panes turn "clean" into three competing messages. */}
+            {!current && comments.length > 0 && <p className="pt-10 text-center text-body text-faint">在左侧选择一条评论。</p>}
             {current && (
               <>
                 <div className="mb-3 flex flex-wrap items-center gap-1.5">
-                  <Badge className={cn("border-transparent", SEVERITY_TEXT[current.severity || ""], "bg-transparent px-0 font-semibold")}>
-                    {current.severity || "未标注严重级"}
+                  <Badge
+                    title={current.severity || "CLI 未标注严重级"}
+                    className={cn("border-transparent", SEVERITY_TEXT[current.severity || ""], "bg-transparent px-0 font-semibold")}
+                  >
+                    {SEVERITY_LABEL[current.severity || ""]}
                   </Badge>
                   {current.category && <Badge>{current.category}</Badge>}
                   <span className="font-mono text-meta text-faint">
@@ -552,7 +675,7 @@ export function ResultsPanel() {
           {current ? (
             <FileViewer current={current} file={file} variant="pane" />
           ) : (
-            <p className="p-4 text-body text-faint">选中评论后在这里显示对应代码位置。</p>
+            comments.length > 0 && <p className="p-4 text-body text-faint">选中评论后在这里显示对应代码位置。</p>
           )}
         </div>
       </div>

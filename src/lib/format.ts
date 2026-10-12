@@ -18,6 +18,20 @@ export const SEVERITY_DOT: Record<Severity | string, string> = {
   "": "bg-line-strong",
 };
 
+/**
+ * The CLI's severity vocabulary is English, and every other label in the app is
+ * Chinese — so the filter pills and the detail badge read as raw enum values.
+ * The enum stays available as the tooltip, because it is what the CLI writes and
+ * what a user sees in an exported report.
+ */
+export const SEVERITY_LABEL: Record<string, string> = {
+  critical: "严重",
+  high: "高",
+  medium: "中",
+  low: "低",
+  "": "未标注",
+};
+
 /** `status` / `manifest.terminal_state` vocabulary of the CLI. */
 export const STATUS: Record<string, { label: string; cls: string }> = {
   success: { label: "完成", cls: "border-ok/40 bg-ok/10 text-ok" },
@@ -106,6 +120,30 @@ export function humanDuration(ns: number | undefined): string {
   return `${Math.floor(mins / 60)} 时 ${mins % 60} 分`;
 }
 
-export function firstLine(s: string): string {
-  return String(s || "").split(/\r?\n/)[0].slice(0, 200);
+/**
+ * The one-line summary of a finding, for the master list.
+ *
+ * The CLI writes findings in light markdown, and the list rendered it raw: a row
+ * read `**密码校验用了普通的字符串比较**` and `这里对 `email` 建了索引却又套了
+ * `LOWER()``, while the pane beside it rendered the same text bold. The list is
+ * the navigation surface for the whole screen, so every row was showing
+ * punctuation that exists only to be consumed by a renderer.
+ *
+ * Strip the markers rather than render them: this is a summary, and the
+ * formatted version is one click away. Leading blank lines are skipped, because
+ * findings often open with one.
+ */
+export function summaryLine(s: string): string {
+  const line = String(s || "")
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .find(Boolean);
+  if (!line) return "";
+  return line
+    .replace(/^#{1,6}\s+/, "") // heading
+    .replace(/^(\d+\.|[-*+])\s+/, "") // list marker
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1") // link -> its text
+    .replace(/\*\*([^*]+)\*\*/g, "$1") // bold
+    .replace(/`([^`]*)`/g, "$1") // inline code
+    .slice(0, 200);
 }

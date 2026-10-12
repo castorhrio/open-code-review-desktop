@@ -107,7 +107,7 @@ interface Store {
   history: SessionSummary[];
   historyLoading: boolean;
   refreshHistory: () => Promise<void>;
-  exportSession: (s: SessionSummary) => Promise<void>;
+  exportSession: (sessionId: string) => Promise<void>;
   deleteSession: (s: SessionSummary) => Promise<void>;
   saveConfig: (form: Parameters<typeof api.saveConfig>[0]) => Promise<boolean>;
   unsetProvider: () => Promise<void>;
@@ -313,6 +313,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (r.value) {
         applyResult({ ...r.value, session_id: r.value.session_id || r.sessionId || "" }, { kind: "run" });
         setView("results");
+        // The session the run just wrote is what the results header exports as an
+        // HTML report, and it used to be absent from `history` until the user
+        // visited that page — so the report button silently disappeared at the
+        // one moment a reader most wants it outside the app.
+        void refreshHistory();
       } else if (r.sessionId) {
         setResume({ sessionId: r.sessionId, reason: "failed", failed: 0 });
       }
@@ -440,8 +445,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [applyResult]
   );
 
-  const exportSession = useCallback(async (s: SessionSummary) => {
-    const res = await api.exportSession(repoRef.current, s.session_id);
+  // Takes the id rather than a SessionSummary: the results header offers the
+  // same export, and the session it just produced is not in `history` yet.
+  const exportSession = useCallback(async (sessionId: string) => {
+    const res = await api.exportSession(repoRef.current, sessionId);
     if (res.ok && res.file) toast.success("已导出 HTML 报告", { description: res.file });
     else if (!res.canceled) toast.error("导出失败", { description: res.error });
   }, []);

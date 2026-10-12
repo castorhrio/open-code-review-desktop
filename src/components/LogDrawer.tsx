@@ -16,7 +16,11 @@ export function LogDrawer() {
   }, [running]);
 
   useEffect(() => {
-    if (log.length && !revealed.current) {
+    // The running screen carries the live feed now, so the drawer no longer has
+    // to open itself for the app to look alive — and while it did, it took 170px
+    // away from that feed on every single run. It still opens on its own for
+    // output that looks like trouble, which is the one thing the feed truncates.
+    if (log.length && !revealed.current && /error|warning|失败|无法|✗/i.test(log[log.length - 1])) {
       revealed.current = true;
       setOpen(true);
     }

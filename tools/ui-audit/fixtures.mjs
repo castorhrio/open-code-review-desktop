@@ -3,6 +3,7 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
+import { createRequire } from "node:module";
 
 export const ROOT = path.resolve(import.meta.dirname, "../..");
 export const OUT = path.join(ROOT, "out");
@@ -11,6 +12,60 @@ export const OUT = path.join(ROOT, "out");
 export const SHOTS = path.join(import.meta.dirname, "shots");
 
 export const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png" };
+
+const require = createRequire(import.meta.url);
+const ocr = require(path.join(ROOT, "ocr-service.js"));
+
+/**
+ * stderr from one real single-file review (`ocr review` on a throwaway repo:
+ * 3m48s, 6 findings). This is the transcript the running screen has to be
+ * legible against, and the reason it is here rather than invented: the bridge
+ * used to stub `onProgress` with a no-op, so the audit only ever saw a running
+ * screen with three zeros and a void — and reported it as passing.
+ */
+export const RUN_TRANSCRIPT = [
+  "[ocr] 8 file(s) changed, reviewing 5 in /home/x/work/payments-api",
+  '[ocr] Skipping plan phase for group "internal/service/auth/login.go" (1 file(s), max 90 lines, total 90 lines)',
+  "[ocr]   ▶ file_read file_path=internal/service/auth/login.go",
+  "[ocr]   ✔ file_read (1ms)",
+  "[ocr]   ▶ code_search search_text=tokenFor",
+  "[ocr]   ✔ code_search (21ms)",
+  "[ocr]   ▶ code_search search_text=auth file_patterns=[*.go]",
+  "[ocr]   ✔ code_search (21ms)",
+  "[ocr]   ▶ code_search search_text=ConstantTimeCompare",
+  "[ocr]   ✔ code_search (21ms)",
+  "[ocr]   ▶ file_find query_name=token*",
+  "[ocr]   ✔ file_find (19ms)",
+  "[ocr]   ▶ code_comment",
+  "[ocr]   ✔ code_comment (0s)",
+  '[ocr] Plan completed for group "pkg/httpx/middleware.go"',
+  "[ocr]   ▶ file_read file_path=pkg/httpx/middleware.go",
+  "[ocr]   ✔ file_read (2ms)",
+  "[ocr]   ▶ code_search search_text=WithTimeout use_perl_regexp=true",
+  "[ocr]   ✔ code_search (22ms)",
+  "[ocr]   ▶ code_comment",
+  "[ocr]   ✔ code_comment (0s)",
+  "[ocr] estimated cost: ~1.2M tokens",
+  "[ocr]   ✔ code_comment (1ms)",
+  "[ocr] Summary: 5 file(s) reviewed, 9 comment(s), ~412880 token(s) used, 3m48s elapsed",
+];
+
+/** Progress snapshots produced by the app's own parser, not by hand. */
+export function runFrames() {
+  const p = ocr.createProgress();
+  const frames = [];
+  for (const line of RUN_TRANSCRIPT) {
+    ocr.feedProgressLine(p, line);
+    frames.push({ ...p, activity: p.activity.slice() });
+  }
+  return frames;
+}
+
+/** The same run's milestone lines, i.e. what the log drawer receives. */
+export function runMilestones() {
+  const p = ocr.createProgress();
+  return RUN_TRANSCRIPT.map((line) => ocr.feedProgressLine(p, line)).filter(Boolean);
+}
 
 const now = Date.now();
 const iso = (msAgo) => new Date(now - msAgo).toISOString();
@@ -282,6 +337,16 @@ window.api = (() => {
   const q = new URLSearchParams(location.search);
   const D = q.get("stress") === "1" ? ${JSON.stringify(STRESS)} : ${JSON.stringify(NORMAL)};
   const SETS = { default: D.SESSIONS, many: ${JSON.stringify(MANY_SESSIONS)} };
+  // A run replays the real transcript through the real parser, so the running
+  // screen is audited against the data it will actually receive.
+  const FRAMES = ${JSON.stringify(runFrames())};
+  const LINES = ${JSON.stringify(runMilestones())};
+  let progressCb = null;
+  let logCb = null;
+  const replay = () => {
+    FRAMES.forEach((f, i) => setTimeout(() => progressCb && progressCb({ id: "run-1", progress: f }), 130 * i));
+    LINES.forEach((l, i) => setTimeout(() => logCb && logCb({ id: "run-1", line: l }), 130 * i));
+  };
   return {
   info: async () => (D.INFO),
   providers: async () => ({ ok: true, value: [
@@ -327,9 +392,14 @@ window.api = (() => {
     if (q.get("toast") === "1") {
       return { ok: false, error: "error: failed to read session index\\n  caused by: open /home/x/.opencodereview/sessions/demo/index.jsonl: permission denied\\n  hint: run 'ocr sessions --rebuild' to regenerate the index" };
     }
-    return { ok: true, value: SETS[want] || SETS.default };
+    const set = SETS[want] || SETS.default;
+    // ?clean=1 pairs with the empty sessionComments below: a review that
+    // found nothing has to be consistent across both calls, or the shot renders
+    // a header promising 9 comments over a list that says there are none.
+    if (q.get("clean") === "1") return { ok: true, value: set.map((s, i) => (i ? s : { ...s, total_comments: 0 })) };
+    return { ok: true, value: set };
   },
-  sessionComments: async () => ({ ok: true, value: D.FINDINGS }),
+  sessionComments: async () => (q.get("clean") === "1" ? { ok: true, value: [] } : { ok: true, value: D.FINDINGS }),
   preview: async () => {
     // ?empty=1 is the state where the scope legitimately contains nothing to
     // review — a clean working tree, or a ref range that touches no source.
@@ -340,7 +410,7 @@ window.api = (() => {
     return { ok: true, value: { files: D.PREVIEW_FILES, total_insertions: 171, total_deletions: 27, total_files: 8, reviewable_count: 5, excluded_count: 3 } };
   },
   resolveRef: async (_r, ref) => ({ ok: true, sha: "8c1de4f9a2b3c4d5e6f708192a3b4c5d6e7f8091" }),
-  run: async () => "run-1",
+  run: async () => { replay(); return "run-1"; },
   cancel: async () => true,
   readFile: async () => ({ ok: true, path: "internal/service/auth/login.go", absPath: "/home/x/work/payments-api/internal/service/auth/login.go", source: "worktree", ref: "feat/tenant-rate-limit", totalLines: 180, firstLine: 72, lines: Array.from({length: 33}, (_, i) => ({ n: 72 + i, content: ["func (s *Service) Login(ctx context.Context, email, presented string) (*Token, error) {", "\tuser, err := s.repo.ByEmail(ctx, strings.ToLower(email))", "\tif err != nil {", "\t\treturn nil, ErrInvalidCredentials", "\t}", "\tstored, err := s.repo.PasswordHash(ctx, user.ID)", "\tif err != nil {", "\t\treturn nil, err", "\t}", "", "\t// TODO: constant-time compare", "\tif stored == presented {", "\t\treturn s.tokens.Issue(user)", "\t}", "\treturn nil, ErrInvalidCredentials", "}", "", "func (s *Service) Refresh(ctx context.Context, tok string) (*Token, error) {", "\tclaims, err := s.tokens.Verify(tok)", "\tif err != nil {", "\t\treturn nil, ErrInvalidCredentials", "\t}", "\treturn s.tokens.Issue(&model.User{ID: claims.Subject})", "}", "", "func (s *Service) Logout(ctx context.Context, tok string) error {", "\treturn s.tokens.Revoke(ctx, tok)", "}"][i % 29] || "" })) }),
   openFile: async () => "",
@@ -366,9 +436,9 @@ window.api = (() => {
   setUpdateEnabled: async () => true,
   openReleases: async () => true,
   onUpdateState: () => () => {},
-  onLog: () => () => {},
+  onLog: (cb) => { logCb = cb; return () => { if (logCb === cb) logCb = null; }; },
   onExit: () => () => {},
-  onProgress: () => () => {},
+  onProgress: (cb) => { progressCb = cb; return () => { if (progressCb === cb) progressCb = null; }; },
   onMenuOpenRepo: () => () => {},
   };
 })();
