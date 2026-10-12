@@ -214,6 +214,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const runId = useRef<string | null>(null);
   const startedAt = useRef(0);
   const tick = useRef<number | null>(null);
+  const cancelRequested = useRef(false);
   const repoRef = useRef("");
   repoRef.current = repo;
 
@@ -317,11 +318,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (!runId.current || id !== runId.current) return;
       stopTimer();
       setProgress(null);
+      // A cancel is the user choosing to stop, and the CLI reports it as a
+      // non-zero exit. Treating that as a failure put a red 审查失败 toast on
+      // exactly the action the app had just offered, and hid the one follow-up
+      // that matters: the part that did finish is still there.
+      const cancelled = cancelRequested.current;
+      cancelRequested.current = false;
       if (r.error) {
-        setRunLabel("审查失败");
-        // The log area is selectable; a toast is not, and it disappears.
-        setLog((l) => [...l, "[error] " + r.error]);
-        toast.error(r.error.split("\n")[0], { description: r.error.split("\n").slice(1).join("\n") || undefined, duration: 15000 });
+        setRunLabel(cancelled ? "已取消" : "审查失败");
+        if (cancelled) {
+          setLog((l) => [...l, "[cancelled] 这次审查已停止"]);
+          toast("已取消这次审查", {
+            description: r.value
+              ? "已审完的部分保留在下方；未完成的部分可以续跑，不会重复计费。"
+              : "这次运行的会话已保存，到「历史」里可以续跑未完成的部分。",
+          });
+        } else {
+          // The log area is selectable; a toast is not, and it disappears.
+          setLog((l) => [...l, "[error] " + r.error]);
+          toast.error(r.error.split("\n")[0], { description: r.error.split("\n").slice(1).join("\n") || undefined, duration: 15000 });
+        }
       } else {
         setRunLabel("完成");
         toast.success("审查完成", { description: `${r.value?.comments?.length ?? 0} 条评论` });
@@ -361,6 +377,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setPreview(null);
       setResume(null);
       setProgress(null);
+      cancelRequested.current = false;
       setRunning(true);
       setElapsed(0);
       // Watching a run from the form page means watching a wall of configuration.
@@ -416,6 +433,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const cancelRun = useCallback(async () => {
     if (!runId.current) return;
+    cancelRequested.current = true;
     await api.cancel(runId.current);
     setRunLabel("已请求取消");
   }, []);

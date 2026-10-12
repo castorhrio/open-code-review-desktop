@@ -824,6 +824,29 @@ await shoot(page, "39-history-resume-scope", {
   },
 });
 
+// Stopping a run is an action the app itself offers, so it must not come back as
+// a crash. `?cancel=1` answers the cancel with the same non-zero exit a killed
+// child produces — which is what made 已取消 render as 审查失败.
+await shoot(page, "40-run-cancelled", {
+  query: "?cancel=1",
+  after: async (page) => {
+    await nav("审查")(page);
+    await page.waitForTimeout(300);
+    await page.getByRole("button", { name: /开始审查/ }).click();
+    await page.waitForTimeout(1200);
+    await page.getByRole("button", { name: "取消", exact: true }).first().click();
+    await page.waitForTimeout(1400);
+  },
+  expect: async (page) => {
+    const body = await page.locator("body").innerText();
+    const out = [];
+    if (/审查失败/.test(body)) out.push("a user-initiated cancel is reported as 审查失败");
+    if (!/已取消/.test(body)) out.push("the cancel is not acknowledged anywhere on screen");
+    if (!/续跑/.test(body)) out.push("a cancelled run does not say the unfinished part can be resumed");
+    return out;
+  },
+});
+
 await browser.close();
 server.close();
 

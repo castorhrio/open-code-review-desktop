@@ -343,6 +343,7 @@ window.api = (() => {
   const LINES = ${JSON.stringify(runMilestones())};
   let progressCb = null;
   let logCb = null;
+  let exitCb = null;
   const replay = () => {
     FRAMES.forEach((f, i) => setTimeout(() => progressCb && progressCb({ id: "run-1", progress: f }), 130 * i));
     LINES.forEach((l, i) => setTimeout(() => logCb && logCb({ id: "run-1", line: l }), 130 * i));
@@ -411,7 +412,20 @@ window.api = (() => {
   },
   resolveRef: async (_r, ref) => ({ ok: true, sha: "8c1de4f9a2b3c4d5e6f708192a3b4c5d6e7f8091" }),
   run: async (spec) => { window.__lastRunSpec = spec; replay(); return "run-1"; },
-  cancel: async () => true,
+  cancel: async () => {
+    // What a killed child really looks like: a non-zero exit, no payload, and a
+    // session id on disk. Without this the cancel path could not be rendered,
+    // and a user-initiated stop was reported as a crash.
+    if (q.get("cancel") === "1")
+      setTimeout(() => {
+        if (exitCb)
+          exitCb({
+            id: "run-1",
+            result: { code: null, error: "ocr 以退出码 null 结束", value: null, sessionId: "9f2c41d0a7b34e58b1c6d7e8f9a0b1c2" },
+          });
+      }, 250);
+    return true;
+  },
   readFile: async () => ({ ok: true, path: "internal/service/auth/login.go", absPath: "/home/x/work/payments-api/internal/service/auth/login.go", source: "worktree", ref: "feat/tenant-rate-limit", totalLines: 180, firstLine: 72, lines: Array.from({length: 33}, (_, i) => ({ n: 72 + i, content: ["func (s *Service) Login(ctx context.Context, email, presented string) (*Token, error) {", "\tuser, err := s.repo.ByEmail(ctx, strings.ToLower(email))", "\tif err != nil {", "\t\treturn nil, ErrInvalidCredentials", "\t}", "\tstored, err := s.repo.PasswordHash(ctx, user.ID)", "\tif err != nil {", "\t\treturn nil, err", "\t}", "", "\t// TODO: constant-time compare", "\tif stored == presented {", "\t\treturn s.tokens.Issue(user)", "\t}", "\treturn nil, ErrInvalidCredentials", "}", "", "func (s *Service) Refresh(ctx context.Context, tok string) (*Token, error) {", "\tclaims, err := s.tokens.Verify(tok)", "\tif err != nil {", "\t\treturn nil, ErrInvalidCredentials", "\t}", "\treturn s.tokens.Issue(&model.User{ID: claims.Subject})", "}", "", "func (s *Service) Logout(ctx context.Context, tok string) error {", "\treturn s.tokens.Revoke(ctx, tok)", "}"][i % 29] || "" })) }),
   openFile: async () => "",
   revealFile: async () => ({ ok: true, action: "reveal", path: "" }),
@@ -437,14 +451,19 @@ window.api = (() => {
   openReleases: async () => true,
   onUpdateState: () => () => {},
   onLog: (cb) => { logCb = cb; return () => { if (logCb === cb) logCb = null; }; },
-  onExit: () => () => {},
+  onExit: (cb) => { exitCb = cb; return () => { if (exitCb === cb) exitCb = null; }; },
   onProgress: (cb) => { progressCb = cb; return () => { if (progressCb === cb) progressCb = null; }; },
   onMenuOpenRepo: () => () => {},
   };
 })();
 `;
 
-export const STORAGE = { "last-repo": "/home/x/work/payments-api", "guide-dismissed": "1" };
+// The theme is declared, not inherited. `shoot` only writes the keys it is
+// given and localStorage survives navigation within the origin, so one shot that
+// asks for dark leaves every later shot dark — which is how the update-banner
+// shot quietly recoloured the eight screens after it while each of them believed
+// it was looking at the default theme.
+export const STORAGE = { "last-repo": "/home/x/work/payments-api", "guide-dismissed": "1", "ocr-theme-pref": "system" };
 
 
 export function serve(port) {
