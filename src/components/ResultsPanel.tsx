@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/form";
 import { EmptyState, PanelHeader } from "@/components/ui/layout";
 import { Badge } from "@/components/ui/overlay";
-import { CodeBlock, MarkdownLite, findingToMarkdown } from "@/components/finding";
+import { CodeBlock, CoverageNotice, MarkdownLite, findingToMarkdown } from "@/components/finding";
 import { toast } from "sonner";
 
 const SEVERITIES = ["critical", "high", "medium", "low", ""] as const;
@@ -447,22 +447,16 @@ export function ResultsPanel() {
         </div>
       </PanelHeader>
 
-      {(failed.length > 0 || waived.length > 0) && (
-        <div className="shrink-0 border-b border-warn/25 bg-warn/5 px-4 py-2.5">
-          <div className="mb-1 text-body font-medium text-warn">
-            有 {failed.length + waived.length} 个文件没有完成，{resultOrigin?.kind === "session" ? "该会话" : "本次结果"}不等于全量审查
-          </div>
-          <div className="flex flex-wrap gap-x-4 gap-y-1">
-            {[...failed.map((f) => ({ f, kind: "未审" })), ...waived.map((f) => ({ f, kind: "跳过" }))].map(({ f, kind }) => (
-              <span key={f.item_id} className="font-mono text-meta text-muted">
-                <span className={kind === "未审" ? "text-bad" : "text-low"}>{kind}</span> {f.path || f.item_id}
-                {f.reason && <span className="text-faint"> · {f.reason}</span>}
-              </span>
-            ))}
-          </div>
-          {resume && <p className="mt-1 text-meta text-faint">点上方「续跑未完成部分」可接着跑，已完成的部分不会重复付费。</p>}
-        </div>
-      )}
+      <CoverageNotice
+        failed={failed}
+        waived={waived}
+        failedFiles={resultOrigin?.failedFiles || 0}
+        subject={resultOrigin?.kind === "session" ? "该会话" : "本次结果"}
+        className="shrink-0 border-b border-warn/25"
+        resumeHint={
+          resume ? <p className="mt-1 text-meta text-faint">点上方「续跑未完成部分」可接着跑，已完成的部分不会重复付费。</p> : undefined
+        }
+      />
 
       {result.project_summary && (
         <div className="shrink-0 border-b border-line bg-surface px-4 py-3">

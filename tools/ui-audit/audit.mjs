@@ -1251,6 +1251,28 @@ await shoot(page, "57-repo-switch-clears-results", {
   },
 });
 
+// A session that ended partial. `ocr session comments` returns findings only and
+// `session list` carries no coverage detail, so the reopened view knows a file
+// failed but not which — and a 部分完成 badge over a page that lists nothing as
+// missed is exactly the "truncated run looks clean" failure the app promises not
+// to have.
+await shoot(page, "58-session-partial", {
+  after: async (page) => {
+    await nav("历史")(page);
+    await page.waitForTimeout(700);
+    await page.locator("main").getByRole("button", { name: "结果", exact: true }).nth(1).click();
+    await page.waitForTimeout(900);
+  },
+  expect: async (page) => {
+    const text = await page.locator("main").innerText();
+    const out = [];
+    if (!/部分完成|已中断/.test(text)) out.push("a partial session is not labelled as one");
+    if (!/个文件没有完成/.test(text)) out.push("the page lists nothing as unreviewed despite a failed file");
+    if (!/只有失败的文件数/.test(text)) out.push("the count-only case does not say it cannot name the files");
+    return out;
+  },
+});
+
 await browser.close();
 server.close();
 

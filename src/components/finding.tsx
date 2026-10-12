@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { cn } from "@/lib/cn";
 import type { Finding } from "@/lib/types";
 import { copyText } from "@/lib/clipboard";
@@ -94,6 +95,59 @@ export function CodeBlock({ title, tone, text }: { title: string; tone: "ok" | "
         </Button>
       </div>
       <pre className="overflow-x-auto px-3 py-2 font-mono text-meta whitespace-pre text-ink selectable">{text}</pre>
+    </div>
+  );
+}
+
+/**
+ * What the run did not cover.
+ *
+ * A live run carries `manifest.coverage`, so it can name the files. A session
+ * reopened from history cannot — `ocr session comments` returns findings only and
+ * `session list` records just a count — so it says how many instead. Either way
+ * the block exists because the product's own promise is that a truncated run
+ * never reads as a clean one, and a 部分完成 badge over a page that lists nothing
+ * as missed breaks that promise quietly.
+ *
+ * Both results surfaces render this, and they had drifted-able copies of it.
+ */
+export function CoverageNotice({
+  failed,
+  waived,
+  failedFiles,
+  subject,
+  resumeHint,
+  className,
+}: {
+  failed: { item_id: string; path?: string; reason?: string }[];
+  waived: { item_id: string; path?: string; reason?: string }[];
+  failedFiles: number;
+  subject: string;
+  resumeHint?: ReactNode;
+  className?: string;
+}) {
+  const known = failed.length + waived.length;
+  if (!known && !failedFiles) return null;
+  return (
+    <div className={cn("bg-warn/5 px-4 py-2.5 text-warn", className)}>
+      <div className="mb-1 text-body font-medium">
+        有 {Math.max(known, failedFiles)} 个文件没有完成，{subject}不等于全量审查
+      </div>
+      {known > 0 ? (
+        <div className="flex flex-wrap gap-x-4 gap-y-1">
+          {[...failed.map((f) => ({ f, kind: "未审" })), ...waived.map((f) => ({ f, kind: "跳过" }))].map(({ f, kind }) => (
+            <span key={f.item_id} className="font-mono text-meta text-muted">
+              <span className={kind === "未审" ? "text-bad" : "text-low"}>{kind}</span> {f.path || f.item_id}
+              {f.reason && <span className="text-faint"> · {f.reason}</span>}
+            </span>
+          ))}
+        </div>
+      ) : (
+        <div className="text-meta text-faint">
+          会话记录里只有失败的文件数，CLI 的会话导出没有给出具体是哪些；续跑会重新派发它们。
+        </div>
+      )}
+      {resumeHint}
     </div>
   );
 }

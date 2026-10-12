@@ -89,6 +89,14 @@ export interface ResultOrigin {
    * reinterpret.
    */
   scope?: string;
+  /**
+   * How many files the CLI recorded as failed for a session. `ocr session
+   * comments` returns findings only and the manifest on `session list` carries no
+   * `coverage` detail, so a reopened session knows *that* files were missed and
+   * not *which* — and without this the results screen shows a 部分完成 badge over
+   * a page that lists nothing as unreviewed.
+   */
+  failedFiles?: number;
 }
 
 /**
@@ -560,6 +568,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             : s.review_mode === "full_scan" ? MODE_META.scan.label
             : `${MODE_META.workspace.label} ${s.git_branch || ""}`.trim(),
           fileRef: s.review_mode === "range" ? s.diff_to || "" : s.review_mode === "commit" ? s.diff_commit || "" : "",
+          failedFiles: s.failed_files || 0,
           resumable: resumableMode(s.review_mode),
         }
       );

@@ -6,7 +6,7 @@ import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
 import { Card, PageBody, PanelHeader } from "@/components/ui/layout";
 import { Badge } from "@/components/ui/overlay";
-import { FindingBlock, MarkdownLite, findingToMarkdown } from "@/components/finding";
+import { CoverageNotice, FindingBlock, MarkdownLite, findingToMarkdown } from "@/components/finding";
 
 /** Files first, worst file first, findings in line order inside a file.
  *  A reviewer reads a changeset one file at a time; the flat severity list on
@@ -124,23 +124,13 @@ export function ReportView() {
             </Card>
           )}
 
-          {(failed.length > 0 || waived.length > 0) && (
-            <Card tone="warn" padded={false}>
-              <div className="px-4 py-2.5">
-                <div className="mb-1 text-body font-medium text-warn">
-                  有 {failed.length + waived.length} 个文件没有完成，{resultOrigin?.kind === "session" ? "该会话" : "本次结果"}不等于全量审查
-                </div>
-                <div className="flex flex-wrap gap-x-4 gap-y-1">
-                  {[...failed.map((f) => ({ f, kind: "未审" })), ...waived.map((f) => ({ f, kind: "跳过" }))].map(({ f, kind }) => (
-                    <span key={f.item_id} className="font-mono text-meta text-muted">
-                      <span className={kind === "未审" ? "text-bad" : "text-low"}>{kind}</span> {f.path || f.item_id}
-                      {f.reason && <span className="text-faint"> · {f.reason}</span>}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </Card>
-          )}
+          <CoverageNotice
+            failed={failed}
+            waived={waived}
+            failedFiles={resultOrigin?.failedFiles || 0}
+            subject={resultOrigin?.kind === "session" ? "该会话" : "本次结果"}
+            className="rounded-md border border-warn/25"
+          />
 
           {comments.length === 0 ? (
             <Card>
