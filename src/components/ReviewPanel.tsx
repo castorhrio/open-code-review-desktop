@@ -220,7 +220,9 @@ export function ReviewPanel() {
         {drop.length > 0 && <span className="text-faint"> · 另有 {drop.length} 个被排除</span>}
       </span>
     ) : (
-      <span className="text-warn">当前范围没有文件进入审查</span>
+      <span className="text-warn">
+        当前范围 {preview.value.total_files} 个文件，没有一个进入审查
+      </span>
     )
   ) : (
     <span className="text-faint">{blocked || "正在准备…"}</span>
@@ -229,7 +231,10 @@ export function ReviewPanel() {
   return (
     <>
       <div className="flex h-full min-h-0 flex-col">
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        {/* Natural height when the page has little to say, capped so the file
+            region below always keeps its share — the guide card and the open
+            tuning panel together are taller than any window. */}
+        <div className="max-h-[55%] min-h-0 shrink-0 overflow-y-auto">
           <PageBody>
             <GuideCard />
 
@@ -309,80 +314,6 @@ export function ReviewPanel() {
                 </FieldGrid>
               )}
             </Section>
-
-            {/* In the page's reading order, not below the knobs: this is the
-                answer to "what am I about to pay for", and it used to live in a
-                sidebar that only existed above 1536px. */}
-            {preview && (
-              <Card
-                padded={false}
-                title="文件清单"
-                icon={<ListTree className="size-3.5 text-accent" />}
-                hint={preview.loading ? "计算中…" : preview.value ? `不消耗 token · 进入审查 ${keep.length} / 共 ${preview.value.total_files} 个文件` : undefined}
-                actions={
-                  <Button variant="ghost" size="sm" disabled={preview.loading} onClick={() => void runPreview()}>
-                    <RefreshCw className="size-3.5" />
-                    重新计算
-                  </Button>
-                }
-              >
-                {preview.loading && <p className="px-4 py-3 text-body text-faint">正在计算…</p>}
-                {preview.error && <p className="whitespace-pre-wrap px-4 py-3 text-body text-bad">{preview.error}</p>}
-                {preview.value && (
-                  <>
-                    <div className="grid grid-cols-3 divide-x divide-line border-b border-line">
-                      {[
-                        { label: "进入审查", value: String(keep.length) },
-                        {
-                          label: scan ? "待通读行数" : "改动行数",
-                          value: scan
-                            ? `${preview.value.total_insertions} 行`
-                            : `+${preview.value.total_insertions} / -${preview.value.total_deletions}`,
-                        },
-                        { label: "改动文件总数", value: String(preview.value.total_files) },
-                      ].map((cell) => (
-                        <div key={cell.label} className="px-4 py-3">
-                          <div className="tnum text-stat font-semibold text-ink">{cell.value}</div>
-                          <div className="mt-0.5 text-meta text-faint">{cell.label}</div>
-                        </div>
-                      ))}
-                    </div>
-
-                    {keep.length === 0 ? (
-                      <p className="px-4 py-3 text-body text-faint">
-                        没有文件进入审查。工作区没有改动时属正常，可改用「分支对比」或「单个提交」。
-                      </p>
-                    ) : (
-                      <div className="max-h-80 overflow-y-auto">
-                        {keep.map((f) => (
-                          <div key={f.path} className="flex items-center gap-3 border-b border-line/60 px-4 py-2">
-                            <span className="min-w-0 flex-1 truncate font-mono text-body text-ink">{f.path}</span>
-                            <span className="tnum shrink-0 text-meta text-faint">
-                              {f.status}
-                              {scan ? ` · ${f.insertions} 行` : ` · +${f.insertions} / -${f.deletions}`}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {drop.length > 0 && (
-                      <div className="border-t border-line">
-                        <div className="bg-raised px-4 py-1.5 text-meta text-faint">以下 {drop.length} 个不进入审查</div>
-                        <div className="max-h-56 overflow-y-auto">
-                          {drop.map((f) => (
-                            <div key={f.path} className="flex items-center gap-3 border-b border-line/40 px-4 py-2 last:border-b-0">
-                              <span className="min-w-0 flex-1 truncate font-mono text-body text-muted">{f.path}</span>
-                              <span className="shrink-0 text-meta text-faint">{EXCLUDE_REASON[f.exclude_reason || ""] || f.exclude_reason}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </>
-                )}
-              </Card>
-            )}
 
             <Card
               padded={false}
@@ -665,11 +596,74 @@ export function ReviewPanel() {
           </PageBody>
         </div>
 
+        {/* What the review is about to read, in the region that fills the
+            window. This is the answer to "the product is a configuration form":
+            with the knobs collapsed, everything left on screen is the code. It
+            also removes the void the launcher used to end in — a page whose
+            content is top-aligned and shorter than the window reads as broken
+            regardless of how little is on it. */}
+        <section className="flex min-h-0 flex-1 flex-col border-t border-line bg-surface">
+          <div className="flex shrink-0 items-center gap-2 border-b border-line px-6 py-2">
+            <ListTree className="size-3.5 shrink-0 text-accent" />
+            <h2 className="shrink-0 text-strong font-semibold text-ink">进入审查的文件</h2>
+            <span className="min-w-0 truncate text-meta text-faint">
+              {preview?.value ? `不消耗 token · 共 ${preview.value.total_files} 个改动文件` : "范围确定后自动计算"}
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="ml-auto shrink-0"
+              disabled={preview?.loading}
+              onClick={() => void runPreview()}
+            >
+              <RefreshCw className="size-3.5" />
+              重新计算
+            </Button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-1">
+            {blocked ? (
+              <p className="px-1 py-6 text-center text-body text-faint">{blocked}</p>
+            ) : !preview || preview.loading ? (
+              <p className="px-1 py-6 text-center text-body text-faint">正在计算文件清单…</p>
+            ) : preview.error ? (
+              <p className="whitespace-pre-wrap px-1 py-6 text-center text-body text-bad">{preview.error}</p>
+            ) : (
+              <>
+                {keep.length === 0 && (
+                  <p className="px-1 py-6 text-center text-body text-faint">
+                    没有文件进入审查。工作区没有改动时属正常，可改用「分支对比」或「单个提交」。
+                  </p>
+                )}
+                {keep.map((f) => (
+                  <div key={f.path} className="flex items-center gap-3 border-b border-line/60 py-2 last:border-b-0">
+                    <span className="min-w-0 flex-1 truncate font-mono text-body text-ink">{f.path}</span>
+                    <span className="tnum shrink-0 text-meta text-faint">
+                      {f.status}
+                      {scan ? ` · ${f.insertions} 行` : ` · +${f.insertions} / -${f.deletions}`}
+                    </span>
+                  </div>
+                ))}
+                {drop.length > 0 && (
+                  <>
+                    <div className="mt-3 mb-1 text-meta text-faint">以下 {drop.length} 个不进入审查</div>
+                    {drop.map((f) => (
+                      <div key={f.path} className="flex items-center gap-3 border-b border-line/40 py-2 last:border-b-0">
+                        <span className="min-w-0 flex-1 truncate font-mono text-body text-muted">{f.path}</span>
+                        <span className="shrink-0 text-meta text-faint">{EXCLUDE_REASON[f.exclude_reason || ""] || f.exclude_reason}</span>
+                      </div>
+                    ))}
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        </section>
+
         {/* The run action is the point of the page, and it used to sit below
             every knob the page owns — at the 1000x660 floor the button was not
             on screen at all. It is pinned here so 范围 → 开始 is always one
-            glance and one click, however the form above it scrolls. */}
-        <div className="flex shrink-0 flex-wrap items-center gap-3 border-t border-line bg-surface px-6 py-3">
+            glance and one click, however the two regions above it scroll. */}
+        <div className="flex shrink-0 flex-wrap items-center gap-3 border-t border-line bg-raised px-6 py-3">
           <div className="min-w-0 flex-1 text-body text-muted">{scopeSummary}</div>
           {running && (
             <Button variant="danger" size="lg" onClick={() => void cancelRun()}>

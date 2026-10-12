@@ -306,14 +306,6 @@ const expectCodeStacked = async (page) => {
 };
 
 /**
- * The preview panel is one of the two buttons on the form, so it is a core
- * flow — and it had no assertion at all, which is how it came to be
- * screenshotted for months against a fixture whose normal payload had no file
- * list at all (`files: undefined`). Every shot showed "进入审查 0 / 共 8" and
- * the "nothing entered the review" explanation, which looks like a perfectly
- * plausible state. Assert the contents, not just the layout.
- */
-/**
  * 开始审查 is the page's only primary action, and it used to sit underneath
  * every knob the form owns: at the 1000x660 floor it was not on screen at all,
  * so the smallest legal window showed a wall of configuration with no way to
@@ -330,12 +322,52 @@ const expectRunActionVisible = async (page) => {
   return [];
 };
 
-const expectPreviewListed = async (page) => {  const out = [];
+/**
+ * The preview is a core flow, and it had no assertion at all — which is how it
+ * came to be screenshotted for months against a fixture whose normal payload had
+ * no file list at all (`files: undefined`). Every shot showed "进入审查 0 / 共 8"
+ * and the "nothing entered the review" explanation, which looks like a perfectly
+ * plausible state. Assert the contents, not just the layout.
+ */
+const expectPreviewListed = async (page) => {
+  const out = [];
   const text = await page.locator("main").innerText();
-  if (!/进入审查 5 \/ 共 8 个文件/.test(text)) out.push("the preview header does not report 5 of 8");
+  if (!/进入审查 5 \/ 共 8 个文件/.test(text) && !/共 8 个改动文件/.test(text))
+    out.push("the file region does not report the scope's size");
+  if (!/5 个文件进入审查/.test(text)) out.push("the pinned bar no longer states the file count");
   if (!/以下 3 个不进入审查/.test(text)) out.push("the excluded files are not listed");
   const rows = await page.locator("main").getByText(/· [+-]\d+ \/ -\d+/).count();
   if (rows < 5) out.push(`only ${rows} reviewable file rows rendered, expected 5`);
+  return out;
+};
+
+/**
+ * The launcher used to end in a band of bare canvas: its content was top-aligned
+ * in a scroll region, so on any window taller than the form the page read as
+ * half-finished — the same defect the running screen had. What has to hold is
+ * that the file region reaches the action bar, whatever the window height.
+ */
+const expectNoDeadBand = async (page) => {
+  const m = await page.evaluate(() => {
+    const h2 = [...document.querySelectorAll("main h2")].find((h) => h.textContent === "进入审查的文件");
+    const section = h2?.closest("section");
+    const btn = [...document.querySelectorAll("main button")].find((b) => /开始审查/.test(b.textContent || ""));
+    const bar = btn?.parentElement;
+    const mb = document.querySelector("main")?.getBoundingClientRect();
+    if (!section || !bar || !mb) return null;
+    const bb = bar.getBoundingClientRect();
+    return {
+      // The bar is pinned: anything between it and the bottom of the window
+      // means the column stopped growing and the page ends in bare canvas.
+      belowBar: Math.round(mb.bottom - bb.bottom),
+      // And the file region must be what absorbs the slack, not the void.
+      aboveBar: Math.round(bb.top - section.getBoundingClientRect().bottom),
+    };
+  });
+  if (m === null) return ["the launcher lost either its file region or its run bar"];
+  const out = [];
+  if (m.belowBar > 4) out.push(`${m.belowBar}px of empty canvas below the run bar, so the page ends in a void`);
+  if (m.aboveBar > 4) out.push(`${m.aboveBar}px of empty canvas between the file region and the run bar`);
   return out;
 };
 
@@ -423,14 +455,31 @@ await shoot(page, "13-review-preview", {
   after: async (page) => {
     await nav("审查")(page);
     await page.waitForTimeout(1400);
-    await page.evaluate(() => {
-      const el = [...document.querySelectorAll("main *")].find(
-        (n) => n.scrollHeight > n.clientHeight + 4 && /auto|scroll/.test(getComputedStyle(n).overflowY)
-      );
-      if (el) el.scrollTop = el.scrollHeight;
-    });
   },
   expect: expectPreviewListed,
+});
+
+// The launcher at the window minimum, where the guide card is gone and the form
+// is two lines: this is the shape that used to end in a band of bare canvas.
+await shoot(page, "46-review-launcher", {
+  width: 1440,
+  height: 900,
+  after: async (page) => {
+    await nav("审查")(page);
+    await page.waitForTimeout(1400);
+  },
+  expect: async (page) => [...(await expectNoDeadBand(page)), ...(await expectRunActionVisible(page))],
+});
+await shoot(page, "47-review-tuning-open", {
+  width: 1440,
+  height: 900,
+  after: async (page) => {
+    await nav("审查")(page);
+    await page.waitForTimeout(1400);
+    await page.getByRole("button", { name: /调整这次审查的参数/ }).click();
+    await page.waitForTimeout(400);
+  },
+  expect: async (page) => [...(await expectNoDeadBand(page)), ...(await expectRunActionVisible(page))],
 });
 
 // 1000x660 is the window minimum declared in main.js — the tightest the app
@@ -663,22 +712,28 @@ await shoot(page, "32-review-empty-scope", {
   },
   expect: async (page) => {
     const out = [];
+    // The bar carries the numbers even when there is nothing to review — the
+    // empty scope is exactly when "8 files were found, none entered" is the
+    // information that tells the user what to change.
+    const bar = await page.locator("main").innerText();
+    if (!/当前范围 8 个文件，没有一个进入审查/.test(bar))
+      out.push(`the pinned bar does not report an empty scope with its totals: "${bar.split("\n").find((l) => l.includes("没有一个")) || "?"}"`);
+
+    // The file region has to explain *why* nothing entered, not just that.
     const text = await page.locator("main").innerText();
-    if (!/进入审查 0 \/ 共 8 个文件/.test(text)) out.push("the empty preview did not report 0 of 8");
-    if (!/没有文件进入审查/.test(text)) out.push("no explanation for the empty scope");
-    // The bar under the fold used to be the only place that said what would be
-    // reviewed; it is on screen now, so the count has to be readable there.
-    if (!/当前范围没有文件进入审查/.test(text)) out.push("the pinned run bar does not state that the scope is empty");
+    if (!/共 8 个改动文件/.test(text)) out.push("the empty preview did not report 0 of 8");
+    if (!/没有文件进入审查。工作区没有改动时属正常/.test(text)) out.push("no explanation for the empty scope");
 
     // Change the scope: the stale count must go, not linger as if current. The
     // list recomputes itself, so the window to observe that is the debounce.
+    // The header's own "共 N 个改动文件" is the proxy — the section itself stays
+    // mounted through a recompute, so its title proves nothing.
+    const counted = () => page.locator("main").getByText(/个改动文件/).count();
     await page.getByRole("button", { name: /分支对比/ }).click();
     await page.waitForTimeout(250);
-    if ((await page.locator("main").getByText("文件清单").count()) !== 0)
-      out.push("the preview survived a change of scope, so its count is now stale");
+    if ((await counted()) !== 0) out.push("the preview survived a change of scope, so its count is now stale");
     await page.waitForTimeout(1400);
-    if ((await page.locator("main").getByText("文件清单").count()) === 0)
-      out.push("the preview never came back after the scope changed — the list is manual again");
+    if ((await counted()) === 0) out.push("the preview never came back after the scope changed — the list is manual again");
 
     // And pressing run with nothing to review must explain, not start.
     await page.getByRole("button", { name: /工作区改动/ }).click();
