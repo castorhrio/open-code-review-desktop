@@ -7,6 +7,7 @@ import { copyText } from "@/lib/clipboard";
 import type { Finding } from "@/lib/types";
 import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/form";
 import { EmptyState, PanelHeader } from "@/components/ui/layout";
 import { Badge } from "@/components/ui/overlay";
 import { toast } from "sonner";
@@ -521,18 +522,16 @@ export function ResultsPanel() {
             </button>
           ))}
         </div>
-        <select
+        {/* The one control on this screen that was not built from the app's own
+            primitive: a hand-styled native <select> whose popup is drawn by the
+            OS, so it ignored the theme and its trigger drifted from every other
+            control in the toolbar. */}
+        <Select
           value={cat}
-          onChange={(e) => setCat(e.target.value)}
-          className="h-7 rounded-sm border border-line bg-raised px-2 text-body text-ink outline-none"
-        >
-          <option value="">全部类别</option>
-          {cats.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
-        </select>
+          onValueChange={setCat}
+          className="h-7 w-auto min-w-[110px] shrink-0 text-body"
+          options={[{ value: "", label: "全部类别" }, ...cats.map((c) => ({ value: c, label: c }))]}
+        />
         <div className="flex h-7 min-w-40 flex-1 items-center gap-1.5 rounded-sm border border-line bg-raised px-2">
           <Search className="size-3.5 text-faint" />
           <input
