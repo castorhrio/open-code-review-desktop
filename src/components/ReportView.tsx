@@ -18,7 +18,10 @@ function groupByPath(comments: Finding[]) {
     if (list) list.push(c);
     else byPath.set(c.path, [c]);
   }
-  const worst = (list: Finding[]) => Math.min(...list.map((c) => SEVERITY_RANK[c.severity || ""]));
+  // `?? 9`: the CLI owns this vocabulary and can add a step this build has never
+  // seen, and an unknown value turning the comparator into NaN would order the
+  // document unpredictably rather than just last.
+  const worst = (list: Finding[]) => Math.min(...list.map((c) => SEVERITY_RANK[c.severity || ""] ?? 9));
   return [...byPath.entries()]
     .sort((a, b) => worst(a[1]) - worst(b[1]) || a[0].localeCompare(b[0]))
     .map(([path, list]) => ({ path, findings: [...list].sort((x, y) => x.start_line - y.start_line) }));
