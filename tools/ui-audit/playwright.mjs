@@ -5,17 +5,34 @@
 //
 //   1. PLAYWRIGHT_MODULE — an explicit path, for CI or a custom checkout.
 //   2. The project's own node_modules, for anyone who ran `npm i -D playwright`.
-//   3. A global install, via NODE_PATH.
+//   3. The npm global root, for `npm i -g playwright`.
+//   4. NODE_PATH.
 //
 // If none of them work we say exactly what to run rather than throwing a bare
 // MODULE_NOT_FOUND from three frames deep.
 import { createRequire } from "node:module";
+import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+
+// The npm global root, so a `npm i -g playwright` is enough to run these
+// harnesses. Without it the only auto-discovered path was the project's own
+// node_modules, which by design does not carry Playwright — and the resolver
+// silently fell through to "not installed" on any machine that had it globally,
+// which is how the whole visual suite came to be unrun while the layout drifted.
+function globalModuleRoot() {
+  if (process.platform === "win32") return process.env.APPDATA ? path.join(process.env.APPDATA, "npm", "node_modules") : "";
+  try {
+    return execSync("npm root -g", { encoding: "utf8" }).trim();
+  } catch (_) {
+    return "";
+  }
+}
 
 const CANDIDATES = [
   process.env.PLAYWRIGHT_MODULE,
   path.resolve(import.meta.dirname, "../../node_modules/"),
+  globalModuleRoot(),
   process.env.NODE_PATH,
 ].filter(Boolean);
 
