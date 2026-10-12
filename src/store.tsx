@@ -308,6 +308,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setResult(null);
       setResultOrigin(null);
       setHistory([]);
+      // A rule lookup answers for a file in a repository. Same reason as above.
+      setRulesOutput("");
       if (trimmed) void inspect(trimmed);
     },
     [inspect]
