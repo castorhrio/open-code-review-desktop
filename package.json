@@ -18,14 +18,15 @@
     "dist:linux": "npm run build && electron-builder --linux",
     "fetch:binaries": "node build/fetch-binaries.cjs",
     "icon": "node build/make-icon.cjs",
-    "audit": "npm run typecheck && npm run audit:packaging && npm run audit:bridge && npm run audit:service && npm run audit:update && npm run audit:ui && npm run audit:contrast && npm run audit:guards",
+    "audit": "npm run typecheck && npm run audit:packaging && npm run audit:bridge && npm run audit:service && npm run audit:update && npm run audit:ui && npm run audit:contrast && npm run audit:guards && npm run audit:e2e",
     "audit:packaging": "node tools/check-packaging.mjs",
     "audit:bridge": "node tools/bridge-contract.mjs",
     "audit:service": "node tools/service-smoke.mjs",
     "audit:update": "node tools/update-state.mjs",
     "audit:ui": "npm run build && node tools/ui-audit/audit.mjs",
     "audit:contrast": "npm run build && node tools/ui-audit/contrast.mjs",
-    "audit:guards": "npm run build && node tools/electron-guards.mjs"
+    "audit:guards": "npm run build && node tools/electron-guards.mjs",
+    "audit:e2e": "npm run build && node tools/e2e-flow.mjs"
   },
   "dependencies": {
     "@alibaba-group/open-code-review": "^1.12.13",

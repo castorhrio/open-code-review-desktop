@@ -147,7 +147,7 @@ The UI once drifted, one reasonable-looking change at a time, into three differe
 Everything is checked by rendering the real bundle against a stubbed IPC bridge in headless Edge — no Electron, no desktop — plus one check that drives the actual Electron process, because some behaviour only exists there.
 
 ```
-npm run audit           # typecheck + all seven checks below
+npm run audit           # typecheck + all eight checks below
 npm run audit:packaging # every runtime module is in the build.files allowlist
 npm run audit:bridge    # preload.js and the Bridge interface agree, both ways
 npm run audit:service   # the real CLI: arg building and output parsing, all 4 modes
@@ -155,11 +155,14 @@ npm run audit:update    # the update state machine, with the updater stubbed
 npm run audit:ui        # 65 states x 3 window sizes x 2 themes
 npm run audit:contrast  # WCAG AA for every text/background pair
 npm run audit:guards    # navigation + window-open policy, in real Electron
+npm run audit:e2e       # renderer -> preload -> ipcMain -> CLI, in real Electron
 ```
 
 All of them exit non-zero on findings, so they work as a gate rather than a log, and each states what it inspected — a check that reports "0 problems" without saying what it looked at manufactures confidence rather than providing it, so they refuse to pass vacuously.
 
 **`audit:bridge`** covers the one seam nothing else can see. The renderer reaches the main process through `window.api`, and the only description of that object is a hand-written interface in `src/lib/api.ts` bound with a cast — `(window as unknown as { api: Bridge }).api` — so `tsc` never checks that `preload.js` implements it. The UI audit cannot either: its stub is written against the interface, so it agrees with the interface by construction and would keep agreeing after the real preload drifted away. The check loads the actual `preload.js` with a stubbed `electron`, captures what it really exposes, and compares both directions — plus the channel names, since a typo there is a promise that never settles rather than an error anyone sees.
+
+**`audit:e2e`** covers the seam between the two halves. `audit:service` drives `ocr-service` in plain Node, so it proves the arguments and the parsing but never that the renderer reaches them; `audit:ui` drives the renderer against a stub, so it proves the rendering but not that anything behind it exists. This runs the real `main.js` in real Electron, boots the real bundle against a throwaway git repository, and lets the app preview it on its own — so the spec the renderer builds, the preload call, the `ipcMain` handler, the CLI invocation and the reply all have to line up. It uses `--preview`, which costs no tokens and needs no API key, and asserts the file the CLI reports appears *and* that a file the CLI did not report does not.
 
 **`audit:service`** covers the layer that is the app's whole job: turning a spec into CLI arguments and turning the CLI's output back into something the UI can render. It runs the real binary against a throwaway git repo, using `--preview` so no API key or network is needed. It asserts all four modes parse into the expected shape and find files, that mode-specific flags do not leak into another mode (the CLI would reject the run), that a bad ref fails with an error rather than an empty preview the UI would render as "nothing to review", and that a non-repo directory is reported as such.
 
