@@ -290,10 +290,11 @@ export function ResultsPanel() {
     if (resume) {
       return (
         <EmptyState
-          icon={<Badge tone="warn">这次运行没有产出结果</Badge>}
+          icon={<Badge tone="warn">{resume.reason === "cancelled" ? "这次运行已取消" : "这次运行没有产出结果"}</Badge>}
           description={
             <p className="text-body text-muted">
-              会话 <code className="font-mono text-meta">{resume.sessionId.slice(0, 12)}…</code> 已经中断
+              会话 <code className="font-mono text-meta">{resume.sessionId.slice(0, 12)}…</code> 已经
+              {resume.reason === "cancelled" ? "取消" : "中断"}
               {resume.failed ? `（${resume.failed} 个文件失败）` : ""}。
               {resume.resumable
                 ? "保持同样的范围与模型服务点「续跑未完成部分」，已经审完的文件不会重复计费。"

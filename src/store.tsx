@@ -371,8 +371,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // visited that page — so the report button silently disappeared at the
         // one moment a reader most wants it outside the app.
         void refreshHistory();
-      } else if (r.sessionId) {
-        setResume({ sessionId: r.sessionId, reason: "failed", failed: 0, resumable: canResume });
+      } else {
+        // A run that produced no payload used to leave `result` exactly as it
+        // was: the previous run's findings, or a session opened from 历史. The
+        // screen then presented them under a 已取消 / 审查失败 badge and a
+        // 完成 status chip, which reads as the outcome of the run that just
+        // failed. Nothing on this screen is that run's until it says so.
+        setResult(null);
+        setResultOrigin(null);
+        if (r.sessionId) setResume({ sessionId: r.sessionId, reason: cancelled ? "cancelled" : "failed", failed: 0, resumable: canResume });
       }
       runId.current = null;
     });

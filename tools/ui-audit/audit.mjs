@@ -1082,6 +1082,32 @@ await shoot(page, "49-review-repo-gone", {
   },
 });
 
+// Open a session, then start a run from it and cancel. A run that produces no
+// payload used to leave `result` untouched, so the results screen kept showing
+// the session's findings under a 已取消 badge and a 完成 status chip — the
+// previous content presented as the outcome of the run that just stopped.
+await shoot(page, "50-stale-result-cleared", {
+  query: "?cancel=1",
+  after: async (page) => {
+    await openFindings(page);
+    await nav("审查")(page);
+    await page.waitForTimeout(500);
+    await page.getByRole("button", { name: /开始审查/ }).click();
+    await page.waitForTimeout(1200);
+    await page.getByRole("button", { name: "取消", exact: true }).first().click();
+    await page.waitForTimeout(1600);
+  },
+  expect: async (page) => {
+    const text = await page.locator("main").innerText();
+    const out = [];
+    if (/密码校验用了普通的字符串比较/.test(text))
+      out.push("the cancelled run still shows findings from the session opened before it");
+    if (!/这次运行(已取消|没有产出结果)/.test(text)) out.push("the cancelled run does not say it produced nothing");
+    if (!/已取消/.test(text)) out.push("the cancel is not acknowledged on screen");
+    return out;
+  },
+});
+
 await browser.close();
 server.close();
 
