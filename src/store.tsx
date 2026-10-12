@@ -292,11 +292,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     setRepoInfo(res);
     const branch = res.branch || "";
-    const candidates = [res.upstream, ...(res.refs || []).filter((r) => r === "main" || r === "master"), (res.refs || [])[0]];
-    const base = candidates.find((c) => c && c !== branch) || "";
+    // A candidate is only a usable base if it names a *different* branch, or the
+    // comparison diffs a branch against itself and reviews nothing.
+    //
+    // `refs` arrives with remote prefixes already stripped, but `upstream` does
+    // not — and `@{upstream}` is by definition the current branch's own remote
+    // (`origin/master` while on `master`). Compared raw, it always looked like a
+    // different ref, so the guard never fired, `from` collapsed onto `to`, and
+    // the CLI was handed `--from master --to master`: 0 files, exit 0, and a
+    // 分支对比 that silently reviews nothing. So compare on the stripped name.
+    //
+    // The value is emitted *as given*, though: when a branch really does track a
+    // different remote branch, `origin/develop` is the form that always resolves,
+    // where a stripped `develop` needs a local branch of that name to exist.
+    const stripRemote = (r?: string) => String(r || "").replace(/^(origin|upstream)\//, "");
+    const candidates = [
+      res.upstream,
+      ...(res.refs || []).filter((r) => r === "main" || r === "master"),
+      ...(res.refs || []),
+    ];
+    // No base is the honest answer for a repository with a single branch — the
+    // field stays empty and `validateSpec` says which one is missing, rather
+    // than pre-filling a comparison that cannot produce a diff.
+    const base = candidates.find((c) => c && stripRemote(c) !== branch) || "";
     setForm((f) => ({
       ...f,
-      from: f.from || base.replace(/^origin\//, ""),
+      from: f.from || base,
       to: f.to || branch,
     }));
   }, []);
@@ -304,6 +325,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const setRepo = useCallback(
     (dir: string) => {
       const trimmed = dir.trim();
+      // "Changed" is what makes the scope fields stale — re-inspecting the same
+      // repository must not throw away refs the user typed in by hand.
+      const changed = trimmed !== repoRef.current;
       setRepoState(trimmed);
       localStorage.setItem("last-repo", trimmed);
       setPreview(null);
@@ -318,6 +342,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setHistory([]);
       // A rule lookup answers for a file in a repository. Same reason as above.
       setRulesOutput("");
+      // The scope fields name things that live *inside* a repository — branches,
+      // a commit, a relative path — and `inspect` only fills from/to while they
+      // are empty, so a leftover value was never re-derived. After one switch,
+      // 分支对比 went on offering the previous repository's branch inside the new
+      // one, where it does not exist. Clearing lets `inspect` answer for the
+      // repository actually selected. `exclude` and `rule` are deliberately kept:
+      // they are user preferences or paths elsewhere on disk, not repo refs.
+      if (changed) setForm((f) => ({ ...f, from: "", to: "", commit: "", scanPath: "" }));
       if (trimmed) void inspect(trimmed);
     },
     [inspect]

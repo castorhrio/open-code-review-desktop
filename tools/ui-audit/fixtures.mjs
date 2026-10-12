@@ -294,6 +294,37 @@ const REPO_INFO = {
   dirtyCount: 3,
 };
 
+// A second repository, so "switch repos" can be a real switch rather than the
+// same repository under a different path. It sits on a different branch with a
+// different base and a disjoint ref list, so anything the first repository left
+// behind in the form is *visible* — with one shared profile the stale value
+// happened to still be correct and the bug was invisible.
+export const OTHER_REPO_PATH = "/home/x/work/other-repo";
+const OTHER_REPO_INFO = {
+  ok: true,
+  repoRoot: OTHER_REPO_PATH,
+  branch: "develop",
+  upstream: "origin/develop",
+  refs: ["main", "master", "develop"],
+  commits: [{ hash: "c0ffee1234567890abcdef1234567890abcdef12", date: "2026-09-30 11:15", message: "chore: cut release 3.0" }],
+  dirtyCount: 0,
+};
+
+// The most common repository shape there is: one branch, tracked to its own
+// remote, nothing to compare against. Here the only honest default base is
+// *none*, so the app has to say so rather than pre-fill a diff that is empty by
+// construction.
+export const SOLO_REPO_PATH = "/home/x/work/solo-repo";
+const SOLO_REPO_INFO = {
+  ok: true,
+  repoRoot: SOLO_REPO_PATH,
+  branch: "main",
+  upstream: "origin/main",
+  refs: ["main"],
+  commits: [{ hash: "a11ce0000000000000000000000000000000beef", date: "2026-10-01 08:00", message: "init" }],
+  dirtyCount: 0,
+};
+
 // ---------------------------------------------------------------------------
 // Pathological payloads (?stress=1)
 // Real data is not tidy: vendor errors arrive as one unbroken 200-char token,
@@ -324,13 +355,17 @@ const STRESS = {
   })),
   FINDINGS: FINDINGS.map((f) => ({ ...f, path: LONG_PATH })),
   PREVIEW_FILES: PREVIEW_FILES.map((f) => ({ ...f, path: LONG_PATH })),
+  OTHER_REPO_INFO,
+  OTHER_REPO_PATH,
+  SOLO_REPO_INFO,
+  SOLO_REPO_PATH,
 };
 // PREVIEW_FILES belongs here. It was missing from the normal set, so every
 // screenshot of the preview panel — a core flow, "预览清单" is one of the two
 // buttons on the form — was taken against `files: undefined` and therefore
 // showed "进入审查 0" with the "nothing entered the review" explanation. The
 // panel looked plausible, so nothing noticed; the fixture was simply wrong.
-const NORMAL = { INFO, CONFIG, REPO_INFO, SESSIONS, FINDINGS, PREVIEW_FILES };
+const NORMAL = { INFO, CONFIG, REPO_INFO, SESSIONS, FINDINGS, PREVIEW_FILES, OTHER_REPO_INFO, OTHER_REPO_PATH, SOLO_REPO_INFO, SOLO_REPO_PATH };
 
 export const BRIDGE = `
 window.api = (() => {
@@ -416,7 +451,12 @@ window.api = (() => {
     }[q.get("update") || "idle"];
     return { ...base, ...state };
   },
-  inspect: async () => (q.get("norepo") === "1" ? { ok: false, error: "路径不存在" } : D.REPO_INFO),
+  inspect: async (dir) => {
+    if (q.get("norepo") === "1") return { ok: false, error: "路径不存在" };
+    if (dir === D.OTHER_REPO_PATH) return D.OTHER_REPO_INFO;
+    if (dir === D.SOLO_REPO_PATH) return D.SOLO_REPO_INFO;
+    return D.REPO_INFO;
+  },
   listSessions: async () => {
     // ?sessions=many swaps in the 65-session set, so the history panel's paging
     // can be exercised without a second harness. ?toast=1 makes the call fail

@@ -86,7 +86,16 @@ export function intOrEmpty(value: string): number | "" {
 export function validateSpec(spec: Spec): string {
   // The picker is in the top bar; this line is the first thing a cold start reads.
   if (!spec.repo) return "先在顶部的仓库栏里选一个 git 仓库目录。";
-  if (spec.mode === "range" && (!spec.from || !spec.to)) return "分支对比需要同时填基线 (from) 和目标 (to)。";
+  if (spec.mode === "range" && (!spec.from || !spec.to)) {
+    // Name the field that is actually missing. The blanket "fill in from and to"
+    // was wrong whenever one of them was already filled — which is now the common
+    // case, because a repository with a single branch is deliberately given no
+    // base rather than a base equal to the target. Telling the reader to fill in
+    // something that is already there sends them looking in the wrong place.
+    if (!spec.from && !spec.to) return "分支对比需要填基线 (from) 和目标 (to)。";
+    if (!spec.from) return "分支对比还缺基线 (from)：选一个要对比的基准分支。";
+    return "分支对比还缺目标 (to)：选一个要审查的分支或提交。";
+  }
   if (spec.mode === "commit" && !spec.commit) return "请填写要审查的提交号，或从下拉里选一个。";
   return "";
 }

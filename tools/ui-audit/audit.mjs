@@ -3,7 +3,7 @@
 // Run with `npm run audit:ui` after `npm run build`.
 import fs from "node:fs";
 import path from "node:path";
-import { SHOTS, BRIDGE, STORAGE, serve } from "./fixtures.mjs";
+import { SHOTS, BRIDGE, STORAGE, serve, OTHER_REPO_PATH, SOLO_REPO_PATH } from "./fixtures.mjs";
 import { loadPlaywright, CHANNEL, describeChannel, requireBuilt } from "./playwright.mjs";
 
 requireBuilt();
@@ -1414,6 +1414,113 @@ await shoot(page, "61-results-keyboard-nav", {
     if (m === null) return ["the results list has no selected row, or no scroller around it"];
     if (m.row[0] < m.view[0] - 1 || m.row[1] > m.view[1] + 1)
       return [`the keyboard selection sits outside the visible list (row ${m.row.join("-")}, view ${m.view.join("-")}, scrollTop ${m.scrollTop})`];
+    return [];
+  },
+});
+
+// The default scope for 分支对比 must not be a zero-width diff. `inspect` builds
+// its candidate bases from `res.refs` (remote prefixes already stripped) but puts
+// the raw `res.upstream` first — and `@{upstream}` is *by definition* the current
+// branch's own remote (`origin/master` for `master`), so the `c !== branch` guard
+// meant to prevent a branch being compared with itself never fired: the prefix
+// made it look like a different ref. `from` then collapsed onto `to` and the CLI
+// was handed `--from master --to master`, which reviews nothing. The user picked
+// 分支对比, pressed the primary action, and got "当前范围没有文件可审查" — the
+// app's main function appearing to do nothing.
+await shoot(page, "63-range-default-not-empty", {
+  after: async (page) => {
+    await page.getByRole("button", { name: "分支对比", exact: true }).click();
+    await page.waitForTimeout(400);
+  },
+  expect: async (page) => {
+    const from = await page.getByPlaceholder("main").inputValue();
+    const to = await page.getByPlaceholder("feature/x").inputValue();
+    const out = [];
+    // Remote prefixes are how `refs` and `upstream` differ for the same branch,
+    // so compare the names the CLI would actually diff.
+    const norm = (r) => r.trim().replace(/^(origin|upstream)\//, "");
+    if (!from) out.push("分支对比 was pre-filled with no base ref at all");
+    else if (norm(from) === norm(to))
+      out.push(`the default branch comparison is empty (from="${from}" and to="${to}" are the same ref, so the diff is zero-width)`);
+    return out;
+  },
+});
+
+// The other half of 63. A repository with a single branch has no base to compare
+// against, so the honest default is *no* base — and then the app has to say so.
+// The failure this guards against is the one the user reported: the primary
+// action either runs and produces nothing, or is dead, and the screen never
+// explains which. Here the action must be unavailable *and* the reason legible.
+await shoot(page, "64-range-no-base-explains", {
+  storage: { ...STORAGE, "last-repo": SOLO_REPO_PATH },
+  after: async (page) => {
+    await page.getByRole("button", { name: "分支对比", exact: true }).click();
+    await page.waitForTimeout(400);
+  },
+  expect: async (page) => {
+    const out = [];
+    const from = await page.getByPlaceholder("main").inputValue();
+    if (from) out.push(`a single-branch repository was given a base ref it does not have ("${from}")`);
+    const start = page.getByRole("button", { name: /开始审查/ });
+    if (!(await start.isDisabled()))
+      out.push("分支对比 is offered as runnable with no base ref, so it would review a zero-width diff");
+    const text = await page.locator("main").innerText();
+    if (!/还缺基线 \(from\)/.test(text))
+      out.push("nothing on the screen says which ref is missing — and (to) is filled, so a message about both would send the reader looking at the wrong field");
+    if (/同时填基线/.test(text))
+      out.push("the message asks for (from) and (to) together while (to) is already filled");
+    return out;
+  },
+});
+
+// Switching repositories must not carry the previous repository's scope into the
+// form. `inspect` fills from/to only while they are empty (`f.from || base`), a
+// guard meant to protect what the user typed — but it cannot tell "the user
+// typed this" from "this came from the repository we just left", so after one
+// switch the range fields went on offering repository A's branch inside B, where
+// it does not exist. This is the same class as 57, from the other side: 57
+// checked the *results*, this checks the *form*.
+await shoot(page, "62-repo-switch-resets-scope", {
+  after: async (page) => {
+    // Range mode is the one whose fields name a branch, which is a thing that
+    // belongs to a repository.
+    await page.getByRole("button", { name: "分支对比", exact: true }).click();
+    await page.waitForTimeout(300);
+    await page.locator("header input").fill(OTHER_REPO_PATH);
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(1200);
+  },
+  expect: async (page) => {
+    const from = await page.getByPlaceholder("main").inputValue();
+    const to = await page.getByPlaceholder("feature/x").inputValue();
+    const out = [];
+    const stale = "feat/tenant-rate-limit";
+    if (from === stale || to === stale)
+      out.push(`the previous repository's branch is still in the scope fields (from=${from}, to=${to})`);
+    if (to !== "develop") out.push(`the target ref was not re-derived for the new repository (got "${to}", want "develop")`);
+    return out;
+  },
+});
+
+// The scope fields are cleared because they belonged to the repository that was
+// *left*, so re-opening the repository already open must not clear them. The
+// browse button goes through `pickRepo`, which calls `setRepo` directly and so
+// bypasses the top bar's own "did it actually change?" guard — and the fixture
+// returns the repository that is already open, which is the only way to reach
+// this branch from the harness at all.
+await shoot(page, "65-same-repo-keeps-scope", {
+  after: async (page) => {
+    await page.getByRole("button", { name: "分支对比", exact: true }).click();
+    await page.waitForTimeout(300);
+    await page.getByPlaceholder("feature/x").fill("release/2.4");
+    await page.waitForTimeout(300);
+    await page.getByRole("button", { name: "浏览", exact: true }).click();
+    await page.waitForTimeout(1000);
+  },
+  expect: async (page) => {
+    const to = await page.getByPlaceholder("feature/x").inputValue();
+    if (to !== "release/2.4")
+      return [`re-inspecting the repository already open discarded a hand-typed ref (got "${to}", want "release/2.4")`];
     return [];
   },
 });
