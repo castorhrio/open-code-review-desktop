@@ -76,6 +76,38 @@ export function PageBody({
   );
 }
 
+/**
+ * Just the centred measure, for a band that keeps its full-bleed background but
+ * whose *content* still belongs on the page column.
+ *
+ * The review page's file list and its pinned action bar are the case: the
+ * background has to reach the window edges for them to read as bands, but the
+ * rows and the run button must line up with the form above them. They did not,
+ * and at 1920px the page had three left edges — the form at 152px, the rows at
+ * 32px — so a row's diff stat landed ~1770px from the filename it describes,
+ * which is the exact failure rule 1 of this file forbids. At 1440px the same
+ * mistake is a 90px offset that reads as a margin, which is why every shot
+ * before the 1920 one missed it.
+ */
+export function Measure({
+  children,
+  narrow,
+  className,
+}: {
+  children: React.ReactNode;
+  narrow?: boolean;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn("mx-auto w-full", className)}
+      style={{ maxWidth: narrow ? "var(--page-max-narrow)" : "var(--page-max)" }}
+    >
+      {children}
+    </div>
+  );
+}
+
 /** A titled group of content. Rhythm comes from the parent stack, not from here. */
 export function Section({
   title,

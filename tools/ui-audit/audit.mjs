@@ -356,8 +356,44 @@ const expectPreviewListed = async (page) => {
  * half-finished — the same defect the running screen had. What has to hold is
  * that the file region reaches the action bar, whatever the window height.
  */
-const expectNoDeadBand = async (page) => {
+/**
+ * One measure per page — asserted on the page that broke it, at the width where
+ * it breaks.
+ *
+ * The review page's file list and its pinned bar are full-bleed *bands*: their
+ * background has to reach the window edges to read as bands. Their content does
+ * not, and did not: at 1920px the form began at 152px while the file rows began
+ * at 32px, so a row's diff stat landed ~1770px from the filename it describes.
+ * Three left edges on one page, and the one pairing the list exists to make
+ * unreadable — verbatim what rule 1 of the layout spec forbids. Every other shot
+ * is 1440px wide, where the same mistake is a 90px offset that reads as a
+ * margin, which is why it survived a suite that already checked for overflow.
+ */
+const expectOneColumn = async (page) => {
   const m = await page.evaluate(() => {
+    const find = (sel, test) => [...document.querySelectorAll(sel)].find(test);
+    const form = find("main h2", (h) => h.textContent === "审查范围");
+    const row = find("main span", (s) => s.textContent === "internal/service/auth/login.go");
+    const btn = find("main button", (b) => /开始审查/.test(b.textContent || ""));
+    if (!form || !row || !btn) return null;
+    const band = row.closest("div");
+    return {
+      formLeft: Math.round(form.getBoundingClientRect().left),
+      rowLeft: Math.round(row.getBoundingClientRect().left),
+      bandRight: Math.round(band.getBoundingClientRect().right),
+      runRight: Math.round(btn.getBoundingClientRect().right),
+    };
+  });
+  if (m === null) return ["the launcher lost its form, its file list or its run action"];
+  const out = [];
+  if (Math.abs(m.rowLeft - m.formLeft) > 2)
+    out.push(`the file rows start ${Math.abs(m.rowLeft - m.formLeft)}px off the form's column (${m.rowLeft} vs ${m.formLeft})`);
+  if (Math.abs(m.runRight - m.bandRight) > 2)
+    out.push(`the run action ends ${Math.abs(m.runRight - m.bandRight)}px off the column the list ends at (${m.runRight} vs ${m.bandRight})`);
+  return out;
+};
+
+const expectNoDeadBand = async (page) => {  const m = await page.evaluate(() => {
     const h2 = [...document.querySelectorAll("main h2")].find((h) => h.textContent === "进入审查的文件");
     const section = h2?.closest("section");
     const btn = [...document.querySelectorAll("main button")].find((b) => /开始审查/.test(b.textContent || ""));
@@ -463,7 +499,11 @@ await shoot(page, "09-results-findings", {
 });
 await shoot(page, "10-review-narrow", { width: 1100, height: 780, expect: expectRunActionVisible });
 await shoot(page, "11-settings-narrow", { width: 1100, height: 780, after: nav("设置") });
-await shoot(page, "12-review-xwide", { width: 1920, height: 1080, expect: expectRunActionVisible });
+await shoot(page, "12-review-xwide", {
+  width: 1920,
+  height: 1080,
+  expect: async (page) => [...(await expectRunActionVisible(page)), ...(await expectOneColumn(page))],
+});
 
 // The file list now computes itself as soon as the scope settles, so this shot
 // is the automatic path rather than a button press. The preview used to render

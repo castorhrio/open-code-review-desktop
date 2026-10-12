@@ -19,7 +19,7 @@ import { EFFORTS, MODE_META, validateSpec } from "@/lib/spec";
 import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
 import { Checkbox, Field, Input, Select, Textarea } from "@/components/ui/form";
-import { Card, FieldGrid, PageBody, Section } from "@/components/ui/layout";
+import { Card, FieldGrid, Measure, PageBody, Section } from "@/components/ui/layout";
 import { Badge, ConfirmDialog } from "@/components/ui/overlay";
 import { toast } from "sonner";
 import { GuideCard } from "@/components/GuideCard";
@@ -657,76 +657,80 @@ export function ReviewPanel() {
             content is top-aligned and shorter than the window reads as broken
             regardless of how little is on it. */}
         <section className="flex min-h-0 flex-1 flex-col border-t border-line bg-surface">
-          <div className="flex shrink-0 items-center gap-2 border-b border-line px-6 py-2">
-            <ListTree className="size-3.5 shrink-0 text-accent" />
-            <h2 className="shrink-0 text-strong font-semibold text-ink">进入审查的文件</h2>
-            <span className="min-w-0 truncate text-meta text-faint">
-              {preview?.value
-                ? `不消耗 token · 共 ${preview.value.total_files} 个${scan ? "" : "改动"}文件`
-                : "范围确定后自动计算"}
-            </span>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="ml-auto shrink-0"
-              disabled={preview?.loading}
-              onClick={() => void runPreview()}
-            >
-              <RefreshCw className="size-3.5" />
-              重新计算
-            </Button>
+          <div className="shrink-0 border-b border-line">
+            <Measure className="flex items-center gap-2 px-6 py-2">
+              <ListTree className="size-3.5 shrink-0 text-accent" />
+              <h2 className="shrink-0 text-strong font-semibold text-ink">进入审查的文件</h2>
+              <span className="min-w-0 truncate text-meta text-faint">
+                {preview?.value
+                  ? `不消耗 token · 共 ${preview.value.total_files} 个${scan ? "" : "改动"}文件`
+                  : "范围确定后自动计算"}
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="ml-auto shrink-0"
+                disabled={preview?.loading}
+                onClick={() => void runPreview()}
+              >
+                <RefreshCw className="size-3.5" />
+                重新计算
+              </Button>
+            </Measure>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-1">
-            {blocked ? (
-              <p className="px-1 py-6 text-center text-body text-faint">{blocked}</p>
-            ) : !preview || preview.loading ? (
-              <p className="px-1 py-6 text-center text-body text-faint">正在计算文件清单…</p>
-            ) : preview.error ? (
-              // Lead with the sentence that says what to change; the CLI's own
-              // wording follows, small and selectable, because it is what gets
-              // pasted into a bug report.
-              <div className="px-1 py-6 text-center">
-                <p className="text-body text-bad">{cliReason(preview.error)}</p>
-                {previewDetail && (
-                  <p className="mx-auto mt-1.5 max-w-[var(--page-max-narrow)] whitespace-pre-wrap font-mono text-meta text-faint selectable">
-                    {previewDetail}
-                  </p>
-                )}
-              </div>
-            ) : (
-              <>
-                {keep.length === 0 && (
-                  // A scan does not look at changes, so "工作区没有改动时属正常"
-                  // was advice for the wrong mode: it told someone who had just
-                  // asked for a whole-repository audit to go and make a diff.
-                  <p className="px-1 py-6 text-center text-body text-faint">
-                    {scan
-                      ? "这个路径下没有可通读的文件。换个「扫描路径」，或确认目录里有该语言支持读取的源文件。"
-                      : "没有文件进入审查。工作区没有改动时属正常，可改用「分支对比」或「单个提交」。"}
-                  </p>
-                )}
-                {keep.map((f) => (
-                  <div key={f.path} className="flex items-center gap-3 border-b border-line/60 py-2 last:border-b-0">
-                    <span className="min-w-0 flex-1 truncate font-mono text-body text-ink">{f.path}</span>
-                    <span className="tnum shrink-0 text-meta text-faint">
-                      {f.status}
-                      {scan ? ` · ${f.insertions} 行` : ` · +${f.insertions} / -${f.deletions}`}
-                    </span>
-                  </div>
-                ))}
-                {drop.length > 0 && (
-                  <>
-                    <div className="mt-3 mb-1 text-meta text-faint">以下 {drop.length} 个不进入审查</div>
-                    {drop.map((f) => (
-                      <div key={f.path} className="flex items-center gap-3 border-b border-line/40 py-2 last:border-b-0">
-                        <span className="min-w-0 flex-1 truncate font-mono text-body text-muted">{f.path}</span>
-                        <span className="shrink-0 text-meta text-faint">{EXCLUDE_REASON[f.exclude_reason || ""] || f.exclude_reason}</span>
-                      </div>
-                    ))}
-                  </>
-                )}
-              </>
-            )}
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <Measure className="px-6 py-1">
+              {blocked ? (
+                <p className="px-1 py-6 text-center text-body text-faint">{blocked}</p>
+              ) : !preview || preview.loading ? (
+                <p className="px-1 py-6 text-center text-body text-faint">正在计算文件清单…</p>
+              ) : preview.error ? (
+                // Lead with the sentence that says what to change; the CLI's own
+                // wording follows, small and selectable, because it is what gets
+                // pasted into a bug report.
+                <div className="px-1 py-6 text-center">
+                  <p className="text-body text-bad">{cliReason(preview.error)}</p>
+                  {previewDetail && (
+                    <p className="mx-auto mt-1.5 max-w-[var(--page-max-narrow)] whitespace-pre-wrap font-mono text-meta text-faint selectable">
+                      {previewDetail}
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <>
+                  {keep.length === 0 && (
+                    // A scan does not look at changes, so "工作区没有改动时属正常"
+                    // was advice for the wrong mode: it told someone who had just
+                    // asked for a whole-repository audit to go and make a diff.
+                    <p className="px-1 py-6 text-center text-body text-faint">
+                      {scan
+                        ? "这个路径下没有可通读的文件。换个「扫描路径」，或确认目录里有该语言支持读取的源文件。"
+                        : "没有文件进入审查。工作区没有改动时属正常，可改用「分支对比」或「单个提交」。"}
+                    </p>
+                  )}
+                  {keep.map((f) => (
+                    <div key={f.path} className="flex items-center gap-3 border-b border-line/60 py-2 last:border-b-0">
+                      <span className="min-w-0 flex-1 truncate font-mono text-body text-ink">{f.path}</span>
+                      <span className="tnum shrink-0 text-meta text-faint">
+                        {f.status}
+                        {scan ? ` · ${f.insertions} 行` : ` · +${f.insertions} / -${f.deletions}`}
+                      </span>
+                    </div>
+                  ))}
+                  {drop.length > 0 && (
+                    <>
+                      <div className="mt-3 mb-1 text-meta text-faint">以下 {drop.length} 个不进入审查</div>
+                      {drop.map((f) => (
+                        <div key={f.path} className="flex items-center gap-3 border-b border-line/40 py-2 last:border-b-0">
+                          <span className="min-w-0 flex-1 truncate font-mono text-body text-muted">{f.path}</span>
+                          <span className="shrink-0 text-meta text-faint">{EXCLUDE_REASON[f.exclude_reason || ""] || f.exclude_reason}</span>
+                        </div>
+                      ))}
+                    </>
+                  )}
+                </>
+              )}
+            </Measure>
           </div>
         </section>
 
@@ -734,52 +738,56 @@ export function ReviewPanel() {
             every knob the page owns — at the 1000x660 floor the button was not
             on screen at all. It is pinned here so 范围 → 开始 is always one
             glance and one click, however the two regions above it scroll. */}
-        <div className="flex shrink-0 flex-wrap items-center gap-3 border-t border-line bg-raised px-6 py-3">
-          <div className="min-w-0 flex-1">
-            <div className="text-body text-muted">{scopeSummary}</div>
-            {(repoGone || llmBlocked) && (
-              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-warn">
-                {repoGone && (
-                  <>
-                    <span>仓库目录现在打不开：{repoGone}。</span>
-                    <Button variant="ghost" size="sm" onClick={() => void pickRepo()}>
-                      重新选择
-                    </Button>
-                  </>
-                )}
-                {llmBlocked && (
-                  <>
-                    <span>模型服务还没就绪：{llmBlocked}。</span>
-                    <Button variant="ghost" size="sm" onClick={() => setView("settings")}>
-                      去设置
-                    </Button>
-                  </>
-                )}
-              </div>
+        <div className="shrink-0 border-t border-line bg-raised">
+          <Measure className="flex flex-wrap items-center gap-3 px-6 py-3">
+            <div className="min-w-0 flex-1">
+              <div className="text-body text-muted">{scopeSummary}</div>
+              {(repoGone || llmBlocked) && (
+                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-warn">
+                  {repoGone && (
+                    <>
+                      <span>仓库目录现在打不开：{repoGone}。</span>
+                      <Button variant="ghost" size="sm" onClick={() => void pickRepo()}>
+                        重新选择
+                      </Button>
+                    </>
+                  )}
+                  {llmBlocked && (
+                    <>
+                      <span>模型服务还没就绪：{llmBlocked}。</span>
+                      <Button variant="ghost" size="sm" onClick={() => setView("settings")}>
+                        去设置
+                      </Button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+            {running && (
+              <Button variant="danger" size="lg" onClick={() => void cancelRun()}>
+                <Square className="size-4" />
+                取消
+              </Button>
             )}
-          </div>
-          {running && (
-            <Button variant="danger" size="lg" onClick={() => void cancelRun()}>
-              <Square className="size-4" />
-              取消
+            {/* Disabled only when the run cannot start at all (no repo, a mode
+                missing its refs, a repository that is gone, no model behind it, a
+                scope the CLI has already refused) — the bar's own text is the
+                explanation, sitting next to the button. A scope that is valid but
+                empty stays clickable, because clicking it explains what to
+                change. The `title` is a courtesy only: `Button` sets
+                `disabled:pointer-events-none`, so a disabled button cannot show
+                one — the visible sentence above is what actually carries this. */}
+            <Button
+              variant="primary"
+              size="lg"
+              disabled={running || Boolean(disabledReason)}
+              title={disabledReason || undefined}
+              onClick={() => void startOrExplain()}
+            >
+              {resuming ? <RotateCcw className="size-4" /> : <Play className="size-4" />}
+              {running ? "审查运行中…" : resuming ? "续跑未完成部分" : "开始审查"}
             </Button>
-          )}
-          {/* Disabled only when the run cannot start at all (no repo, a mode
-              missing its refs, a repository that is gone, no model behind it, a
-              scope the CLI has already refused) — the bar's own text is the
-              explanation, sitting next to the button. A scope that is valid but
-              empty stays clickable, because clicking it explains what to
-              change. */}
-          <Button
-            variant="primary"
-            size="lg"
-            disabled={running || Boolean(disabledReason)}
-            title={disabledReason || undefined}
-            onClick={() => void startOrExplain()}
-          >
-            {resuming ? <RotateCcw className="size-4" /> : <Play className="size-4" />}
-            {running ? "审查运行中…" : resuming ? "续跑未完成部分" : "开始审查"}
-          </Button>
+          </Measure>
         </div>
       </div>
 
