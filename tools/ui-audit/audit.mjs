@@ -107,6 +107,13 @@ const PROBE = `(() => {
     docScrollH: document.documentElement.scrollHeight,
     docClientH: document.documentElement.clientHeight,
     clipped: clipped.slice(0, 4),
+    // An interpolated optional field prints the word "undefined" into the run
+    // header, and an unparseable number prints NaN — both invisible in code
+    // review, and both landing in the sentence the user reads to decide whether
+    // the run was real.
+    leaked: [...(document.body.innerText.match(/\\bundefined\\b|\\bNaN\\b|\\[object Object\\]/g) || [])].filter(
+      (v, i, all) => all.indexOf(v) === i
+    ),
   };
 })()`;
 
@@ -135,6 +142,7 @@ async function shoot(page, name, { width = 1440, height = 900, storage = STORAGE
   if (p.docScrollH > p.docClientH + 1) problems.push("doc-y-overflow");
   if (p.measure !== null && p.cap !== null && p.measure > p.cap + 1) problems.push(`measure ${p.measure}px > cap ${p.cap}px`);
   if (p.clipped.length) problems.push("clipped: " + p.clipped.join(" | "));
+  if (p.leaked.length) problems.push("rendered placeholder text: " + p.leaked.join(", "));
   if (expect) problems.push(...(await expect(page)));
   console.log(
     `${problems.length ? "FAIL    " : "ok      "} ${name.padEnd(20)} ${width}x${height}  measure=${p.measure}/${p.cap}` +
@@ -222,26 +230,35 @@ const expectCleanSummaries = async (page) => {
 };
 
 /**
- * The screen a user watches for minutes while a review runs. The bridge used to
- * stub `onProgress` with a no-op, so the audit only ever saw three zeros over an
- * empty window and reported it as passing — while the real complaint against
- * this screen is "I thought it had hung". Both halves are asserted: the data
- * (a scope count that actually arrived) and the density (a feed that fills the
- * screen rather than floating in it).
+ * The screen a user watches for minutes. The bridge used to stub `onProgress`
+ * with a no-op, so the audit only ever saw three zeros over an empty window and
+ * reported it as passing — while the real complaint against this screen is "I
+ * thought it had hung".
+ *
+ * The data half (a scope count that actually arrived) was fixed. The density
+ * half was not: it measured the gap *below* the last row, and the feed was
+ * bottom-anchored, so that gap was always ~0 while a 490px hole sat *above* the
+ * first row — a screen that is 70% blank in the middle of a run, which is the
+ * exact thing this screen exists to prevent. Both edges are asserted now.
  */
 const expectRunningFeed = async (page) => {
   const seen = await page.evaluate(() => {
     const main = document.querySelector("main");
     const list = main.querySelector("ol");
     const rows = list ? [...list.querySelectorAll("li")] : [];
-    const last = rows[rows.length - 1];
-    const box = list?.parentElement?.getBoundingClientRect();
-    const lb = last?.getBoundingClientRect();
+    const region = list?.parentElement;
+    const panel = region?.parentElement;
+    const rb = region?.getBoundingClientRect();
+    const fb = rows[0]?.getBoundingClientRect();
+    const pb = panel?.getBoundingClientRect();
+    const mb = main.getBoundingClientRect();
     return {
       rows: rows.length,
       text: main.innerText.replace(/\s+/g, " "),
       cells: [...main.querySelectorAll(".tnum")].map((e) => e.textContent.trim()),
-      gapBelow: box && lb ? Math.round(box.bottom - lb.bottom) : -1,
+      gapAbove: rb && fb ? Math.round(fb.top - rb.top) : -1,
+      share: pb ? Math.round((pb.height / mb.height) * 100) : -1,
+      bordered: panel ? parseFloat(getComputedStyle(panel).borderTopWidth) > 0 : false,
     };
   });
   const out = [];
@@ -249,7 +266,9 @@ const expectRunningFeed = async (page) => {
   if (seen.cells.includes("—")) out.push(`a run counter never left "—": ${seen.cells.join(", ")}`);
   if (seen.cells.includes("…")) out.push(`a run counter never left its placeholder: ${seen.cells.join(", ")}`);
   if (!/进入审查/.test(seen.text)) out.push("the run screen lost its scope counter");
-  if (seen.gapBelow > 60) out.push(`${seen.gapBelow}px of empty window under the last activity row — the feed floats instead of anchoring`);
+  if (seen.gapAbove > 40) out.push(`${seen.gapAbove}px of empty window above the first activity row — the run screen reads as stuck`);
+  if (seen.share < 55) out.push(`the activity panel is only ${seen.share}% of the screen, so it is not the hero of a running review`);
+  if (!seen.bordered) out.push("the activity region has no frame, so unfilled space inside it reads as broken layout");
   return out;
 };
 
@@ -890,6 +909,57 @@ await shoot(page, "41-cancel-resumable", {
     return out;
   },
 });
+
+// The reading view is the answer to "the results can't be looked at on their
+// own": the triage screen shows one finding at a time behind a click each, so a
+// review of any size cannot be read end to end or searched. What has to hold is
+// that it is the *whole* review (not the current filter), laid out per file,
+// with the CLI's markdown rendered rather than shown.
+const openReport = async (page) => {
+  await openFindings(page);
+  await page.getByRole("button", { name: "阅读", exact: true }).click();
+  await page.waitForTimeout(500);
+};
+
+const expectReadableDocument = async (page) => {
+  const doc = await page.evaluate(() => {
+    const main = document.querySelector("main");
+    const files = [...main.querySelectorAll("section")]
+      .filter((s) => s.querySelector("article"))
+      .map((s) => ({
+        path: s.querySelector("span")?.textContent || "",
+        findings: s.querySelectorAll("article").length,
+      }));
+    return {
+      files,
+      findings: main.querySelectorAll("article").length,
+      text: main.innerText,
+      // The document must scroll on its own; a clipped reading surface is the
+      // same failure the code pane used to have.
+      scrolls: [...main.querySelectorAll("div")].some((d) => d.scrollHeight > d.clientHeight + 8 && /auto|scroll/.test(getComputedStyle(d).overflowY)),
+    };
+  });
+  const out = [];
+  if (doc.findings !== 5) out.push(`the report shows ${doc.findings} findings, but this review has 5 — reading view must carry the whole run`);
+  if (doc.files.length !== 3) out.push(`expected the findings grouped into 3 files, got ${doc.files.length}`);
+  if (doc.files[0] && !/login\.go/.test(doc.files[0].path))
+    out.push(`the report does not lead with the worst file: ${doc.files.map((f) => f.path).join(", ")}`);
+  if (/\*\*|`/.test(doc.text)) out.push("the report shows literal markdown markers instead of rendering them");
+  // `ocr session comments` returns findings only, so the CLI's project summary
+  // exists for a live run and not for a session reopened from history. Assert
+  // the part that must survive both paths: the run identity line.
+  if (!/条评论/.test(doc.text)) out.push("the report lost the run's own header, so it cannot be read outside the app");
+  if (!doc.scrolls) out.push("the report has no scroller, so a long review cannot be read to the end");
+  return out;
+};
+
+await shoot(page, "42-report-read", { after: openReport, expect: expectReadableDocument });
+await shoot(page, "43-report-min", { width: 1000, height: 660, after: openReport, expect: expectReadableDocument });
+await shoot(page, "44-report-light", {
+  storage: { ...STORAGE, "ocr-theme-pref": "light" },
+  after: openReport,
+});
+await shoot(page, "45-report-stress", { query: "?stress=1", after: openReport });
 
 await browser.close();
 server.close();

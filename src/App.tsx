@@ -9,6 +9,7 @@ import { LogDrawer } from "@/components/LogDrawer";
 import { ReviewPanel } from "@/components/ReviewPanel";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { ResultsPanel } from "@/components/ResultsPanel";
+import { ReportView } from "@/components/ReportView";
 import { HistoryPanel } from "@/components/HistoryPanel";
 import { SettingsPanel } from "@/components/SettingsPanel";
 
@@ -30,6 +31,7 @@ export function App() {
         <main className="min-h-0 flex-1 overflow-hidden bg-canvas">
           {view === "review" && <ReviewPanel />}
           {view === "results" && <ResultsPanel />}
+          {view === "report" && <ReportView />}
           {view === "history" && <HistoryPanel />}
           {view === "settings" && <SettingsPanel />}
         </main>

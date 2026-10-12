@@ -1,4 +1,4 @@
-// WCAG contrast audit. Walks every rendered text node in all four views, in both
+// WCAG contrast audit. Walks every rendered text node in all five views, in both
 // themes, resolves the effective background behind it, and reports pairs below
 // the AA thresholds. Rendered images are hard to judge by eye, so this reports
 // ratios instead of opinions. Run with `npm run audit:contrast` after a build.
@@ -85,6 +85,9 @@ const VIEWS = [
   { name: "settings", nav: "设置" },
   { name: "history", nav: "历史" },
   { name: "results", nav: "历史", then: "main:/结果/" },
+  // The reading view is the widest block of prose in the app, so it is the place
+  // a muted-on-surface step would first fail real reading.
+  { name: "report", nav: "历史", then: "main:/结果/", then2: "阅读" },
 ];
 
 const findings = [];
@@ -113,6 +116,10 @@ for (const theme of ["light", "dark"]) {
       await page.waitForTimeout(900);
       await page.locator("main").getByRole("button", { name: /密码校验/ }).first().click();
       await page.waitForTimeout(900);
+    }
+    if (view.then2) {
+      await page.getByRole("button", { name: view.then2, exact: true }).click();
+      await page.waitForTimeout(600);
     }
 
     const rows = await page.evaluate(COLLECT);

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Download, ExternalLink, FileCode2, FolderOpen, Search, Sparkles, Wrench, Copy } from "lucide-react";
+import { Download, ExternalLink, FileCode2, FolderOpen, Search, Sparkles, Wrench, Copy, BookOpenText } from "lucide-react";
 import { api, type FileWindow } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { SEVERITY_DOT, SEVERITY_LABEL, SEVERITY_RANK, SEVERITY_TEXT, STATUS, coverageOf, summaryLine, terminalState } from "@/lib/format";
@@ -10,81 +10,10 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/form";
 import { EmptyState, PanelHeader } from "@/components/ui/layout";
 import { Badge } from "@/components/ui/overlay";
+import { CodeBlock, MarkdownLite, findingToMarkdown } from "@/components/finding";
 import { toast } from "sonner";
 
 const SEVERITIES = ["critical", "high", "medium", "low", ""] as const;
-
-/**
- * The end of this app's workflow is pasting findings into a PR/MR, a chat, or a
- * ticket — and until now the only ways out were a JSON dump and a standalone
- * HTML report. Findings are already written in light markdown by the CLI, so a
- * markdown block pastes cleanly into GitHub/GitLab without re-formatting.
- */
-function findingToMarkdown(c: Finding): string {
-  const line = c.end_line && c.end_line !== c.start_line ? `L${c.start_line}-${c.end_line}` : `L${c.start_line}`;
-  const tags = [c.severity, c.category].filter(Boolean).join(" · ");
-  const out = [`### \`${c.path}\` ${line}${tags ? ` — ${tags}` : ""}`, "", c.content.trim()];
-  if (c.existing_code) out.push("", "当前代码：", "```", c.existing_code.trimEnd(), "```");
-  if (c.suggestion_code) out.push("", "建议改为：", "```", c.suggestion_code.trimEnd(), "```");
-  return out.join("\n");
-}
-
-/**
- * Minimal markdown for the CLI's own prose. The CLI writes findings and the
- * project summary in light markdown, so rendering them raw leaks `**` into the
- * primary reading surface. Findings name identifiers constantly, so inline code
- * is the second construct worth handling — it was rendering as literal
- * backticks in the one place a reader is trying to follow an argument about
- * `subtle.ConstantTimeCompare`.
- *
- * Both are split in a single pass so a line that mixes them keeps its order.
- * The length guards matter: a stray `**` in prose (no closing pair) must render
- * as itself, not as an empty `<b>` that silently deletes it.
- */
-const INLINE = /(\*\*[^*]+\*\*|`[^`]+`)/g;
-
-function MarkdownLite({ text, className }: { text: string; className?: string }) {
-  const inline = (s: string, key: string) =>
-    s.split(INLINE).map((part, i) => {
-      if (part.length > 4 && part.startsWith("**") && part.endsWith("**"))
-        return (
-          <b key={key + i} className="font-semibold text-ink">
-            {part.slice(2, -2)}
-          </b>
-        );
-      if (part.length > 2 && part.startsWith("`") && part.endsWith("`"))
-        return (
-          <code key={key + i} className="rounded-xs bg-raised px-1 font-mono text-ink">
-            {part.slice(1, -1)}
-          </code>
-        );
-      return <span key={key + i}>{part}</span>;
-    });
-  return (
-    <div className={cn("space-y-1.5 text-body text-muted", className)}>
-      {text.split(/\r?\n/).map((line, i) => {
-        const t = line.trim();
-        if (!t) return null;
-        const heading = /^(#{1,4})\s+(.*)$/.exec(t);
-        if (heading)
-          return (
-            <p key={i} className="text-strong font-semibold text-ink">
-              {inline(heading[2], "h" + i)}
-            </p>
-          );
-        const item = /^(\d+\.|[-*])\s+(.*)$/.exec(t);
-        if (item)
-          return (
-            <p key={i} className="flex gap-1.5 pl-1">
-              <span className="tnum shrink-0 text-faint">{item[1].replace(".", "")}</span>
-              <span className="min-w-0">{inline(item[2], "i" + i)}</span>
-            </p>
-          );
-        return <p key={i}>{inline(t, "p" + i)}</p>;
-      })}
-    </div>
-  );
-}
 
 /**
  * The file around a finding. Two homes, because the 3-pane grid only has room
@@ -174,8 +103,13 @@ function FileViewer({ current, file, variant }: { current: Finding; file: FileWi
  * working perfectly, which is exactly "the app has hung".
  *
  * So the CLI's own activity *is* the interface here: every tool call, with what
- * it asked for and how long it took, growing downward and auto-following. The
- * counters above it are secondary orientation, not the main signal.
+ * it asked for and how long it took. It is a framed panel that fills the
+ * window with its rows starting at the top, because the version this replaced
+ * bottom-anchored a bare list inside an unframed flex column — 13 rows at the
+ * bottom of a 900px window, and a ~490px hole where the activity should have
+ * been. That hole is the single most direct cause of "it looks stuck", and a
+ * panel that owns its space cannot produce it: an unfilled log region reads as
+ * a log, while an unfilled void reads as a crash.
  */
 function RunningView() {
   const { elapsed, runLabel, progress, cancelRun, runResumable } = useStore();
@@ -188,9 +122,10 @@ function RunningView() {
   }, [activity.length]);
 
   const cells = [
+    { label: "已运行", value: `${elapsed}s` },
     { label: "进入审查", value: progress ? progress.reviewing || progress.files || "—" : "…" },
+    { label: "已产出评论", value: progress ? progress.comments : "…", accent: Boolean(progress?.comments) },
     { label: "工具调用", value: progress ? progress.tools : "…" },
-    { label: "已产出评论", value: progress ? progress.comments : 0 },
     ...(progress && progress.excluded ? [{ label: "被规则排除", value: progress.excluded }] : []),
   ];
 
@@ -198,7 +133,6 @@ function RunningView() {
     <div className="flex h-full min-h-0 flex-col">
       <PanelHeader>
         <Badge tone="accent">{runLabel || "审查运行中"}</Badge>
-        <span className="tnum text-meta text-muted">已运行 {elapsed}s</span>
         {progress?.current && (
           <span className="flex min-w-0 items-center gap-1.5 text-meta text-faint">
             正在
@@ -214,40 +148,46 @@ function RunningView() {
       <div className="grid shrink-0 grid-cols-[repeat(auto-fit,minmax(120px,1fr))] divide-x divide-line border-b border-line bg-surface">
         {cells.map((cell) => (
           <div key={cell.label} className="px-4 py-2.5">
-            <div className="tnum text-stat font-semibold text-ink">{cell.value}</div>
+            <div className={cn("tnum text-stat font-semibold", "accent" in cell && cell.accent ? "text-accent" : "text-ink")}>{cell.value}</div>
             <div className="mt-0.5 text-meta text-faint">{cell.label}</div>
           </div>
         ))}
       </div>
 
-      {/* Bottom-anchored, like a terminal: a feed of five rows would otherwise
-          float at the top of a tall window and leave the screen reading as a
-          void — the exact shape this rewrite exists to remove. */}
-      <div ref={feed} className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-3">
-        <ol className="mt-auto space-y-1">
-          {activity.length === 0 && (
-            <li className="text-body text-faint">正在启动 ocr…第一行输出到达后，这里会开始逐条显示它在读哪个文件、查了什么。</li>
-          )}
-          {activity.map((a) => (
-            <li key={a.id} className="flex items-baseline gap-2">
-              {a.kind === "note" ? (
-                <span className={cn("shrink-0 text-meta", a.warn ? "text-warn" : "text-accent")}>{a.warn ? "!" : "›"}</span>
-              ) : (
-                <span
-                  className={cn(
-                    "size-1.5 shrink-0 self-center rounded-full",
-                    a.state === "running" ? "animate-pulse bg-accent" : a.state === "failed" ? "bg-bad" : "bg-ok"
-                  )}
-                />
+      <div className="min-h-0 flex-1 p-4">
+        <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-md border border-line bg-surface">
+          <div className="flex shrink-0 items-center gap-2 border-b border-line bg-raised px-3 py-1.5">
+            <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-accent" aria-hidden="true" />
+            <h3 className="text-strong font-semibold text-ink">实时活动</h3>
+            <span className="min-w-0 truncate text-meta text-faint">CLI 的每一次工具调用一行，最新在下方</span>
+          </div>
+          <div ref={feed} className="min-h-0 flex-1 overflow-y-auto px-3 py-2.5">
+            <ol className="space-y-1">
+              {activity.length === 0 && (
+                <li className="text-body text-faint">正在启动 ocr…第一行输出到达后，这里会开始逐条显示它在读哪个文件、查了什么。</li>
               )}
-              <span className={cn("shrink-0 font-mono text-body", a.kind === "note" ? "text-ink" : "text-muted")}>
-                {a.kind === "note" ? a.text : a.tool}
-              </span>
-              {a.args && <span className="min-w-0 truncate font-mono text-meta text-faint">{a.args}</span>}
-              {a.ms && <span className="tnum shrink-0 font-mono text-meta text-faint">{a.ms}</span>}
-            </li>
-          ))}
-        </ol>
+              {activity.map((a) => (
+                <li key={a.id} className="flex items-baseline gap-2">
+                  {a.kind === "note" ? (
+                    <span className={cn("shrink-0 text-meta", a.warn ? "text-warn" : "text-accent")}>{a.warn ? "!" : "›"}</span>
+                  ) : (
+                    <span
+                      className={cn(
+                        "size-1.5 shrink-0 self-center rounded-full",
+                        a.state === "running" ? "animate-pulse bg-accent" : a.state === "failed" ? "bg-bad" : "bg-ok"
+                      )}
+                    />
+                  )}
+                  <span className={cn("shrink-0 font-mono text-body", a.kind === "note" ? "text-ink" : "text-muted")}>
+                    {a.kind === "note" ? a.text : a.tool}
+                  </span>
+                  {a.args && <span className="min-w-0 truncate font-mono text-meta text-faint">{a.args}</span>}
+                  {a.ms && <span className="tnum shrink-0 font-mono text-meta text-faint">{a.ms}</span>}
+                </li>
+              ))}
+            </ol>
+          </div>
+        </div>
       </div>
 
       <div className="shrink-0 border-t border-line bg-surface px-4 py-2 text-meta text-faint">
@@ -453,6 +393,13 @@ export function ResultsPanel() {
           {(result.warnings?.length ?? 0) > 0 && <span className="text-warn">{result.warnings?.length} 条警告</span>}
         </div>
         <div className="ml-auto flex items-center gap-1.5">
+          {/* This screen is a triage surface: one finding at a time, behind a
+              click each. Reading a whole review top to bottom — or searching it
+              with one keystroke — needs a document, which is what 阅读 opens. */}
+          <Button variant="ghost" size="sm" title="把这次审查排成一份可通读的文档" onClick={() => setView("report")}>
+            <BookOpenText className="size-3.5" />
+            阅读
+          </Button>
           <Button
             variant="ghost"
             size="sm"
@@ -702,20 +649,6 @@ export function ResultsPanel() {
           )}
         </div>
       </div>
-    </div>
-  );
-}
-
-function CodeBlock({ title, tone, text }: { title: string; tone: "ok" | "bad"; text: string }) {
-  return (
-    <div className="mt-3 overflow-hidden rounded-md border border-line">
-      <div className="flex items-center justify-between bg-raised px-3 py-1">
-        <span className={cn("text-meta font-medium", tone === "ok" ? "text-ok" : "text-bad")}>{title}</span>
-        <Button variant="ghost" size="sm" onClick={() => void copyText(text, `「${title}」代码`)}>
-          复制
-        </Button>
-      </div>
-      <pre className="overflow-x-auto px-3 py-2 font-mono text-meta whitespace-pre text-ink selectable">{text}</pre>
     </div>
   );
 }

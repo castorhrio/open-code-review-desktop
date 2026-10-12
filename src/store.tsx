@@ -17,7 +17,7 @@ import type {
   UpdateView,
 } from "@/lib/types";
 
-export type View = "review" | "results" | "history" | "settings";
+export type View = "review" | "results" | "report" | "history" | "settings";
 
 export interface FormState {
   mode: ReviewMode;

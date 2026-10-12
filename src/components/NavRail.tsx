@@ -15,9 +15,14 @@ const CYCLE: ThemePref[] = ["system", "dark", "light"];
 const THEME_LABEL: Record<ThemePref, string> = { system: "跟随系统", dark: "深色", light: "浅色" };
 const THEME_ICON = { system: MonitorSmartphone, dark: Moon, light: Sun };
 
+// 阅读 is a second way to look at 结果, not a fifth destination, so it keeps the
+// results item lit rather than leaving the rail with nothing selected.
+const NAV_OF: Partial<Record<View, View>> = { report: "results" };
+
 export function NavRail() {
   const { view, setView, comments, running } = useStore();
   const pref = useThemePref();
+  const nav = NAV_OF[view] || view;
 
   const Icon = THEME_ICON[pref];
 
@@ -30,7 +35,7 @@ export function NavRail() {
 
       <div className="flex flex-col items-center gap-1">
         {ITEMS.map(({ view: v, label, icon: ItemIcon }) => {
-          const active = view === v;
+          const active = nav === v;
           return (
             <Tooltip key={v} content={label}>
               <button
