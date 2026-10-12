@@ -531,6 +531,14 @@ for (const [name, storage] of [
       for (const step of ["选择要审查的仓库目录", "配置模型服务与 API Key", "点「开始审查」，结果在「结果」页"])
         if (!text.includes(step)) out.push(`guide step missing: ${step}`);
       if (!text.includes("不再提示")) out.push("no way to dismiss the guide");
+      if (name === "30-guide-cold") {
+        // With nothing to review, the pinned action must not pretend otherwise —
+        // and disabling it is only honest if the bar says what is missing.
+        const btn = page.getByRole("button", { name: /开始审查/ });
+        if (!(await btn.count())) out.push("the pinned run action disappeared on a cold start");
+        else if (!(await btn.first().isDisabled())) out.push("a review with no repository is still offered as clickable");
+        if (!/仓库栏/.test(text)) out.push("nothing on a cold start says what is missing");
+      }
       return out;
     },
   });

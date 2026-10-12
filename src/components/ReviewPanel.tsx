@@ -186,6 +186,8 @@ export function ReviewPanel() {
     void startRun();
   };
 
+  const blocked = validateSpec(buildSpec());
+
   const scopeSummary = running ? (
     <span className="flex items-center gap-2">
       {runLabel || "审查运行中"}
@@ -213,7 +215,7 @@ export function ReviewPanel() {
       <span className="text-warn">当前范围没有文件进入审查</span>
     )
   ) : (
-    <span className="text-faint">{validateSpec(buildSpec()) || "正在准备…"}</span>
+    <span className="text-faint">{blocked || "正在准备…"}</span>
   );
 
   return (
@@ -667,7 +669,17 @@ export function ReviewPanel() {
               取消
             </Button>
           )}
-          <Button variant="primary" size="lg" disabled={running} onClick={() => void startOrExplain()}>
+          {/* Disabled only when the run cannot start at all (no repo, a mode
+              missing its refs) — the bar's own text is the explanation, sitting
+              next to the button. A scope that is valid but empty stays
+              clickable, because clicking it explains what to change. */}
+          <Button
+            variant="primary"
+            size="lg"
+            disabled={running || Boolean(blocked)}
+            title={blocked || undefined}
+            onClick={() => void startOrExplain()}
+          >
             {resume?.sessionId ? <RotateCcw className="size-4" /> : <Play className="size-4" />}
             {running ? "审查运行中…" : resume?.sessionId ? "续跑未完成部分" : "开始审查"}
           </Button>
