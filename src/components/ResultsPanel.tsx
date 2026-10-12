@@ -209,6 +209,8 @@ export function ResultsPanel() {
   const [text, setText] = useState("");
   const [selected, setSelected] = useState(-1);
   const [file, setFile] = useState<FileWindow | null>(null);
+  /** The row the selection is on, so it can be brought back into view. */
+  const selectedRow = useRef<HTMLButtonElement | null>(null);
 
   const cats = useMemo(() => [...new Set(comments.map((c) => c.category || "").filter(Boolean))].sort(), [comments]);
 
@@ -285,6 +287,23 @@ export function ResultsPanel() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [filtered, selected, open]);
+
+  /**
+   * Keep the selection on screen.
+   *
+   * The list advertises ↑↓ / j k and on a 200-finding run it is far taller than
+   * its pane, so the selection walked off the bottom and kept going: measured,
+   * fourteen presses left the highlighted row 3400px below the visible list
+   * with `scrollTop` still 0. The detail pane changed on every press, so the
+   * keyboard looked like it had stopped working rather than like it had scrolled
+   * somewhere the reader could not see. `nearest` — so clicking a row that is
+   * already visible does not jump the list — and the default (instant) behaviour,
+   * so holding `j` does not queue animations.
+   */
+  useEffect(() => {
+    if (selected < 0) return;
+    selectedRow.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [selected]);
 
   if (running) return <RunningView />;
 
@@ -567,6 +586,7 @@ export function ResultsPanel() {
             return (
               <button
                 key={i}
+                ref={i === selected ? selectedRow : undefined}
                 onClick={() => void open(i)}
                 className={cn(
                   "flex w-full gap-2.5 border-b border-line/60 px-3 py-2.5 text-left transition-colors",

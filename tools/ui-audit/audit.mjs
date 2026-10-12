@@ -11,6 +11,13 @@ const { chromium } = await loadPlaywright();
 
 const PORT = 5199;
 
+// Negative verification means re-running one shot after deliberately breaking the
+// fix, and a full sixty-shot run is slow enough that the step quietly stops
+// happening. `SHOT=<substring> npm run audit:ui` runs only the matching shots.
+// A filtered run announces itself in the tally, because a filtered green is not
+// a green and must never be readable as one.
+const ONLY = process.env.SHOT || "";
+
 // Enforces the layout spec in `src/components/ui/layout.tsx` instead of trusting
 // a code comment: one measure per scrolling page, no horizontal overflow, and no
 // element whose content is wider than its own box.
@@ -125,6 +132,12 @@ const PROBE = `(() => {
 })()`;
 
 async function shoot(page, name, { width = 1440, height = 900, storage = STORAGE, clearStorage = false, after, expect, query = "" } = {}) {
+  // Skipped shots are counted separately, never as passes — each shot reloads
+  // the page and seeds its own storage, so skipping one cannot change another.
+  if (ONLY && !name.includes(ONLY)) {
+    skipped.push(name);
+    return null;
+  }
   await page.setViewportSize({ width, height });
   await page.goto(`http://127.0.0.1:${PORT}/${query}`, { waitUntil: "load" });
   // localStorage survives navigation within an origin, so a shot that needs a
@@ -183,6 +196,7 @@ const server = await serve(PORT);
 fs.mkdirSync(SHOTS, { recursive: true });
 const passed = [];
 const failed = [];
+const skipped = [];
 
 /**
  * The results screen is the one master-detail view, and its column count is a
@@ -1370,13 +1384,59 @@ await shoot(page, "60-review-scan-empty", {
   },
 });
 
+// The results list advertises ↑↓ / j k, and on a 200-finding run the list is
+// taller than its pane — so the selection has to be brought into view, or the
+// keyboard appears to stop working while the detail pane keeps changing to
+// findings the reader cannot see the source of.
+await shoot(page, "61-results-keyboard-nav", {
+  query: "?many=1",
+  after: async (page) => {
+    await openFindings(page);
+    for (let i = 0; i < 14; i++) {
+      await page.keyboard.press("j");
+      await page.waitForTimeout(60);
+    }
+    await page.waitForTimeout(700);
+  },
+  expect: async (page) => {
+    const m = await page.evaluate(() => {
+      const sel = [...document.querySelectorAll("main button")].find((b) => /bg-accent-soft/.test(String(b.className)));
+      const scroller = sel && sel.closest("div[class*='overflow-y-auto']");
+      if (!sel || !scroller) return null;
+      const r = sel.getBoundingClientRect();
+      const s = scroller.getBoundingClientRect();
+      return {
+        row: [Math.round(r.top), Math.round(r.bottom)],
+        view: [Math.round(s.top), Math.round(s.bottom)],
+        scrollTop: Math.round(scroller.scrollTop),
+      };
+    });
+    if (m === null) return ["the results list has no selected row, or no scroller around it"];
+    if (m.row[0] < m.view[0] - 1 || m.row[1] > m.view[1] + 1)
+      return [`the keyboard selection sits outside the visible list (row ${m.row.join("-")}, view ${m.view.join("-")}, scrollTop ${m.scrollTop})`];
+    return [];
+  },
+});
+
 await browser.close();
 server.close();
 
 // A harness that prints FAIL and then exits 0 is a harness CI will happily
 // ignore. Report the tally and fail loudly.
-console.log(`\n${passed.length} ok, ${failed.length} failed  (${describeChannel()})`);
+const filtered = skipped.length > 0;
+console.log(
+  `\n${passed.length} ok, ${failed.length} failed` +
+    (filtered ? `, ${skipped.length} skipped (SHOT=${ONLY})` : "") +
+    `  (${describeChannel()})`
+);
 console.log("shots ->", SHOTS);
+// A filter that matches nothing is a typo, not a pass: reporting "0 ok, 0
+// failed" and exiting 0 would let a misspelt SHOT read as a green build.
+if (filtered && passed.length === 0 && failed.length === 0) {
+  console.error(`\nSHOT=${ONLY} matched no shots — nothing was verified`);
+  process.exit(1);
+}
+if (filtered) console.warn(`filtered run — only shots matching "${ONLY}" were verified; this is not a full green`);
 if (failed.length) {
   console.error(`\nlayout assertions failed: ${failed.join(", ")}`);
   process.exit(1);
