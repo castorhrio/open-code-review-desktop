@@ -10,7 +10,7 @@ The review engine is the official, **unmodified** `ocr` binary. This project onl
 
 ## Status
 
-`v0.1.9` (latest) — usable, verified against `ocr v1.12.13`.
+`v0.1.10` (latest) — usable, verified against `ocr v1.12.13`.
 
 Verified end-to-end against the real CLI, without spending tokens:
 

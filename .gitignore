@@ -28,3 +28,14 @@ dev-app-update.yml
 # working notes for the improvement loop — local only, not part of the shipped repo
 AGENT_BACKLOG.md
 AGENT_NOTES.md
+
+# secrets — the CLI keeps its key in ~/.opencodereview/config.json, never in the
+# repo, and nothing here should ever be committed. Listed defensively so that a
+# stray local file cannot be added by accident.
+.env
+.env.*
+*.pem
+*.key
+*.p12
+.opencodereview/
+credentials.json
