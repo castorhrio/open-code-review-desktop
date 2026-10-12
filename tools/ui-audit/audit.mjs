@@ -1139,6 +1139,22 @@ await shoot(page, "52-report-many", {
   },
 });
 
+// The tightest real combination for the launcher's three-band layout: the
+// window minimum, the first-run guide still on screen, and every knob expanded.
+// The form region is capped so it can never push the file region or the run bar
+// out of the window, and this is where that cap has to hold.
+await shoot(page, "53-review-tight", {
+  width: 1000,
+  height: 660,
+  storage: { "last-repo": "/home/x/work/payments-api" },
+  clearStorage: true,
+  after: async (page) => {
+    await page.getByRole("button", { name: /调整这次审查的参数/ }).click();
+    await page.waitForTimeout(500);
+  },
+  expect: async (page) => [...(await expectNoDeadBand(page)), ...(await expectRunActionVisible(page))],
+});
+
 await browser.close();
 server.close();
 
