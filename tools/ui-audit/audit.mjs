@@ -1155,6 +1155,56 @@ await shoot(page, "53-review-tight", {
   expect: async (page) => [...(await expectNoDeadBand(page)), ...(await expectRunActionVisible(page))],
 });
 
+// The app's main transition, which no shot walked before: press 开始审查, the
+// run finishes, the payload arrives, and the results screen has to take it.
+// Every other "results with findings" shot got there through 历史, so the whole
+// success path through `onExit` — the jump, the header, the auto-selected worst
+// finding, the project summary that only a live run carries — was unrendered.
+await shoot(page, "54-run-completes", {
+  query: "?run=done",
+  after: async (page) => {
+    await nav("审查")(page);
+    await page.waitForTimeout(1600);
+    await page.getByRole("button", { name: /开始审查/ }).click();
+    await page.waitForTimeout(5200);
+  },
+  expect: async (page) => {
+    const text = await page.locator("main").innerText();
+    const out = [];
+    if (!/完成/.test(text)) out.push("a finished run is not shown as finished");
+    if (!/密码校验用了普通的字符串比较/.test(text)) out.push("the finished run did not open on its most severe finding");
+    if (!/这次审查的要点/.test(text)) out.push("the CLI's project summary is missing from a live run's results");
+    if (!/412,880/.test(text)) out.push("the run's token total is not in the header");
+    if (/审查运行中/.test(text)) out.push("the screen still says the run is going after it exited");
+    return out;
+  },
+});
+
+// The exact invocation is the first thing to read when a run did not do what you
+// expected, and it is in no other durable place — the log drawer collapsed, and a
+// toast is not selectable. It belongs in the document a run produces.
+await shoot(page, "55-report-carries-command", {
+  query: "?run=done",
+  after: async (page) => {
+    await nav("审查")(page);
+    await page.waitForTimeout(1600);
+    await page.getByRole("button", { name: /开始审查/ }).click();
+    await page.waitForTimeout(5200);
+    await page.getByRole("button", { name: "阅读", exact: true }).click();
+    await page.waitForTimeout(600);
+  },
+  expect: async (page) => {
+    const text = await page.locator("main").innerText();
+    const out = [];
+    if (!/ocr review --repo/.test(text)) out.push("the report does not record the command that produced it");
+    // The log line already carries the program name, so prefixing it again reads
+    // `ocr ocr review …` — which the check above cannot see.
+    if (/ocr ocr/.test(text)) out.push("the recorded command doubled its program name");
+    if (/\[cmd\]/.test(text)) out.push("the raw log marker leaked into the document");
+    return out;
+  },
+});
+
 await browser.close();
 server.close();
 

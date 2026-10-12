@@ -25,7 +25,13 @@ function groupByPath(comments: Finding[]) {
 }
 
 export function ReportView() {
-  const { result, resultOrigin, comments, setView, exportSession } = useStore();
+  const { result, resultOrigin, comments, log, setView, exportSession } = useStore();
+  // The exact invocation is the first thing to read when a run did not do what
+  // was expected, and it survives nowhere else: the log drawer is collapsed by
+  // default and a toast cannot be selected. Only a run has one — a session
+  // reopened from 历史 was written by whatever command made it, which may be
+  // this app's or may be the CLI's, so the line is omitted rather than guessed.
+  const command = resultOrigin?.kind === "run" ? (log.find((l) => l.startsWith("[cmd] ")) || "").slice(6) : "";
 
   if (!result) {
     return (
@@ -84,6 +90,15 @@ export function ReportView() {
 
       <div className="min-h-0 flex-1 overflow-y-auto bg-canvas">
         <PageBody>
+          {command && (
+            <div className="flex items-start gap-2">
+              <code className="min-w-0 flex-1 break-all font-mono text-meta text-faint selectable">{command}</code>
+              <Button variant="ghost" size="sm" className="shrink-0" title="复制这条命令" onClick={() => void copyText(command, "本次运行的命令")}>
+                复制命令
+              </Button>
+            </div>
+          )}
+
           {result.project_summary && (
             <Card
               padded={false}

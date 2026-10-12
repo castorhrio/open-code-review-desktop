@@ -344,9 +344,33 @@ window.api = (() => {
   let progressCb = null;
   let logCb = null;
   let exitCb = null;
+  // The payload a completed review answers with on stdout. Everything the app
+  // shows after a run comes from this shape, so the success transition is only
+  // real if the whole payload is here — not just the comments.
+  // (No backticks anywhere below: the bridge is one template literal.)
+  const RUN_RESULT = {
+    status: "success",
+    session_id: "9f2c41d0a7b34e58b1c6d7e8f9a0b1c2",
+    llm: { provider: "deepseek", model: "deepseek-v4-pro" },
+    comments: D.FINDINGS,
+    project_summary: "**主要风险**\\n\\n1. 认证路径上有一处非常量时间比较。\\n2. 超时中间件泄漏 cancel。",
+    summary: { files_reviewed: 5, comments: 5, total_tokens: 412880, input_tokens: 401000, output_tokens: 11880, elapsed: "3m48s" },
+    manifest: { schema_version: "1", run_id: "9f2c41d0", operation: "review", terminal_state: "success", coverage: { failed: [], waived: [] } },
+    warnings: [],
+  };
   const replay = () => {
     FRAMES.forEach((f, i) => setTimeout(() => progressCb && progressCb({ id: "run-1", progress: f }), 130 * i));
     LINES.forEach((l, i) => setTimeout(() => logCb && logCb({ id: "run-1", line: l }), 130 * i));
+    // ?run=done walks the transition nothing else in this file covered: the run
+    // finishes, the payload arrives, and the app has to land on the results with
+    // them. Every other "results" shot got there through 历史.
+    if (q.get("run") === "done") {
+      setTimeout(
+        () => logCb && logCb({ id: "run-1", line: "[cmd] ocr review --repo /home/x/work/payments-api --format json --color never" }),
+        60
+      );
+      setTimeout(() => exitCb && exitCb({ id: "run-1", result: { code: 0, value: RUN_RESULT, sessionId: RUN_RESULT.session_id } }), 130 * FRAMES.length + 400);
+    }
   };
   return {
   info: async () => (D.INFO),
@@ -495,6 +519,18 @@ window.api = (() => {
   };
 })();
 `;
+
+// The bridge is a template literal whose *contents* become source text in the
+// page, so a stray backtick or an unescaped interpolation inside an innocent
+// comment yields a bundle that fails only at runtime — as a pageerror three
+// screenshots later. Parse it here, where the message points at the line.
+try {
+  // eslint-disable-next-line no-new-func
+  new Function(BRIDGE);
+} catch (err) {
+  console.error(`The stubbed bridge does not parse: ${err.message}`);
+  process.exit(2);
+}
 
 // The theme is declared, not inherited. `shoot` only writes the keys it is
 // given and localStorage survives navigation within the origin, so one shot that
