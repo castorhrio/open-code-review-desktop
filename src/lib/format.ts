@@ -104,6 +104,26 @@ export function needsContinuation(value: RunResult): boolean {
   return st === "partial" || st === "failed" || coverageOf(value, "failed").length > 0;
 }
 
+/**
+ * The one line of a CLI failure that a person can act on.
+ *
+ * `ocr-service.js` appends a translated hint as a `→ …` line whenever it
+ * recognises the error, and that line is the one written for a human. Everything
+ * above it is the CLI's own wording — `Error: --to value "x" is not a valid
+ * commit ref: fatal: Needed a single revision` — which names flags and git
+ * internals rather than the field to fix. Three surfaces used to take
+ * `error.split("\n")[0]` and so printed exactly the line the hint exists to
+ * replace; the full text stays available (and selectable) underneath.
+ */
+export function cliReason(text: string): string {
+  const lines = String(text || "")
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const hint = lines.find((l) => l.startsWith("→"));
+  return (hint ? hint.replace(/^→\s*/, "") : lines[0] || "").trim();
+}
+
 export function humanTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso || "—";

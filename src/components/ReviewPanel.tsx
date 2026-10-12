@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import { EXCLUDE_REASON } from "@/lib/format";
+import { EXCLUDE_REASON, cliReason } from "@/lib/format";
 import { EFFORTS, MODE_META, validateSpec } from "@/lib/spec";
 import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
@@ -133,6 +133,22 @@ export function ReviewPanel() {
   const drop = (preview?.value?.files || []).filter((f) => !f.will_review);
 
   /**
+   * The CLI's own wording for a scope it refused, kept for copying — but only
+   * when it adds something the translated line does not. It usually does not:
+   * the hint is derived *from* it, so printing both would say the same thing
+   * twice in the same place.
+   */
+  const previewDetail = (() => {
+    if (!preview?.error) return "";
+    const raw = preview.error
+      .split(/\r?\n/)
+      .filter((l) => l.trim() && !l.trim().startsWith("→"))
+      .join("\n")
+      .trim();
+    return raw === cliReason(preview.error) ? "" : raw;
+  })();
+
+  /**
    * Compute the file list on its own, so the screen can say what a run would
    * touch before money is spent.
    *
@@ -177,8 +193,21 @@ export function ReviewPanel() {
       return;
     }
     const cached = preview?.value ? keep.length : null;
-    const count = cached && cached > 0 ? cached : await runPreview();
-    if (count < 0) return;
+    const result = cached && cached > 0 ? { count: cached, error: "" } : await runPreview();
+    // The one outcome this button must never produce is silence. It used to:
+    // a scope the CLI refuses (a mistyped ref, a directory that is not a git
+    // root) made the preview fail, and the click returned without a word while
+    // the button stayed enabled — so the app's primary action looked broken and
+    // the user had no way to tell what it wanted. The reason now travels back
+    // with the count and is shown, whatever it is.
+    if (result.count < 0) {
+      toast.warning("这次审查没能开始", {
+        description: `${cliReason(result.error) || "这个范围现在算不出文件清单。"}\n改好上面的范围后按钮会恢复可用。`,
+        duration: 12000,
+      });
+      return;
+    }
+    const count = result.count;
     if (count === 0) {
       toast.warning(scan ? "没有文件需要通读" : "当前范围没有文件可审查", {
         description: scan
@@ -207,6 +236,19 @@ export function ReviewPanel() {
   // after spawning a process. `ready` is the same predicate the top bar's badge
   // already uses, so this is not a new guess about the CLI's state.
   const llmBlocked = config && !config.ready ? config.blockedReason || "还没有配置模型服务" : "";
+  /**
+   * A scope the CLI has already refused — a ref that does not resolve, a
+   * directory that is not a git root.
+   *
+   * `validateSpec` cannot see this: it knows a ref is *present*, not that it
+   * exists, so the button stayed enabled for a range that could never run and
+   * clicking it was a no-op. The preview has already asked the question and been
+   * refused, so the answer is known here — the same "a precondition the app
+   * knows about but does not act on" the results page was fixed for.
+   */
+  const scopeUnresolvable = !running && !preview?.loading && preview?.error ? preview.error : "";
+  const disabledReason =
+    blocked || repoGone || llmBlocked || (scopeUnresolvable ? `范围无法计算：${cliReason(scopeUnresolvable)}` : "");
 
   const scopeSummary = running ? (
     <span className="flex items-center gap-2">
@@ -220,7 +262,7 @@ export function ReviewPanel() {
   ) : preview?.loading ? (
     <span className="text-faint">正在计算文件清单…</span>
   ) : preview?.error ? (
-    <span className="text-bad">范围无法计算：{preview.error.split("\n")[0]}</span>
+    <span className="text-bad">范围无法计算：{cliReason(preview.error)}</span>
   ) : preview?.value ? (
     keep.length ? (
       <span>
@@ -619,7 +661,9 @@ export function ReviewPanel() {
             <ListTree className="size-3.5 shrink-0 text-accent" />
             <h2 className="shrink-0 text-strong font-semibold text-ink">进入审查的文件</h2>
             <span className="min-w-0 truncate text-meta text-faint">
-              {preview?.value ? `不消耗 token · 共 ${preview.value.total_files} 个改动文件` : "范围确定后自动计算"}
+              {preview?.value
+                ? `不消耗 token · 共 ${preview.value.total_files} 个${scan ? "" : "改动"}文件`
+                : "范围确定后自动计算"}
             </span>
             <Button
               variant="ghost"
@@ -638,12 +682,27 @@ export function ReviewPanel() {
             ) : !preview || preview.loading ? (
               <p className="px-1 py-6 text-center text-body text-faint">正在计算文件清单…</p>
             ) : preview.error ? (
-              <p className="whitespace-pre-wrap px-1 py-6 text-center text-body text-bad">{preview.error}</p>
+              // Lead with the sentence that says what to change; the CLI's own
+              // wording follows, small and selectable, because it is what gets
+              // pasted into a bug report.
+              <div className="px-1 py-6 text-center">
+                <p className="text-body text-bad">{cliReason(preview.error)}</p>
+                {previewDetail && (
+                  <p className="mx-auto mt-1.5 max-w-[var(--page-max-narrow)] whitespace-pre-wrap font-mono text-meta text-faint selectable">
+                    {previewDetail}
+                  </p>
+                )}
+              </div>
             ) : (
               <>
                 {keep.length === 0 && (
+                  // A scan does not look at changes, so "工作区没有改动时属正常"
+                  // was advice for the wrong mode: it told someone who had just
+                  // asked for a whole-repository audit to go and make a diff.
                   <p className="px-1 py-6 text-center text-body text-faint">
-                    没有文件进入审查。工作区没有改动时属正常，可改用「分支对比」或「单个提交」。
+                    {scan
+                      ? "这个路径下没有可通读的文件。换个「扫描路径」，或确认目录里有该语言支持读取的源文件。"
+                      : "没有文件进入审查。工作区没有改动时属正常，可改用「分支对比」或「单个提交」。"}
                   </p>
                 )}
                 {keep.map((f) => (
@@ -706,15 +765,16 @@ export function ReviewPanel() {
             </Button>
           )}
           {/* Disabled only when the run cannot start at all (no repo, a mode
-              missing its refs, a repository that is gone, no model behind it) —
-              the bar's own text is the explanation, sitting next to the button.
-              A scope that is valid but empty stays clickable, because clicking
-              it explains what to change. */}
+              missing its refs, a repository that is gone, no model behind it, a
+              scope the CLI has already refused) — the bar's own text is the
+              explanation, sitting next to the button. A scope that is valid but
+              empty stays clickable, because clicking it explains what to
+              change. */}
           <Button
             variant="primary"
             size="lg"
-            disabled={running || Boolean(blocked) || Boolean(repoGone) || Boolean(llmBlocked)}
-            title={blocked || repoGone || llmBlocked || undefined}
+            disabled={running || Boolean(disabledReason)}
+            title={disabledReason || undefined}
             onClick={() => void startOrExplain()}
           >
             {resuming ? <RotateCcw className="size-4" /> : <Play className="size-4" />}

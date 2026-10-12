@@ -164,7 +164,7 @@ interface Store {
   patchForm: (patch: Partial<FormState>) => void;
   buildSpec: (resume?: string) => Spec;
   preview: { value: Preview | null; loading: boolean; error: string } | null;
-  runPreview: () => Promise<number>;
+  runPreview: () => Promise<{ count: number; error: string }>;
   running: boolean;
   elapsed: number;
   progress: RunProgress | null;
@@ -502,22 +502,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setRunLabel("已请求取消");
   }, []);
 
-  // Returns how many files would enter the review, so a caller can decide
-  // whether the run is big enough to ask first — without needing the result to
-  // be rendered (the preview panel is not open during that check).
-  const runPreview = useCallback(async () => {
+  // Returns how many files would enter the review — and, when there is no
+  // number to return, the reason. Both, because the caller has to *say*
+  // something: the run button used to call this, read only the count, and
+  // return silently on a negative one, so clicking 开始审查 on a scope the CLI
+  // had already refused did nothing at all — not even the error the preview had
+  // just produced. The error travels with the count so the explanation cannot be
+  // lost to a state update that has not rendered yet.
+  const runPreview = useCallback(async (): Promise<{ count: number; error: string }> => {
     const spec = buildSpec();
-    const error = validateSpec(spec);
-    if (error) {
-      toast.warning(error);
-      return -1;
+    const invalid = validateSpec(spec);
+    if (invalid) {
+      toast.warning(invalid);
+      return { count: -1, error: invalid };
     }
     setPreview({ value: null, loading: true, error: "" });
     const res = await api.preview(spec);
-    setPreview(res.ok ? { value: res.value, loading: false, error: "" } : { value: null, loading: false, error: res.error });
-    if (!res.ok || !res.value) return -1;
+    if (!res.ok) {
+      setPreview({ value: null, loading: false, error: res.error });
+      return { count: -1, error: res.error };
+    }
+    setPreview({ value: res.value, loading: false, error: "" });
     const files = res.value.files || [];
-    return res.value.reviewable_count ?? files.filter((f) => f.will_review).length;
+    return { count: res.value.reviewable_count ?? files.filter((f) => f.will_review).length, error: "" };
   }, [buildSpec]);
 
   const refreshHistory = useCallback(async () => {

@@ -459,11 +459,20 @@ window.api = (() => {
       };
     return { ok: true, value: D.FINDINGS };
   },
-  preview: async () => {
+  preview: async (spec) => {
     // ?norepo=1 has to fail here too, or the shot renders a file list for a
     // repository that does not exist and never shows what the region does.
     if (q.get("norepo") === "1")
       return { ok: false, error: "仓库目录已经不存在：/home/x/work/payments-api\\n→ 上次用的目录已经不在了。在顶部重新选一个仓库目录即可。" };
+    // ?badref=1 is the scope the CLI has already refused: a ref that does not
+    // resolve. It keys off the ref in the spec, the way the CLI does, so fixing
+    // the field really does fix the preview — otherwise the shot could only ever
+    // prove that the button is disabled, never that it comes back. The error
+    // text is copied verbatim from a live run, raw line and appended hint
+    // together, because the pair is the whole point: the page used to print only
+    // the raw one.
+    if (q.get("badref") === "1" && /no-such/.test(String((spec && spec.to) || "")))
+      return { ok: false, error: 'Error: --to value "no-such-branch-xyz" is not a valid commit ref: fatal: Needed a single revision\\n→ 分支或提交号无法解析：检查拼写，或直接从下拉列表里选。' };
     // ?empty=1 is the state where the scope legitimately contains nothing to
     // review — a clean working tree, or a ref range that touches no source.
     // The app has to say so rather than spend a run discovering it.
@@ -472,7 +481,10 @@ window.api = (() => {
     }
     return { ok: true, value: { files: D.PREVIEW_FILES, total_insertions: 171, total_deletions: 27, total_files: 8, reviewable_count: 5, excluded_count: 3 } };
   },
-  resolveRef: async (_r, ref) => ({ ok: true, sha: "8c1de4f9a2b3c4d5e6f708192a3b4c5d6e7f8091" }),
+  resolveRef: async (_r, ref) =>
+    q.get("badref") === "1" && /no-such/.test(ref)
+      ? { ok: false, error: "无法解析 " + ref }
+      : { ok: true, sha: "8c1de4f9a2b3c4d5e6f708192a3b4c5d6e7f8091" },
   run: async (spec) => { window.__lastRunSpec = spec; replay(); return "run-1"; },
   cancel: async () => {
     // What a killed child really looks like: a non-zero exit, no payload, and a

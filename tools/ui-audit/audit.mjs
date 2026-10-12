@@ -1273,6 +1273,63 @@ await shoot(page, "58-session-partial", {
   },
 });
 
+// A scope the CLI has already refused: a ref that does not resolve. This was a
+// live no-op — the preview failed, `startOrExplain` read the negative count and
+// returned without a word, and 开始审查 stayed enabled, so the one action the
+// page exists for did nothing and said nothing. `validateSpec` cannot catch it
+// (it knows a ref is present, not that it exists), so the preview's own answer
+// has to be what disables the button.
+await shoot(page, "59-review-bad-ref", {
+  query: "?badref=1",
+  after: async (page) => {
+    await nav("审查")(page);
+    await page.waitForTimeout(400);
+    await page.getByRole("button", { name: "分支对比", exact: true }).click();
+    await page.waitForTimeout(600);
+    await page.getByPlaceholder("feature/x").fill("no-such-branch-xyz");
+    await page.waitForTimeout(1800);
+  },
+  expect: async (page) => {
+    const out = [];
+    const btn = page.getByRole("button", { name: /开始审查/ }).first();
+    if (!(await btn.isDisabled()))
+      out.push("a scope the CLI cannot resolve is still offered as a runnable review");
+    const text = await page.locator("main").innerText();
+    if (!/分支或提交号无法解析/.test(text)) out.push("the page never says what is wrong with the ref");
+    if (!/Needed a single revision/.test(text))
+      out.push("the CLI's own wording was dropped instead of kept for copying");
+    // Half of the contract: a button that never comes back is worse than one
+    // that was never disabled. The fixture keys its refusal off the ref, so
+    // repairing the field really does repair the preview.
+    await page.getByPlaceholder("feature/x").fill("feat/tenant-rate-limit");
+    await page.waitForTimeout(2000);
+    if (await btn.isDisabled()) out.push("the run action stayed disabled after the ref was fixed");
+    return out;
+  },
+});
+
+// A full scan that finds nothing to read. The list region used to end with
+// "工作区没有改动时属正常，可改用「分支对比」或「单个提交」" — advice for a mode
+// that looks at diffs, given to someone who had just asked for a whole-repo
+// audit — and the header called its file count "改动文件".
+await shoot(page, "60-review-scan-empty", {
+  query: "?empty=1",
+  after: async (page) => {
+    await nav("审查")(page);
+    await page.waitForTimeout(300);
+    await page.getByRole("button", { name: /全量扫描/ }).first().click();
+    await page.waitForTimeout(1600);
+  },
+  expect: async (page) => {
+    const text = await page.locator("main").innerText();
+    const out = [];
+    if (/工作区没有改动时属正常/.test(text)) out.push("an empty full scan is told to go and make a working-tree change");
+    if (/个改动文件/.test(text)) out.push("a full scan's file count is still described as changes");
+    if (!/扫描路径/.test(text)) out.push("the empty scan state does not name the control that would fix it");
+    return out;
+  },
+});
+
 await browser.close();
 server.close();
 
