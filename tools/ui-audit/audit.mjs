@@ -1676,6 +1676,26 @@ await shoot(page, "68-commit-mode-ready", {
     const text = await page.locator("main").innerText();
     if (/请填写要审查的提交号/.test(text))
       out.push("the page still asks for a commit while the field already names one");
+    // One form column, like the range refs. Across the full measure the
+    // resolved-SHA tick that confirms the value sits ~700px away from it, which
+    // is the "label and value 900px apart" failure the layout spec forbids.
+    const geo = await page.evaluate(() => {
+      const input = [...document.querySelectorAll("main input")].find((i) => i.placeholder === "abc1234");
+      let measure = null;
+      for (const el of document.querySelectorAll("main *")) {
+        const mw = parseFloat(getComputedStyle(el).maxWidth);
+        if (Number.isFinite(mw) && mw >= 480 && mw <= 1200) {
+          measure = el.getBoundingClientRect().width;
+          break;
+        }
+      }
+      if (!input || !measure) return null;
+      return { input: input.getBoundingClientRect().width, measure };
+    });
+    if (geo && geo.input > geo.measure * 0.62)
+      out.push(
+        `the commit field runs ${Math.round(geo.input)}px of a ${Math.round(geo.measure)}px measure — a single-value field belongs in one column, as the range refs are`
+      );
     return out;
   },
 });

@@ -76,9 +76,11 @@
   /* Centered empty / loading / error states read better narrow. */
   --page-max-narrow: 640px;
   /* Minimum width of one form column. The form grids are
-     `repeat(auto-fit, minmax(var(--field-min), 1fr))`, which yields two
+     `repeat(auto-fill, minmax(var(--field-min), 1fr))`, which yields two
      columns whenever the measure allows and one when it does not - so the
-     layout responds to its own container instead of to viewport breakpoints. */
+     layout responds to its own container instead of to viewport breakpoints.
+     `auto-fill`, not `auto-fit`: with a single child the two differ, and
+     `auto-fit` stretches that one child across the whole measure. */
   --field-min: 380px;
   /* Spacing scale, in Tailwind's own 4px steps, so no custom utilities are
      needed. Documented here because consistency is the whole point:

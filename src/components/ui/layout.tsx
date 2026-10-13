@@ -199,10 +199,18 @@ export function Card({
  * Form field grid. Two columns when the measure allows, one when it does not.
  * Wide children use `col-span-full` — never `col-span-2`, which would create an
  * implicit track and overflow once the grid collapses to a single column.
+ *
+ * `auto-fill`, not `auto-fit`. They are identical for two or more children, and
+ * differ for exactly one: `auto-fit` collapses the empty track and stretches the
+ * lone child across the whole measure, so 单个提交's single commit field ran
+ * 1032px of a 1080px measure while 分支对比's two refs each took a column — and
+ * the tick that confirms the resolved SHA landed ~700px from the hash it
+ * confirms. That is rule 1 of this file, and it also contradicted the sentence
+ * above: one lone field is not "two columns when the measure allows".
  */
 export function FieldGrid({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <div className={cn("grid grid-cols-[repeat(auto-fit,minmax(var(--field-min),1fr))] gap-x-4 gap-y-4", className)}>
+    <div className={cn("grid grid-cols-[repeat(auto-fill,minmax(var(--field-min),1fr))] gap-x-4 gap-y-4", className)}>
       {children}
     </div>
   );

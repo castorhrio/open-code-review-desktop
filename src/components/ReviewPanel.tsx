@@ -332,9 +332,12 @@ export function ReviewPanel() {
                     </>
                   )}
                   {form.mode === "commit" && (
-                    <div className="col-span-full">
-                      <RefInput label="提交" value={form.commit} onChange={(v) => patchForm({ commit: v })} placeholder="abc1234" list="commit-list" />
-                    </div>
+                    // One column, like the two range refs — not `col-span-full`.
+                    // A commit is a short hash, and across the full measure the
+                    // resolved-SHA tick that confirms it landed ~700px away from
+                    // the value it confirms. The three diff modes now put the
+                    // same kind of control at the same width.
+                    <RefInput label="提交" value={form.commit} onChange={(v) => patchForm({ commit: v })} placeholder="abc1234" list="commit-list" />
                   )}
                   {scan && (
                     <div className="col-span-full">
