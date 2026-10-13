@@ -18,6 +18,14 @@ const PORT = 5199;
 // a green and must never be readable as one.
 const ONLY = process.env.SHOT || "";
 
+// Windows ships at 125% and 150% by default on every laptop, and a fractional
+// device pixel ratio changes text metrics and rounding everywhere at once —
+// which is exactly the kind of change a 1x-only suite cannot see. SCALE runs the
+// same shots at another ratio; the artefacts get a suffix so a scaled run never
+// overwrites the 1x ones, and the tally names the ratio so a scaled green is
+// not readable as a 1x green.
+const SCALE = Number(process.env.SCALE || 1);
+
 // Enforces the layout spec in `src/components/ui/layout.tsx` instead of trusting
 // a code comment: one measure per scrolling page, no horizontal overflow, and no
 // element whose content is wider than its own box.
@@ -275,7 +283,7 @@ const PROBE = `(() => {
 async function shoot(page, name, { width = 1440, height = 900, storage = STORAGE, clearStorage = false, after, expect, query = "" } = {}) {
   // Skipped shots are counted separately, never as passes — each shot reloads
   // the page and seeds its own storage, so skipping one cannot change another.
-  if (ONLY && !name.includes(ONLY)) {
+  if (ONLY && !ONLY.split(",").some((token) => name.includes(token))) {
     skipped.push(name);
     return null;
   }
@@ -295,7 +303,7 @@ async function shoot(page, name, { width = 1440, height = 900, storage = STORAGE
   await page.waitForTimeout(700);
   if (after) await after(page);
   await page.waitForTimeout(500);
-  const file = path.join(SHOTS, `${name}.png`);
+  const file = path.join(SHOTS, `${name}${SCALE === 1 ? "" : "@" + Math.round(SCALE * 100)}.png`);
   await page.screenshot({ path: file, fullPage: false });
   const p = await page.evaluate(PROBE);
   const problems = [];
@@ -1000,7 +1008,7 @@ const expectNoDeadBand = async (page) => {  const m = await page.evaluate(() => 
 };
 
 const browser = await chromium.launch({ channel: CHANNEL });
-const page = await browser.newPage({ deviceScaleFactor: 1 });
+const page = await browser.newPage({ deviceScaleFactor: SCALE });
 await page.addInitScript(BRIDGE);
 page.on("console", (m) => {
   if (m.type() === "error") console.log("  [console.error]", m.text().slice(0, 220));
@@ -2331,7 +2339,7 @@ const filtered = skipped.length > 0;
 console.log(
   `\n${passed.length} ok, ${failed.length} failed` +
     (filtered ? `, ${skipped.length} skipped (SHOT=${ONLY})` : "") +
-    `  (${describeChannel()})`
+    `  (${describeChannel()}${SCALE === 1 ? "" : `, deviceScaleFactor ${SCALE}`})`
 );
 console.log("shots ->", SHOTS);
 // A filter that matches nothing is a typo, not a pass: reporting "0 ok, 0
