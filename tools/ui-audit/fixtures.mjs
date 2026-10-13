@@ -429,6 +429,29 @@ const LONG = "Supercalifragilisticexpialidocious".repeat(3); // 102 chars, no br
 const LONG_PATH = "/home/developer/" + "deeply-nested-directory/".repeat(6) + "login.go";
 const LONG_BRANCH = "feature/" + "tenant-scoped-rate-limiting-and-quota/".repeat(3) + "final";
 
+// The CLI asks the model for a sectioned Chinese summary (主要风险 / 模块热点 /
+// 建议顺序), and a real one runs to a dozen lines of prose. The results screen
+// caps that band at 208px, so the capped region scrolls — but the two-line
+// summary every set carried meant no shot ever reached that state, and the
+// affordance check over the band passed over a region with 150px to spare.
+// LONG_SUMMARY is the shape the CLI actually produces; no backticks in it,
+// because it is interpolated into the bridge's template literal. Declared
+// before STRESS, which both sets spread from.
+const SUMMARY = "**主要风险**\n\n1. 认证路径上有一处非常量时间比较。\n2. 超时中间件泄漏 cancel。";
+const LONG_SUMMARY =
+  "**主要风险**\n\n" +
+  "1. 认证路径上有一处非常量时间比较：密码哈希直接用等号比较，攻击者可以靠响应时间差逐字节猜出哈希，改用常量时间比较即可。\n" +
+  "2. 超时中间件泄漏 cancel：带超时的上下文没有 defer 释放，长时间运行会堆积定时器与协程。\n" +
+  "3. 错误信息把内部路径直接返回给客户端，等于把目录结构告诉对方；记进日志就够。\n" +
+  "4. 刷新令牌没有轮换：同一个令牌可以一直用到过期，泄漏之后无法靠换发来失效。\n" +
+  "5. 登出只清了访问令牌，刷新令牌仍留在客户端存储里，下次启动还能换回会话。\n\n" +
+  "**模块热点**\n\n" +
+  "- 认证服务集中了上面五条里的三条，登录、刷新、登出三个入口共用同一处比较逻辑，改一处即可全覆盖。\n" +
+  "- 超时包装被九个路由引用，改动需要跟着看一遍调用方。\n" +
+  "- 令牌签发与校验分散在两个包里，轮换策略要两边一起改才不会出现半边生效。\n\n" +
+  "**建议顺序**\n\n" +
+  "先修常量时间比较（安全收益最大、改动最小），再补 cancel 的释放，然后做令牌轮换，最后收敛错误消息。前三处互不依赖，可以分开提交；轮换涉及存储结构，单独一个提交并附上迁移说明。";
+
 const STRESS = {
   INFO: { ...INFO, binary: LONG_PATH, installDir: "/opt/" + LONG, configPath: "/home/developer/.opencodereview/" + LONG },
   CONFIG: {
@@ -446,6 +469,7 @@ const STRESS = {
     diff_to: LONG_BRANCH,
   })),
   FINDINGS: FINDINGS.map((f) => ({ ...f, path: LONG_PATH })),
+  SUMMARY,
   PREVIEW_FILES: PREVIEW_FILES.map((f) => ({ ...f, path: LONG_PATH })),
   OTHER_REPO_INFO,
   OTHER_REPO_PATH,
@@ -459,12 +483,45 @@ const STRESS = {
 // buttons on the form — was taken against `files: undefined` and therefore
 // showed "进入审查 0" with the "nothing entered the review" explanation. The
 // panel looked plausible, so nothing noticed; the fixture was simply wrong.
-const NORMAL = { INFO, CONFIG, REPO_INFO, SESSIONS, FINDINGS, PREVIEW_FILES, OTHER_REPO_INFO, OTHER_REPO_PATH, SOLO_REPO_INFO, SOLO_REPO_PATH, BASE_REPO_INFO, BASE_REPO_PATH };
+const NORMAL = { INFO, CONFIG, REPO_INFO, SESSIONS, FINDINGS, SUMMARY, PREVIEW_FILES, OTHER_REPO_INFO, OTHER_REPO_PATH, SOLO_REPO_INFO, SOLO_REPO_PATH, BASE_REPO_INFO, BASE_REPO_PATH };
+
+// ---------------------------------------------------------------------------
+// A finding long enough to overflow the reading column (?longfinding=1)
+//
+// The results screen's reading column is a bare `overflow-y-auto` wrapping a
+// ScrollArea, and the ScrollArea is the one that is supposed to own the fade.
+// Measured at 1440x900: the outer region is 729px tall while the inner scroller
+// is 425px of content, so the inner one never scrolls and its fade never
+// appears — the outer one does the scrolling, with no affordance at all. Every
+// fade check over that column passed vacuously, because the fixture's findings
+// are three lines each and the region always measured `below=0`. Real reviews
+// are not three lines: a security finding with a rewrite and a model rationale
+// runs past the window. This payload is that shape, and its only job is length.
+//
+// Declared after NORMAL, which it spreads: the other way round is a temporal
+// dead zone, and it is a *silent* one for anyone who pipes the suite's output
+// through `tail`, because the pipeline then reports tail's exit status.
+const LONG_BODY = Array.from({ length: 14 }, (_, i) =>
+  "第 " + (i + 1) + " 段：这段说明用来把阅读栏撑到窗口高度以上，好让这一列真的开始滚动。" +
+  "它没有任何信息量，存在的唯一理由是长度——真实审查里的安全类问题就是这样，"
+).join("\n\n");
+const LONG_CODE = Array.from(
+  { length: 22 },
+  (_, i) => "\tline" + String(i + 1).padStart(2, "0") + " := compute(ctx, req, store)"
+).join("\n");
+
+const LONG_FINDING = {
+  ...NORMAL,
+  SUMMARY: LONG_SUMMARY,
+  FINDINGS: FINDINGS.map((f, i) =>
+    i === 0 ? { ...f, content: f.content + "\n\n" + LONG_BODY, existing_code: LONG_CODE, suggestion_code: LONG_CODE } : f
+  ),
+};
 
 export const BRIDGE = `
 window.api = (() => {
   const q = new URLSearchParams(location.search);
-  const D = q.get("stress") === "1" ? ${JSON.stringify(STRESS)} : ${JSON.stringify(NORMAL)};
+  const D = q.get("stress") === "1" ? ${JSON.stringify(STRESS)} : q.get("longfinding") === "1" ? ${JSON.stringify(LONG_FINDING)} : ${JSON.stringify(NORMAL)};
   const SETS = { default: D.SESSIONS, many: ${JSON.stringify(MANY_SESSIONS)} };
   // A run replays the real transcript through the real parser, so the running
   // screen is audited against the data it will actually receive. ?longrun=1
@@ -484,7 +541,7 @@ window.api = (() => {
     session_id: "9f2c41d0a7b34e58b1c6d7e8f9a0b1c2",
     llm: { provider: "deepseek", model: "deepseek-v4-pro" },
     comments: D.FINDINGS,
-    project_summary: "**主要风险**\\n\\n1. 认证路径上有一处非常量时间比较。\\n2. 超时中间件泄漏 cancel。",
+    project_summary: D.SUMMARY,
     summary: { files_reviewed: 5, comments: 5, total_tokens: 412880, input_tokens: 401000, output_tokens: 11880, elapsed: "3m48s" },
     manifest: { schema_version: "1", run_id: "9f2c41d0", operation: "review", terminal_state: "success", coverage: { failed: [], waived: [] } },
     warnings: [],

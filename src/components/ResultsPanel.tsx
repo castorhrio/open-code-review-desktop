@@ -511,9 +511,14 @@ export function ResultsPanel() {
             <h3 className="text-strong font-semibold text-ink">这次审查的要点</h3>
             <span className="text-meta text-faint">由 CLI 汇总，不是本程序生成的</span>
           </div>
-          <div className="max-h-52 overflow-y-auto pr-1">
+          {/* A capped region that ends on the filter bar's border, so rule 6 of
+              layout.tsx applies: clipped mid-line with nothing to say so reads
+              as damage. The cap is real — a sectioned CLI summary runs past the
+              window — so this is ScrollArea with grow=false, the form the
+              component documents for a region with its own max-h. */}
+          <ScrollArea grow={false} className="max-h-52" bodyClassName="pr-1">
             <MarkdownLite text={result.project_summary} />
-          </div>
+          </ScrollArea>
         </div>
       )}
 
@@ -666,10 +671,19 @@ export function ResultsPanel() {
         {/* The reading column. Narrow: split into two rows so the code is
             always on screen instead of sitting below the fold — the finding
             block and the code each scroll on their own. Wide: one scroller, and
-            the code lives in its own column. */}
+            the code lives in its own column.
+
+            A flex column, not a scroller. This used to be `overflow-y-auto`,
+            which made *this* element the one that scrolled: the ScrollArea
+            inside is sized by `flex-1`, and `flex-1` does nothing when the
+            parent is a block, so the ScrollArea simply grew to its content
+            (1917px in a 729px column) and reported `below=0` forever. Its fade
+            was inert, and 1188px of finding ran off the bottom of a region
+            whose only scrollbar was the window's own — rule 6 of layout.tsx,
+            broken by the wrapper around the component that implements it. */}
         <div
           className={cn(
-            "min-h-0 overflow-y-auto",
+            "flex min-h-0 flex-col",
             current && "@max-[1240px]:grid @max-[1240px]:grid-rows-[minmax(0,0.46fr)_minmax(0,0.54fr)] @max-[1240px]:overflow-hidden"
           )}
         >

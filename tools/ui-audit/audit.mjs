@@ -630,6 +630,97 @@ const expectRunActionVisible = async (page) => {
 };
 
 /**
+ * The reading column has to be the region that scrolls — and it has to overflow.
+ *
+ * Two failures in one, which is why this is its own check rather than a line in
+ * `expectScrollAffordance`. That check asks "is there a fade where content is
+ * cut off", and it passed over this column for the suite's whole life because
+ * the fixture's findings are three lines each: the column never overflowed, so
+ * there was never anything to fade. `?longfinding=1` supplies a finding the
+ * length a real security comment runs to, and with it the second failure shows:
+ * the column's wrapper was `overflow-y-auto` around a `ScrollArea`, so the
+ * wrapper scrolled (729px of box, 1917px of content) while the ScrollArea —
+ * the component that owns the fade — grew to its content and reported nothing
+ * cut off. 1188px of finding ran off the bottom of the screen with no
+ * affordance, on the one screen whose whole job is reading.
+ *
+ * So both halves are asserted: the wrapper does not scroll, and the scroller
+ * inside it does. Either one alone passes on the broken build.
+ */
+const expectReadingColumnOverflows = async (page) => {
+  const m = await page.evaluate(() => {
+    const grid = [...document.querySelectorAll("main .grid")].find((g) =>
+      (g.getAttribute("class") || "").includes("grid-cols-[minmax(240px")
+    );
+    if (!grid) return { error: "no results grid" };
+    const vis = [...grid.children].filter((el) => getComputedStyle(el).display !== "none");
+    const col = vis[1];
+    if (!col) return { error: "the results grid has no reading column" };
+    const scrolls = (el) => /auto|scroll/.test(getComputedStyle(el).overflowY) && el.clientHeight > 0;
+    let inner = null;
+    for (const el of col.querySelectorAll("*")) {
+      // The finding's own scroller, not a code block's: the code panes scroll
+      // sideways and are excluded from the fade rule on purpose.
+      if (!scrolls(el)) continue;
+      if (el.scrollWidth > el.clientWidth + 1) continue;
+      if (!inner || el.scrollHeight > inner.scrollHeight) inner = el;
+    }
+    return {
+      wrapperScrolls: scrolls(col) && col.scrollHeight > col.clientHeight + 1,
+      wrapperBelow: col.scrollHeight - col.clientHeight,
+      inner: inner
+        ? { client: inner.clientHeight, scroll: inner.scrollHeight, below: inner.scrollHeight - inner.scrollTop - inner.clientHeight }
+        : null,
+    };
+  });
+  if (m.error) return [m.error];
+  const out = [];
+  if (m.wrapperScrolls)
+    out.push(
+      `the reading column's wrapper scrolls ${m.wrapperBelow}px past its box, so the ScrollArea inside it is not the region that owns the fade`
+    );
+  if (!m.inner) return [...out, "no scroller was found inside the reading column"];
+  if (m.inner.below <= 1)
+    out.push(
+      `the reading column holds its finding in ${m.inner.client}px with ${m.inner.scroll}px of content — nothing is cut off, so the scroll-affordance check over it is vacuous`
+    );
+  return out;
+};
+
+/**
+ * The summary band has to overflow, or its fade check means nothing.
+ *
+ * The results screen caps 这次审查的要点 at 208px, and the CLI's real summary is
+ * a sectioned document — a dozen lines of prose. Every fixture carried a
+ * two-line one, so the capped band never scrolled in any shot and the
+ * affordance check over it was a green light wired to nothing, while the band
+ * itself was a bare `overflow-y-auto` with no fade. `?longfinding=1` carries the
+ * sectioned shape; this asserts the cap is actually reached with it.
+ */
+const expectSummaryOverflows = async (page) => {
+  const m = await page.evaluate(() => {
+    const h3 = [...document.querySelectorAll("main h3")].find((h) => h.textContent.trim() === "这次审查的要点");
+    if (!h3) return null;
+    // The band is the nearest ancestor that owns a scroller: the header row and
+    // the capped region are siblings inside it.
+    const hasScroller = (n) => [...n.querySelectorAll("*")].some((c) => /auto|scroll/.test(getComputedStyle(c).overflowY));
+    let band = h3.parentElement;
+    while (band && !hasScroller(band)) band = band.parentElement;
+    if (!band) return { error: "the summary band has no scroller" };
+    const scroller = [...band.querySelectorAll("*")].find((n) => /auto|scroll/.test(getComputedStyle(n).overflowY) && n.clientHeight > 40);
+    if (!scroller) return { error: "the summary band has no scroller" };
+    return { client: scroller.clientHeight, scroll: scroller.scrollHeight, below: scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight };
+  });
+  if (!m) return ["the summary band was not rendered"];
+  if (m.error) return [m.error];
+  if (m.below <= 1)
+    return [
+      `the summary band holds its text in ${m.client}px with ${m.scroll}px of content — nothing is cut off, so the scroll-affordance check over it is vacuous`,
+    ];
+  return [];
+};
+
+/**
  * Every scroll region has to admit it scrolls.
  *
  * Both of the review page's regions end flush against a fixed band — the form
@@ -951,6 +1042,22 @@ await shoot(page, "09-results-findings", {
     await selectFirstFinding(page);
   },
   expect: all(expectThreePanes, expectCleanSummaries, expectCodeFollowsSession, expectScrollAffordance, expectHighlightVisible),
+});
+// A finding long enough to overflow the reading column, which the fixture's
+// three-line findings never do. Without this shot every fade assertion over the
+// column the app exists to read was a green light wired to nothing — see
+// `expectReadingColumnOverflows`. The run path, not 历史: the project summary is
+// only carried by a live run's payload — the CLI never persists it — so this is
+// the one way to reach both capped regions at once.
+await shoot(page, "72-results-long-finding", {
+  query: "?longfinding=1&run=done",
+  after: async (page) => {
+    await nav("审查")(page);
+    await page.waitForTimeout(1600);
+    await page.getByRole("button", { name: /开始审查/ }).click();
+    await page.waitForTimeout(5200);
+  },
+  expect: all(expectReadingColumnOverflows, expectSummaryOverflows, expectScrollAffordance, expectHighlightVisible),
 });
 await shoot(page, "10-review-narrow", { width: 1100, height: 780, expect: expectRunActionVisible });
 await shoot(page, "11-settings-narrow", { width: 1100, height: 780, after: nav("设置"), expect: expectScrollAffordance });
