@@ -483,6 +483,12 @@ const expectFeedOverflows = async (page) => {
       above: el.scrollTop,
       client: el.clientHeight,
       scroll: el.scrollHeight,
+      // A feed that scrolls sideways is two failures, not one: a horizontal
+      // scrollbar on the screen the user watches for minutes, and an exemption
+      // from the scroll-affordance rule, which skips any region whose
+      // scrollWidth exceeds its box — so the feed would lose its vertical fade
+      // for exactly as long as one wide line exists.
+      wide: el.scrollWidth - el.clientWidth,
     };
   });
   if (!m) return ["the running feed was not found"];
@@ -490,6 +496,8 @@ const expectFeedOverflows = async (page) => {
     return [
       `the feed holds ${m.rows} rows in ${m.client}px (${m.scroll}px of content) — nothing is cut off, so the scroll-affordance check is vacuous`,
     ];
+  if (m.wide > 1)
+    return [`the feed scrolls ${m.wide}px sideways, so one wide line costs it its vertical fade and gives the run screen a horizontal scrollbar`];
   return [];
 };
 

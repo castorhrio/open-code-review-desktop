@@ -25,6 +25,13 @@ const ocr = require(path.join(ROOT, "ocr-service.js"));
  */
 export const RUN_TRANSCRIPT = [
   "[ocr] 8 file(s) changed, reviewing 5 in /home/x/work/payments-api",
+  // A batched group, which is what the CLI actually emits whenever several files
+  // land in one concurrency slot: a real 11-file run produced one group line
+  // naming ten files, and the feed row it became was ~1200px wide. The
+  // transcript used to carry single-file groups only, so no shot ever rendered
+  // the shape that widens the feed — and a feed that scrolls sideways is
+  // silently exempt from the scroll-affordance rule, which skips such regions.
+  '[ocr] Skipping plan phase for group "internal/service/auth/login.go,internal/service/auth/session.go,internal/service/auth/token.go,internal/repository/user.go,pkg/httpx/middleware.go" (5 file(s), max 90 lines, total 214 lines)',
   '[ocr] Skipping plan phase for group "internal/service/auth/login.go" (1 file(s), max 90 lines, total 90 lines)',
   "[ocr]   ▶ file_read file_path=internal/service/auth/login.go",
   "[ocr]   ✔ file_read (1ms)",

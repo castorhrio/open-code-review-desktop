@@ -202,7 +202,20 @@ function RunningView() {
                       )}
                     />
                   )}
-                  <span className={cn("shrink-0 font-mono text-body", a.kind === "note" ? "text-ink" : "text-muted")}>
+                  {/* A note's text is the one unbounded string in a row: the CLI
+                      batches files into one group line, and a real 11-file run
+                      produced a "开始审查 a.go,b.go,…" note ~1200px wide. In a
+                      shrink-0 box it widened the whole feed, which cost two
+                      things at once — a horizontal scrollbar on the screen the
+                      user watches for minutes, and the feed's exclusion from the
+                      scroll-affordance rule, which skips any region that also
+                      scrolls sideways. Truncate like every other unbounded
+                      value in the app; the full line stays in the title and in
+                      the drawer's raw output. */}
+                  <span
+                    title={a.kind === "note" ? a.text : undefined}
+                    className={cn("font-mono text-body", a.kind === "note" ? "min-w-0 truncate text-ink" : "shrink-0 text-muted")}
+                  >
                     {a.kind === "note" ? a.text : a.tool}
                   </span>
                   {a.args && <span className="min-w-0 truncate font-mono text-meta text-faint" title={a.args}>{a.args}</span>}
