@@ -834,20 +834,28 @@ await shoot(page, "32-review-empty-scope", {
     const text = await page.locator("main").innerText();
     if (!/共 8 个改动文件/.test(text)) out.push("the empty preview did not report 0 of 8");
     if (!/工作区没有改动时属正常/.test(text)) out.push("no explanation for the empty scope");
+    // An empty scope is a dead end unless the sentence that says "改用…" is a
+    // control. The prose was there before; the way out was not.
+    if ((await page.getByRole("button", { name: "改用分支对比", exact: true }).count()) === 0)
+      out.push("the empty scope names an alternative mode but offers no way to switch to it");
+    if ((await page.getByRole("button", { name: "改用工作区改动", exact: true }).count()) > 0)
+      out.push("the empty scope offers to switch to 工作区改动, which is the mode it is already in");
 
     // Change the scope: the stale count must go, not linger as if current. The
     // list recomputes itself, so the window to observe that is the debounce.
     // The header's own "共 N 个改动文件" is the proxy — the section itself stays
     // mounted through a recompute, so its title proves nothing.
     const counted = () => page.locator("main").getByText(/个改动文件/).count();
-    await page.getByRole("button", { name: /分支对比/ }).click();
+    // `exact` because the empty state now also offers 改用分支对比, and a loose
+    // /分支对比/ matches both controls.
+    await page.getByRole("button", { name: "分支对比", exact: true }).click();
     await page.waitForTimeout(250);
     if ((await counted()) !== 0) out.push("the preview survived a change of scope, so its count is now stale");
     await page.waitForTimeout(1400);
     if ((await counted()) === 0) out.push("the preview never came back after the scope changed — the list is manual again");
 
     // And pressing run with nothing to review must explain, not start.
-    await page.getByRole("button", { name: /工作区改动/ }).click();
+    await page.getByRole("button", { name: "工作区改动", exact: true }).click();
     await page.waitForTimeout(1400);
     await page.getByRole("button", { name: /开始审查/ }).click();
     await page.waitForTimeout(900);
@@ -1608,6 +1616,12 @@ await shoot(page, "67-range-empty-explains", {
       out.push("an empty 分支对比 does not say the two refs are identical, so nothing explains why no file is listed");
     if (/可改用「分支对比」/.test(text))
       out.push("an empty 分支对比 is told to switch to 分支对比, which is the mode it is already in");
+    // The way out has to be a control, and it must not offer the mode the user
+    // is already in — the exact failure the prose had.
+    if ((await page.getByRole("button", { name: "改用工作区改动", exact: true }).count()) === 0)
+      out.push("an empty 分支对比 offers no way to switch to a mode that could have content");
+    if ((await page.getByRole("button", { name: "改用分支对比", exact: true }).count()) > 0)
+      out.push("an empty 分支对比 offers to switch to 分支对比, which is the mode it is already in");
     return out;
   },
 });

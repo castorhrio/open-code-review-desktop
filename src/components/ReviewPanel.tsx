@@ -695,13 +695,22 @@ export function ReviewPanel() {
               ) : (
                 <>
                   {keep.length === 0 && (
-                    // Advice has to match the mode that produced the empty scope.
-                    // The old sentence was written for 工作区改动 and shown to
-                    // every mode, so a 分支对比 with an empty diff was told to
-                    // "改用「分支对比」" — the mode it was already in.
+                    // Advice has to match the mode that produced the empty scope,
+                    // and it has to be actionable. The old sentence was written
+                    // for 工作区改动 and shown to every mode, so a 分支对比 with an
+                    // empty diff was told to "改用「分支对比」" — the mode it was
+                    // already in. Each mode now names its own reason, and the
+                    // sentence that used to be prose ("可改用…") is a button.
                     <div className="mx-auto max-w-[var(--page-max-narrow)] px-1 py-6 text-center">
                       <p className="text-body text-warn">{EMPTY_SCOPE[form.mode].title}</p>
                       <p className="mt-1.5 text-meta text-faint">{EMPTY_SCOPE[form.mode].detail}</p>
+                      <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                        {EMPTY_SCOPE[form.mode].alternatives.map((m) => (
+                          <Button key={m} variant="outline" size="sm" onClick={() => patchForm({ mode: m })}>
+                            改用{MODE_META[m].label}
+                          </Button>
+                        ))}
+                      </div>
                     </div>
                   )}
                   {keep.map((f) => (

@@ -92,23 +92,27 @@ export function intOrEmpty(value: string): number | "" {
  * was told the working tree had no changes. Each mode can only be empty for its
  * own reason, so each gets its own sentence and its own title.
  */
-export const EMPTY_SCOPE: Record<ReviewMode, { title: string; detail: string }> = {
+export const EMPTY_SCOPE: Record<ReviewMode, { title: string; detail: string; alternatives: ReviewMode[] }> = {
   workspace: {
     title: "当前范围没有文件可审查",
     detail: "工作区没有改动时属正常。想审一条分支的改动可改用「分支对比」，想审某个提交可改用「单个提交」。",
+    alternatives: ["range", "commit"],
   },
   range: {
     title: "这两个 ref 之间没有差异",
     detail:
       "按 merge-base 比较，目标分支没有领先基线分支的提交。若你要评审一条特性分支，基线应填它的上游分支（如 main），目标填这条分支——两个 ref 填反了就会得到空 diff。",
+    alternatives: ["workspace", "commit"],
   },
   commit: {
     title: "这个提交没有可审查的改动",
     detail: "它相对父提交没有改动，可能是空提交或合并提交。换一个提交号，或改用「分支对比」。",
+    alternatives: ["range", "workspace"],
   },
   scan: {
     title: "没有文件需要通读",
     detail: "这个路径下没有可通读的文件。换个「扫描路径」，或确认目录里有该语言支持读取的源文件。",
+    alternatives: ["workspace", "range"],
   },
 };
 
