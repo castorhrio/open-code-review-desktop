@@ -1209,6 +1209,19 @@ await shoot(page, "37-results-clean", {
     const counted = [...text.matchAll(/(\d+) 条评论/g)].map((m) => m[1]);
     if (counted.some((n) => n !== "0")) out.push(`the header still counts comments this review does not have: ${counted.join(",")}`);
     if (/在左侧选择一条评论/.test(text)) out.push("an empty pane is telling the reader to select from a list that is empty");
+    // The sentence used to sit in the 240px list column of the master-detail
+    // grid, so the other two panes were bare canvas — two thirds of the window
+    // reading as a broken layout rather than as "nothing was found". The same
+    // failure is already recorded twice in the backlog (a page that ends in a
+    // band of bare canvas), so assert the structure, not just the sentence.
+    const shape = await page.evaluate(() => ({
+      panes: document.querySelectorAll('main div[class*="grid-cols-[minmax(240px"]').length,
+      chips: [...document.querySelectorAll("main button")].filter((b) => /^(严重|高|中|低|未标注)$/.test((b.textContent || "").trim())).length,
+    }));
+    if (shape.panes)
+      out.push(`a clean review still renders the ${shape.panes} master-detail pane(s), leaving blank canvas beside one sentence`);
+    if (shape.chips) out.push(`a clean review still shows ${shape.chips} severity filter chips over a list that does not exist`);
+    if (!/回审查页换范围/.test(text)) out.push("a clean review does not offer the action that ends it");
     return out;
   },
 });

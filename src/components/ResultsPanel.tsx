@@ -374,6 +374,9 @@ export function ResultsPanel() {
   const waived = coverageOf(result, "waived");
   const sessionId = result.session_id || "";
 
+  // A run that found nothing is a result, and it is rendered as one (see below).
+  const clean = comments.length === 0;
+
   const exportJson = async () => {
     const res = await api.saveText({
       title: "导出审查结果",
@@ -490,6 +493,7 @@ export function ResultsPanel() {
         </div>
       )}
 
+      {!clean && (
       <PanelHeader tone="canvas">
         <div className="flex items-center gap-1">
           {SEVERITIES.map((sev) => (
@@ -538,6 +542,7 @@ export function ResultsPanel() {
         </span>
         <span className="hidden text-meta text-faint xl:inline">↑↓ / j k 切换</span>
       </PanelHeader>
+      )}
 
       {/* Master-detail: the one screen that legitimately uses the whole window.
           Above 1240px of container width the three columns fit and the code gets
@@ -548,6 +553,28 @@ export function ResultsPanel() {
           same content, nothing hidden behind a breakpoint, and at 1000px the
           reading column ends up ~660px wide — wider than the 568px the code
           pane got at 1440px before this. */}
+      {clean ? (
+        <EmptyState
+          className="min-h-0 flex-1"
+          icon={<FileCode2 className="size-8 text-faint" />}
+          title="这次审查没有提出问题。"
+          description={
+            <>
+              <p className="text-meta text-faint">
+                已审 {String(s.files_reviewed ?? "—")} 个文件。范围不对的话，换个模式或改小排除规则再跑一次。
+              </p>
+              {failed.length > 0 && (
+                <p className="mt-1 text-meta text-warn">其中 {failed.length} 个文件没有审完，上方有提示。</p>
+              )}
+            </>
+          }
+          action={
+            <Button variant="primary" size="sm" onClick={() => setView("review")}>
+              回审查页换范围
+            </Button>
+          }
+        />
+      ) : (
       <div className="grid min-h-0 flex-1 divide-x divide-line grid-cols-[minmax(240px,300px)_minmax(320px,1fr)_minmax(620px,1.25fr)] @max-[1240px]:grid-cols-[minmax(240px,300px)_minmax(0,1fr)]">
         <ScrollArea tone="canvas" className="min-h-0">
           {filtered.length === 0 && (
@@ -687,6 +714,7 @@ export function ResultsPanel() {
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }
