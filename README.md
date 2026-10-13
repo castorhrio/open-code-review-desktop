@@ -27,7 +27,7 @@ Verified end-to-end against the real CLI, without spending tokens:
 - the two results surfaces at four figures: `?huge=1` mounts 1200 findings — every row in the triage list, every block in 阅读 — in 405ms, asserted against an 8s ceiling; neither virtualises, and that measurement is the reason
 - rendering at 125% and 150% system scale: the visual audit re-runs its eight tightest shots at both device pixel ratios, green at each
 
-**Not** yet exercised in-app: a **real** run that emits `project_summary` — the one observed (11 files, 2 comments) emitted none, and the CLI never persists it (absent from both `session show --json` and the session JSONL), so an old session has nothing to load. The block's layout is verified by the visual audit against a run payload: a sectioned summary renders, caps and fades at both 1440x900 and the 1000x660 floor; a session result showing no summary band is correct behaviour, not missing rendering. A real review's findings themselves do render — a completed scan's 4 comments were loaded from its session and shown in the results list.
+**Verified 2026-10-13**: a real full scan (12 files, 8 comments, 173K tokens, 1m41s) emitted a sectioned `project_summary`, and the band rendered that real text, capped and faded. Whether a run emits one is the CLI's decision — a workspace run over the same repo with 2 comments emitted none — so this project promises only to render it when present. Sessions still never persist it, so a session result showing no band remains correct behaviour, not missing rendering. A real review's findings themselves do render — a completed scan's 4 comments were loaded from its session and shown in the results list.
 
 ## Why a GUI
 
