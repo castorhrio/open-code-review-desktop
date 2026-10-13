@@ -563,7 +563,13 @@ function feedProgressLine(progress, line) {
   progress.tools += 1;
   progress.byTool[tool] = (progress.byTool[tool] || 0) + 1;
   if (tool === "code_comment") progress.comments += 1;
-  settleActivity(progress, tool, mark === "✗" ? "failed" : "done", duration ? duration[1] : "");
+  // A failed call's closing line is the only place its reason exists — "✗
+  // code_search failed: git grep failed: exit status 128: …". Settling the row
+  // without it left a red dot that could not say why, on the screen the user
+  // watches for minutes: the run-screen shape of a silent failure.
+  const failed = mark === "✗";
+  const reason = failed ? argSummary(args.replace(/^failed:\s*/i, "")) : undefined;
+  settleActivity(progress, tool, failed ? "failed" : "done", duration ? duration[1] : "", reason);
   return null;
 }
 
@@ -587,16 +593,17 @@ function pushActivity(progress, event) {
  * row for that tool. Concurrent files interleave, which is why the match is by
  * tool name rather than "the last row".
  */
-function settleActivity(progress, tool, state, ms) {
+function settleActivity(progress, tool, state, ms, reason) {
   for (let i = progress.activity.length - 1; i >= 0; i--) {
     const row = progress.activity[i];
     if (row.kind === "tool" && row.tool === tool && row.state === "running") {
       row.state = state;
       row.ms = ms;
+      if (reason) row.args = reason;
       return;
     }
   }
-  pushActivity(progress, { kind: "tool", tool, state, ms, args: "" });
+  pushActivity(progress, { kind: "tool", tool, state, ms, args: reason || "" });
 }
 
 function startRun(spec, onLine, onExit, onProgress) {

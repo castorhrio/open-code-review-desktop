@@ -40,7 +40,12 @@ export const RUN_TRANSCRIPT = [
   "[ocr]   ▶ code_search search_text=auth file_patterns=[*.go]",
   "[ocr]   ✔ code_search (21ms)",
   "[ocr]   ▶ code_search search_text=ConstantTimeCompare",
-  "[ocr]   ✔ code_search (21ms)",
+  // A failed tool call, transcribed from a real run: the CLI's git grep choked
+  // on an unbalanced parenthesis in a search pattern. It follows its own ▶ with
+  // no ✔ between, which is how the closing line settles the running row to
+  // failed — and the feed's failed state, a red dot whose row now carries the
+  // reason, had no line in the transcript before this one.
+  "[ocr]   ✗ code_search failed: git grep failed: exit status 128: fatal: -e option, 'token(': missing closing parenthesis",
   "[ocr]   ▶ file_find query_name=token*",
   "[ocr]   ✔ file_find (19ms)",
   "[ocr]   ▶ code_comment",
