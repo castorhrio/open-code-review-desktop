@@ -631,7 +631,7 @@ export function ReviewPanel() {
               <Card
                 padded={false}
                 title={<Badge tone="accent">适用规则</Badge>}
-                hint={<span className="truncate font-mono">{ruleProbe}</span>}
+                hint={<span className="truncate font-mono" title={ruleProbe}>{ruleProbe}</span>}
                 actions={
                   <Button variant="ghost" size="sm" onClick={() => setShowTuning(false)}>
                     关闭
@@ -706,7 +706,7 @@ export function ReviewPanel() {
                   )}
                   {keep.map((f) => (
                     <div key={f.path} className="flex items-center gap-3 border-b border-line/60 py-2 last:border-b-0">
-                      <span className="min-w-0 flex-1 truncate font-mono text-body text-ink">{f.path}</span>
+                      <span className="min-w-0 flex-1 truncate font-mono text-body text-ink" title={f.path}>{f.path}</span>
                       <span className="tnum shrink-0 text-meta text-faint">
                         {f.status}
                         {scan ? ` · ${f.insertions} 行` : ` · +${f.insertions} / -${f.deletions}`}
@@ -718,7 +718,7 @@ export function ReviewPanel() {
                       <div className="mt-3 mb-1 text-meta text-faint">以下 {drop.length} 个不进入审查</div>
                       {drop.map((f) => (
                         <div key={f.path} className="flex items-center gap-3 border-b border-line/40 py-2 last:border-b-0">
-                          <span className="min-w-0 flex-1 truncate font-mono text-body text-muted">{f.path}</span>
+                          <span className="min-w-0 flex-1 truncate font-mono text-body text-muted" title={f.path}>{f.path}</span>
                           <span className="shrink-0 text-meta text-faint">{EXCLUDE_REASON[f.exclude_reason || ""] || f.exclude_reason}</span>
                         </div>
                       ))}

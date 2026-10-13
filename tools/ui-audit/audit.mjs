@@ -107,6 +107,39 @@ const PROBE = `(() => {
       }
     }
   }
+  // Truncation with no way back to the full value.
+  //
+  // The app's own rule (see Badge in overlay.tsx) is that a slot fed by a path,
+  // ref, model id or provider name gets a cap *and* a title — because otherwise
+  // the one thing the reader needs (the whole path, the whole branch, the whole
+  // model id) is exactly the thing the layout hides, and there is no hover, no
+  // selection and no other place it appears. The truncate utility was applied
+  // widely but the title half was missed in ten slots, which no screenshot can
+  // show: an ellipsised value looks identical whether or not it is recoverable.
+  //
+  // Only elements that are *actually* truncated are reported, so a static label
+  // that carries truncate merely as a safety net is not noise.
+  const unreachable = [];
+  for (const el of document.querySelectorAll("body *")) {
+    if (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "DATALIST") continue;
+    if (getComputedStyle(el).textOverflow !== "ellipsis") continue;
+    if (!(el.scrollWidth > el.clientWidth + 1 && el.clientWidth > 0)) continue;
+    let has = false;
+    // An ancestor's title covers the whole slot; a descendant's covers the text
+    // itself, which is where the pointer lands even when the ancestor clips it
+    // (ReportView puts the full path on the span inside the card header). Either
+    // way the value is reachable, which is the whole question.
+    for (let n = el; n && n !== document.body; n = n.parentElement) {
+      if (n.getAttribute && n.getAttribute("title")) {
+        has = true;
+        break;
+      }
+    }
+    if (!has && el.querySelector("[title]")) has = true;
+    if (has) continue;
+    const cls = typeof el.className === "string" ? el.className : el.getAttribute("class") || "";
+    unreachable.push(el.tagName.toLowerCase() + "." + cls.slice(0, 50) + " " + el.scrollWidth + ">" + el.clientWidth);
+  }
   const root = document.getElementById("root");
   return {
     // A page that rendered nothing passes every layout probe: no overflow, no
@@ -121,6 +154,7 @@ const PROBE = `(() => {
     docScrollH: document.documentElement.scrollHeight,
     docClientH: document.documentElement.clientHeight,
     clipped: clipped.slice(0, 4),
+    unreachable: unreachable.slice(0, 4),
     // An interpolated optional field prints the word "undefined" into the run
     // header, and an unparseable number prints NaN — both invisible in code
     // review, and both landing in the sentence the user reads to decide whether
@@ -164,6 +198,7 @@ async function shoot(page, name, { width = 1440, height = 900, storage = STORAGE
   if (p.docScrollH > p.docClientH + 1) problems.push("doc-y-overflow");
   if (p.measure !== null && p.cap !== null && p.measure > p.cap + 1) problems.push(`measure ${p.measure}px > cap ${p.cap}px`);
   if (p.clipped.length) problems.push("clipped: " + p.clipped.join(" | "));
+  if (p.unreachable.length) problems.push("truncated with no title: " + p.unreachable.join(" | "));
   if (p.leaked.length) problems.push("rendered placeholder text: " + p.leaked.join(", "));
   if (expect) problems.push(...(await expect(page)));
   console.log(

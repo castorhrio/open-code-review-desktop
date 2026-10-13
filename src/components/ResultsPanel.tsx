@@ -40,7 +40,7 @@ function FileViewer({ current, file, variant }: { current: Finding; file: FileWi
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       <div className={cn("flex min-w-0 shrink-0 items-center gap-2 border-b border-line bg-surface py-2", stacked ? "px-4" : "px-3")}>
         <Wrench className="size-3.5 shrink-0 text-faint" />
-        <span className="min-w-0 flex-1 truncate font-mono text-meta text-muted">{current.path}</span>
+        <span className="min-w-0 flex-1 truncate font-mono text-meta text-muted" title={current.path}>{current.path}</span>
         {/* A ref is a branch name or a SHA the user typed, and a Badge is
             `nowrap` and refuses to shrink: an uncapped one pushed this toolbar
             past the code pane and clipped the pane itself. Cap the box and keep
@@ -136,7 +136,7 @@ function RunningView() {
         {progress?.current && (
           <span className="flex min-w-0 items-center gap-1.5 text-meta text-faint">
             正在
-            <span className="min-w-0 truncate font-mono text-body text-ink">{progress.current}</span>
+            <span className="min-w-0 truncate font-mono text-body text-ink" title={progress.current}>{progress.current}</span>
           </span>
         )}
         {progress?.cost && <span className="tnum hidden text-meta text-muted sm:inline">预计 {progress.cost}</span>}
@@ -181,7 +181,7 @@ function RunningView() {
                   <span className={cn("shrink-0 font-mono text-body", a.kind === "note" ? "text-ink" : "text-muted")}>
                     {a.kind === "note" ? a.text : a.tool}
                   </span>
-                  {a.args && <span className="min-w-0 truncate font-mono text-meta text-faint">{a.args}</span>}
+                  {a.args && <span className="min-w-0 truncate font-mono text-meta text-faint" title={a.args}>{a.args}</span>}
                   {a.ms && <span className="tnum shrink-0 font-mono text-meta text-faint">{a.ms}</span>}
                 </li>
               ))}
@@ -599,7 +599,7 @@ export function ResultsPanel() {
                   {/* `faint` over `--accent-soft` is 4.2:1, so the selected row's
                       metadata steps up to `muted`. */}
                   <span className={cn("mt-1 flex items-center gap-2 font-mono text-meta", i === selected ? "text-muted" : "text-faint")}>
-                    <span className="truncate">{c.path}</span>
+                    <span className="truncate" title={c.path}>{c.path}</span>
                     <span className="tnum shrink-0">
                       L{c.start_line}
                       {c.end_line && c.end_line !== c.start_line ? `-${c.end_line}` : ""}

@@ -97,7 +97,7 @@ export function ReportView() {
               version a user forwards, and the reader's first question is not
               "how many comments" but "of what". */}
           <div className="flex flex-col gap-1">
-            <h1 className="min-w-0 truncate text-stat font-semibold text-ink">
+            <h1 className="min-w-0 truncate text-stat font-semibold text-ink" title={resultOrigin?.scope || "审查结果"}>
               {resultOrigin?.scope || "审查结果"}
               <span className="tnum ml-2 font-normal text-faint">{comments.length} 条评论</span>
             </h1>
