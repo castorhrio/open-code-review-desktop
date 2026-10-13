@@ -451,10 +451,11 @@ const expectRunActionVisible = async (page) => {
  *
  * Both of the review page's regions end flush against a fixed band — the form
  * against the file region's border, the file list against the pinned action bar
- * — so when either is taller than its share the content is sliced mid-row, and
- * that slice is the *only* cue that anything follows, because overlay
- * scrollbars stay hidden until you scroll. At the 1000x660 floor that is the
- * default state: the page opens with a half-row and nothing to explain it.
+ * — so when either is taller than its share the content is sliced mid-row. The
+ * scrollbar says the region scrolls (a real 9px one: the app styles
+ * `::-webkit-scrollbar`); it does not stop the last row being cut through its
+ * glyphs, which is the half-line the reader was about to read. At the 1000x660
+ * floor that is the default state: the page opens with a half-row.
  *
  * The rule is conditional, and that is what makes it worth asserting: the fade
  * has to be there *when and only when* there is content beyond the edge. This

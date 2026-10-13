@@ -117,12 +117,16 @@ export function Measure({
  * WHY THIS EXISTS
  * The file region ends flush against the pinned action bar. When the list is
  * taller than the region — always, at the 1000x660 floor — the bottom row is
- * sliced horizontally through its middle, and that slice is the *only* cue that
- * anything follows: the platform hides overlay scrollbars until you scroll, and
- * a half-row reads as a rendering bug rather than as "there is more". So the
- * region fades its content into the surface at whichever edge still has content
- * beyond it, and shows nothing at an edge you have reached. That restraint is
- * the point: the fade never claims there is more to read when there is not.
+ * sliced horizontally through its middle. The region does have a scrollbar, and
+ * a visible one: the app styles `::-webkit-scrollbar`, which makes Chromium
+ * reserve 9px for it (measured in the shipped Electron build; the headless
+ * audit forces overlay scrollbars, so it cannot answer this). So a reader *can*
+ * tell the region scrolls — but a row cut through its glyphs still reads as
+ * damage rather than as a deliberate boundary, and the half-line is exactly the
+ * one the reader was about to read. The region therefore fades its content into
+ * the surface at whichever edge still has content beyond it, and shows nothing
+ * at an edge you have reached. That restraint is the point: the fade never
+ * claims there is more to read when there is not.
  *
  * The measurement runs after every render (a content change always comes with
  * one), on scroll, and on a ResizeObserver — a window resize does not re-render
