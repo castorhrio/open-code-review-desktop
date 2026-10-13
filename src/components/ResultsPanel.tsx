@@ -155,6 +155,13 @@ function RunningView() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
+      {/* The feed is visual: rows appear, dots pulse, counters climb. A screen
+          reader gets none of it, so the one line that matters — the run is
+          alive, and how much it has produced — is announced politely. It
+          changes only when the comment count does, so it cannot spam. */}
+      <p role="status" className="sr-only">
+        审查运行中，已产出 {progress ? progress.comments : 0} 条评论
+      </p>
       <PanelHeader>
         <Badge tone="accent">{runLabel || "审查运行中"}</Badge>
         {progress?.current && (
@@ -429,6 +436,15 @@ export function ResultsPanel() {
     // actually has, not to the viewport. The nav rail is a fixed 48px, so a
     // viewport media query would silently drift the moment that changes.
     <div className="@container flex h-full min-h-0 flex-col">
+      {/* A finished live run replaces the whole screen at once, which is a
+          sentence for a sighted reader and silence for a screen one. role
+          status announces it on mount; reopening a session announces nothing,
+          because nothing new happened. */}
+      {resultOrigin?.kind === "run" && (
+        <p role="status" className="sr-only">
+          审查完成，{comments.length} 条评论
+        </p>
+      )}
       <PanelHeader>
         <Badge className={status.cls}>{status.label}</Badge>
         {resultOrigin?.kind === "session" && <Badge tone="accent">历史会话</Badge>}

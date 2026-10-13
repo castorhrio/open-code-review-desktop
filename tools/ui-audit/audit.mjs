@@ -797,6 +797,30 @@ const expectHugeReport = async (page) => {
 };
 
 /**
+ * The run screen is visual — rows appearing, dots pulsing, counters climbing —
+ * and a screen reader got none of it. One polite live region now carries the
+ * sentence that matters. These assert it exists and says something true: a live
+ * region that is empty, or whose text never changes, is silence with extra
+ * steps, and neither half is visible in a screenshot.
+ */
+const liveText = (page) =>
+  page.evaluate(() => [...document.querySelectorAll("main [role=status]")].map((e) => e.textContent.trim()).join(" | "));
+
+const expectRunAnnounced = async (page) => {
+  const t = await liveText(page);
+  if (!t) return ["the running screen has no live region: assistive tech hears nothing while the run works"];
+  if (!/审查运行中，已产出 \d+ 条评论/.test(t)) return [`the run's live region does not state its progress: "${t}"`];
+  return [];
+};
+
+const expectResultAnnounced = async (page) => {
+  const t = await liveText(page);
+  if (!/审查完成，\d+ 条评论/.test(t))
+    return [`a finished run's results do not announce themselves: "${t || "no live region"}"`];
+  return [];
+};
+
+/**
  * Every scroll region has to admit it scrolls.
  *
  * Both of the review page's regions end flush against a fixed band — the form
@@ -1280,7 +1304,7 @@ await shoot(page, "18-results-running", {
     await page.getByRole("button", { name: /开始审查/ }).click();
     await page.waitForTimeout(1400);
   },
-  expect: all(expectRunningFeed, expectScrollAffordance),
+  expect: all(expectRunningFeed, expectRunAnnounced, expectScrollAffordance),
 });
 // The running screen with a feed that has actually filled.
 //
@@ -1300,7 +1324,7 @@ await shoot(page, "69-run-feed-full", {
     await page.getByRole("button", { name: /开始审查/ }).click();
     await page.waitForTimeout(2600);
   },
-  expect: all(expectFeedOverflows, expectScrollAffordance),
+  expect: all(expectFeedOverflows, expectRunAnnounced, expectScrollAffordance),
 });
 // The log drawer: the raw CLI output the feed summarises, opened by hand. It is
 // a sibling of <main>, so nothing had ever rendered it.
@@ -2028,6 +2052,7 @@ await shoot(page, "54-run-completes", {
     if (!/这次审查的要点/.test(text)) out.push("the CLI's project summary is missing from a live run's results");
     if (!/412,880/.test(text)) out.push("the run's token total is not in the header");
     if (/审查运行中/.test(text)) out.push("the screen still says the run is going after it exited");
+    out.push(...(await expectResultAnnounced(page)));
     return out;
   },
 });
