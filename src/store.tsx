@@ -335,6 +335,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       (Object.keys(rel).length ? "" : candidates[0]) ||
       "";
     const ahead = base ? "" : candidates.find((c) => relation(c) === "descendant") || "";
+    // 单个提交 has a default where 分支对比 sometimes has none: the newest commit,
+    // which is what "review the last commit" means. It was the only one of the
+    // four modes that opened with its required field empty and its primary
+    // action disabled, so the mode read as unfinished rather than as ready.
+    const head = (res.commits || [])[0]?.hash || "";
     // No base and nothing ahead is the honest answer for a repository with a
     // single branch — the field stays empty and `validateSpec` says which one is
     // missing, rather than pre-filling a comparison that cannot produce a diff.
@@ -342,6 +347,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ...f,
       from: f.from || base || (ahead ? branch : ""),
       to: f.to || (ahead || branch),
+      commit: f.commit || head,
     }));
   }, []);
 

@@ -1657,6 +1657,29 @@ await shoot(page, "67-range-empty-explains", {
   },
 });
 
+// 单个提交 was the one primary mode no shot had ever rendered — four modes,
+// three of them covered, and this one also the only one that opened with its
+// required field empty. A mode nothing renders is a mode nothing checks: the
+// form could have lost its pre-fill, or the run button could have gone dead,
+// and every screenshot would still be green.
+await shoot(page, "68-commit-mode-ready", {
+  after: async (page) => {
+    await page.getByRole("button", { name: "单个提交", exact: true }).click();
+    await page.waitForTimeout(1400);
+  },
+  expect: async (page) => {
+    const out = [];
+    const commit = await page.getByPlaceholder("abc1234").inputValue();
+    if (!commit) out.push("单个提交 opened with no commit, so the mode cannot be run at all");
+    if (await page.getByRole("button", { name: /开始审查/ }).isDisabled())
+      out.push("单个提交 is not runnable even though the repository has commits");
+    const text = await page.locator("main").innerText();
+    if (/请填写要审查的提交号/.test(text))
+      out.push("the page still asks for a commit while the field already names one");
+    return out;
+  },
+});
+
 await browser.close();
 server.close();
 

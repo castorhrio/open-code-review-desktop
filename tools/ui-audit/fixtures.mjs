@@ -300,8 +300,11 @@ const REPO_INFO = {
     "release/2.4": "diverged",
   },
   commits: [
-    { hash: "8c1de4f9a2b3c4d5e6f708192a3b4c5d6e7f8091", date: "2026-10-11 09:41", message: "fix(auth): stop leaking rows on the failure path" },
-    { hash: "2f7a1b0c9d8e7f60514253647586970a1b2c3d4e", date: "2026-10-10 18:02", message: "feat(ratelimit): per-tenant buckets" },
+    // Short hash, as `git log --format=%h` reports it — this is now rendered
+    // into the 单个提交 field, so a 40-char hash here would be a fixture that
+    // cannot show what the field really holds.
+    { hash: "8c1de4f", date: "2026-10-11 09:41", message: "fix(auth): stop leaking rows on the failure path" },
+    { hash: "2f7a1b0", date: "2026-10-10 18:02", message: "feat(ratelimit): per-tenant buckets" },
   ],
   dirtyCount: 3,
 };
