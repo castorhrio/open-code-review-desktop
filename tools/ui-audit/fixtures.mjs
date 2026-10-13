@@ -61,6 +61,37 @@ export function runFrames() {
   return frames;
 }
 
+/**
+ * A long run, for the one state the suite never rendered: a feed with more tool
+ * calls than rows.
+ *
+ * The recorded transcript is 23 lines and the parser folds a tool call's ▶ and ✔
+ * into a single row, so a whole run is ~16 rows — and the feed holds ~15 at the
+ * 1000x660 floor. Measured with the real fixture: after 2.8s the feed held 15
+ * rows in 374px with nothing cut off, so `expectScrollAffordance` on the running
+ * shot could not fire, and never had. A real run of minutes produces hundreds of
+ * tool calls, so the state that matters was the one the fixture could not reach.
+ *
+ * ?longrun=1 replays the same transcript four times with a distinct file per
+ * pass — 92 frames, ~60 rows — which is what the list looks like a few minutes
+ * in. The replay also runs faster (40ms/frame), because this shot is about the
+ * feed's layout when full, not about how long a run takes.
+ */
+export function longRunFrames() {
+  const p = ocr.createProgress();
+  const frames = [];
+  for (let pass = 1; pass <= 4; pass++) {
+    for (const line of RUN_TRANSCRIPT) {
+      const l = line
+        .replace(/internal\/service\/auth\/login\.go/g, `internal/service/auth/login_p${pass}.go`)
+        .replace(/pkg\/httpx\/middleware\.go/g, `pkg/httpx/middleware_p${pass}.go`);
+      ocr.feedProgressLine(p, l);
+      frames.push({ ...p, activity: p.activity.slice() });
+    }
+  }
+  return frames;
+}
+
 /** The same run's milestone lines, i.e. what the log drawer receives. */
 export function runMilestones() {
   const p = ocr.createProgress();
@@ -415,8 +446,10 @@ window.api = (() => {
   const D = q.get("stress") === "1" ? ${JSON.stringify(STRESS)} : ${JSON.stringify(NORMAL)};
   const SETS = { default: D.SESSIONS, many: ${JSON.stringify(MANY_SESSIONS)} };
   // A run replays the real transcript through the real parser, so the running
-  // screen is audited against the data it will actually receive.
-  const FRAMES = ${JSON.stringify(runFrames())};
+  // screen is audited against the data it will actually receive. ?longrun=1
+  // swaps in a replay long enough to overflow the feed — see longRunFrames.
+  const LONG = q.get("longrun") === "1";
+  const FRAMES = LONG ? ${JSON.stringify(longRunFrames())} : ${JSON.stringify(runFrames())};
   const LINES = ${JSON.stringify(runMilestones())};
   let progressCb = null;
   let logCb = null;
@@ -436,8 +469,9 @@ window.api = (() => {
     warnings: [],
   };
   const replay = () => {
-    FRAMES.forEach((f, i) => setTimeout(() => progressCb && progressCb({ id: "run-1", progress: f }), 130 * i));
-    LINES.forEach((l, i) => setTimeout(() => logCb && logCb({ id: "run-1", line: l }), 130 * i));
+    const step = LONG ? 40 : 130;
+    FRAMES.forEach((f, i) => setTimeout(() => progressCb && progressCb({ id: "run-1", progress: f }), step * i));
+    LINES.forEach((l, i) => setTimeout(() => logCb && logCb({ id: "run-1", line: l }), step * i));
     // ?run=done walks the transition nothing else in this file covered: the run
     // finishes, the payload arrives, and the app has to land on the results with
     // them. Every other "results" shot got there through 历史.
@@ -446,7 +480,7 @@ window.api = (() => {
         () => logCb && logCb({ id: "run-1", line: "[cmd] ocr review --repo /home/x/work/payments-api --format json --color never" }),
         60
       );
-      setTimeout(() => exitCb && exitCb({ id: "run-1", result: { code: 0, value: RUN_RESULT, sessionId: RUN_RESULT.session_id } }), 130 * FRAMES.length + 400);
+      setTimeout(() => exitCb && exitCb({ id: "run-1", result: { code: 0, value: RUN_RESULT, sessionId: RUN_RESULT.session_id } }), step * FRAMES.length + 400);
     }
   };
   return {

@@ -35,7 +35,16 @@ import { cn } from "@/lib/cn";
  *    nothing to explain it is indistinguishable from a broken render.
  */
 
-/** A whole scrolling page: the scroller plus the centred measure. */
+/**
+ * A whole scrolling page: the scroller plus the centred measure.
+ *
+ * The scroller is a `ScrollArea`, because this is the region rule 6 above is
+ * about and `Page` is where it was broken: as a bare `overflow-y-auto` it cut
+ * 2184px off the bottom of the history list with nothing to say so, and had no
+ * top fade once scrolled either. Every screen that is simply "a page" — history,
+ * settings — went through it, so the one primitive that most needed the fade was
+ * the one that did not have it. `tone="canvas"` matches `main`'s own background.
+ */
 export function Page({
   children,
   narrow,
@@ -46,9 +55,9 @@ export function Page({
   className?: string;
 }) {
   return (
-    <div className={cn("h-full overflow-y-auto", className)}>
+    <ScrollArea className={cn("h-full", className)} tone="canvas">
       <PageBody narrow={narrow}>{children}</PageBody>
-    </div>
+    </ScrollArea>
   );
 }
 
@@ -142,6 +151,7 @@ export function ScrollArea({
   bodyClassName,
   tone = "surface",
   grow = true,
+  scrollerRef,
 }: {
   children: React.ReactNode;
   /** Sizing for the wrapper (the flex/grid item), not for the scroller. */
@@ -151,6 +161,13 @@ export function ScrollArea({
   tone?: "surface" | "canvas" | "raised";
   /** `flex-1` by default; pass `false` for a region with its own cap (max-h). */
   grow?: boolean;
+  /**
+   * The inner scroller, for a region that has to move itself — the running
+   * feed pins to its newest line. A prop rather than a forwarded ref because
+   * the wrapper is the flex item and the scroller is a child of it, so a ref on
+   * the component would land on the wrong element.
+   */
+  scrollerRef?: React.RefObject<HTMLDivElement | null>;
 }) {
   const scroller = React.useRef<HTMLDivElement>(null);
   const [edges, setEdges] = React.useState({ top: false, bottom: false });
@@ -176,7 +193,13 @@ export function ScrollArea({
   const from = `var(--${tone})`;
   return (
     <div className={cn("relative flex min-h-0 flex-col", grow ? "flex-1" : "shrink-0", className)}>
-      <div ref={scroller} className={cn("min-h-0 flex-1 overflow-y-auto", bodyClassName)}>
+      <div
+        ref={(el) => {
+          scroller.current = el;
+          if (scrollerRef) scrollerRef.current = el;
+        }}
+        className={cn("min-h-0 flex-1 overflow-y-auto", bodyClassName)}
+      >
         {children}
       </div>
       {edges.top && (

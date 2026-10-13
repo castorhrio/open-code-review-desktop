@@ -419,7 +419,19 @@ const expectRunningFeed = async (page) => {
     const list = main.querySelector("ol");
     const rows = list ? [...list.querySelectorAll("li")] : [];
     const region = list?.parentElement;
-    const panel = region?.parentElement;
+    // The frame belongs to the nearest ancestor that draws one, not to a fixed
+    // depth. This walked exactly two levels up — list, region, panel — which was
+    // right until the feed became a `ScrollArea` and gained a wrapper of its own,
+    // at which point the assertion reported the panel frameless. Note the failure
+    // mode: it did not crash or find nothing, it quietly measured the wrapper, so
+    // the message ("the activity region has no frame") described a real property
+    // of the wrong element. A DOM walk that assumes a shape breaks silently when
+    // the shape changes; a walk that states what it is looking for does not.
+    let panel = region?.parentElement ?? null;
+    while (panel && panel !== main && parseFloat(getComputedStyle(panel).borderTopWidth) === 0) {
+      panel = panel.parentElement;
+    }
+    if (panel === main) panel = null;
     const rb = region?.getBoundingClientRect();
     const fb = rows[0]?.getBoundingClientRect();
     const pb = panel?.getBoundingClientRect();
@@ -439,9 +451,46 @@ const expectRunningFeed = async (page) => {
   if (seen.cells.includes("…")) out.push(`a run counter never left its placeholder: ${seen.cells.join(", ")}`);
   if (!/进入审查/.test(seen.text)) out.push("the run screen lost its scope counter");
   if (seen.gapAbove > 40) out.push(`${seen.gapAbove}px of empty window above the first activity row — the run screen reads as stuck`);
-  if (seen.share < 55) out.push(`the activity panel is only ${seen.share}% of the screen, so it is not the hero of a running review`);
+  // Only meaningful when the panel was found at all: without it the share is
+  // -1, and "-1% of the screen" is noise on top of the message that says the
+  // panel is missing.
+  if (seen.share >= 0 && seen.share < 55)
+    out.push(`the activity panel is only ${seen.share}% of the screen, so it is not the hero of a running review`);
   if (!seen.bordered) out.push("the activity region has no frame, so unfilled space inside it reads as broken layout");
   return out;
+};
+
+/**
+ * The running feed has to be full for the affordance check to mean anything.
+ *
+ * A check that reads "is there a fade where content is cut off" passes trivially
+ * on a region with nothing cut off, so the state that matters — a feed with more
+ * tool calls than rows — has to be asserted to exist. Without this the shot above
+ * would report green over a feed with 200px to spare, which is what the suite
+ * did for its whole life.
+ */
+const expectFeedOverflows = async (page) => {
+  const m = await page.evaluate(() => {
+    const h3 = [...document.querySelectorAll("main h3")].find((h) => h.textContent.trim() === "实时活动");
+    const panel = h3?.closest("div[class*='rounded-md']");
+    const el = panel
+      ? [...panel.querySelectorAll("*")].find((n) => /auto|scroll/.test(getComputedStyle(n).overflowY) && n.clientHeight > 40)
+      : null;
+    if (!el) return null;
+    return {
+      rows: el.querySelectorAll("li").length,
+      below: el.scrollHeight - el.scrollTop - el.clientHeight,
+      above: el.scrollTop,
+      client: el.clientHeight,
+      scroll: el.scrollHeight,
+    };
+  });
+  if (!m) return ["the running feed was not found"];
+  if (m.below <= 1 && m.above <= 1)
+    return [
+      `the feed holds ${m.rows} rows in ${m.client}px (${m.scroll}px of content) — nothing is cut off, so the scroll-affordance check is vacuous`,
+    ];
+  return [];
 };
 
 /**
@@ -790,6 +839,7 @@ await shoot(page, "06-history", {
   // left to the default.
   expect: async (page) => {
     const out = [];
+    out.push(...(await expectScrollAffordance(page)));
     // innerText puts each flex child on its own line, so read the row's
     // textContent: span "0/27" -> stats cluster -> the row.
     const rowText = await page.evaluate(() => {
@@ -802,7 +852,7 @@ await shoot(page, "06-history", {
     return out;
   },
 });
-await shoot(page, "07-settings-top", { after: nav("设置") });
+await shoot(page, "07-settings-top", { after: nav("设置"), expect: expectScrollAffordance });
 await shoot(page, "08-settings-bottom", {
   after: async (page) => {
     await nav("设置")(page);
@@ -814,6 +864,7 @@ await shoot(page, "08-settings-bottom", {
       if (el) el.scrollTop = el.scrollHeight;
     });
   },
+  expect: expectScrollAffordance,
 });
 await shoot(page, "09-results-findings", {
   after: async (page) => {
@@ -895,6 +946,26 @@ await shoot(page, "18-results-running", {
   },
   expect: all(expectRunningFeed, expectScrollAffordance),
 });
+// The running screen with a feed that has actually filled.
+//
+// This is the one state the suite had never rendered, and it is the normal one:
+// the recorded transcript is 23 lines, every shot looked at it ~10 rows in, and
+// the feed holds ~16 rows at the window floor — so the feed was only ever
+// audited with room to spare, and its behaviour when it overflows (a run of
+// minutes produces hundreds of tool calls) was unobservable. `expectScrollAffordance`
+// was already wired to the shot above and could not fire.
+await shoot(page, "69-run-feed-full", {
+  width: 1000,
+  height: 660,
+  query: "?longrun=1",
+  after: async (page) => {
+    await nav("审查")(page);
+    await page.waitForTimeout(300);
+    await page.getByRole("button", { name: /开始审查/ }).click();
+    await page.waitForTimeout(2600);
+  },
+  expect: all(expectFeedOverflows, expectScrollAffordance),
+});
 await shoot(page, "19-light-review", { storage: { ...STORAGE, "ocr-theme-pref": "light" }, after: nav("审查") });
 await shoot(page, "20-light-settings", {
   storage: { ...STORAGE, "ocr-theme-pref": "light" },
@@ -917,6 +988,9 @@ await shoot(page, "22-history-many", {
   after: nav("历史"),
   expect: async (page) => {
     const out = [];
+    // The history list is the page's only scroller, and it ends flush against
+    // the log bar — the same obligation as every other region.
+    out.push(...(await expectScrollAffordance(page)));
     const main = page.locator("main");
     const rows = () => main.getByRole("button", { name: "结果", exact: true }).count();
     const more = main.getByRole("button", { name: /显示更多/ });
@@ -951,7 +1025,7 @@ for (const [name, view] of [
   ["24-stress-settings", "设置"],
   ["25-stress-history", "历史"],
 ]) {
-  await shoot(page, name, { query: "?stress=1", after: nav(view) });
+  await shoot(page, name, { query: "?stress=1", after: nav(view), expect: expectScrollAffordance });
 }
 
 // The results view holds the most arbitrary text of any screen: file paths,

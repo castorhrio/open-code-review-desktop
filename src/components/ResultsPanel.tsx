@@ -185,7 +185,7 @@ function RunningView() {
             <h3 className="text-strong font-semibold text-ink">实时活动</h3>
             <span className="min-w-0 truncate text-meta text-faint">CLI 的每一次工具调用一行，最新在下方</span>
           </div>
-          <div ref={feed} className="min-h-0 flex-1 overflow-y-auto px-3 py-2.5">
+          <ScrollArea scrollerRef={feed} bodyClassName="px-3 py-2.5">
             <ol className="space-y-1">
               {activity.length === 0 && (
                 <li className="text-body text-faint">正在启动 ocr…第一行输出到达后，这里会开始逐条显示它在读哪个文件、查了什么。</li>
@@ -210,7 +210,7 @@ function RunningView() {
                 </li>
               ))}
             </ol>
-          </div>
+          </ScrollArea>
         </div>
       </div>
 
