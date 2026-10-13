@@ -21,6 +21,13 @@ const ONLY = process.env.SHOT || "";
 // Enforces the layout spec in `src/components/ui/layout.tsx` instead of trusting
 // a code comment: one measure per scrolling page, no horizontal overflow, and no
 // element whose content is wider than its own box.
+//
+// *** DO NOT PUT A BACKTICK ANYWHERE INSIDE THIS LITERAL. ***
+// It is a template literal, so a backtick in a *comment* ends it early and the
+// file stops parsing — which has happened four times now, each time as an
+// `Unexpected identifier` on a line that looks perfectly correct. Name things
+// in prose ("Button carries an svg size of 3.5 in its base class") rather than
+// in backticks, and do not reach for template interpolation inside the probe.
 const PROBE = `(() => {
   // Find the page's declared measure: the first element in <main> carrying a
   // max-width cap (PageBody sets it from --page-max / --page-max-narrow).
@@ -184,6 +191,50 @@ const PROBE = `(() => {
       slowMotion.push(Math.round(d) + "ms " + el.tagName.toLowerCase() + "." + cls.slice(0, 30));
     }
   }
+  // A declared size that does not take effect.
+  //
+  // Button carries an svg size of 3.5 in its base class, which is specificity
+  // (0,1,1) — a class plus the svg type selector. An explicit size-4 on the
+  // icon is (0,1,0), so it loses, and every size-4 icon inside a Button
+  // rendered at 14px while the source said 16. The primary action and the
+  // settings buttons all said size-4. This is the same failure the type ramp
+  // had: the code claims one thing and the screen shows another, and no
+  // screenshot can show it because 14px looks perfectly plausible.
+  //
+  // Scoped to svg: an icon's size-* is unambiguous, whereas a size-* on a
+  // stretched grid or flex item is layout doing its job, not a dead override.
+  const deadSize = [];
+  for (const el of document.querySelectorAll("main svg")) {
+    if (!el.getClientRects().length) continue;
+    const cls = el.getAttribute("class") || "";
+    // Doubled backslashes: this literal is template-literal source text, where a
+    // lone \\s or \\d is an unrecognised escape and collapses to a bare s or d.
+    const m = cls.match(/(?:^|\\s)size-(\\d+(?:\\.\\d+)?)(?:\\s|$)/);
+    if (!m) continue;
+    // Tailwind's size-N is N * 0.25rem, and the app runs at a 16px root.
+    const want = parseFloat(m[1]) * 4;
+    const got = el.getBoundingClientRect().width;
+    if (Math.abs(got - want) > 1)
+      deadSize.push("size-" + m[1] + " renders " + Math.round(got) + "px " + cls.replace(/\s+/g, " ").slice(0, 40));
+  }
+  // The positive half of the same rule, and it has to exist: once the call
+  // sites stop patching sizes (which is the fix), there is no declared size left
+  // for the check above to disagree with, and the rule would go unprobed. So
+  // read the button's own step instead — 14px of icon for dense chrome (h-7 /
+  // h-8), 16px for the action row (h-9). Scoped to main, which excludes the nav
+  // rail: those are hand-rolled buttons at their own optical size, not Buttons.
+  const iconStep = [];
+  for (const btn of document.querySelectorAll("main button")) {
+    const h = Math.round(btn.getBoundingClientRect().height);
+    const want = h >= 36 ? 16 : h === 28 || h === 32 ? 14 : 0;
+    if (!want) continue;
+    for (const svg of btn.querySelectorAll("svg")) {
+      if (!svg.getClientRects().length) continue;
+      const got = Math.round(svg.getBoundingClientRect().width);
+      if (got !== want)
+        iconStep.push("a " + h + "px button draws a " + got + "px icon, expected " + want + "px");
+    }
+  }
   const root = document.getElementById("root");
   // Which view is on screen changes more often than anything else in this app,
   // and it used to hard-swap: no transition at all, so navigation read as a
@@ -208,6 +259,8 @@ const PROBE = `(() => {
     unreachable: unreachable.slice(0, 4),
     offRamp: Object.entries(offRamp).slice(0, 4),
     slowMotion: slowMotion.slice(0, 4),
+    deadSize: deadSize.slice(0, 4),
+    iconStep: [...new Set(iconStep)].slice(0, 4),
     viewMotion,
     // An interpolated optional field prints the word "undefined" into the run
     // header, and an unparseable number prints NaN — both invisible in code
@@ -255,6 +308,8 @@ async function shoot(page, name, { width = 1440, height = 900, storage = STORAGE
   if (p.unreachable.length) problems.push("truncated with no title: " + p.unreachable.join(" | "));
   if (p.offRamp.length) problems.push("font size off the ramp: " + p.offRamp.map(([k, n]) => `${k} x${n}`).join(" | "));
   if (p.slowMotion.length) problems.push("motion slower than a quarter second: " + p.slowMotion.join(" | "));
+  if (p.deadSize.length) problems.push("icon size declared but not applied: " + p.deadSize.join(" | "));
+  if (p.iconStep.length) problems.push("icon size does not match the button step: " + p.iconStep.join(" | "));
   // Every view animates in, so the change of screen is legible. A view that
   // swaps instantly is the failure this guards.
   if (!/fadeIn/.test(p.viewMotion || "")) problems.push(`the view does not animate in (animation-name "${p.viewMotion}")`);

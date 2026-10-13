@@ -773,7 +773,7 @@ export function ReviewPanel() {
             </div>
             {running && (
               <Button variant="danger" size="lg" onClick={() => void cancelRun()}>
-                <Square className="size-4" />
+                <Square />
                 取消
               </Button>
             )}
@@ -792,7 +792,7 @@ export function ReviewPanel() {
               title={disabledReason || undefined}
               onClick={() => void startOrExplain()}
             >
-              {resuming ? <RotateCcw className="size-4" /> : <Play className="size-4" />}
+              {resuming ? <RotateCcw /> : <Play />}
               {running ? "审查运行中…" : resuming ? "续跑未完成部分" : "开始审查"}
             </Button>
           </Measure>

@@ -41,11 +41,11 @@ export function LogDrawer() {
         {log.length > 0 && (
           <div className="ml-auto flex items-center gap-1">
             <Button variant="ghost" size="sm" onClick={() => void copyText(log.join("\n"), ` ${log.length} 行运行日志`)}>
-              <ClipboardCopy className="size-3" />
+              <ClipboardCopy />
               复制全部
             </Button>
             <Button variant="ghost" size="sm" onClick={clearLog}>
-              <Eraser className="size-3" />
+              <Eraser />
               清空
             </Button>
           </div>

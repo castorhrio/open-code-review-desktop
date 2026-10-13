@@ -315,14 +315,14 @@ export function SettingsPanel() {
             title={formTestable ? "按上方填写的值直接测，不需要先保存" : "先选好服务并填模型名，才能按填写值测试"}
             onClick={() => void testLlm(formValues)}
           >
-            <PlugZap className="size-4" />
+            <PlugZap />
             测试连通
           </Button>
           <Button variant="ghost" size="lg" onClick={() => void testLlm()}>
             测已保存配置
           </Button>
           <Button variant="danger" size="lg" disabled={!config.provider} onClick={() => setConfirmUnset(true)}>
-            <Trash2 className="size-4" />
+            <Trash2 />
             清除当前服务
           </Button>
         </div>
@@ -486,12 +486,12 @@ export function SettingsPanel() {
         >
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" onClick={() => void checkUpdate()}>
-              <RefreshCw className="size-4" />
+              <RefreshCw />
               立即检查更新
             </Button>
             {update?.phase === "ready" && (
               <Button variant="primary" onClick={() => void installUpdate()}>
-                <Download className="size-4" />
+                <Download />
                 重启并更新到 v{update.version}
               </Button>
             )}
