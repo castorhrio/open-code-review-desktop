@@ -443,6 +443,11 @@ const expectRunningFeed = async (page) => {
       gapAbove: rb && fb ? Math.round(fb.top - rb.top) : -1,
       share: pb ? Math.round((pb.height / mb.height) * 100) : -1,
       bordered: panel ? parseFloat(getComputedStyle(panel).borderTopWidth) > 0 : false,
+      // A failed call is the one row whose colour carries bad news, and a red
+      // dot with no reason beside it is the run screen's silent failure.
+      failedRows: rows
+        .filter((li) => [...li.querySelectorAll("span")].some((s) => (s.className || "").toString().includes("bg-bad")))
+        .map((li) => li.innerText.replace(/\s+/g, " ").trim()),
     };
   });
   const out = [];
@@ -457,6 +462,12 @@ const expectRunningFeed = async (page) => {
   if (seen.share >= 0 && seen.share < 55)
     out.push(`the activity panel is only ${seen.share}% of the screen, so it is not the hero of a running review`);
   if (!seen.bordered) out.push("the activity region has no frame, so unfilled space inside it reads as broken layout");
+  // Both halves: the transcript's failed call has to reach the feed as a failed
+  // row, and that row has to say why. A dot alone passes the first half and
+  // tells the reader nothing, which is the failure the parser fix exists for.
+  if (seen.failedRows.length === 0) out.push("the transcript's failed tool call produced no failed row in the feed");
+  for (const f of seen.failedRows)
+    if (f.split(" ").length < 4) out.push(`a failed tool row is a red dot with no reason: "${f}"`);
   return out;
 };
 
@@ -830,20 +841,36 @@ const expectScrollAffordance = async (page) => {
   // edge, so a later "is the finding on screen" check read a screen the user
   // never sees. The screenshot is taken before the assertions, so nothing about
   // this was visible in a shot either. A check owns the state it mutates.
-  const before = await page.evaluate(() => {
-    const keep = [];
-    const scope = document.querySelector("main")?.parentElement ?? document.body;
-    for (const el of scope.querySelectorAll("*")) {
-      const cs = getComputedStyle(el);
-      if (cs.overflowY !== "auto" && cs.overflowY !== "scroll") continue;
-      if (!el.clientHeight) continue;
-      keep.push(el.scrollTop);
-      el.scrollTop = el.scrollHeight;
-    }
-    return keep;
-  });
+  const scrollEnd = (capture) =>
+    page.evaluate((cap) => {
+      const keep = [];
+      const scope = document.querySelector("main")?.parentElement ?? document.body;
+      for (const el of scope.querySelectorAll("*")) {
+        const cs = getComputedStyle(el);
+        if (cs.overflowY !== "auto" && cs.overflowY !== "scroll") continue;
+        if (!el.clientHeight) continue;
+        if (cap) keep.push(el.scrollTop);
+        el.scrollTop = el.scrollHeight;
+      }
+      return keep;
+    }, capture);
+
+  const before = await scrollEnd(true);
   await page.waitForTimeout(200);
-  out.push(...check(await read(), "last"));
+  // A region that grows while it is watched — the running feed replays on a
+  // timer — can accept the scroll and then gain a row before the read lands, so
+  // the read catches a one-row gap the app's own pin closes a task later. That
+  // is a race in the measurement, not a defect: it appeared once in a loaded
+  // full run and never in isolation. So a phase-2 gap gets two more chances to
+  // settle before it is called a failure; a region that genuinely cannot reach
+  // its end fails all three reads.
+  let last = await read();
+  for (let i = 0; i < 2 && last.some((r) => r.below > 1); i++) {
+    await scrollEnd(false);
+    await page.waitForTimeout(150);
+    last = await read();
+  }
+  out.push(...check(last, "last"));
   await page.evaluate((keep) => {
     let i = 0;
     const scope = document.querySelector("main")?.parentElement ?? document.body;
