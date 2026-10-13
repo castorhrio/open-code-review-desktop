@@ -25,7 +25,7 @@ Verified end-to-end against the real CLI, without spending tokens:
 - live progress during a run (files discovered, completed tool calls, comments so far, the CLI's own cost estimate), with per-tool-call chatter counted rather than streamed; large scans are gated behind an explicit size/cost confirmation
 - `ocr llm test` against a live provider, including the tool-call round trip
 
-**Not** yet exercised in-app: the `project_summary` block on a finished scan (the CLI only puts it in the run payload, never in `session show --json`, so it cannot be checked by reopening an old session). A real review's findings themselves do render — a completed scan's 4 comments were loaded from its session and shown in the results list.
+**Not** yet exercised in-app: a **real** run that emits `project_summary` — the one observed (11 files, 2 comments) emitted none, and the CLI never persists it (absent from both `session show --json` and the session JSONL), so an old session has nothing to load. The block's layout is verified by the visual audit against a run payload: a sectioned summary renders, caps and fades at both 1440x900 and the 1000x660 floor; a session result showing no summary band is correct behaviour, not missing rendering. A real review's findings themselves do render — a completed scan's 4 comments were loaded from its session and shown in the results list.
 
 ## Why a GUI
 
