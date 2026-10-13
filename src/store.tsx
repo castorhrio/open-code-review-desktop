@@ -310,15 +310,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
       res.upstream,
       ...(res.refs || []).filter((r) => r === "main" || r === "master"),
       ...(res.refs || []),
-    ];
-    // No base is the honest answer for a repository with a single branch — the
-    // field stays empty and `validateSpec` says which one is missing, rather
-    // than pre-filling a comparison that cannot produce a diff.
-    const base = candidates.find((c) => c && stripRemote(c) !== branch) || "";
+    ].filter((c): c is string => Boolean(c) && stripRemote(c) !== branch);
+    const rel = res.relations || {};
+    const relation = (c: string) => rel[c] || "";
+
+    // Direction is not symmetric: the CLI's merge-base diff `A...B` is empty
+    // exactly when B is an ancestor of A. So a base *behind* HEAD is what makes
+    // "review my branch" work, and a base *ahead* of HEAD is what breaks it —
+    // picking the latter while `to` stayed on HEAD produced a scope that reviews
+    // nothing at all, with no explanation, on the very mode whose hint promises
+    // "适合评审一条特性分支".
+    //
+    //   1. ancestor  -> HEAD is ahead: from=it, to=HEAD reviews HEAD's changes.
+    //   2. diverged  -> neither contains the other, so either direction has
+    //                   content; keep the app's long-standing direction.
+    //   3. descendant-> only that branch has content: review *it* instead, so
+    //                   from=HEAD, to=it. This is "review the feature branch"
+    //                   from the branch it was cut from.
+    //   4. no data   -> an older main process that reports no relations: the
+    //                   previous heuristic, correct whenever the base is behind.
+    const base =
+      candidates.find((c) => relation(c) === "ancestor") ||
+      candidates.find((c) => relation(c) === "diverged") ||
+      (Object.keys(rel).length ? "" : candidates[0]) ||
+      "";
+    const ahead = base ? "" : candidates.find((c) => relation(c) === "descendant") || "";
+    // No base and nothing ahead is the honest answer for a repository with a
+    // single branch — the field stays empty and `validateSpec` says which one is
+    // missing, rather than pre-filling a comparison that cannot produce a diff.
     setForm((f) => ({
       ...f,
-      from: f.from || base,
-      to: f.to || branch,
+      from: f.from || base || (ahead ? branch : ""),
+      to: f.to || (ahead || branch),
     }));
   }, []);
 

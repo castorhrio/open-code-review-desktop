@@ -15,7 +15,7 @@ import {
 import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { EXCLUDE_REASON, cliReason } from "@/lib/format";
-import { EFFORTS, MODE_META, validateSpec } from "@/lib/spec";
+import { EFFORTS, EMPTY_SCOPE, MODE_META, validateSpec } from "@/lib/spec";
 import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
 import { Checkbox, Field, Input, Select, Textarea } from "@/components/ui/form";
@@ -209,11 +209,7 @@ export function ReviewPanel() {
     }
     const count = result.count;
     if (count === 0) {
-      toast.warning(scan ? "没有文件需要通读" : "当前范围没有文件可审查", {
-        description: scan
-          ? "换个「扫描路径」，或改用「工作区改动」这类按改动的模式。"
-          : "工作区没有改动时属正常，可改用「分支对比」或「单个提交」。",
-      });
+      toast.warning(EMPTY_SCOPE[form.mode].title, { description: EMPTY_SCOPE[form.mode].detail });
       return;
     }
     // A scan costs roughly one LLM round trip per file, so its size is worth
@@ -699,14 +695,14 @@ export function ReviewPanel() {
               ) : (
                 <>
                   {keep.length === 0 && (
-                    // A scan does not look at changes, so "工作区没有改动时属正常"
-                    // was advice for the wrong mode: it told someone who had just
-                    // asked for a whole-repository audit to go and make a diff.
-                    <p className="px-1 py-6 text-center text-body text-faint">
-                      {scan
-                        ? "这个路径下没有可通读的文件。换个「扫描路径」，或确认目录里有该语言支持读取的源文件。"
-                        : "没有文件进入审查。工作区没有改动时属正常，可改用「分支对比」或「单个提交」。"}
-                    </p>
+                    // Advice has to match the mode that produced the empty scope.
+                    // The old sentence was written for 工作区改动 and shown to
+                    // every mode, so a 分支对比 with an empty diff was told to
+                    // "改用「分支对比」" — the mode it was already in.
+                    <div className="mx-auto max-w-[var(--page-max-narrow)] px-1 py-6 text-center">
+                      <p className="text-body text-warn">{EMPTY_SCOPE[form.mode].title}</p>
+                      <p className="mt-1.5 text-meta text-faint">{EMPTY_SCOPE[form.mode].detail}</p>
+                    </div>
                   )}
                   {keep.map((f) => (
                     <div key={f.path} className="flex items-center gap-3 border-b border-line/60 py-2 last:border-b-0">

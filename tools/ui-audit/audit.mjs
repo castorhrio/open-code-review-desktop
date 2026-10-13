@@ -3,7 +3,7 @@
 // Run with `npm run audit:ui` after `npm run build`.
 import fs from "node:fs";
 import path from "node:path";
-import { SHOTS, BRIDGE, STORAGE, serve, OTHER_REPO_PATH, SOLO_REPO_PATH } from "./fixtures.mjs";
+import { SHOTS, BRIDGE, STORAGE, serve, OTHER_REPO_PATH, SOLO_REPO_PATH, BASE_REPO_PATH } from "./fixtures.mjs";
 import { loadPlaywright, CHANNEL, describeChannel, requireBuilt } from "./playwright.mjs";
 
 requireBuilt();
@@ -793,10 +793,12 @@ await shoot(page, "32-review-empty-scope", {
     if (!/当前范围 8 个文件，没有一个进入审查/.test(bar))
       out.push(`the pinned bar does not report an empty scope with its totals: "${bar.split("\n").find((l) => l.includes("没有一个")) || "?"}"`);
 
-    // The file region has to explain *why* nothing entered, not just that.
+    // The file region has to explain *why* nothing entered, not just that — and
+    // in 工作区改动 the reason is the working tree, so that is the sentence it
+    // must be. (The copy is now per mode; 67 checks the 分支对比 one.)
     const text = await page.locator("main").innerText();
     if (!/共 8 个改动文件/.test(text)) out.push("the empty preview did not report 0 of 8");
-    if (!/没有文件进入审查。工作区没有改动时属正常/.test(text)) out.push("no explanation for the empty scope");
+    if (!/工作区没有改动时属正常/.test(text)) out.push("no explanation for the empty scope");
 
     // Change the scope: the stale count must go, not linger as if current. The
     // list recomputes itself, so the window to observe that is the debounce.
@@ -1522,6 +1524,56 @@ await shoot(page, "65-same-repo-keeps-scope", {
     if (to !== "release/2.4")
       return [`re-inspecting the repository already open discarded a hand-typed ref (got "${to}", want "release/2.4")`];
     return [];
+  },
+});
+
+// The direction of the default 分支对比 scope, which 63 does not check.
+//
+// 63 proves the base is not the same ref as the target — but the CLI's diff is
+// not symmetric: `A...B` is empty exactly when B is an ancestor of A. So a base
+// that is *ahead* of HEAD diffs to nothing just as surely as a base equal to it.
+// `inspect` used to take "any ref that is not the current branch", which on the
+// base branch means a branch that is ahead — `--from feature/x --to master`,
+// merge-base against master, zero files. The user picked 分支对比, pressed the
+// primary action, and got "当前范围 0 个文件" with no explanation. The base must
+// be the branch under review's own base, and the target the branch that is ahead.
+await shoot(page, "66-range-on-base-branch", {
+  query: "?onbase=1",
+  storage: { ...STORAGE, "last-repo": BASE_REPO_PATH },
+  after: async (page) => {
+    await page.getByRole("button", { name: "分支对比", exact: true }).click();
+    await page.waitForTimeout(400);
+  },
+  expect: async (page) => {
+    const from = await page.getByPlaceholder("main").inputValue();
+    const to = await page.getByPlaceholder("feature/x").inputValue();
+    const out = [];
+    if (from !== "master")
+      out.push(`the default base is not the branch under review's base (got from="${from}", want "master")`);
+    if (to !== "feature/rate-limit")
+      out.push(`the default target does not name the branch that is ahead (got to="${to}", want "feature/rate-limit")`);
+    return out;
+  },
+});
+
+// What an empty 分支对比 says. The empty-scope sentence was written for
+// 工作区改动 and then shown to every mode, so a range with no diff was told to
+// "改用「分支对比」或「单个提交」" — the mode it was already in — and a reader had
+// no way to learn that the two refs were simply the wrong way round.
+await shoot(page, "67-range-empty-explains", {
+  query: "?empty=1",
+  after: async (page) => {
+    await page.getByRole("button", { name: "分支对比", exact: true }).click();
+    await page.waitForTimeout(1200);
+  },
+  expect: async (page) => {
+    const text = await page.locator("main").innerText();
+    const out = [];
+    if (!/这两个 ref 之间没有差异/.test(text))
+      out.push("an empty 分支对比 does not say the two refs are identical, so nothing explains why no file is listed");
+    if (/可改用「分支对比」/.test(text))
+      out.push("an empty 分支对比 is told to switch to 分支对比, which is the mode it is already in");
+    return out;
   },
 });
 

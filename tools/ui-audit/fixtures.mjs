@@ -287,6 +287,18 @@ const REPO_INFO = {
   branch: "feat/tenant-rate-limit",
   upstream: "origin/feat/tenant-rate-limit",
   refs: ["main", "master", "develop", "feat/tenant-rate-limit", "release/2.4"],
+  // How each ref stands relative to HEAD. This is what makes the default
+  // 分支对比 scope pickable in a direction that has a diff: `A...B` is empty
+  // exactly when B is an ancestor of A. Here HEAD is the feature branch and the
+  // base is behind it, so `from=main, to=feat/…` reviews the feature's changes.
+  relations: {
+    "origin/feat/tenant-rate-limit": "same",
+    "feat/tenant-rate-limit": "same",
+    main: "ancestor",
+    master: "ancestor",
+    develop: "diverged",
+    "release/2.4": "diverged",
+  },
   commits: [
     { hash: "8c1de4f9a2b3c4d5e6f708192a3b4c5d6e7f8091", date: "2026-10-11 09:41", message: "fix(auth): stop leaking rows on the failure path" },
     { hash: "2f7a1b0c9d8e7f60514253647586970a1b2c3d4e", date: "2026-10-10 18:02", message: "feat(ratelimit): per-tenant buckets" },
@@ -306,7 +318,31 @@ const OTHER_REPO_INFO = {
   branch: "develop",
   upstream: "origin/develop",
   refs: ["main", "master", "develop"],
+  relations: { "origin/develop": "same", develop: "same", main: "ancestor", master: "ancestor" },
   commits: [{ hash: "c0ffee1234567890abcdef1234567890abcdef12", date: "2026-09-30 11:15", message: "chore: cut release 3.0" }],
+  dirtyCount: 0,
+};
+
+// The shape that produced a silent zero-file review: the checkout is the *base*
+// branch and every other branch is ahead of it. `inspect` used to pick "any ref
+// that is not the current branch" as the base, so it chose a branch that was
+// ahead of HEAD — and `--from <ahead> --to HEAD` diffs the merge-base against
+// HEAD, which is HEAD, i.e. nothing. The user picked 分支对比, pressed the
+// primary action, and got "0 个文件，没有一个进入审查" with no explanation.
+export const BASE_REPO_PATH = "/home/x/work/base-repo";
+const BASE_REPO_INFO = {
+  ok: true,
+  repoRoot: BASE_REPO_PATH,
+  branch: "master",
+  upstream: "origin/master",
+  refs: ["master", "feature/rate-limit", "hotfix/pool"],
+  relations: {
+    "origin/master": "same",
+    master: "same",
+    "feature/rate-limit": "descendant",
+    "hotfix/pool": "descendant",
+  },
+  commits: [{ hash: "5ea1be0f0a1b2c3d4e5f60718293a4b5c6d7e8f9", date: "2026-10-12 10:20", message: "chore: bump deps" }],
   dirtyCount: 0,
 };
 
@@ -321,6 +357,7 @@ const SOLO_REPO_INFO = {
   branch: "main",
   upstream: "origin/main",
   refs: ["main"],
+  relations: { "origin/main": "same", main: "same" },
   commits: [{ hash: "a11ce0000000000000000000000000000000beef", date: "2026-10-01 08:00", message: "init" }],
   dirtyCount: 0,
 };
@@ -359,13 +396,15 @@ const STRESS = {
   OTHER_REPO_PATH,
   SOLO_REPO_INFO,
   SOLO_REPO_PATH,
+  BASE_REPO_INFO,
+  BASE_REPO_PATH,
 };
 // PREVIEW_FILES belongs here. It was missing from the normal set, so every
 // screenshot of the preview panel — a core flow, "预览清单" is one of the two
 // buttons on the form — was taken against `files: undefined` and therefore
 // showed "进入审查 0" with the "nothing entered the review" explanation. The
 // panel looked plausible, so nothing noticed; the fixture was simply wrong.
-const NORMAL = { INFO, CONFIG, REPO_INFO, SESSIONS, FINDINGS, PREVIEW_FILES, OTHER_REPO_INFO, OTHER_REPO_PATH, SOLO_REPO_INFO, SOLO_REPO_PATH };
+const NORMAL = { INFO, CONFIG, REPO_INFO, SESSIONS, FINDINGS, PREVIEW_FILES, OTHER_REPO_INFO, OTHER_REPO_PATH, SOLO_REPO_INFO, SOLO_REPO_PATH, BASE_REPO_INFO, BASE_REPO_PATH };
 
 export const BRIDGE = `
 window.api = (() => {
@@ -455,6 +494,9 @@ window.api = (() => {
     if (q.get("norepo") === "1") return { ok: false, error: "路径不存在" };
     if (dir === D.OTHER_REPO_PATH) return D.OTHER_REPO_INFO;
     if (dir === D.SOLO_REPO_PATH) return D.SOLO_REPO_INFO;
+    // ?onbase=1 is the shape that produced a silent zero-file 分支对比: the
+    // checkout is the base branch and everything else is ahead of it.
+    if (q.get("onbase") === "1") return D.BASE_REPO_INFO;
     return D.REPO_INFO;
   },
   listSessions: async () => {

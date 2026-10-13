@@ -34,6 +34,38 @@ async function resolveRef(repo, ref) {
   return res.code === 0 && sha ? { ok: true, sha } : { ok: false, error: `无法解析 ${ref}` };
 }
 
+/**
+ * How a ref stands relative to HEAD, which is the only thing that decides
+ * whether a `--from <ref> --to HEAD` comparison has anything in it.
+ *
+ * `git rev-list --count --left-right HEAD...<ref>` prints "<only-in-HEAD>
+ * <only-in-ref>", which answers the ancestor question directly:
+ *   0 n  HEAD is behind      -> the ref is *ahead* of us (a descendant)
+ *   n 0  the ref is behind   -> the ref is an ancestor of HEAD
+ *   n m  neither contains the other (diverged); either direction has content
+ *   0 0  the same commit
+ *
+ * The distinction matters because `from` and `to` are not symmetric under the
+ * CLI's merge-base diff: `A...B` is empty exactly when B is an ancestor of A.
+ * Picking a descendant as `from` while `to` stays on HEAD therefore reviews
+ * nothing at all, silently.
+ */
+async function classifyRef(repoRoot, ref) {
+  const res = await git(["rev-list", "--count", "--left-right", `HEAD...${ref}`], repoRoot);
+  if (res.code !== 0) return "";
+  const [left, right] = res.stdout.trim().split(/\s+/).map((n) => Number.parseInt(n, 10));
+  if (!Number.isFinite(left) || !Number.isFinite(right)) return "";
+  if (left === 0 && right === 0) return "same";
+  if (left === 0) return "descendant";
+  if (right === 0) return "ancestor";
+  return "diverged";
+}
+
+// A default base only needs one good answer, and a repository with hundreds of
+// branches should not turn every `inspect` into hundreds of git spawns. The
+// named bases are always evaluated; the rest are capped.
+const REF_LIMIT = 40;
+
 async function inspect(repo) {
   if (!repo || !fs.existsSync(repo)) return { ok: false, error: "路径不存在" };
   const root = await git(["rev-parse", "--show-toplevel"], repo);
@@ -61,12 +93,28 @@ async function inspect(repo) {
     return { hash, date, message: msg.join("\x01") };
   });
 
+  const upstream = origin.code === 0 ? origin.stdout.trim() : "";
+  // Named bases first, so the cap can never drop the ref a user most likely
+  // wants to compare against; `upstream` is classified by its full name because
+  // `origin/x` is the form that always resolves.
+  const ranked = [
+    ...new Set([upstream, "main", "master", ...refs].filter(Boolean)),
+  ].slice(0, REF_LIMIT);
+  const relations = {};
+  await Promise.all(
+    ranked.map(async (r) => {
+      const rel = await classifyRef(repoRoot, r);
+      if (rel) relations[r] = rel;
+    })
+  );
+
   return {
     ok: true,
     repoRoot,
     branch,
-    upstream: origin.code === 0 ? origin.stdout.trim() : "",
+    upstream,
     refs,
+    relations,
     commits,
     dirtyCount: lines(status.stdout).length,
     isGitRepo: true,

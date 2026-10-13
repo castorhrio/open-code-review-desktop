@@ -171,6 +171,13 @@ export interface RepoInfo {
   branch?: string;
   upstream?: string;
   refs?: string[];
+  /**
+   * How each ref stands relative to HEAD. A `--from A --to B` comparison is
+   * empty exactly when B is an ancestor of A, so the default 分支对比 scope can
+   * only be chosen in a direction that has a diff if this is known — without
+   * it, "review this branch" on the base branch silently reviews nothing.
+   */
+  relations?: Record<string, "same" | "ancestor" | "descendant" | "diverged">;
   commits?: { hash: string; date: string; message: string }[];
   dirtyCount?: number;
 }
