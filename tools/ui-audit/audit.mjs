@@ -394,6 +394,13 @@ const expectCodeStacked = async (page) => {
   return out;
 };
 
+/** Run several assertions over one shot, concatenating their problems. */
+const all = (...checks) => async (page) => {
+  const out = [];
+  for (const c of checks) out.push(...(await c(page)));
+  return out;
+};
+
 /**
  * 开始审查 is the page's only primary action, and it used to sit underneath
  * every knob the form owns: at the 1000x660 floor it was not on screen at all,
@@ -409,6 +416,95 @@ const expectRunActionVisible = async (page) => {
   if (box.y + box.height > vp.height + 1)
     return [`the run action sits ${Math.round(box.y + box.height - vp.height)}px below the fold in a ${vp.height}px window`];
   return [];
+};
+
+/**
+ * Every scroll region has to admit it scrolls.
+ *
+ * Both of the review page's regions end flush against a fixed band — the form
+ * against the file region's border, the file list against the pinned action bar
+ * — so when either is taller than its share the content is sliced mid-row, and
+ * that slice is the *only* cue that anything follows, because overlay
+ * scrollbars stay hidden until you scroll. At the 1000x660 floor that is the
+ * default state: the page opens with a half-row and nothing to explain it.
+ *
+ * The rule is conditional, and that is what makes it worth asserting: the fade
+ * has to be there *when and only when* there is content beyond the edge. This
+ * reads the scroll numbers, then scrolls every region to its far end and
+ * re-reads them. A decoration that is always painted passes the first half and
+ * fails the second, which is exactly the failure a static gradient has — and a
+ * region that was never converted to `ScrollArea` fails the first.
+ *
+ * It deliberately enumerates regions rather than looking for one known row:
+ * the point is that a *new* scroll region cannot quietly skip the rule.
+ */
+const expectScrollAffordance = async (page) => {
+  const read = () =>
+    page.evaluate(() => {
+      const regions = [];
+      for (const el of document.querySelectorAll("main *")) {
+        const cs = getComputedStyle(el);
+        if (cs.overflowY !== "auto" && cs.overflowY !== "scroll") continue;
+        if (!el.clientHeight || !el.clientWidth) continue;
+        const wrap = el.parentElement;
+        const box = el.getBoundingClientRect();
+        const fades = wrap
+          ? [...wrap.children]
+              .filter((c) => c !== el && getComputedStyle(c).position === "absolute")
+              .map((c) => ({
+                at: c.getBoundingClientRect().top <= box.top + 1 ? "top" : "bottom",
+                grad: /linear-gradient/.test(getComputedStyle(c).backgroundImage),
+              }))
+          : [];
+        const cls = typeof el.className === "string" ? el.className : "";
+        regions.push({
+          // Name the region by the thing above it, which is how a reader finds
+          // it on screen; the class list is the fallback.
+          id: cls.replace(/\s+/g, " ").slice(0, 34) || el.tagName.toLowerCase(),
+          below: el.scrollHeight - el.scrollTop - el.clientHeight,
+          above: el.scrollTop,
+          fades,
+        });
+      }
+      return regions;
+    });
+
+  const check = (regions, phase) => {
+    const out = [];
+    for (const r of regions) {
+      const has = (at) => r.fades.some((f) => f.at === at && f.grad);
+      if (r.below > 1 && !has("bottom"))
+        out.push(
+          phase === "first"
+            ? `${r.below}px is cut off at the bottom of scroll region "${r.id}" with no fade to say so`
+            : `scroll region "${r.id}" still cuts ${r.below}px off after scrolling to its end`
+        );
+      if (r.below <= 1 && has("bottom"))
+        out.push(`scroll region "${r.id}" fits (${r.below}px spare) but still fades its bottom edge`);
+      if (r.above <= 1 && has("top"))
+        out.push(`scroll region "${r.id}" is at its top but already fades its top edge`);
+      if (r.above > 1 && !has("top"))
+        out.push(`scroll region "${r.id}" is scrolled ${r.above}px down with no fade showing content above`);
+    }
+    return out;
+  };
+
+  const first = await read();
+  const out = check(first, "first");
+
+  // Scroll every region to its far end: each fade has to move to the other
+  // edge, or vanish.
+  await page.evaluate(() => {
+    for (const el of document.querySelectorAll("main *")) {
+      const cs = getComputedStyle(el);
+      if (cs.overflowY !== "auto" && cs.overflowY !== "scroll") continue;
+      if (!el.clientHeight) continue;
+      el.scrollTop = el.scrollHeight;
+    }
+  });
+  await page.waitForTimeout(200);
+  out.push(...check(await read(), "last"));
+  return out;
 };
 
 /**
@@ -596,7 +692,7 @@ await shoot(page, "13-review-preview", {
     await nav("审查")(page);
     await page.waitForTimeout(1400);
   },
-  expect: expectPreviewListed,
+  expect: all(expectPreviewListed, expectScrollAffordance),
 });
 
 // The launcher at the window minimum, where the guide card is gone and the form
@@ -619,14 +715,14 @@ await shoot(page, "47-review-tuning-open", {
     await page.getByRole("button", { name: /调整这次审查的参数/ }).click();
     await page.waitForTimeout(400);
   },
-  expect: async (page) => [...(await expectNoDeadBand(page)), ...(await expectRunActionVisible(page))],
+  expect: all(expectNoDeadBand, expectRunActionVisible, expectScrollAffordance),
 });
 
 // 1000x660 is the window minimum declared in main.js — the tightest the app
 // can ever get. The three-column grid cannot be satisfied down here (the
 // minimums alone come to ~1180px), so the code folds into the detail column
 // rather than being clipped to a third of a line.
-await shoot(page, "14-min-review", { width: 1000, height: 660, after: nav("审查"), expect: expectRunActionVisible });
+await shoot(page, "14-min-review", { width: 1000, height: 660, after: nav("审查"), expect: all(expectRunActionVisible, expectScrollAffordance) });
 await shoot(page, "15-min-settings", { width: 1000, height: 660, after: nav("设置") });
 await shoot(page, "16-min-results", {
   fullWidth: true,

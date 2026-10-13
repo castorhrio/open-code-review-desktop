@@ -30,6 +30,9 @@ import { cn } from "@/lib/cn";
  * 5. Responsiveness. Form grids respond to their own container
  *    (`FieldGrid`), not to viewport breakpoints, so the layout behaves the same
  *    whether the window is narrow or the sidebar is wide.
+ * 6. Scroll affordance. A scroll region that ends flush against a fixed band
+ *    uses `ScrollArea`, not a bare `overflow-y-auto`: a clipped half-row with
+ *    nothing to explain it is indistinguishable from a broken render.
  */
 
 /** A whole scrolling page: the scroller plus the centred measure. */
@@ -104,6 +107,84 @@ export function Measure({
       style={{ maxWidth: narrow ? "var(--page-max-narrow)" : "var(--page-max)" }}
     >
       {children}
+    </div>
+  );
+}
+
+/**
+ * A scroll region that admits it scrolls.
+ *
+ * WHY THIS EXISTS
+ * The file region ends flush against the pinned action bar. When the list is
+ * taller than the region — always, at the 1000x660 floor — the bottom row is
+ * sliced horizontally through its middle, and that slice is the *only* cue that
+ * anything follows: the platform hides overlay scrollbars until you scroll, and
+ * a half-row reads as a rendering bug rather than as "there is more". So the
+ * region fades its content into the surface at whichever edge still has content
+ * beyond it, and shows nothing at an edge you have reached. That restraint is
+ * the point: the fade never claims there is more to read when there is not.
+ *
+ * The measurement runs after every render (a content change always comes with
+ * one), on scroll, and on a ResizeObserver — a window resize does not re-render
+ * this component, and it is exactly when the region gets shorter that the fade
+ * has to appear.
+ *
+ * The overlay is `pointer-events-none` and `aria-hidden`: it is decoration over
+ * content that stays selectable, and it must not eat a click on the last row.
+ */
+export function ScrollArea({
+  children,
+  className,
+  tone = "surface",
+  grow = true,
+}: {
+  children: React.ReactNode;
+  className?: string;
+  tone?: "surface" | "canvas" | "raised";
+  /** `flex-1` by default; pass `false` for a region with its own cap (max-h). */
+  grow?: boolean;
+}) {
+  const scroller = React.useRef<HTMLDivElement>(null);
+  const [edges, setEdges] = React.useState({ top: false, bottom: false });
+
+  React.useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const measure = () => {
+      const top = el.scrollTop > 1;
+      const bottom = el.scrollHeight - el.scrollTop - el.clientHeight > 1;
+      setEdges((prev) => (prev.top === top && prev.bottom === bottom ? prev : { top, bottom }));
+    };
+    measure();
+    el.addEventListener("scroll", measure, { passive: true });
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener("scroll", measure);
+      ro.disconnect();
+    };
+  });
+
+  const from = `var(--${tone})`;
+  return (
+    <div className={cn("relative flex min-h-0 flex-col", grow ? "flex-1" : "shrink-0", className)}>
+      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
+        {children}
+      </div>
+      {edges.top && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-0 h-6"
+          style={{ background: `linear-gradient(to bottom, ${from}, transparent)` }}
+        />
+      )}
+      {edges.bottom && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 bottom-0 h-6"
+          style={{ background: `linear-gradient(to top, ${from}, transparent)` }}
+        />
+      )}
     </div>
   );
 }

@@ -19,7 +19,7 @@ import { EFFORTS, EMPTY_SCOPE, MODE_META, validateSpec } from "@/lib/spec";
 import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
 import { Checkbox, Field, Input, Select, Textarea } from "@/components/ui/form";
-import { Card, FieldGrid, Measure, PageBody, Section } from "@/components/ui/layout";
+import { Card, FieldGrid, Measure, PageBody, ScrollArea, Section } from "@/components/ui/layout";
 import { Badge, ConfirmDialog } from "@/components/ui/overlay";
 import { toast } from "sonner";
 import { GuideCard } from "@/components/GuideCard";
@@ -284,7 +284,7 @@ export function ReviewPanel() {
         {/* Natural height when the page has little to say, capped so the file
             region below always keeps its share — the guide card and the open
             tuning panel together are taller than any window. */}
-        <div className="max-h-[55%] min-h-0 shrink-0 overflow-y-auto">
+        <ScrollArea grow={false} className="max-h-[55%]">
           <PageBody>
             <GuideCard />
 
@@ -647,7 +647,7 @@ export function ReviewPanel() {
               </Card>
             )}
           </PageBody>
-        </div>
+        </ScrollArea>
 
         {/* What the review is about to read, in the region that fills the
             window. This is the answer to "the product is a configuration form":
@@ -677,7 +677,7 @@ export function ReviewPanel() {
               </Button>
             </Measure>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <ScrollArea>
             <Measure className="px-6 py-1">
               {blocked ? (
                 <p className="px-1 py-6 text-center text-body text-faint">{blocked}</p>
@@ -739,7 +739,7 @@ export function ReviewPanel() {
                 </>
               )}
             </Measure>
-          </div>
+          </ScrollArea>
         </section>
 
         {/* The run action is the point of the page, and it used to sit below
