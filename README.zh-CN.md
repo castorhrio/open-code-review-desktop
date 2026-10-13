@@ -93,6 +93,10 @@ preload.js               contextBridge 接口
 - **`asar` 必须保持 `false`。** 开启后 `resolveNativeBinary()` 返回 `app.asar\…` 路径，`fs.existsSync()` 会返回 true 骗过检查（Electron 只给 `fs` 打了补丁），而 `spawn()` 走 CreateProcess 不认识该路径直接 ENOENT——每次审查静默失败。
 - 界面产物目录是 **`out/`**（不是 `dist/`），且以 `base: './'` 构建，才能在 `file://` 下加载。
 
+## 发版
+
+`node tools/release.mjs <x.y.z>` 会升版本、提交 `chore(release): <x.y.z>`、跑完整门禁、打 Windows 安装包，并对 `release/` 重跑密钥扫描；若 electron-builder 撞上 `win-unpacked.tmp` 被锁的重命名失败，它会自动改到新输出目录构建，再把产物移回 `release/`。它停在两件属于人的动作之前：推送提交，以及发布 GitHub Release（自动更新源读的是 releases/latest）。
+
 ## 已知限制
 
 - 只在 Windows x64 上构建并验证过；需要 `PATH` 上有 Git。

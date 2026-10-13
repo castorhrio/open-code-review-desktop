@@ -201,10 +201,13 @@ It needs the Electron binary, and on a machine with no GPU or a restrictive sand
 
 Run these before and after any layout, token, or main-process change. Several real defects were only visible this way: a settings page that ran at two widths at once, a grid track that overflowed its container by 57px, a preview panel unreachable below 1536px, 234 text instances below AA contrast, and a navigation guard that blocked the app's own startup and would have shipped a blank window.
 
+### Cutting a release
+
+`node tools/release.mjs <x.y.z>` bumps the version, commits `chore(release): <x.y.z>`, runs the whole gate, packages the Windows installers and re-runs the key scan over `release/`. If electron-builder hits the locked-`win-unpacked.tmp` rename failure, it rebuilds into a fresh output directory and moves the artefacts into `release/` itself. It stops short of the two acts that belong to a human: pushing the commit, and publishing the GitHub Release that the auto-update feed reads.
+
 ## Known limitations
 
-- Git must be on `PATH`. Windows packages are built and verified on Windows x64; macOS dmg builds must run on macOS and Linux AppImage/deb builds on Linux (or WSL/Docker), because each target needs its own host tooling.
-- **Auto-update applies to the NSIS setup build only.** The portable exe re-extracts to a temp dir each run and has no install root to replace, so it links to the releases page instead. macOS/Linux builds are unsigned against a generic update feed, so treat in-app updates as Windows-installed-build-only for now.
+- Git must be on `PATH`. Windows packages are built and verified on Windows x64; macOS dmg builds must run on macOS and Linux AppImage/deb builds on Linux (or WSL/Docker), because each target needs its own host tooling.- **Auto-update applies to the NSIS setup build only.** The portable exe re-extracts to a temp dir each run and has no install root to replace, so it links to the releases page instead. macOS/Linux builds are unsigned against a generic update feed, so treat in-app updates as Windows-installed-build-only for now.
 - Releases must ship `latest.yml` (plus `latest-mac.yml` / `latest-linux.yml` for those platforms) and the `*-setup.exe.blockmap` next to the binaries; without them the updater cannot see a version at all.
 - Installers are **unsigned**, so SmartScreen (Windows) and Gatekeeper (macOS) will warn on first launch.
 - The CLI exposes no model catalogue, so the model name is still typed by hand — a rejected name makes the vendor turn its accepted names into clickable buttons (see [alibaba/open-code-review#1694](https://github.com/alibaba/open-code-review/issues/1694)).
