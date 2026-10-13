@@ -31,11 +31,22 @@ export function App() {
         <TopBar />
         <UpdateBanner />
         <main className="min-h-0 flex-1 overflow-hidden bg-canvas">
-          {view === "review" && <ReviewPanel />}
-          {view === "results" && <ResultsPanel />}
-          {view === "report" && <ReportView />}
-          {view === "history" && <HistoryPanel />}
-          {view === "settings" && <SettingsPanel />}
+          {/* One motion, for the one state change the app makes constantly: which
+              view is on screen. It used to hard-swap, so 审查 → 结果 → 历史 read
+              as a repaint rather than as navigation — and the app had a `fade-in`
+              utility (used only by the update banner) and an `--ease-out` token
+              sitting unused while the most frequent transition had none.
+
+              `key={view}` replays the entry animation on every switch;
+              `prefers-reduced-motion` already collapses it globally in
+              styles.css, so the motion is never the only signal. */}
+          <div key={view} className="fade-in h-full">
+            {view === "review" && <ReviewPanel />}
+            {view === "results" && <ResultsPanel />}
+            {view === "report" && <ReportView />}
+            {view === "history" && <HistoryPanel />}
+            {view === "settings" && <SettingsPanel />}
+          </div>
         </main>
         <LogDrawer />
       </div>

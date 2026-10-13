@@ -159,6 +159,13 @@ const PROBE = `(() => {
     offRamp[key] = (offRamp[key] || 0) + 1;
   }
   const root = document.getElementById("root");
+  // Which view is on screen changes more often than anything else in this app,
+  // and it used to hard-swap: no transition at all, so navigation read as a
+  // repaint. The entry animation is what makes the change legible, and
+  // animation-name survives in computed style after the animation ends, so this
+  // is checkable on a still screenshot.
+  const viewRoot = document.querySelector("main") && document.querySelector("main").firstElementChild;
+  const viewMotion = viewRoot ? getComputedStyle(viewRoot).animationName : "";
   return {
     // A page that rendered nothing passes every layout probe: no overflow, no
     // clipping, no measure to compare. This happened for real when the stubbed
@@ -174,6 +181,7 @@ const PROBE = `(() => {
     clipped: clipped.slice(0, 4),
     unreachable: unreachable.slice(0, 4),
     offRamp: Object.entries(offRamp).slice(0, 4),
+    viewMotion,
     // An interpolated optional field prints the word "undefined" into the run
     // header, and an unparseable number prints NaN — both invisible in code
     // review, and both landing in the sentence the user reads to decide whether
@@ -219,6 +227,9 @@ async function shoot(page, name, { width = 1440, height = 900, storage = STORAGE
   if (p.clipped.length) problems.push("clipped: " + p.clipped.join(" | "));
   if (p.unreachable.length) problems.push("truncated with no title: " + p.unreachable.join(" | "));
   if (p.offRamp.length) problems.push("font size off the ramp: " + p.offRamp.map(([k, n]) => `${k} x${n}`).join(" | "));
+  // Every view animates in, so the change of screen is legible. A view that
+  // swaps instantly is the failure this guards.
+  if (!/fadeIn/.test(p.viewMotion || "")) problems.push(`the view does not animate in (animation-name "${p.viewMotion}")`);
   if (p.leaked.length) problems.push("rendered placeholder text: " + p.leaked.join(", "));
   if (expect) problems.push(...(await expect(page)));
   console.log(
