@@ -140,6 +140,24 @@ const PROBE = `(() => {
     const cls = typeof el.className === "string" ? el.className : el.getAttribute("class") || "";
     unreachable.push(el.tagName.toLowerCase() + "." + cls.slice(0, 50) + " " + el.scrollWidth + ">" + el.clientWidth);
   }
+  // One type ramp. styles.css declares four steps and nothing else — 11 / 12 /
+  // 13 / 20px — because the app once used ten sizes between 10 and 14px in
+  // half-pixel increments, which is what made every screen look slightly
+  // unrelated to every other one. A comment cannot hold that; this can. Only
+  // elements that *own* text are sampled, so an inherited size is never counted
+  // twice, and the sizes are reported so a failure names the offender.
+  const RAMP = [11, 12, 13, 20];
+  const offRamp = {};
+  for (const el of document.querySelectorAll("main *")) {
+    if (!el.getClientRects().length) continue;
+    const owns = [...el.childNodes].some((n) => n.nodeType === 3 && (n.textContent || "").trim());
+    if (!owns) continue;
+    const px = Math.round(parseFloat(getComputedStyle(el).fontSize) * 10) / 10;
+    if (RAMP.indexOf(px) !== -1) continue;
+    const cls = typeof el.className === "string" ? el.className : el.getAttribute("class") || "";
+    const key = px + "px " + el.tagName.toLowerCase() + "." + cls.slice(0, 30);
+    offRamp[key] = (offRamp[key] || 0) + 1;
+  }
   const root = document.getElementById("root");
   return {
     // A page that rendered nothing passes every layout probe: no overflow, no
@@ -155,6 +173,7 @@ const PROBE = `(() => {
     docClientH: document.documentElement.clientHeight,
     clipped: clipped.slice(0, 4),
     unreachable: unreachable.slice(0, 4),
+    offRamp: Object.entries(offRamp).slice(0, 4),
     // An interpolated optional field prints the word "undefined" into the run
     // header, and an unparseable number prints NaN — both invisible in code
     // review, and both landing in the sentence the user reads to decide whether
@@ -199,6 +218,7 @@ async function shoot(page, name, { width = 1440, height = 900, storage = STORAGE
   if (p.measure !== null && p.cap !== null && p.measure > p.cap + 1) problems.push(`measure ${p.measure}px > cap ${p.cap}px`);
   if (p.clipped.length) problems.push("clipped: " + p.clipped.join(" | "));
   if (p.unreachable.length) problems.push("truncated with no title: " + p.unreachable.join(" | "));
+  if (p.offRamp.length) problems.push("font size off the ramp: " + p.offRamp.map(([k, n]) => `${k} x${n}`).join(" | "));
   if (p.leaked.length) problems.push("rendered placeholder text: " + p.leaked.join(", "));
   if (expect) problems.push(...(await expect(page)));
   console.log(
