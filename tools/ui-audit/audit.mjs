@@ -759,6 +759,36 @@ const expectScrollAffordance = async (page) => {
 };
 
 /**
+ * 全量扫描 has no diff, and the real CLI says so: every file comes back with a
+ * constant `scan` status, `deletions: 0`, and `insertions` as the file's total
+ * line count. The list printed that word on every row — the same value 66 times
+ * under a heading that already names the mode — and the fixture had been
+ * returning diff statuses (`M` / `A`) that the CLI never emits, which is exactly
+ * what stopped anyone seeing it. A row's right-hand column has to describe the
+ * file, not repeat the mode.
+ */
+const expectScanRows = async (page) => {
+  const rows = await page.evaluate(() =>
+    [...document.querySelectorAll("main span[class*='font-mono']")].map((p) =>
+      p.parentElement ? p.parentElement.textContent.replace(/\s+/g, " ").trim() : ""
+    )
+  );
+  const out = [];
+  if (rows.length < 5) out.push(`only ${rows.length} file rows rendered for a whole-repo scan`);
+  for (const r of rows) {
+    // Both spellings matter. The raw English is what the fixture used to carry
+    // straight to the screen; the Chinese is what the label map turns it into
+    // now, so a diff status that survives into scan mode is caught either way.
+    if (/modified|added|deleted|重命名|修改|新增|删除/.test(r) || /(^|\s)[MAD]\s·/.test(r))
+      out.push(`a 全量扫描 row carries diff vocabulary, but a scan has no diff: "${r.slice(0, 70)}"`);
+    if (/scan/i.test(r)) out.push(`a 全量扫描 row repeats the mode's own status word: "${r.slice(0, 70)}"`);
+  }
+  const withLines = rows.filter((r) => /\d+ 行$/.test(r)).length;
+  if (withLines < 5) out.push(`only ${withLines} of ${rows.length} 全量扫描 rows state how many lines will be read`);
+  return out;
+};
+
+/**
  * The preview is a core flow, and it had no assertion at all — which is how it
  * came to be screenshotted for months against a fixture whose normal payload had
  * no file list at all (`files: undefined`). Every shot showed "进入审查 0 / 共 8"
@@ -858,6 +888,7 @@ await shoot(page, "03-review-scan", {
     await page.getByRole("button", { name: /整库/ }).click();
     await page.waitForTimeout(300);
   },
+  expect: expectScanRows,
 });
 await shoot(page, "04-review-tuning", {
   after: async (page) => {
@@ -922,7 +953,7 @@ await shoot(page, "09-results-findings", {
   expect: all(expectThreePanes, expectCleanSummaries, expectCodeFollowsSession, expectScrollAffordance, expectHighlightVisible),
 });
 await shoot(page, "10-review-narrow", { width: 1100, height: 780, expect: expectRunActionVisible });
-await shoot(page, "11-settings-narrow", { width: 1100, height: 780, after: nav("设置") });
+await shoot(page, "11-settings-narrow", { width: 1100, height: 780, after: nav("设置"), expect: expectScrollAffordance });
 await shoot(page, "12-review-xwide", {
   width: 1920,
   height: 1080,
@@ -971,7 +1002,7 @@ await shoot(page, "47-review-tuning-open", {
 // minimums alone come to ~1180px), so the code folds into the detail column
 // rather than being clipped to a third of a line.
 await shoot(page, "14-min-review", { width: 1000, height: 660, after: nav("审查"), expect: all(expectRunActionVisible, expectScrollAffordance) });
-await shoot(page, "15-min-settings", { width: 1000, height: 660, after: nav("设置") });
+await shoot(page, "15-min-settings", { width: 1000, height: 660, after: nav("设置"), expect: expectScrollAffordance });
 await shoot(page, "16-min-results", {
   width: 1000,
   height: 660,
@@ -981,7 +1012,11 @@ await shoot(page, "16-min-results", {
   },
   expect: all(expectCodeStacked, expectScrollAffordance, expectHighlightVisible),
 });
-await shoot(page, "17-min-history", { width: 1000, height: 660, after: nav("历史") });
+// `?sessions=many` rather than the default set: at 1000x660 the default history
+// is short enough to fit, so the affordance check would pass over a page with
+// nothing cut off — the exact vacuity the running-feed shot fell into. The
+// narrow window with a full list is the case the rule is for.
+await shoot(page, "17-min-history", { width: 1000, height: 660, query: "?sessions=many", after: nav("历史"), expect: expectScrollAffordance });
 
 // The running state of the results page, and a light-theme pass: the type ramp
 // touched nearly every text colour, so both themes need eyes on them.
@@ -1564,6 +1599,37 @@ await shoot(page, "44-report-light", {
   after: openReport,
 });
 await shoot(page, "45-report-stress", { query: "?stress=1", after: openReport });
+
+// The report is the whole review, not the current filter. That is the sentence in
+// `expectReadableDocument`'s comment, and nothing checked it: both shots above
+// open 阅读 without ever narrowing the list, so pointing the report at `filtered`
+// instead of the store's `comments` would have kept the suite green while
+// quietly turning the forwardable document into "whatever you last searched
+// for". Narrow the list to a single finding first, then read it.
+let narrowedTo = -1;
+await shoot(page, "71-report-ignores-filter", {
+  after: async (page) => {
+    await openFindings(page);
+    await page.getByPlaceholder(/搜索评论内容/).fill("email");
+    await page.waitForTimeout(400);
+    narrowedTo = await page.locator("main .grid > div:first-child button").count();
+    await page.getByRole("button", { name: "阅读", exact: true }).click();
+    await page.waitForTimeout(500);
+  },
+  expect: async (page) => {
+    const out = [];
+    // Without this the shot is vacuous: a search that narrowed nothing would let
+    // "the report shows 5" pass for the wrong reason.
+    if (!(narrowedTo >= 1 && narrowedTo < 5))
+      out.push(`the search narrowed the list to ${narrowedTo} of 5 rows, so this shot proves nothing about the filter`);
+    const findings = await page.locator("main article").count();
+    if (findings !== 5)
+      out.push(
+        `the report carries ${findings} findings after the list was narrowed to ${narrowedTo} — 阅读 must be the whole run, not the filter`
+      );
+    return out;
+  },
+});
 
 // A repo with no model behind it. The run cannot do anything but fail, so the
 // page has to say which of its two preconditions is missing and get out of the

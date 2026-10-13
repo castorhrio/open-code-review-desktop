@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import { EXCLUDE_REASON, cliReason } from "@/lib/format";
+import { EXCLUDE_REASON, FILE_STATUS, cliReason } from "@/lib/format";
 import { EFFORTS, EMPTY_SCOPE, MODE_META, validateSpec } from "@/lib/spec";
 import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
@@ -720,8 +720,9 @@ export function ReviewPanel() {
                     <div key={f.path} className="flex items-center gap-3 border-b border-line/60 py-2 last:border-b-0">
                       <span className="min-w-0 flex-1 truncate font-mono text-body text-ink" title={f.path}>{f.path}</span>
                       <span className="tnum shrink-0 text-meta text-faint">
-                        {f.status}
-                        {scan ? ` · ${f.insertions} 行` : ` · +${f.insertions} / -${f.deletions}`}
+                        {scan
+                          ? `${f.insertions} 行`
+                          : `${FILE_STATUS[f.status] || f.status} · +${f.insertions} / -${f.deletions}`}
                       </span>
                     </div>
                   ))}

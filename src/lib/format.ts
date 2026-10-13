@@ -56,6 +56,28 @@ export const EXCLUDE_REASON: Record<string, string> = {
   too_large: "过大",
 };
 
+/**
+ * The CLI's per-file status in a preview.
+ *
+ * Captured from the real binary, not inferred: `ocr review --preview` spells the
+ * value out in full (`modified` / `added` / `deleted`), and `ocr scan --preview`
+ * returns a constant `scan` with `deletions: 0` and `insertions` as the file's
+ * total line count, because a scan has no diff to describe. `scan` is
+ * deliberately absent here — 全量扫描 does not render a status at all, since the
+ * same word on all 66 rows of a real scan carries no per-file information.
+ *
+ * The list used to print the raw value, and the audit's fixture had invented
+ * single letters (`M` / `A`) that the CLI never emits — so every screenshot of
+ * this list showed a vocabulary that does not exist, which is also what hid the
+ * repeated `scan`.
+ */
+export const FILE_STATUS: Record<string, string> = {
+  modified: "修改",
+  added: "新增",
+  deleted: "删除",
+  renamed: "重命名",
+};
+
 export const MODE_LABEL: Record<string, string> = {
   workspace: "工作区",
   range: "分支对比",

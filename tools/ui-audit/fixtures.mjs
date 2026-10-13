@@ -163,15 +163,20 @@ const FINDINGS = [
   },
 ];
 
+// Status vocabulary captured from the real binary: `ocr review --preview` spells
+// it out (`modified` / `added` / `deleted`), never the single letters this used to
+// carry. A fixture that invents a value the CLI cannot emit makes every shot of
+// the list a picture of a state that does not exist — and it hid a real one, the
+// constant `scan` status that a whole-repo scan returns for all 66 of its files.
 const PREVIEW_FILES = [
-  { path: "internal/service/auth/login.go", status: "M", insertions: 34, deletions: 12, will_review: true },
-  { path: "internal/repository/user_query.go", status: "M", insertions: 8, deletions: 3, will_review: true },
-  { path: "pkg/httpx/middleware.go", status: "A", insertions: 61, deletions: 0, will_review: true },
-  { path: "internal/service/auth/login_test.go", status: "M", insertions: 22, deletions: 4, will_review: true },
-  { path: "web/src/api/client.ts", status: "M", insertions: 6, deletions: 6, will_review: true },
-  { path: "vendor/github.com/pkg/errors/errors.go", status: "M", insertions: 2, deletions: 2, will_review: false, exclude_reason: "vendored" },
-  { path: "docs/api.md", status: "M", insertions: 40, deletions: 0, will_review: false, exclude_reason: "doc-only" },
-  { path: "assets/logo.png", status: "A", insertions: 0, deletions: 0, will_review: false, exclude_reason: "binary" },
+  { path: "internal/service/auth/login.go", status: "modified", insertions: 34, deletions: 12, will_review: true },
+  { path: "internal/repository/user_query.go", status: "modified", insertions: 8, deletions: 3, will_review: true },
+  { path: "pkg/httpx/middleware.go", status: "added", insertions: 61, deletions: 0, will_review: true },
+  { path: "internal/service/auth/login_test.go", status: "modified", insertions: 22, deletions: 4, will_review: true },
+  { path: "web/src/api/client.ts", status: "modified", insertions: 6, deletions: 6, will_review: true },
+  { path: "vendor/github.com/pkg/errors/errors.go", status: "modified", insertions: 2, deletions: 2, will_review: false, exclude_reason: "vendored" },
+  { path: "docs/api.md", status: "modified", insertions: 40, deletions: 0, will_review: false, exclude_reason: "doc-only" },
+  { path: "assets/logo.png", status: "added", insertions: 0, deletions: 0, will_review: false, exclude_reason: "binary" },
 ];
 
 const SESSIONS = [
@@ -611,10 +616,22 @@ window.api = (() => {
     // ?empty=1 is the state where the scope legitimately contains nothing to
     // review — a clean working tree, or a ref range that touches no source.
     // The app has to say so rather than spend a run discovering it.
+    // A scan has no diff, so the CLI reports its constant scan status with no
+    // deletions, and insertions carries the file's total line count. Returning
+    // the diff vocabulary here made the 全量扫描 shot show per-file 修改 / 新增
+    // labels that cannot occur in that mode. Captured from the real binary:
+    //   ocr scan --preview --repo . --format json   -> status "scan", deletions 0
+    //   ocr review --preview --repo . --from HEAD~12 --to HEAD -> "modified"
+    // (No backticks anywhere in this file — the bridge below is one template
+    // literal and a stray backtick ends it. Fifth time. See AGENT_BACKLOG.md.)
+    const files =
+      spec && spec.mode === "scan"
+        ? D.PREVIEW_FILES.map((f) => ({ ...f, status: "scan", insertions: f.insertions + f.deletions, deletions: 0 }))
+        : D.PREVIEW_FILES;
     if (q.get("empty") === "1") {
-      return { ok: true, value: { files: D.PREVIEW_FILES.map((f) => ({ ...f, will_review: false })), total_insertions: 0, total_deletions: 0, total_files: D.PREVIEW_FILES.length, reviewable_count: 0, excluded_count: D.PREVIEW_FILES.length } };
+      return { ok: true, value: { files: files.map((f) => ({ ...f, will_review: false })), total_insertions: 0, total_deletions: 0, total_files: files.length, reviewable_count: 0, excluded_count: files.length } };
     }
-    return { ok: true, value: { files: D.PREVIEW_FILES, total_insertions: 171, total_deletions: 27, total_files: 8, reviewable_count: 5, excluded_count: 3 } };
+    return { ok: true, value: { files, total_insertions: 171, total_deletions: 27, total_files: 8, reviewable_count: 5, excluded_count: 3 } };
   },
   resolveRef: async (_r, ref) =>
     q.get("badref") === "1" && /no-such/.test(ref)
