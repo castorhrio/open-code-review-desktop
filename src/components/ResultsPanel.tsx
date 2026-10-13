@@ -34,8 +34,32 @@ const SEVERITIES = ["critical", "high", "medium", "low", ""] as const;
  */
 function FileViewer({ current, file, variant }: { current: Finding; file: FileWindow | null; variant: "pane" | "stacked" }) {
   const stacked = variant === "stacked";
+  const scroller = useRef<HTMLDivElement>(null);
+  const hit = useRef<HTMLDivElement>(null);
+
+  // A finding is read against its own lines, and the CLI hands back a window
+  // padded 16 lines either side — 33 lines, 597px of code, in a 202px box at the
+  // 1000x660 floor. The pane used to open at the window's first line, which put
+  // the highlight 140px below its own bottom edge: selecting a finding showed
+  // code the finding was not about, and nothing said so, because the pane looked
+  // like a perfectly ordinary scroller. Bring the first highlighted line to the
+  // middle — but only when it is not already in view, so a pane the window fits
+  // inside does not move at all.
+  useEffect(() => {
+    const box = scroller.current;
+    const line = hit.current;
+    if (!box || !line) return;
+    const b = box.getBoundingClientRect();
+    const l = line.getBoundingClientRect();
+    if (l.top >= b.top - 1 && l.bottom <= b.bottom + 1) return;
+    box.scrollTop += l.top - b.top - (b.height - l.height) / 2;
+  }, [file, current.start_line, current.end_line]);
+
   if (!file) return <p className={cn("text-body text-faint", stacked ? "px-4 py-3" : "p-4")}>读取文件中…</p>;
   if (!file.ok) return <p className={cn("text-body text-bad", stacked ? "px-4 py-3" : "p-4")}>{file.error}</p>;
+  const firstHit = file.lines?.find(
+    (l) => l.n >= current.start_line && l.n <= (current.end_line || current.start_line)
+  )?.n;
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       <div className={cn("flex min-w-0 shrink-0 items-center gap-2 border-b border-line bg-surface py-2", stacked ? "px-4" : "px-3")}>
@@ -76,12 +100,12 @@ function FileViewer({ current, file, variant }: { current: Finding; file: FileWi
           </>
         )}
       </div>
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div ref={scroller} className="min-h-0 flex-1 overflow-auto">
         <pre className="w-max min-w-full px-2 py-2 font-mono text-meta leading-[1.6]">
           {file.lines?.map((l) => {
             const inRange = l.n >= current.start_line && l.n <= (current.end_line || current.start_line);
             return (
-              <div key={l.n} className={cn("flex gap-3 rounded-xs px-2", inRange && "bg-hit")}>
+              <div key={l.n} ref={l.n === firstHit ? hit : undefined} className={cn("flex gap-3 rounded-xs px-2", inRange && "bg-hit")}>
                 {/* On the highlight the gutter needs one step more contrast
                     than `faint`, which lands at 4.1:1 over `--hit`. */}
                 <span className={cn("tnum w-10 shrink-0 text-right", inRange ? "text-muted" : "text-faint")}>{l.n}</span>

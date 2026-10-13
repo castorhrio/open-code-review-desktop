@@ -477,6 +477,48 @@ const expectCodeStacked = async (page) => {
   return out;
 };
 
+/**
+ * A finding is read against its own lines, and the CLI hands back a window
+ * padded 16 lines either side. The pane opened at the window's *first* line, so
+ * at the 1000x660 floor the highlight sat 140px below the pane's own bottom
+ * edge — selecting a finding showed code the finding was not about, and nothing
+ * said so, because the pane still looked like an ordinary scroller.
+ *
+ * Measured on the built UI before the fix: pane 202px tall over 597px of code,
+ * highlight at 715..767 against a pane ending at 627. At 1280x800 (pane 294px)
+ * only 4px of the highlight was on screen. The 1440px layout hides it, because
+ * there the whole window fits and the pane never scrolls — which is exactly why
+ * the assertion has to run at the narrow widths too.
+ */
+const expectHighlightVisible = async (page) => {
+  const m = await page.evaluate(() => {
+    const pre = [...document.querySelectorAll("main pre")].find(
+      (p) => (p.className || "").toString().includes("min-w-full") && p.parentElement.clientHeight > 0
+    );
+    if (!pre) return { error: "the code pane is not rendered" };
+    const box = pre.parentElement;
+    const hits = [...pre.querySelectorAll("div")].filter((d) => (d.className || "").toString().includes("bg-hit"));
+    if (!hits.length) return { error: "the code pane highlights no line for the selected finding" };
+    const b = box.getBoundingClientRect();
+    const first = hits[0].getBoundingClientRect();
+    const last = hits[hits.length - 1].getBoundingClientRect();
+    return {
+      above: Math.round(b.top - first.top),
+      below: Math.round(last.bottom - b.bottom),
+      boxH: Math.round(b.height),
+      scrollH: box.scrollHeight,
+    };
+  });
+  if (m.error) return [m.error];
+  const out = [];
+  const where = `(pane ${m.boxH}px, code ${m.scrollH}px)`;
+  if (m.above > 1)
+    out.push(`the highlighted lines start ${m.above}px above the code pane's top edge, so the finding is off screen ${where}`);
+  if (m.below > 1)
+    out.push(`the highlighted lines end ${m.below}px below the code pane's bottom edge, so the finding is off screen ${where}`);
+  return out;
+};
+
 /** Run several assertions over one shot, concatenating their problems. */
 const all = (...checks) => async (page) => {
   const out = [];
@@ -586,16 +628,36 @@ const expectScrollAffordance = async (page) => {
 
   // Scroll every region to its far end: each fade has to move to the other
   // edge, or vanish.
-  await page.evaluate(() => {
+  //
+  // The original offsets are put back afterwards, and that is not tidiness. An
+  // assertion that leaves the page scrolled changes what every assertion after
+  // it measures, silently and in the direction of *passing*: the code pane
+  // pushed to its end left the selected finding 106px above the pane's own top
+  // edge, so a later "is the finding on screen" check read a screen the user
+  // never sees. The screenshot is taken before the assertions, so nothing about
+  // this was visible in a shot either. A check owns the state it mutates.
+  const before = await page.evaluate(() => {
+    const keep = [];
     for (const el of document.querySelectorAll("main *")) {
       const cs = getComputedStyle(el);
       if (cs.overflowY !== "auto" && cs.overflowY !== "scroll") continue;
       if (!el.clientHeight) continue;
+      keep.push(el.scrollTop);
       el.scrollTop = el.scrollHeight;
     }
+    return keep;
   });
   await page.waitForTimeout(200);
   out.push(...check(await read(), "last"));
+  await page.evaluate((keep) => {
+    let i = 0;
+    for (const el of document.querySelectorAll("main *")) {
+      const cs = getComputedStyle(el);
+      if (cs.overflowY !== "auto" && cs.overflowY !== "scroll") continue;
+      if (!el.clientHeight) continue;
+      el.scrollTop = keep[i++] ?? 0;
+    }
+  }, before);
   return out;
 };
 
@@ -759,7 +821,7 @@ await shoot(page, "09-results-findings", {
     await openFindings(page);
     await selectFirstFinding(page);
   },
-  expect: all(expectThreePanes, expectCleanSummaries, expectCodeFollowsSession, expectScrollAffordance),
+  expect: all(expectThreePanes, expectCleanSummaries, expectCodeFollowsSession, expectScrollAffordance, expectHighlightVisible),
 });
 await shoot(page, "10-review-narrow", { width: 1100, height: 780, expect: expectRunActionVisible });
 await shoot(page, "11-settings-narrow", { width: 1100, height: 780, after: nav("设置") });
@@ -820,7 +882,7 @@ await shoot(page, "16-min-results", {
     await openFindings(page);
     await selectFirstFinding(page);
   },
-  expect: all(expectCodeStacked, expectScrollAffordance),
+  expect: all(expectCodeStacked, expectScrollAffordance, expectHighlightVisible),
 });
 await shoot(page, "17-min-history", { width: 1000, height: 660, after: nav("历史") });
 
@@ -847,7 +909,7 @@ await shoot(page, "21-light-findings", {
     await openFindings(page);
     await selectFirstFinding(page);
   },
-  expect: expectThreePanes,
+  expect: all(expectThreePanes, expectHighlightVisible),
 });
 
 // Regression guard for silent history truncation: the panel used to ask the CLI
@@ -913,7 +975,7 @@ await shoot(page, "27-stress-findings-min", {
     await openFindings(page);
     await selectFirstFinding(page);
   },
-  expect: expectCodeStacked,
+  expect: all(expectCodeStacked, expectHighlightVisible),
 });
 await shoot(page, "28-stress-preview", {
   query: "?stress=1",
