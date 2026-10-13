@@ -1067,6 +1067,23 @@ await shoot(page, "72-results-long-finding", {
   },
   expect: all(expectReadingColumnOverflows, expectSummaryOverflows, expectScrollAffordance, expectHighlightVisible),
 });
+// The same long content at the window floor, where the reading column is not a
+// flex column but a two-row grid (finding above, code below) with
+// overflow-hidden. The wide shot cannot see that shape at all: its scroller is
+// a different element in a different container, so a regression confined to the
+// narrow layout would pass every wide assertion.
+await shoot(page, "73-results-long-finding-min", {
+  width: 1000,
+  height: 660,
+  query: "?longfinding=1&run=done",
+  after: async (page) => {
+    await nav("审查")(page);
+    await page.waitForTimeout(1600);
+    await page.getByRole("button", { name: /开始审查/ }).click();
+    await page.waitForTimeout(5200);
+  },
+  expect: all(expectReadingColumnOverflows, expectSummaryOverflows, expectCodeStacked, expectScrollAffordance, expectHighlightVisible),
+});
 await shoot(page, "10-review-narrow", { width: 1100, height: 780, expect: expectRunActionVisible });
 await shoot(page, "11-settings-narrow", { width: 1100, height: 780, after: nav("设置"), expect: expectScrollAffordance });
 await shoot(page, "12-review-xwide", {

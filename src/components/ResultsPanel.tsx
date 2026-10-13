@@ -528,8 +528,14 @@ export function ResultsPanel() {
               layout.tsx applies: clipped mid-line with nothing to say so reads
               as damage. The cap is real — a sectioned CLI summary runs past the
               window — so this is ScrollArea with grow=false, the form the
-              component documents for a region with its own max-h. */}
-          <ScrollArea grow={false} className="max-h-52" bodyClassName="pr-1">
+              component documents for a region with its own max-h.
+
+              The cap also yields when the window is short. At the 1000x660
+              floor a full-height band took 238px of the 660 before the results
+              grid got a pixel, leaving the findings and their code a 199px
+              strip — a courtesy summary outranking the thing the screen is
+              for. Below a 760px window it caps at a third of that. */}
+          <ScrollArea grow={false} className="max-h-52 [@media(max-height:760px)]:max-h-28" bodyClassName="pr-1">
             <MarkdownLite text={result.project_summary} />
           </ScrollArea>
         </div>
