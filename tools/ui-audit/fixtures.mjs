@@ -74,22 +74,38 @@ export function runFrames() {
  *
  * ?longrun=1 replays the same transcript four times with a distinct file per
  * pass — 92 frames, ~60 rows — which is what the list looks like a few minutes
- * in. The replay also runs faster (40ms/frame), because this shot is about the
+ * in. The log drawer gets the same replay, so the two surfaces stay consistent.
+ * The replay also runs faster (40ms/frame), because this shot is about the
  * feed's layout when full, not about how long a run takes.
  */
 export function longRunFrames() {
   const p = ocr.createProgress();
   const frames = [];
-  for (let pass = 1; pass <= 4; pass++) {
-    for (const line of RUN_TRANSCRIPT) {
-      const l = line
-        .replace(/internal\/service\/auth\/login\.go/g, `internal/service/auth/login_p${pass}.go`)
-        .replace(/pkg\/httpx\/middleware\.go/g, `pkg/httpx/middleware_p${pass}.go`);
-      ocr.feedProgressLine(p, l);
-      frames.push({ ...p, activity: p.activity.slice() });
-    }
+  for (const line of longTranscript()) {
+    ocr.feedProgressLine(p, line);
+    frames.push({ ...p, activity: p.activity.slice() });
   }
   return frames;
+}
+
+/** The same replay's log lines, for the drawer. */
+export function longRunMilestones() {
+  const p = ocr.createProgress();
+  return longTranscript().map((line) => ocr.feedProgressLine(p, line)).filter(Boolean);
+}
+
+function longTranscript() {
+  const out = [];
+  for (let pass = 1; pass <= 4; pass++) {
+    for (const line of RUN_TRANSCRIPT) {
+      out.push(
+        line
+          .replace(/internal\/service\/auth\/login\.go/g, `internal/service/auth/login_p${pass}.go`)
+          .replace(/pkg\/httpx\/middleware\.go/g, `pkg/httpx/middleware_p${pass}.go`)
+      );
+    }
+  }
+  return out;
 }
 
 /** The same run's milestone lines, i.e. what the log drawer receives. */
@@ -450,7 +466,7 @@ window.api = (() => {
   // swaps in a replay long enough to overflow the feed — see longRunFrames.
   const LONG = q.get("longrun") === "1";
   const FRAMES = LONG ? ${JSON.stringify(longRunFrames())} : ${JSON.stringify(runFrames())};
-  const LINES = ${JSON.stringify(runMilestones())};
+  const LINES = LONG ? ${JSON.stringify(longRunMilestones())} : ${JSON.stringify(runMilestones())};
   let progressCb = null;
   let logCb = null;
   let exitCb = null;

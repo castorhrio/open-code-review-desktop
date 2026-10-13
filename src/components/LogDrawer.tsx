@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronRight, ClipboardCopy, Eraser } from "lucide-react";
 import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/layout";
 import { copyText } from "@/lib/clipboard";
 import { cn } from "@/lib/cn";
 
@@ -9,7 +10,7 @@ export function LogDrawer() {
   const { log, running, clearLog } = useStore();
   const [open, setOpen] = useState(false);
   const revealed = useRef(false);
-  const body = useRef<HTMLPreElement>(null);
+  const body = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (running) revealed.current = false;
@@ -52,12 +53,15 @@ export function LogDrawer() {
         )}
       </div>
       {open && (
-        <pre
-          ref={body}
-          className="max-h-40 overflow-auto border-t border-line bg-canvas px-4 py-2 font-mono text-meta text-muted selectable"
+        <ScrollArea
+          grow={false}
+          tone="canvas"
+          className="max-h-40 border-t border-line bg-canvas"
+          bodyClassName="px-4 py-2"
+          scrollerRef={body}
         >
-          {log.length ? log.join("\n") : "（暂无输出）"}
-        </pre>
+          <pre className="font-mono text-meta text-muted selectable">{log.length ? log.join("\n") : "（暂无输出）"}</pre>
+        </ScrollArea>
       )}
     </section>
   );

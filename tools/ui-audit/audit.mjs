@@ -494,6 +494,43 @@ const expectFeedOverflows = async (page) => {
 };
 
 /**
+ * The log drawer is the raw-output surface — the CLI's own lines, which the feed
+ * summarises — and it had no shot at all, so its layout, its 160px cap and its
+ * auto-scroll were never rendered in the audit. It also cut at the top for the
+ * same reason the feed did: it pins to its last line, so the oldest lines scroll
+ * out of the box with nothing to say so. It is a sibling of `<main>`, which is
+ * why nothing looked at it — not a screenshot, not a check.
+ */
+const expectLogDrawer = async (page) => {
+  const m = await page.evaluate(() => {
+    const pre = [...document.querySelectorAll("pre")].find((p) => /\[ocr\]/.test(p.textContent || ""));
+    if (!pre) return null;
+    // The scroller is whichever element actually scrolls: the pre itself before
+    // the fix, its wrapper after. Assuming a fixed relationship is how the
+    // running-feed check came to measure the wrong element and report a real
+    // property of it — the same mistake, in the same week.
+    let box = pre;
+    while (box && !/auto|scroll/.test(getComputedStyle(box).overflowY)) box = box.parentElement;
+    if (!box) box = pre.parentElement;
+    return {
+      lines: (pre.textContent || "").split("\n").length,
+      client: box.clientHeight,
+      scroll: box.scrollHeight,
+      above: box.scrollTop,
+      below: box.scrollHeight - box.scrollTop - box.clientHeight,
+    };
+  });
+  if (!m) return ["the log drawer is not open, so nothing about it was verified"];
+  const out = [];
+  if (m.lines < 5) out.push(`the log drawer holds only ${m.lines} line(s) of CLI output`);
+  if (m.scroll <= m.client + 1)
+    out.push(
+      `the log drawer holds ${m.lines} lines in ${m.client}px with nothing cut off, so the scroll-affordance check is vacuous`
+    );
+  return out;
+};
+
+/**
  * A session carries its own scope, and the review form on screen has nothing to
  * do with it. The code pane used to resolve its ref from the form, so opening a
  * history session showed the working tree beside a 历史会话 badge — the code next
@@ -613,12 +650,21 @@ const expectRunActionVisible = async (page) => {
  * It deliberately enumerates regions rather than looking for one known row:
  * the point is that a *new* scroll region cannot quietly skip the rule. The one
  * exclusion is a region that also scrolls sideways — see the note in the loop.
+ *
+ * The scope is the content column, not `main`. The log drawer is a sibling of
+ * `main`, and it is the same kind of region — a 160px box pinned to its last
+ * line, whose bottom edge is the window's — so scoping to `main` meant the one
+ * region literally flush against the window edge was the one the rule never
+ * looked at. Portals (toasts, select menus) attach to <body>, outside this
+ * subtree, so they stay out of scope on purpose: their scrolling is the
+ * library's, not the app's.
  */
 const expectScrollAffordance = async (page) => {
   const read = () =>
     page.evaluate(() => {
       const regions = [];
-      for (const el of document.querySelectorAll("main *")) {
+      const scope = document.querySelector("main")?.parentElement ?? document.body;
+      for (const el of scope.querySelectorAll("*")) {
         const cs = getComputedStyle(el);
         if (cs.overflowY !== "auto" && cs.overflowY !== "scroll") continue;
         if (!el.clientHeight || !el.clientWidth) continue;
@@ -687,7 +733,8 @@ const expectScrollAffordance = async (page) => {
   // this was visible in a shot either. A check owns the state it mutates.
   const before = await page.evaluate(() => {
     const keep = [];
-    for (const el of document.querySelectorAll("main *")) {
+    const scope = document.querySelector("main")?.parentElement ?? document.body;
+    for (const el of scope.querySelectorAll("*")) {
       const cs = getComputedStyle(el);
       if (cs.overflowY !== "auto" && cs.overflowY !== "scroll") continue;
       if (!el.clientHeight) continue;
@@ -700,7 +747,8 @@ const expectScrollAffordance = async (page) => {
   out.push(...check(await read(), "last"));
   await page.evaluate((keep) => {
     let i = 0;
-    for (const el of document.querySelectorAll("main *")) {
+    const scope = document.querySelector("main")?.parentElement ?? document.body;
+    for (const el of scope.querySelectorAll("*")) {
       const cs = getComputedStyle(el);
       if (cs.overflowY !== "auto" && cs.overflowY !== "scroll") continue;
       if (!el.clientHeight) continue;
@@ -965,6 +1013,22 @@ await shoot(page, "69-run-feed-full", {
     await page.waitForTimeout(2600);
   },
   expect: all(expectFeedOverflows, expectScrollAffordance),
+});
+// The log drawer: the raw CLI output the feed summarises, opened by hand. It is
+// a sibling of <main>, so nothing had ever rendered it.
+await shoot(page, "70-log-drawer", {
+  width: 1000,
+  height: 660,
+  query: "?longrun=1",
+  after: async (page) => {
+    await nav("审查")(page);
+    await page.waitForTimeout(300);
+    await page.getByRole("button", { name: /开始审查/ }).click();
+    await page.waitForTimeout(1800);
+    await page.getByRole("button", { name: /运行日志/ }).click();
+    await page.waitForTimeout(400);
+  },
+  expect: all(expectLogDrawer, expectScrollAffordance),
 });
 await shoot(page, "19-light-review", { storage: { ...STORAGE, "ocr-theme-pref": "light" }, after: nav("审查") });
 await shoot(page, "20-light-settings", {
