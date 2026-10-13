@@ -40,6 +40,24 @@
 
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 
+  /* ---------- motion ----------
+     Motion here is *productive*, never expressive — it confirms a state change
+     and then gets out of the way. The whole vocabulary is two values: 150ms for
+     a hover/focus/selection change, 160ms for a view entering. `--ease-out` is
+     a decelerating curve, so motion arrives and settles rather than winding up.
+
+     The rule is a ceiling, not a list: nothing may run longer than 240ms. The
+     one exemption is a deliberate loop — the live-activity dot pulses for as
+     long as a run is in flight, and its two seconds *are* the meaning.
+
+     Enforced by the `slowMotion` probe in `tools/ui-audit/audit.mjs`, which
+     reads every computed duration under <main>; a comment cannot hold this,
+     which is how the ten-size type ramp happened. `prefers-reduced-motion`
+     collapses all of it at the bottom of this file, so motion is never the only
+     signal that something changed. */
+  --motion-fast: 150ms;
+  --motion-in: 160ms;
+
   /* ---------- type ramp ----------
      Four steps and nothing else. Before this, the app used ten sizes between
      10 and 14px in half-pixel increments, which is what made every screen look
@@ -253,7 +271,7 @@
 }
 
 @utility fade-in {
-  animation: fadeIn 0.16s var(--ease-out);
+  animation: fadeIn var(--motion-in) var(--ease-out);
 }
 
 @keyframes fadeIn {

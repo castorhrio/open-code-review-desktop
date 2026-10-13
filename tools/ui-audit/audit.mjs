@@ -158,6 +158,32 @@ const PROBE = `(() => {
     const key = px + "px " + el.tagName.toLowerCase() + "." + cls.slice(0, 30);
     offRamp[key] = (offRamp[key] || 0) + 1;
   }
+  // Motion is productive, not expressive.
+  //
+  // IBM's design language draws the line this way: productive motion "leans
+  // toward efficiency and responsiveness" while expressive motion is
+  // "enthusiastic and vibrant", and "animate only what's vital... needless
+  // flourishes or overcomplicated actions without clear reason have no place".
+  // A code review tool has no use for the expressive half — every motion here
+  // confirms a state change and then gets out of the way. So the rule is a
+  // ceiling, not a vocabulary: nothing may take longer than a quarter second.
+  //
+  // A deliberate loop is exempt, and that is the only exemption: the live
+  // activity dot pulses for as long as a run is in flight, and its two seconds
+  // *are* the meaning — it says "still working", not "look at me".
+  const slowMotion = [];
+  const toMs = (v) => v.split(",").map((s) => parseFloat(s) * (s.indexOf("ms") !== -1 ? 1 : 1000)).filter((n) => Number.isFinite(n));
+  for (const el of document.querySelectorAll("main *")) {
+    if (!el.getClientRects().length) continue;
+    const cs = getComputedStyle(el);
+    if (cs.animationIterationCount.split(",").some((v) => v.trim() === "infinite")) continue;
+    const durs = toMs(cs.animationDuration).concat(toMs(cs.transitionDuration));
+    for (const d of durs) {
+      if (d <= 240) continue;
+      const cls = typeof el.className === "string" ? el.className : "";
+      slowMotion.push(Math.round(d) + "ms " + el.tagName.toLowerCase() + "." + cls.slice(0, 30));
+    }
+  }
   const root = document.getElementById("root");
   // Which view is on screen changes more often than anything else in this app,
   // and it used to hard-swap: no transition at all, so navigation read as a
@@ -181,6 +207,7 @@ const PROBE = `(() => {
     clipped: clipped.slice(0, 4),
     unreachable: unreachable.slice(0, 4),
     offRamp: Object.entries(offRamp).slice(0, 4),
+    slowMotion: slowMotion.slice(0, 4),
     viewMotion,
     // An interpolated optional field prints the word "undefined" into the run
     // header, and an unparseable number prints NaN — both invisible in code
@@ -227,6 +254,7 @@ async function shoot(page, name, { width = 1440, height = 900, storage = STORAGE
   if (p.clipped.length) problems.push("clipped: " + p.clipped.join(" | "));
   if (p.unreachable.length) problems.push("truncated with no title: " + p.unreachable.join(" | "));
   if (p.offRamp.length) problems.push("font size off the ramp: " + p.offRamp.map(([k, n]) => `${k} x${n}`).join(" | "));
+  if (p.slowMotion.length) problems.push("motion slower than a quarter second: " + p.slowMotion.join(" | "));
   // Every view animates in, so the change of screen is legible. A view that
   // swaps instantly is the failure this guards.
   if (!/fadeIn/.test(p.viewMotion || "")) problems.push(`the view does not animate in (animation-name "${p.viewMotion}")`);
