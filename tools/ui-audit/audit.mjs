@@ -816,7 +816,6 @@ await shoot(page, "08-settings-bottom", {
   },
 });
 await shoot(page, "09-results-findings", {
-  fullWidth: true,
   after: async (page) => {
     await openFindings(page);
     await selectFirstFinding(page);
@@ -875,7 +874,6 @@ await shoot(page, "47-review-tuning-open", {
 await shoot(page, "14-min-review", { width: 1000, height: 660, after: nav("审查"), expect: all(expectRunActionVisible, expectScrollAffordance) });
 await shoot(page, "15-min-settings", { width: 1000, height: 660, after: nav("设置") });
 await shoot(page, "16-min-results", {
-  fullWidth: true,
   width: 1000,
   height: 660,
   after: async (page) => {
@@ -903,7 +901,6 @@ await shoot(page, "20-light-settings", {
   after: nav("设置"),
 });
 await shoot(page, "21-light-findings", {
-  fullWidth: true,
   storage: { ...STORAGE, "ocr-theme-pref": "light" },
   after: async (page) => {
     await openFindings(page);
