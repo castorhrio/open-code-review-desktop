@@ -8,7 +8,7 @@ import type { Finding } from "@/lib/types";
 import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/form";
-import { EmptyState, PanelHeader } from "@/components/ui/layout";
+import { EmptyState, PanelHeader, ScrollArea } from "@/components/ui/layout";
 import { Badge } from "@/components/ui/overlay";
 import { CodeBlock, CoverageNotice, MarkdownLite, findingToMarkdown } from "@/components/finding";
 import { toast } from "sonner";
@@ -549,7 +549,7 @@ export function ResultsPanel() {
           reading column ends up ~660px wide — wider than the 568px the code
           pane got at 1440px before this. */}
       <div className="grid min-h-0 flex-1 divide-x divide-line grid-cols-[minmax(240px,300px)_minmax(320px,1fr)_minmax(620px,1.25fr)] @max-[1240px]:grid-cols-[minmax(240px,300px)_minmax(0,1fr)]">
-        <div className="min-h-0 overflow-y-auto">
+        <ScrollArea tone="canvas" className="min-h-0">
           {filtered.length === 0 && (
             <div className="p-6 text-center">
               {comments.length === 0 ? (
@@ -610,7 +610,7 @@ export function ResultsPanel() {
               </button>
             );
           })}
-        </div>
+        </ScrollArea>
 
         {/* The reading column. Narrow: split into two rows so the code is
             always on screen instead of sitting below the fold — the finding
@@ -622,7 +622,11 @@ export function ResultsPanel() {
             current && "@max-[1240px]:grid @max-[1240px]:grid-rows-[minmax(0,0.46fr)_minmax(0,0.54fr)] @max-[1240px]:overflow-hidden"
           )}
         >
-          <div className={cn("px-4 py-3", current && "@max-[1240px]:min-h-0 @max-[1240px]:overflow-y-auto")}>
+          <ScrollArea
+            tone="canvas"
+            className="min-h-0"
+            bodyClassName={cn("px-4 py-3", current && "@max-[1240px]:min-h-0")}
+          >
             {/* With no findings at all the list column already carries the one
                 sentence this state needs; two more placeholders in the empty
                 panes turn "clean" into three competing messages. */}
@@ -667,7 +671,7 @@ export function ResultsPanel() {
                 )}
               </>
             )}
-          </div>
+          </ScrollArea>
           {current && (
             <div className="min-h-0 min-w-0 border-t border-line bg-canvas @min-[1240px]:hidden">
               <FileViewer current={current} file={file} variant="stacked" />

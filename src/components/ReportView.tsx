@@ -4,7 +4,7 @@ import type { Finding } from "@/lib/types";
 import { copyText } from "@/lib/clipboard";
 import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
-import { Card, PageBody, PanelHeader } from "@/components/ui/layout";
+import { Card, PageBody, PanelHeader, ScrollArea } from "@/components/ui/layout";
 import { Badge } from "@/components/ui/overlay";
 import { CoverageNotice, FindingBlock, MarkdownLite, findingToMarkdown } from "@/components/finding";
 
@@ -91,7 +91,7 @@ export function ReportView() {
         </div>
       </PanelHeader>
 
-      <div className="min-h-0 flex-1 overflow-y-auto bg-canvas">
+      <ScrollArea tone="canvas">
         <PageBody>
           {/* A report has to open by saying what it covers. This document is the
               version a user forwards, and the reader's first question is not
@@ -154,7 +154,7 @@ export function ReportView() {
             ))
           )}
         </PageBody>
-      </div>
+      </ScrollArea>
     </div>
   );
 }

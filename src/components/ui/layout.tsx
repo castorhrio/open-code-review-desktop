@@ -139,11 +139,15 @@ export function Measure({
 export function ScrollArea({
   children,
   className,
+  bodyClassName,
   tone = "surface",
   grow = true,
 }: {
   children: React.ReactNode;
+  /** Sizing for the wrapper (the flex/grid item), not for the scroller. */
   className?: string;
+  /** Padding and the like, which belong *inside* the scroller so they scroll. */
+  bodyClassName?: string;
   tone?: "surface" | "canvas" | "raised";
   /** `flex-1` by default; pass `false` for a region with its own cap (max-h). */
   grow?: boolean;
@@ -172,7 +176,7 @@ export function ScrollArea({
   const from = `var(--${tone})`;
   return (
     <div className={cn("relative flex min-h-0 flex-col", grow ? "flex-1" : "shrink-0", className)}>
-      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
+      <div ref={scroller} className={cn("min-h-0 flex-1 overflow-y-auto", bodyClassName)}>
         {children}
       </div>
       {edges.top && (

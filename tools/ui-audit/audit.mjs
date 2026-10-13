@@ -465,7 +465,8 @@ const expectRunActionVisible = async (page) => {
  * region that was never converted to `ScrollArea` fails the first.
  *
  * It deliberately enumerates regions rather than looking for one known row:
- * the point is that a *new* scroll region cannot quietly skip the rule.
+ * the point is that a *new* scroll region cannot quietly skip the rule. The one
+ * exclusion is a region that also scrolls sideways — see the note in the loop.
  */
 const expectScrollAffordance = async (page) => {
   const read = () =>
@@ -475,6 +476,13 @@ const expectScrollAffordance = async (page) => {
         const cs = getComputedStyle(el);
         if (cs.overflowY !== "auto" && cs.overflowY !== "scroll") continue;
         if (!el.clientHeight || !el.clientWidth) continue;
+        // A region that also scrolls sideways is excluded, and the exclusion is
+        // the point rather than an escape hatch: it carries a horizontal
+        // scrollbar along its bottom edge, so a bottom fade would be painted
+        // straight over that scrollbar. The code panes are the case — they are
+        // continuous surfaces where a cut line is a convention every editor
+        // shares, not an ambiguous half-row.
+        if (el.scrollWidth > el.clientWidth + 1) continue;
         const wrap = el.parentElement;
         const box = el.getBoundingClientRect();
         const fades = wrap
@@ -696,11 +704,7 @@ await shoot(page, "09-results-findings", {
     await openFindings(page);
     await selectFirstFinding(page);
   },
-  expect: async (page) => [
-    ...(await expectThreePanes(page)),
-    ...(await expectCleanSummaries(page)),
-    ...(await expectCodeFollowsSession(page)),
-  ],
+  expect: all(expectThreePanes, expectCleanSummaries, expectCodeFollowsSession, expectScrollAffordance),
 });
 await shoot(page, "10-review-narrow", { width: 1100, height: 780, expect: expectRunActionVisible });
 await shoot(page, "11-settings-narrow", { width: 1100, height: 780, after: nav("设置") });
@@ -761,7 +765,7 @@ await shoot(page, "16-min-results", {
     await openFindings(page);
     await selectFirstFinding(page);
   },
-  expect: expectCodeStacked,
+  expect: all(expectCodeStacked, expectScrollAffordance),
 });
 await shoot(page, "17-min-history", { width: 1000, height: 660, after: nav("历史") });
 
@@ -774,7 +778,7 @@ await shoot(page, "18-results-running", {
     await page.getByRole("button", { name: /开始审查/ }).click();
     await page.waitForTimeout(1400);
   },
-  expect: expectRunningFeed,
+  expect: all(expectRunningFeed, expectScrollAffordance),
 });
 await shoot(page, "19-light-review", { storage: { ...STORAGE, "ocr-theme-pref": "light" }, after: nav("审查") });
 await shoot(page, "20-light-settings", {
@@ -1288,8 +1292,8 @@ const expectReadableDocument = async (page) => {
   return out;
 };
 
-await shoot(page, "42-report-read", { after: openReport, expect: expectReadableDocument });
-await shoot(page, "43-report-min", { width: 1000, height: 660, after: openReport, expect: expectReadableDocument });
+await shoot(page, "42-report-read", { after: openReport, expect: all(expectReadableDocument, expectScrollAffordance) });
+await shoot(page, "43-report-min", { width: 1000, height: 660, after: openReport, expect: all(expectReadableDocument, expectScrollAffordance) });
 await shoot(page, "44-report-light", {
   storage: { ...STORAGE, "ocr-theme-pref": "light" },
   after: openReport,
@@ -1376,16 +1380,19 @@ await shoot(page, "50-stale-result-cleared", {
 await shoot(page, "51-results-many", {
   query: "?many=1",
   after: openFindings,
-  expect: async (page) => {
-    const seen = await page.evaluate(() => {
-      const list = document.querySelector("main .grid > div:first-child");
-      return { rows: list ? list.querySelectorAll("button").length : 0, header: document.querySelector("main").innerText.match(/(\d+) 条评论/)?.[1] || "?" };
-    });
-    const out = [];
-    if (seen.rows < 200) out.push(`the findings list mounted ${seen.rows} of 200 rows`);
-    if (seen.header !== "200") out.push(`the header counts ${seen.header} while the list holds ${seen.rows}`);
-    return out;
-  },
+  expect: all(
+    async (page) => {
+      const seen = await page.evaluate(() => {
+        const list = document.querySelector("main .grid > div:first-child");
+        return { rows: list ? list.querySelectorAll("button").length : 0, header: document.querySelector("main").innerText.match(/(\d+) 条评论/)?.[1] || "?" };
+      });
+      const out = [];
+      if (seen.rows < 200) out.push(`the findings list mounted ${seen.rows} of 200 rows`);
+      if (seen.header !== "200") out.push(`the header counts ${seen.header} while the list holds ${seen.rows}`);
+      return out;
+    },
+    expectScrollAffordance
+  ),
 });
 await shoot(page, "52-report-many", {
   query: "?many=1",
