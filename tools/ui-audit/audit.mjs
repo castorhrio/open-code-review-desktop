@@ -748,6 +748,55 @@ const expectSummaryOverflows = async (page) => {
 };
 
 /**
+ * The results list's row count, scoped to the master-detail grid's first column
+ * so filter chips and the detail pane's buttons are not counted as rows.
+ */
+const countListRows = (page) =>
+  page.evaluate(() => {
+    const grid = [...document.querySelectorAll("main .grid")].find((g) =>
+      (g.getAttribute("class") || "").includes("grid-cols-[minmax(240px")
+    );
+    if (!grid) return -1;
+    const col = [...grid.children].filter((el) => getComputedStyle(el).display !== "none")[0];
+    return col ? col.querySelectorAll("button").length : -1;
+  });
+
+/**
+ * At four figures neither surface virtualises, so the question is whether the
+ * mount completes with every finding present. A list that silently caps at a
+ * few hundred would still look like a long list — which is exactly why the
+ * count is asserted rather than admired.
+ */
+const expectHugeListed = async (page) => {
+  const n = await countListRows(page);
+  if (n < 0) return ["the results grid was not rendered"];
+  if (n !== 1200) return [`the results list rendered ${n} of 1200 findings — a silent cap, or a mount that gave up`];
+  return [];
+};
+
+/**
+ * 阅读 renders every finding as a document block, so a thousand findings is the
+ * heaviest mount in the app. Two halves: all of them are in the document, and
+ * the mount finished inside a budget a reader would still call a page load.
+ * The time is measured in the page around the 阅读 click, because a number
+ * taken from the harness's wall clock would include the round trips.
+ */
+const expectHugeReport = async (page) => {
+  const m = await page.evaluate(() => ({
+    articles: document.querySelectorAll("main article").length,
+    ms: Math.round(window.__reportMs ?? -1),
+  }));
+  const out = [];
+  if (m.articles !== 1200) out.push(`the report rendered ${m.articles} of 1200 findings`);
+  if (m.ms < 0) out.push("the report's mount time was not measured");
+  else if (m.ms > 8000) out.push(`the report took ${m.ms}ms to mount 1200 findings — past the point of reading as a document`);
+  // The number is the point of this shot, so it is printed even when it passes:
+  // a ceiling nobody watches drifts into being the measurement.
+  if (m.ms >= 0) console.log(`         report mounted ${m.articles} findings in ${m.ms}ms`);
+  return out;
+};
+
+/**
  * Every scroll region has to admit it scrolls.
  *
  * Both of the review page's regions end flush against a fixed band — the form
@@ -867,18 +916,23 @@ const expectScrollAffordance = async (page) => {
   await page.waitForTimeout(200);
   // A region that grows while it is watched — the running feed replays on a
   // timer — can accept the scroll and then gain a row before the read lands, so
-  // the read catches a one-row gap the app's own pin closes a task later. That
-  // is a race in the measurement, not a defect: it appeared once in a loaded
-  // full run and never in isolation. So a phase-2 gap gets two more chances to
-  // settle before it is called a failure; a region that genuinely cannot reach
-  // its end fails all three reads.
+  // the read catches a one-row gap the app's own pin closes a task later; and
+  // the mirror race reads a bottom fade the app is one commit away from
+  // removing, because the scroll-to-end that clears it fires its scroll event a
+  // task after the pin. Both are races in the measurement, not defects: each
+  // appeared once in a loaded full run and never in isolation. So phase 2 keeps
+  // scrolling and re-reading while it reports anything, bounded to two retries;
+  // a region that genuinely cannot reach its end, or genuinely paints a stale
+  // fade, fails all three reads.
   let last = await read();
-  for (let i = 0; i < 2 && last.some((r) => r.below > 1); i++) {
+  let problems = check(last, "last");
+  for (let i = 0; i < 2 && problems.length; i++) {
     await scrollEnd(false);
     await page.waitForTimeout(150);
     last = await read();
+    problems = check(last, "last");
   }
-  out.push(...check(last, "last"));
+  out.push(...problems);
   await page.evaluate((keep) => {
     let i = 0;
     const scope = document.querySelector("main")?.parentElement ?? document.body;
@@ -1118,6 +1172,38 @@ await shoot(page, "73-results-long-finding-min", {
     await page.waitForTimeout(5200);
   },
   expect: all(expectReadingColumnOverflows, expectSummaryOverflows, expectCodeStacked, expectScrollAffordance, expectHighlightVisible),
+});
+
+// A review at four figures. The largest real session observed was 63 comments
+// and the largest fixture 200, so neither the triage list nor 阅读 had ever been
+// asked to mount a thousand findings; neither virtualises. These two shots are
+// the question, and the assertions are the answer: every finding present, and
+// the report's mount inside a budget a reader still calls a page load.
+await shoot(page, "74-results-huge", {
+  query: "?huge=1",
+  after: async (page) => {
+    await openFindings(page);
+    for (let i = 0; i < 40 && (await countListRows(page)) < 1200; i++) await page.waitForTimeout(250);
+    await selectFirstFinding(page);
+  },
+  expect: all(expectHugeListed, expectScrollAffordance),
+});
+await shoot(page, "75-report-huge", {
+  query: "?huge=1",
+  after: async (page) => {
+    await openFindings(page);
+    for (let i = 0; i < 40 && (await countListRows(page)) < 1200; i++) await page.waitForTimeout(250);
+    await page.evaluate(() => {
+      window.__t0 = performance.now();
+    });
+    await page.getByRole("button", { name: "阅读", exact: true }).click();
+    await page.waitForFunction(() => document.querySelectorAll("main article").length >= 1200, null, { timeout: 30000 });
+    await page.evaluate(() => {
+      window.__reportMs = performance.now() - window.__t0;
+    });
+    await page.waitForTimeout(500);
+  },
+  expect: all(expectHugeReport, expectScrollAffordance),
 });
 await shoot(page, "10-review-narrow", { width: 1100, height: 780, expect: expectRunActionVisible });
 await shoot(page, "11-settings-narrow", { width: 1100, height: 780, after: nav("设置"), expect: expectScrollAffordance });

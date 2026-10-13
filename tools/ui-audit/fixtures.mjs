@@ -530,10 +530,34 @@ const LONG_FINDING = {
   ),
 };
 
+// ---------------------------------------------------------------------------
+// A review at four figures (?huge=1)
+//
+// The largest real session observed was 148 files / 63 comments and the largest
+// fixture 200, so neither results surface had ever been asked to mount a
+// thousand findings. Neither virtualises — the list renders every row and 阅读
+// renders every finding as a document block — which is the right shape at the
+// sizes a review actually reaches, and an open question at four figures. Only a
+// fixture at that order of magnitude can ask it; the shots measure whether the
+// mount completes, whether every finding is present, and how long it took.
+const HUGE = {
+  ...NORMAL,
+  FINDINGS: Array.from({ length: 1200 }, (_, i) => {
+    const t = FINDINGS[i % FINDINGS.length];
+    return {
+      ...t,
+      path: `internal/service/${["auth", "billing", "notify", "search", "tokens"][i % 5]}/file${String(Math.floor(i / 5)).padStart(4, "0")}.go`,
+      start_line: 20 + (i % 180),
+      end_line: 22 + (i % 180),
+    };
+  }),
+  SESSIONS: SESSIONS.map((s, i) => (i ? s : { ...s, total_comments: 1200 })),
+};
+
 export const BRIDGE = `
 window.api = (() => {
   const q = new URLSearchParams(location.search);
-  const D = q.get("stress") === "1" ? ${JSON.stringify(STRESS)} : q.get("longfinding") === "1" ? ${JSON.stringify(LONG_FINDING)} : ${JSON.stringify(NORMAL)};
+  const D = q.get("stress") === "1" ? ${JSON.stringify(STRESS)} : q.get("longfinding") === "1" ? ${JSON.stringify(LONG_FINDING)} : q.get("huge") === "1" ? ${JSON.stringify(HUGE)} : ${JSON.stringify(NORMAL)};
   const SETS = { default: D.SESSIONS, many: ${JSON.stringify(MANY_SESSIONS)} };
   // A run replays the real transcript through the real parser, so the running
   // screen is audited against the data it will actually receive. ?longrun=1
