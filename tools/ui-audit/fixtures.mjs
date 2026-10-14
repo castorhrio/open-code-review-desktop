@@ -638,6 +638,11 @@ window.api = (() => {
       // The state the user reaches by dismissing a release. Unreachable until
       // the ignore path was fixed, so it was never on screen either.
       suppressed: { phase: "idle", suppressed: true, version: "0.2.0" },
+      // A channel with zero published releases, transcribed from the real 404
+      // the updater emits for a missing latest.yml. Every install is in this
+      // state until the first Release exists, so its copy has to be on screen
+      // in a shot, not only described in the service.
+      norelease: { phase: "no-release", message: 'Cannot find channel "latest.yml" update info: HttpError: 404 Not Found' },
     }[q.get("update") || "idle"];
     return { ...base, ...state };
   },

@@ -277,6 +277,7 @@ export type UpdatePhase =
   | "up-to-date"
   | "error"
   | "manual"
+  | "no-release"
   | "unsupported";
 
 export interface UpdateState {

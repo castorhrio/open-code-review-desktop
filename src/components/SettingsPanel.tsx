@@ -509,6 +509,11 @@ export function SettingsPanel() {
             </p>
           )}
           {update?.phase === "unsupported" && <p className="mt-3 text-body text-faint">开发模式下不检查更新，也不会下载任何文件。</p>}
+          {update?.phase === "no-release" && (
+            <p className="mt-3 text-body text-faint">
+              渠道（GitHub Releases）里还没有任何发布：安装包可能已构建但 Release 未发布。这不影响当前版本的使用；自动更新要等第一次 Release 存在后才生效，在那之前需要新安装包请到下载页手动获取。
+            </p>
+          )}
         </Card>
 
         <Card

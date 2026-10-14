@@ -1704,6 +1704,25 @@ await shoot(page, "36-update-suppressed", {
   },
 });
 
+// A channel with zero published releases — the state every install is in until
+// the first Release exists, transcribed from the real 404 the updater emits for
+// a missing latest.yml. Before the phase existed the user got the updater's raw
+// words in red, which reads as damage rather than as "nothing has been
+// published here yet".
+await shoot(page, "76-update-no-release", {
+  query: "?update=norelease",
+  after: nav("设置"),
+  expect: async (page) => {
+    const out = [];
+    const text = await page.locator("main").innerText();
+    if (!/更新渠道尚无任何发布/.test(text)) out.push("the empty-channel state has no sentence of its own");
+    if (/检查失败/.test(text)) out.push("an empty channel is still reported as a failed check");
+    if ((await page.locator("body").innerText()).includes("已下载完成"))
+      out.push("an empty channel is being announced in the banner as a downloaded update");
+    return out;
+  },
+});
+
 // A review that finds nothing is still a finished review, and it used to render
 // the same sentence as a filter that had hidden everything — which reads as
 // "the tool broke", not "your code is clean".

@@ -148,6 +148,16 @@ async function check({ interactive } = {}) {
     return state;
   } catch (err) {
     const message = (err && err.message) || String(err);
+    // A channel with zero published releases answers 404 for latest.yml. That is
+    // not the machine or the network failing, and the updater's own words —
+    // Cannot find channel "latest.yml" update info: HttpError: 404 — read as
+    // damage. It is the state every install is in until the first Release
+    // exists, so an explicit check gets its own sentence; a silent launch check
+    // stays silent, because nothing has gone wrong.
+    if (/404|cannot find channel|latest\.yml/i.test(message)) {
+      if (!interactive) return setState({ phase: "idle" });
+      return setState({ phase: "no-release", message, fallbackUrl: RELEASES_URL });
+    }
     // A portable build cannot auto-update in any form, so it gets the same
     // "download it by hand" message the `error` event produces. It used to
     // depend on how the failure arrived: an emitted error said 无法自动更新,

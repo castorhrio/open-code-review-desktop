@@ -236,6 +236,22 @@ const explicitCheck = (h) => h.handlers.get("update:check")();
   h.cleanup();
 }
 {
+  // A channel with zero published releases: the feed's latest.yml answers 404.
+  // Not a failure of the machine, and the updater's raw words read as damage,
+  // so an explicit check gets its own phase while a silent launch check stays
+  // silent — nothing has gone wrong, there is simply nothing there yet.
+  const emptyChannel = () =>
+    Promise.reject(new Error('Cannot find channel "latest.yml" update info: HttpError: 404 Not Found'));
+  const silent = load({ script: emptyChannel });
+  await launchCheck(silent);
+  check("a silent launch check against an empty channel stays silent", silent.svc.state().phase === "idle", `phase=${silent.svc.state().phase}`);
+  silent.cleanup();
+  const loud = load({ script: emptyChannel });
+  await explicitCheck(loud);
+  check("an explicit check against an empty channel says no-release", loud.svc.state().phase === "no-release", `phase=${loud.svc.state().phase}`);
+  loud.cleanup();
+}
+{
   const env = process.env.PORTABLE_EXECUTABLE_DIR;
   process.env.PORTABLE_EXECUTABLE_DIR = "C:/tmp";
   // Both ways a portable build learns there is no auto-update: the updater

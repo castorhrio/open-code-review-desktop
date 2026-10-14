@@ -1,4 +1,4 @@
-import { Download, RefreshCw, XCircle, ExternalLink } from "lucide-react";
+import { Download, RefreshCw, XCircle, ExternalLink, Info } from "lucide-react";
 import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
 
@@ -50,6 +50,17 @@ export function UpdateBanner() {
 export function UpdateStatusLine() {
   const { update, openReleases } = useStore();
   const phase = update?.phase ?? "idle";
+  if (phase === "no-release") {
+    return (
+      <span className="flex items-center gap-1.5 text-meta text-warn">
+        <Info className="size-3.5" />
+        更新渠道尚无任何发布
+        <button className="link text-accent" onClick={() => void openReleases()}>
+          打开下载页
+        </button>
+      </span>
+    );
+  }
   if (phase === "error") {
     return (
       <span className="flex items-center gap-1.5 text-meta text-bad">
@@ -78,6 +89,7 @@ export function UpdateStatusLine() {
     ready: `v${update?.version ?? ""} 已就绪，重启生效`,
     "up-to-date": `已是最新版（v${update?.version ?? ""}）`,
     manual: "当前形态不支持自动更新",
+    "no-release": "更新渠道尚无任何发布",
     unsupported: "开发模式下不检查更新",
   };
   return <span className="text-meta text-muted">{map[phase] ?? "—"}</span>;
