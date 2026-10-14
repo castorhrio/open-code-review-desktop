@@ -478,7 +478,12 @@ export function SettingsPanel() {
             <>
               <Badge>
                 v{info?.appVersion}
-                {update?.portable ? " · 免安装版" : update?.packaged ? "" : " · 开发模式"}
+                {/* The suffix names the build, so it may only be rendered when
+                    the build is actually known. `update` is null until the
+                    renderer's first pull resolves, and the ternary chain read
+                    that absence as "not packaged" — an installed build opening
+                    on 开发模式 for a beat. */}
+                {update ? (update.portable ? " · 免安装版" : update.packaged ? "" : " · 开发模式") : ""}
               </Badge>
               <UpdateStatusLine />
             </>

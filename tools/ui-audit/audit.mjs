@@ -1736,6 +1736,18 @@ await shoot(page, "76-update-no-release", {
     return out;
   },
 });
+// The beat before the renderer's first update pull resolves. The build-type
+// suffix used to be a ternary chain over an absent object, which read "unknown"
+// as "not packaged" — an installed build opened on 开发模式 until the IPC
+// landed, contradicting the 关于 card beside it in the same process.
+await shoot(page, "78-settings-update-unknown", {
+  query: "?update=none",
+  after: nav("设置"),
+  expect: async (page) => {
+    const text = await page.locator("main").innerText();
+    return /开发模式/.test(text) ? ["an unknown build type is rendered as 开发模式 before the first update pull"] : [];
+  },
+});
 
 // A review that finds nothing is still a finished review, and it used to render
 // the same sentence as a filter that had hidden everything — which reads as

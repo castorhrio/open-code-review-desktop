@@ -222,6 +222,26 @@ const explicitCheck = (h) => h.handlers.get("update:check")();
   h.cleanup();
 }
 
+/* ---- the build type rides every snapshot ---- */
+{
+  const h = load({
+    script: (api) => {
+      api.fire("checking-for-update");
+      api.fire("update-available", { version: "9.9.9" });
+      return api.done("9.9.9");
+    },
+  });
+  await launchCheck(h);
+  const bare = h.emitted.filter((s) => !("packaged" in s) || !("portable" in s) || !("releasesUrl" in s));
+  check("every pushed snapshot carries the build-type flags", bare.length === 0, `${bare.length}/${h.emitted.length} payloads lacked them`);
+  check("a packaged build's push says packaged", h.emitted.every((s) => s.packaged === true), h.phases().join(" -> "));
+  h.cleanup();
+  const u = load({ packaged: false, script: () => Promise.resolve(null) });
+  await launchCheck(u);
+  check("an unpackaged build's push says so too", u.emitted.length > 0 && u.emitted.every((s) => s.packaged === false), u.phases().join(" -> "));
+  u.cleanup();
+}
+
 /* ---- 8. failures: loud when asked, silent at launch ---- */
 {
   const h = load({ script: () => Promise.reject(new Error("getaddrinfo ENOTFOUND")) });

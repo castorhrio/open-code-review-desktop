@@ -628,6 +628,10 @@ window.api = (() => {
   // mean "never tell me about this release again".
   updateState: async () => {
     const base = { current: "0.1.9", enabled: true, packaged: true, portable: false, releasesUrl: "https://github.com/alibaba/open-code-review/releases" };
+    // The state before the renderer's first pull resolves. The build-type badge
+    // used to read this absence as "not packaged" and open an installed build on
+    // 开发模式 for a beat.
+    if (q.get("update") === "none") return null;
     const state = {
       idle: { phase: "idle" },
       downloading: { phase: "downloading", version: "0.2.0", percent: 42, transferred: 38, total: 90 },

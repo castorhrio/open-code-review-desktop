@@ -39,8 +39,28 @@ function setState(next) {
   // the user did not ignore, the "已忽略" note has to go with it. Callers that
   // mean it pass `suppressed` explicitly.
   state = { ...state, suppressed: false, ...next, current: app.getVersion() };
-  emit(state);
+  emit(snapshot());
   return state;
+}
+
+/**
+ * The whole truth about the update surface, for both channels.
+ *
+ * The build-type flags used to be attached only by the `update:state` handler,
+ * so a *pushed* snapshot — the one that arrives when the updater fires — carried
+ * no `packaged`, `portable` or `enabled`. Anything rendering the build type from
+ * a push therefore had nothing to name the build with. One snapshot function for
+ * both channels makes the two agree by construction, and the gate asserts a push
+ * carries the flags rather than trusting which one the renderer saw first.
+ */
+function snapshot() {
+  return {
+    ...state,
+    enabled: readSettings().checkOnLaunch !== false,
+    portable: isPortable(),
+    packaged: app.isPackaged,
+    releasesUrl: RELEASES_URL,
+  };
 }
 
 const ignoredVersion = () => readSettings().ignoredVersion || "";
@@ -180,13 +200,7 @@ function ignore(version) {
   return suppress(version || "");
 }
 
-ipcMain.handle("update:state", () => ({
-  ...state,
-  enabled: readSettings().checkOnLaunch !== false,
-  portable: isPortable(),
-  packaged: app.isPackaged,
-  releasesUrl: RELEASES_URL,
-}));
+ipcMain.handle("update:state", () => snapshot());
 
 ipcMain.handle("update:check", () => check({ interactive: true }));
 
