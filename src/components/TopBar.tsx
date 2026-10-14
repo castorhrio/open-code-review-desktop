@@ -14,7 +14,17 @@ export function TopBar() {
     if (draft.trim() !== repo) setRepo(draft.trim());
   };
   const ready = Boolean(config?.ready);
-  const label = ready ? `${config?.provider}${config?.model ? ` · ${config.model}` : ""}` : config?.blockedReason || "未配置模型";
+  // `config` is null until the first read resolves, and the chain below read
+  // that absence as "not configured": every launch opened the top bar with
+  // 未配置模型 in warn colour beside a provider that had been configured all
+  // along. Unknown is not the same as absent, so it gets its own sentence and a
+  // neutral dot.
+  const unknown = config === null;
+  const label = unknown
+    ? "读取配置中…"
+    : ready
+      ? `${config.provider}${config.model ? ` · ${config.model}` : ""}`
+      : config.blockedReason || "未配置模型";
 
   return (
     <header className="flex h-12 shrink-0 items-center gap-3 border-b border-line bg-surface px-4">
@@ -68,8 +78,8 @@ export function TopBar() {
       )}
 
       <button onClick={() => setView("settings")} title={config?.path} className="min-w-0 shrink-0">
-        <Badge tone={ready ? "ok" : "warn"} className={cn("max-w-[260px]", !ready && "cursor-pointer")}>
-          <span className={cn("size-1.5 shrink-0 rounded-full", ready ? "bg-ok" : "bg-warn")} />
+        <Badge tone={!unknown && !ready ? "warn" : undefined} className={cn("max-w-[260px]", !unknown && !ready && "cursor-pointer")}>
+          <span className={cn("size-1.5 shrink-0 rounded-full", unknown ? "bg-line-strong" : ready ? "bg-ok" : "bg-warn")} />
           <span className="min-w-0 truncate">{label}</span>
         </Badge>
       </button>

@@ -612,6 +612,10 @@ window.api = (() => {
     { name: "ollama-cloud", protocol: "openai", url: "https://ollama.com/v1" },
   ]}),
   readConfig: async () => {
+    // ?config=none is the beat every launch actually has: the boot sequence
+    // awaits this call, so until it lands the renderer holds no config at all.
+    // Never resolving is the honest model of that window.
+    if (q.get("config") === "none") return await new Promise(() => {});
     // ?nollm=1 is the state a fresh machine is actually in: a repo is chosen and
     // the scope computes fine, but there is no model behind the run. The app
     // knows this — "ready" is what the top-bar badge reads — and used to let the

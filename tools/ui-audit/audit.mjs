@@ -1748,6 +1748,19 @@ await shoot(page, "78-settings-update-unknown", {
     return /开发模式/.test(text) ? ["an unknown build type is rendered as 开发模式 before the first update pull"] : [];
   },
 });
+// The same class one surface up: the top bar's model badge read a config that
+// had not arrived yet as "not configured", so every launch greeted even a fully
+// configured machine with 未配置模型 in warning colour.
+await shoot(page, "79-topbar-config-unknown", {
+  query: "?config=none",
+  expect: async (page) => {
+    const out = [];
+    const text = await page.locator("body").innerText();
+    if (/未配置模型/.test(text)) out.push("an unread config is rendered as 未配置模型 in the top bar");
+    if (!/读取配置中/.test(text)) out.push("the top bar claims nothing while the config is still loading");
+    return out;
+  },
+});
 
 // A review that finds nothing is still a finished review, and it used to render
 // the same sentence as a filter that had hidden everything — which reads as
