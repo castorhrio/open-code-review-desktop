@@ -1197,7 +1197,21 @@ await shoot(page, "73-results-long-finding-min", {
   },
   expect: all(expectReadingColumnOverflows, expectSummaryOverflows, expectCodeStacked, expectScrollAffordance, expectHighlightVisible),
 });
-
+// The same long content in the light theme. Every light shot until now carried
+// short findings and a two-line summary, so the fades — gradients that dissolve
+// into the surface colour — had never been seen against the light canvas, where
+// a wrong tone reads as a grey smear rather than as depth.
+await shoot(page, "77-results-long-finding-light", {
+  storage: { ...STORAGE, "ocr-theme-pref": "light" },
+  query: "?longfinding=1&run=done",
+  after: async (page) => {
+    await nav("审查")(page);
+    await page.waitForTimeout(1600);
+    await page.getByRole("button", { name: /开始审查/ }).click();
+    await page.waitForTimeout(5200);
+  },
+  expect: all(expectReadingColumnOverflows, expectSummaryOverflows, expectScrollAffordance, expectHighlightVisible),
+});
 // A review at four figures. The largest real session observed was 63 comments
 // and the largest fixture 200, so neither the triage list nor 阅读 had ever been
 // asked to mount a thousand findings; neither virtualises. These two shots are
