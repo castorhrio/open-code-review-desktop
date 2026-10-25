@@ -52,13 +52,34 @@ const WRITE_TIMEOUT_MS = 2000;
  * The two failures used to share one `false`, so `main.js` could only warn
  * about both or neither. They are not the same news: an `io-error` means the
  * truncation warning is gone after a restart *and nobody chose that*, which is
- * worth a line in the log; `no-session` (scan runs, or a CLI that printed no
- * session id) is a known shape and warning about it every run is noise.
+ * worth a line in the log; `no-session` is a known shape and warning about it
+ * every run is noise.
+ *
+ * `no-session` is *not* "a scan run". `ocr scan` publishes a session id like
+ * every other mode — `cmd/opencodereview/scan_cmd.go` prints
+ * `[ocr] Session: <id> (retry with: --resume <id>)` on stderr and puts
+ * `session_id` in its JSON (`MODES.scan.resumeSupported` in `ocr-service.js` is
+ * `true` for the same reason). So it means what it says: the CLI answered with
+ * truncation evidence but no session id at all — the shape upstream produces
+ * when there is nothing to resume from. There is then no session to reopen, so
+ * no warning can be lost, and this store has nothing to file the evidence under.
  */
 const OK_WITHOUT_WRITING = { ok: true, reason: "clean" };
 const OK_WRITTEN = { ok: true, reason: "written" };
 const NO_SESSION = { ok: false, reason: "no-session" };
 const IO_ERROR = { ok: false, reason: "io-error" };
+
+/**
+ * The end-of-run signal itself failed.
+ *
+ * `main.js` answers `run:exit` with `send()`, which throws when the window is
+ * already gone — the exact shape of "the app is closing while a run ends". The
+ * run is over either way, so the signal failing must not undo the record (which
+ * is on disk) nor keep the outcome from the caller; but it also must not pass in
+ * silence, because the screen may still be showing the run as live. It gets a
+ * word here so the log can say it rather than nothing.
+ */
+const SIGNAL_FAILED = { ok: false, reason: "signal-failed" };
 
 /**
  * How the two waits ended, in the same shape as a record outcome.
@@ -93,6 +114,11 @@ const OUTCOME_MESSAGES = {
   timeout: "上限证据写得太慢，运行结束没有等它；写盘仍在继续",
   "max-rounds": "上限证据的写队列在退出前始终没停，可能仍有写入没落盘",
   "drain-failed": "上限证据的退出冲刷出错，可能仍有写入没落盘",
+  // Not a store outcome: the run ended, the evidence is on disk, but the screen
+  // was never told. Wording ends on 「运行」 so the log drawer keeps it — the
+  // renderer self-opens on a line that reads like trouble, and a session that
+  // stays "running" forever is exactly that.
+  "signal-failed": "本次运行已经结束，但结束信号没能送达界面，界面可能仍显示运行中",
 };
 const LATE_OUTCOME_MESSAGES = {
   "io-error": "上限证据在运行结束后写盘失败，重开会话后将看不到这条提示",
@@ -472,6 +498,11 @@ function recordBounded(store, repo, sessionId, result, timeoutMs = WRITE_TIMEOUT
  * The wait is bounded (`recordBounded`) — a slow disk must not hold the UI —
  * and past the bound the outcome says so, instead of the exit pretending that
  * everything is in order.
+ *
+ * Both halves of the promise survive their own failure: reporting the outcome
+ * throwing still sends the signal (or the screen never comes back), and the
+ * signal throwing still leaves the evidence on disk and is logged (or a run that
+ * ended looks live forever). See `SIGNAL_FAILED`.
  */
 async function settleRunExit(options) {
   const opts = options || {};
@@ -492,7 +523,21 @@ async function settleRunExit(options) {
     // chain said so with a `finally`, and a run that ends without an exit is a
     // spinner that never stops.
   }
-  if (typeof opts.signal === "function") opts.signal(outcome);
+  if (typeof opts.signal !== "function") return outcome;
+  try {
+    opts.signal(outcome);
+  } catch (_) {
+    // The signal is the last thing that happens for this run, so a throw here
+    // used to be the one path `settleRunExit` left uncovered: `main.js` answers
+    // the signal with `send("run:exit")`, which throws when the window is
+    // already gone, and the rejected promise was swallowed by a `.catch(() => {})`
+    // — a run that ended, evidence on disk, and not a word about the screen that
+    // never heard. Say it instead. Report must not throw either: the run is over
+    // whether or not the news can be delivered.
+    try {
+      reportOutcome(SIGNAL_FAILED, opts.warn);
+    } catch (_) {}
+  }
   return outcome;
 }
 
@@ -530,6 +575,7 @@ function flushBeforeQuit(app, store, timeoutMs = WRITE_TIMEOUT_MS, warn) {
 module.exports = {
   createStore,
   normalizeRepo,
+  CASE_INSENSITIVE_PATHS,
   MAX_ENTRIES,
   LIMIT_WARNING,
   WRITE_TIMEOUT_MS,
@@ -540,6 +586,7 @@ module.exports = {
   reportOutcome,
   recordBounded,
   settleRunExit,
+  SIGNAL_FAILED,
   flushNow,
   flushBeforeQuit,
 };

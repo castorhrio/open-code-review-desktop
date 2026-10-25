@@ -332,10 +332,12 @@ ipcMain.handle("review:run", (_e, spec) => {
       // the renderer is told the run is over and the write stays queued, so it
       // still lands (and a quit still waits for it).
       //
-      // Only a lost `io-error` is real news. `no-session` (a scan run, or a CLI
-      // that printed no session id) is a known shape — there is no session to
-      // reopen, so the warning cannot be lost — and warning about it on every
-      // such run would train the reader to ignore the line that matters. An
+      // Only a lost `io-error` is real news. `no-session` is a known shape — the
+      // CLI answered with truncation evidence but printed no session id at all
+      // (it is not a scan run: `ocr scan` publishes a session id like every
+      // other mode) — so there is no session to reopen, the warning cannot be
+      // lost, and warning about it every time would train the reader to ignore
+      // the line that matters. An
       // `io-error` means the *reopened* session will look clean again even
       // though this one was truncated, and nothing in the UI can show that.
       // A `timeout` is not a loss: the write stays queued and the read of the

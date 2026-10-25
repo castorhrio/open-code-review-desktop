@@ -12,6 +12,7 @@ const require = createRequire(import.meta.url);
 const {
   createStore,
   normalizeRepo,
+  CASE_INSENSITIVE_PATHS,
   MAX_ENTRIES,
   LIMIT_WARNING,
   WRITE_TIMEOUT_MS,
@@ -22,6 +23,7 @@ const {
   reportOutcome,
   recordBounded,
   settleRunExit,
+  SIGNAL_FAILED,
   flushNow,
 } = require("../run-diagnostics.js");
 
@@ -108,10 +110,22 @@ check(
   "a case-sensitive volume keeps two spellings apart",
   normalizeRepo(caseRepo, { caseInsensitive: false }) !== normalizeRepo(caseRepo.toLowerCase(), { caseInsensitive: false })
 );
+// Two explicit assertions, not one `a === b === c`. Chained `===` evaluates left
+// to right, so it folds the first comparison into a boolean and then asks
+// whether *that* equals the platform flag — a check that happens to pass today
+// and would keep passing whatever the store did, which is the opposite of what
+// it exists for (this is the assertion that catches a macOS regression).
+const foldedHere = normalizeRepo(caseRepo) === normalizeRepo(caseRepo.toLowerCase());
+const platformFoldsCasing = process.platform === "win32" || process.platform === "darwin";
 check(
-  "the platform's own answer is the one the store uses",
-  normalizeRepo(caseRepo) === normalizeRepo(caseRepo.toLowerCase()) ===
-    (process.platform === "win32" || process.platform === "darwin")
+  "the store folds casing on Windows and macOS, and nowhere else",
+  CASE_INSENSITIVE_PATHS === platformFoldsCasing,
+  `flag=${CASE_INSENSITIVE_PATHS} platform=${process.platform}`
+);
+check(
+  "and normalizeRepo uses exactly that answer",
+  foldedHere === CASE_INSENSITIVE_PATHS,
+  `folded=${foldedHere} flag=${CASE_INSENSITIVE_PATHS}`
 );
 
 await store.remove(repo, session);
@@ -203,6 +217,11 @@ check("a clean run reports success without writing", cleanOutcome.ok === true &&
 // nothing can be lost — the caller has to stay quiet about it rather than warn.
 const noSession = await store.record(repo, "", limitResult);
 check("evidence with no session id is reported, not swallowed", noSession.ok === false && noSession.reason === "no-session", JSON.stringify(noSession));
+// And the caller stays quiet about it: `no-session` means the CLI printed no
+// session id at all — not "a scan run" (`ocr scan` publishes one). With no
+// session there is nothing to reopen, so nothing can be lost and a line every
+// run would only teach the reader to skip the one that matters.
+check("and it says nothing in the log, because there is no session to reopen", outcomeMessage(noSession) === "", JSON.stringify(outcomeMessage(noSession)));
 const written = await store.record(repo, "reported", limitResult);
 check("a recorded run reports success", written.ok === true && written.reason === "written", JSON.stringify(written));
 check("and its evidence is there to read", store.read(repo, "reported")?.warnings?.length === 1);
@@ -386,6 +405,40 @@ await settleRunExit({
   },
 });
 check("the exit signal goes out even when reporting the outcome fails", signalAfterBadReport === 1, `${signalAfterBadReport}`);
+
+// The signal itself can fail, and that is not a corner case: `main.js` answers
+// `run:exit` with `send()`, which throws once the window is gone — the exact
+// shape of the app closing while a run ends. The run is over either way, so the
+// throw must not undo the evidence (already on disk), must not keep the outcome
+// from the caller, and must not pass in silence (the screen may still show the
+// run as live).
+const throwingSignalStore = createStore(path.join(dir, "throwing-signal", "run-diagnostics.json"));
+const throwingSignalLog = [];
+let signalSawEvidence = null;
+let settleAfterThrowThrew = null;
+let settleAfterThrow = null;
+try {
+  settleAfterThrow = await settleRunExit({
+    store: throwingSignalStore,
+    repo,
+    sessionId: "throwing-signal",
+    result: limitResult,
+    timeoutMs: 2000,
+    warn: (line) => throwingSignalLog.push(line),
+    signal: () => {
+      signalSawEvidence = throwingSignalStore.read(repo, "throwing-signal")?.warnings?.length === 1;
+      throw new Error("the window was already gone");
+    },
+  });
+} catch (err) {
+  settleAfterThrowThrew = err;
+}
+check("a throwing exit signal does not reject the settle", settleAfterThrowThrew === null, settleAfterThrowThrew && String(settleAfterThrowThrew));
+check("the evidence was on disk before the signal even ran", signalSawEvidence === true, `${signalSawEvidence}`);
+check("and it is still there afterwards", throwingSignalStore.read(repo, "throwing-signal")?.warnings?.length === 1);
+check("and the caller still gets the outcome of the record", settleAfterThrow?.reason === "written", JSON.stringify(settleAfterThrow));
+check("the failed signal is reported exactly once", throwingSignalLog.length === 1 && throwingSignalLog[0].startsWith("[run-diagnostics]"), JSON.stringify(throwingSignalLog));
+check("with a wording the app can show, since the screen may still be busy", outcomeMessage(SIGNAL_FAILED) === throwingSignalLog[0]?.replace("[run-diagnostics] ", "") && outcomeMessage(SIGNAL_FAILED).includes("界面"), outcomeMessage(SIGNAL_FAILED));
 
 // A slow disk must not hold the run's exit — but the exit then has to say that
 // the evidence is not there yet, or the app would treat a truncated run as clean.
