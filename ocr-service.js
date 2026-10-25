@@ -189,6 +189,13 @@ function readConfigView({ configPath = CONFIG_PATH, env = process.env } = {}) {
   const active = raw.provider || "";
   const entry =
     (raw.providers || {})[active] || (raw.custom_providers || {})[active] || {};
+  // The config has two shapes, not one: the resolver stops at the provider
+  // section as soon as `provider` is set and only reads the legacy `llm` block
+  // when it is not (internal/llm/resolver.go, ResolveEndpointWithOptions →
+  // tryOCRConfig). Every answer below is therefore given per shape — the model
+  // lives under one key in one of them and under another key in the other, and
+  // the `llm` block's own Key never reaches a selected service.
+  const usesLlmBlock = !active;
   const detectedEnv = ENV_SOURCES.filter(([name]) => env[name]);
   const envSources = detectedEnv.map(([name]) => name);
   const envCredentials = detectedEnv
@@ -196,11 +203,18 @@ function readConfigView({ configPath = CONFIG_PATH, env = process.env } = {}) {
     .map(([name]) => name);
   const envHasEndpoint = detectedEnv.some(([, kind]) => kind === "endpoint");
   const envHasModel = detectedEnv.some(([, kind]) => kind === "model");
+  // The effective model is the one the resolver would actually send, and the two
+  // shapes read it from different places (internal/llm/resolver.go):
+  // - provider form (`tryProviderConfig`): the entry's own `model` wins, and the
+  //   top-level `model` is the fallback;
+  // - legacy form (`tryLegacyLlmConfig`): only `llm.model` — the top-level
+  //   `model` is not read at all.
+  const entryModel = String(entry.model || "").trim();
   const view = {
     path: configPath,
     fileExists,
     provider: active,
-    model: raw.model || entry.model || "",
+    model: usesLlmBlock ? llmRaw.model || "" : entryModel || raw.model || "",
     effort: raw.effort || "",
     language: raw.language || "",
     maxTokens: raw.max_tokens || 0,
@@ -216,13 +230,6 @@ function readConfigView({ configPath = CONFIG_PATH, env = process.env } = {}) {
     envSources,
     envCredentials,
   };
-  // The config has two shapes, not one: the resolver stops at the provider
-  // section as soon as `provider` is set and only reads the legacy `llm` block
-  // when it is not (internal/llm/resolver.go, ResolveEndpointWithOptions →
-  // tryOCRConfig). So an `llm.auth_token` sitting next to a selected provider
-  // never reaches the request, and counting it left the gap list empty for a
-  // service that had no Key of its own.
-  const usesLlmBlock = !active;
   // `providers.<name>` only accepts a preset name — `config set` routes every
   // other name into `custom_providers` (cmd/opencodereview/config_cmd.go,
   // setProviderValue) — and the resolver takes the URL from the preset registry
@@ -231,6 +238,9 @@ function readConfigView({ configPath = CONFIG_PATH, env = process.env } = {}) {
   // an endpoint even when the file never spells one out.
   const presetEntry = Boolean(active && (raw.providers || {})[active]);
   const hasEntryKey = entryHasCredential(entry);
+  // An `llm.auth_token` sitting next to a selected provider never reaches the
+  // request, and counting it left the gap list empty for a service that had no
+  // Key of its own.
   const hasLlmKey = usesLlmBlock && Boolean(llmRaw.auth_token || llmRaw.auth_token_cmd);
   // A provider entry carries its own endpoint and model, the environment can
   // supply them too, and a preset entry has both from the CLI's own table, so
@@ -242,9 +252,21 @@ function readConfigView({ configPath = CONFIG_PATH, env = process.env } = {}) {
     Boolean((usesLlmBlock && llmRaw.url) || String(entry.url || "").trim()) ||
     envHasEndpoint ||
     presetEntry;
-  const hasModel =
-    Boolean((usesLlmBlock && llmRaw.model) || raw.model || String(entry.model || "").trim()) ||
-    envHasModel;
+  // The model is read from a *different* key in each shape, and reading the
+  // wrong one is how a config that the CLI rejects gets called ready:
+  // - provider form (`tryProviderConfig`): the top-level `model` is read, and
+  //   the entry's own `model` overrides it. The `llm` block is not read at all.
+  // - legacy form (`tryLegacyLlmConfig`): only `llm.model` is read. The
+  //   top-level `model` is *not* — and `ocr config set model X` without a
+  //   provider writes exactly that key, so the legacy path ignores what the
+  //   CLI's own `config set` just wrote.
+  // The environment fills the model only in the legacy form: the provider path
+  // never consults `OCR_LLM_MODEL`, and a provider without a model is a hard
+  // error ("provider %q has no model configured"), not something the next
+  // resolution strategy can complete.
+  const hasModel = usesLlmBlock
+    ? Boolean(llmRaw.model) || envHasModel
+    : Boolean(raw.model) || Boolean(entryModel);
   // Any credential counts, wherever it lives: the environment is the CLI's own
   // last resort for the Key, and being wrong here in the optimistic direction
   // only means a run that fails with the CLI's message instead of a disabled

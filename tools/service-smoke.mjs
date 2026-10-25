@@ -580,6 +580,78 @@ check(
   `${gapOf(providerUrlOnly)} | ${providerUrlOnly.blockedReason}`
 );
 
+/* ---- the model is read from a different key in each shape ----
+ * The resolver reads the model from two different places (internal/llm/resolver.go
+ * @ v1.13.3):
+ * - provider form (`tryProviderConfig`): the top-level `model` is read, and the
+ *   entry's own `model` overrides it;
+ * - legacy form (`tryLegacyLlmConfig`): only `llm.model` is read — the top-level
+ *   `model` is not read at all.
+ * The environment fills the model only in the legacy form: the provider path
+ * never consults `OCR_LLM_MODEL`, and a provider without a model is a hard error
+ * ("provider %q has no model configured"), not something the next resolution
+ * strategy completes. Reading the wrong key is how a config the CLI refuses was
+ * called ready — the badge said "已就绪" and the run failed on the first request.
+ */
+const providerTopModel = readiness({
+  provider: "corp-gateway",
+  custom_providers: { "corp-gateway": { url: gateway.url, api_key: "sk-test" } },
+  model: "qwen3-max",
+});
+check(
+  "a top-level model is the fallback for a selected provider",
+  gapOf(providerTopModel) === "" && providerTopModel.model === "qwen3-max",
+  `${gapOf(providerTopModel)} | ${providerTopModel.model}`
+);
+const providerEntryModel = readiness({
+  provider: "corp-gateway",
+  custom_providers: {
+    "corp-gateway": { url: gateway.url, api_key: "sk-test", model: "entry-model" },
+  },
+  model: "top-level-model",
+});
+check(
+  "and the entry's own model wins over it",
+  gapOf(providerEntryModel) === "" && providerEntryModel.model === "entry-model",
+  `${gapOf(providerEntryModel)} | ${providerEntryModel.model}`
+);
+// `ocr config set model X` without a provider writes exactly this key — and the
+// legacy path never reads it. Counting it filled the gap list for a config the
+// CLI answers with "no valid LLM endpoint configured".
+const legacyTopModel = readiness({ model: "qwen3-max", llm: { url: llm.url, auth_token: "t" } });
+check(
+  "a top-level model does not stand in for llm.model",
+  gapOf(legacyTopModel) === "model" && /缺少模型名/.test(legacyTopModel.blockedReason),
+  `${gapOf(legacyTopModel)} | ${legacyTopModel.blockedReason}`
+);
+check(
+  "and the view does not offer a model the CLI would not send",
+  legacyTopModel.model === "",
+  legacyTopModel.model
+);
+const providerEnvModel = readiness(
+  {
+    provider: "corp-gateway",
+    custom_providers: { "corp-gateway": { url: gateway.url, api_key: "sk-test" } },
+  },
+  { OCR_LLM_MODEL: "qwen3-max" }
+);
+check(
+  "an env model does not complete a selected provider",
+  gapOf(providerEnvModel) === "model",
+  `${gapOf(providerEnvModel)} | ${providerEnvModel.blockedReason}`
+);
+const providerLlmModel = readiness({
+  provider: "corp-gateway",
+  custom_providers: { "corp-gateway": { url: gateway.url, api_key: "sk-test" } },
+  llm: { model: "qwen3-max" },
+});
+check(
+  "and neither does the llm block next to a selected provider",
+  gapOf(providerLlmModel) === "model",
+  `${gapOf(providerLlmModel)} | ${providerLlmModel.blockedReason}`
+);
+
 /* ---- a built-in service needs no URL in the file ----
  * `providers.<name>` only accepts a preset name (config set routes every other
  * name into custom_providers), and the resolver takes the URL from the preset
@@ -642,6 +714,9 @@ const invariances = {
   "provider without a Key": providerUrlOnly,
   "llm token next to a provider": r1,
   "bare provider": bareProvider,
+  "provider with a top-level model": providerTopModel,
+  "legacy form with a top-level model": legacyTopModel,
+  "provider with an env model": providerEnvModel,
 };
 for (const [name, view] of Object.entries(invariances)) {
   check(
