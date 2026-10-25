@@ -162,6 +162,11 @@ const ENV_SOURCES = [
 // the readiness badge is built from the same list, so the two cannot drift apart
 // (they used to: the list knew about a missing endpoint, the sentence did not).
 const GAP_LABEL = { baseUrl: "服务端点", model: "模型名", credential: "API Key" };
+// The order the user should fill the gaps in, and the order they are named in.
+// Readiness, the gap list and the sentence are all derived from this array plus
+// the three booleans below, so adding a fourth dimension cannot leave one of the
+// three behind.
+const GAP_ORDER = ["baseUrl", "model", "credential"];
 // Chinese run straight into a latin word would read as one token ("缺少API Key"),
 // so an ASCII label carries a leading space, and the last one is introduced with
 // 和 rather than the enumeration comma.
@@ -211,39 +216,56 @@ function readConfigView({ configPath = CONFIG_PATH, env = process.env } = {}) {
     envSources,
     envCredentials,
   };
+  // The config has two shapes, not one: the resolver stops at the provider
+  // section as soon as `provider` is set and only reads the legacy `llm` block
+  // when it is not (internal/llm/resolver.go, ResolveEndpointWithOptions →
+  // tryOCRConfig). So an `llm.auth_token` sitting next to a selected provider
+  // never reaches the request, and counting it left the gap list empty for a
+  // service that had no Key of its own.
+  const usesLlmBlock = !active;
+  // `providers.<name>` only accepts a preset name — `config set` routes every
+  // other name into `custom_providers` (cmd/opencodereview/config_cmd.go,
+  // setProviderValue) — and the resolver takes the URL from the preset registry
+  // unless the entry overrides it. This app configures a built-in service with a
+  // Key and a model and no URL at all, which is complete, so a preset entry has
+  // an endpoint even when the file never spells one out.
+  const presetEntry = Boolean(active && (raw.providers || {})[active]);
   const hasEntryKey = entryHasCredential(entry);
-  const hasLlmKey = Boolean(llmRaw.auth_token || llmRaw.auth_token_cmd);
-  // A provider entry carries its own endpoint and model, and the environment can
-  // supply them too, so all three places count. Reading only the `llm` section
-  // here made a selected provider with neither a URL nor a model report a single
-  // gap — the Key — and the settings page sent the user to add an API key while
-  // the endpoint was the actual hole.
-  const hasEndpoint = Boolean(llmRaw.url || String(entry.url || "").trim()) || envHasEndpoint;
+  const hasLlmKey = usesLlmBlock && Boolean(llmRaw.auth_token || llmRaw.auth_token_cmd);
+  // A provider entry carries its own endpoint and model, the environment can
+  // supply them too, and a preset entry has both from the CLI's own table, so
+  // all of those count. Reading only the `llm` section here made a selected
+  // provider with neither a URL nor a model report a single gap — the Key — and
+  // the settings page sent the user to add an API key while the endpoint was the
+  // actual hole.
+  const hasEndpoint =
+    Boolean((usesLlmBlock && llmRaw.url) || String(entry.url || "").trim()) ||
+    envHasEndpoint ||
+    presetEntry;
   const hasModel =
-    Boolean(llmRaw.model || raw.model || String(entry.model || "").trim()) || envHasModel;
+    Boolean((usesLlmBlock && llmRaw.model) || raw.model || String(entry.model || "").trim()) ||
+    envHasModel;
+  // Any credential counts, wherever it lives: the environment is the CLI's own
+  // last resort for the Key, and being wrong here in the optimistic direction
+  // only means a run that fails with the CLI's message instead of a disabled
+  // button. Being wrong the other way would block a config that works.
   const hasCredential = Boolean(envCredentials.length || (active && hasEntryKey) || hasLlmKey);
   view.configured = Boolean(active || llmRaw.url || llmRaw.model);
-  view.ready = Boolean(
-    envCredentials.length || (active && hasEntryKey) || (Boolean(llmRaw.url) && hasLlmKey)
-  );
-  // One list, in the order the user should fill the gaps, and the sentence is
-  // read back off it — a Key that is already saved is not reported as missing.
-  view.missing = view.ready
-    ? []
-    : [
-        ...(hasEndpoint ? [] : ["baseUrl"]),
-        ...(hasModel ? [] : ["model"]),
-        ...(hasCredential ? [] : ["credential"]),
-      ];
+  // One list decides both answers. `ready` used to be its own expression and
+  // could disagree with `missing`: a selected service with an endpoint and a
+  // model but no Key of its own emptied the list while the badge still said
+  // "not ready", and the sentence then had no gap to name.
+  const gapPresent = { baseUrl: hasEndpoint, model: hasModel, credential: hasCredential };
+  view.missing = GAP_ORDER.filter((key) => !gapPresent[key]);
+  view.ready = view.missing.length === 0;
   const gapText = listText(view.missing.map((key) => GAP_LABEL[key] || key));
-  const configuredParts = [
-    hasEndpoint && "服务端点",
-    hasModel && "模型名",
-    hasCredential && "API Key",
-  ].filter(Boolean);
+  // Same order and same labels as the gap list above, so the two halves of the
+  // sentence cannot spell a dimension differently.
+  const configuredParts = GAP_ORDER.filter((key) => gapPresent[key]).map((key) => GAP_LABEL[key]);
   if (view.ready) view.blockedReason = "";
-  // `|| "必要配置"` is the belt: a not-ready view always has at least one gap, and
-  // a sentence ending in 但缺少 with nothing after it is worse than a vague one.
+  // `|| "必要配置"` is still the belt: a not-ready view always has at least one
+  // gap, so it can only fire if a gap key has no GAP_LABEL — and a sentence
+  // ending in 但缺少 with nothing after it is worse than a vague one.
   else if (active) view.blockedReason = `已选服务 ${active}，但缺少${gapText || "必要配置"}`;
   else if (configuredParts.length)
     view.blockedReason = `已配置${listText(configuredParts)}，但缺少${gapText || "必要配置"}`;

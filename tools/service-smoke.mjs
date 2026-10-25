@@ -450,6 +450,9 @@ const readiness = (config, env = {}) => {
   fs.rmSync(dir, { recursive: true, force: true });
   return view;
 };
+// The gap list is the machine-readable copy of the sentence, so most assertions
+// below can name the gaps once and read the sentence separately.
+const gapOf = (view) => view.missing.join(",");
 const gateway = { url: "https://llm.corp.internal/v1", protocol: "openai", model: "qwen3-max" };
 const gatewayConfig = (entry) => ({ provider: "corp-gateway", custom_providers: { "corp-gateway": entry } });
 
@@ -482,9 +485,29 @@ check(
   JSON.stringify({ sources: urlOnly.envSources, credentials: urlOnly.envCredentials })
 );
 check("a URL-only environment names the missing Key", /缺少 API Key/.test(urlOnly.blockedReason), urlOnly.blockedReason);
+// A credential in the environment is a Key, not an endpoint. Upstream returns a
+// Claude-Code endpoint only when base URL, token *and* model are all set
+// (internal/llm/resolver.go, tryCCEnv), so a lone ANTHROPIC_API_KEY used to turn
+// the badge green for a review that could only fail with "no valid LLM endpoint
+// configured".
+const envTokenOnly = readiness({}, { ANTHROPIC_API_KEY: "k" });
 check(
-  "a credential env var is ready",
-  readiness({}, { OCR_LLM_TOKEN: "t" }).ready && readiness({}, { ANTHROPIC_API_KEY: "k" }).ready
+  "a lone credential env var is not a complete environment",
+  !envTokenOnly.ready && gapOf(envTokenOnly) === "baseUrl,model",
+  `${gapOf(envTokenOnly)} | ${envTokenOnly.blockedReason}`
+);
+const envComplete = readiness(
+  {},
+  {
+    ANTHROPIC_BASE_URL: "https://api.anthropic.com",
+    ANTHROPIC_AUTH_TOKEN: "t",
+    ANTHROPIC_MODEL: "claude-sonnet-5",
+  }
+);
+check(
+  "a complete ANTHROPIC_* environment is ready",
+  envComplete.ready && envComplete.missing.length === 0,
+  `${gapOf(envComplete)} | ${envComplete.blockedReason}`
 );
 const empty = readiness({});
 check(
@@ -502,7 +525,6 @@ check(
  * endpoint/model combinations are asserted value by value, so the failure lands
  * on the field that moved rather than on "the view changed".
  */
-const gapOf = (view) => view.missing.join(",");
 const onlyEndpoint = readiness({ llm: { url: llm.url } });
 check(
   "an endpoint without a model names the model",
@@ -557,6 +579,109 @@ check(
   gapOf(providerUrlOnly) === "model,credential" && /缺少模型名/.test(providerUrlOnly.blockedReason),
   `${gapOf(providerUrlOnly)} | ${providerUrlOnly.blockedReason}`
 );
+
+/* ---- a built-in service needs no URL in the file ----
+ * `providers.<name>` only accepts a preset name (config set routes every other
+ * name into custom_providers), and the resolver takes the URL from the preset
+ * registry unless the entry overrides it — so the shape this app writes for a
+ * built-in service (a Key and a model, no URL) is complete, and calling it
+ * "missing the endpoint" would disable the run button on a working config.
+ */
+const presetReady = readiness({
+  provider: "deepseek",
+  providers: { deepseek: { api_key: "sk-test", model: "deepseek-chat" } },
+});
+check(
+  "a preset entry with a Key and a model is ready without a URL",
+  presetReady.ready && presetReady.missing.length === 0,
+  `${gapOf(presetReady)} | ${presetReady.blockedReason}`
+);
+const presetNoKey = readiness({
+  provider: "deepseek",
+  providers: { deepseek: { model: "deepseek-chat" } },
+});
+check(
+  "the same preset entry without a Key still names the Key",
+  gapOf(presetNoKey) === "credential",
+  `${gapOf(presetNoKey)} | ${presetNoKey.blockedReason}`
+);
+
+/* ---- the `llm` block is not read once a provider is selected ----
+ * Upstream stops at the provider section as soon as `provider` is set, so an
+ * `llm.auth_token` saved next to a selected service never reaches the request:
+ * a custom provider has to carry its own Key. Counting that token emptied the
+ * gap list while the badge said "not ready", and the sentence then had no gap to
+ * name.
+ */
+const r1 = readiness({
+  provider: "corp-gateway",
+  custom_providers: { "corp-gateway": gateway },
+  llm: { url: gateway.url, model: gateway.model, auth_token: "t" },
+});
+check(
+  "a token in the llm block does not stand in for a selected service's Key",
+  !r1.ready && gapOf(r1) === "credential",
+  `${gapOf(r1)} | ${r1.blockedReason}`
+);
+
+/* ---- one list, one answer ----
+ * `ready` and `missing` used to be separate expressions, so they could disagree:
+ * `ready` was false while `missing` was empty, leaving the badge with nothing to
+ * name. Both are now read off the same three booleans, and the invariant is
+ * asserted on every shape the resolver can see.
+ */
+const invariances = {
+  "llm block": readiness({ llm: { ...llm, auth_token: "t" } }),
+  "empty config": empty,
+  "no endpoint": onlyEndpoint,
+  "no model": onlyModel,
+  "saved Key only": keyOnlyLlm,
+  "lone credential env": envTokenOnly,
+  "complete env": envComplete,
+  "preset entry": presetReady,
+  "provider without a Key": providerUrlOnly,
+  "llm token next to a provider": r1,
+  "bare provider": bareProvider,
+};
+for (const [name, view] of Object.entries(invariances)) {
+  check(
+    `ready and missing agree (${name})`,
+    view.ready === (view.missing.length === 0) && view.ready === (view.blockedReason === ""),
+    `ready=${view.ready} missing=${JSON.stringify(view.missing)} blockedReason=${view.blockedReason}`
+  );
+}
+
+/* ---- the sentence, spelled out ----
+ * The assertions above read the sentence for a keyword. These compare the whole
+ * string, so the 「和」/「、」 join and the label wording are under regression
+ * protection too — that punctuation was wrong once already, and a keyword match
+ * cannot see it.
+ */
+const sentences = [
+  ["the endpoint", readiness({ llm: { model: llm.model, auth_token: "t" } }), "已配置模型名和 API Key，但缺少服务端点"],
+  ["the model", readiness({ llm: { url: llm.url, auth_token: "t" } }), "已配置服务端点和 API Key，但缺少模型名"],
+  ["the Key", readiness({ llm }), "已配置服务端点、模型名，但缺少 API Key"],
+  ["the model and the Key", readiness({ llm: { url: llm.url } }), "已配置服务端点，但缺少模型名和 API Key"],
+  [
+    "the endpoint and the Key",
+    readiness({ llm: { model: llm.model } }),
+    "已配置模型名，但缺少服务端点和 API Key",
+  ],
+  [
+    "the endpoint and the model",
+    readiness({ llm: { auth_token: "t" } }),
+    "已配置 API Key，但缺少服务端点、模型名",
+  ],
+  ["nothing at all", readiness({}), "未选择模型服务"],
+  [
+    "every gap on a selected service",
+    bareProvider,
+    "已选服务 corp-gateway，但缺少服务端点、模型名和 API Key",
+  ],
+];
+for (const [name, view, expected] of sentences) {
+  check(`the sentence names ${name}`, view.blockedReason === expected, view.blockedReason);
+}
 
 const rules = await svc.rulesCheck(dir, "a.go", "");
 check("rulesCheck answers without throwing", typeof rules.ok === "boolean", JSON.stringify(rules).slice(0, 120));
