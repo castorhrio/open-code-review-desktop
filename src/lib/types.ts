@@ -59,6 +59,20 @@ export interface CoverageItem {
   reason?: string;
 }
 
+/**
+ * The values `manifest.run_failure.classification` can hold. Spelling the enum
+ * out is what makes a new upstream class a compile error here rather than a
+ * raw English word on a failure badge.
+ */
+export type RunFailureClass =
+  | "input"
+  | "configuration"
+  | "timeout"
+  | "cancelled"
+  | "budget"
+  | "internal"
+  | "unknown";
+
 export interface RunManifest {
   schema_version: string;
   run_id: string;
@@ -88,14 +102,27 @@ export interface RunManifest {
     waived?: CoverageItem[];
   };
   /**
-   * Why the whole run stopped, when it did. Upstream keeps this distinct from
-   * a file's own failure class (`internal/session/manifest.go`): a run never
-   * fails with `provider` or `panic` — those belong to a single item — and the
-   * run-level vocabulary adds `internal` for scheduler/invariant failures.
+   * Why the whole run stopped, when it did.
+   *
+   * This is the single written-down source of the two failure vocabularies the
+   * app maps to Chinese (`format.ts`: `RUN_FAILURE_LABEL` /
+   * `ITEM_FAILURE_LABEL`). Upstream `internal/session/manifest.go` (read at
+   * `v1.13.3`) declares **two** enums, and they are not interchangeable:
+   *
+   * - `RunFailureClass`, this field's `classification` — `input` /
+   *   `configuration` / `timeout` / `cancelled` / `budget` / `internal` /
+   *   `unknown`. Seven values. A run never fails with `provider` or `panic`:
+   *   those are always attributed to a single item. `internal` exists only
+   *   here, for scheduler/invariant failures.
+   * - `FailureClass`, `coverage.failed[].classification` — `provider` /
+   *   `timeout` / `cancelled` / `configuration` / `input` / `budget` /
+   *   `panic` / `unknown`. Eight values.
+   *
    * Its presence forces `terminal_state` to `failed` while leaving the items
-   * that did complete intact. `reason` is the CLI's own prose.
+   * that did complete intact. `reason` is the CLI's own prose (English, and it
+   * names providers), which is why it is shown as context and never parsed.
    */
-  run_failure?: { classification?: string; reason?: string };
+  run_failure?: { classification?: RunFailureClass; reason?: string };
   elapsed_ms?: number;
 }
 

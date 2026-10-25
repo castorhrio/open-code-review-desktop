@@ -13,6 +13,10 @@
 本轮已把 desktop 的依赖升到 `^1.13.3`（`package.json` / `package-lock.json`），
 并移植了其中对封装影响最大的一个修复。
 
+**本轮复核结论**：`git fetch upstream --tags` 后最新 tag 仍是 `v1.13.3`，
+`v1.13.3..upstream/main` 为空——上游自上次检查以来没有新 commit / release，
+所以本轮没有需要移植的新内容，改动全部来自待办清单。
+
 核对方式：
 
 ```bash
@@ -77,13 +81,22 @@ git log --oneline v1.13.0..upstream/main
 上游的 `RunManifest` 有 `run_failure: { classification, reason }`，它会把
 `terminal_state` 强制成 `failed`。desktop 只显示一个红色「失败」徽章，
 **不显示失败原因**——用户知道失败了，但不知道为什么。
-上游的失败分类词表是
-`provider / timeout / cancelled / configuration / input / budget / panic / unknown`
-（`internal/session/manifest.go`）。
 
-desktop 的 `CoverageItem.classification` 字段类型里有、但**从来没有被读过**
-（`format.ts` 的 cast 里带着，没有任何 UI 使用它）。下一步应该是：
-给 `classification` 做中文映射，接到 `CoverageNotice` 与失败徽章旁边。
+**词表（2026-10-25 复核，`internal/session/manifest.go` @ `v1.13.3`）**——上游是
+**两个**枚举，不是一份：
+
+- `RunFailureClass`（`manifest.run_failure.classification`，7 个）：
+  `input / configuration / timeout / cancelled / budget / internal / unknown`
+- `FailureClass`（`coverage.failed[].classification`，8 个）：
+  `provider / timeout / cancelled / configuration / input / budget / panic / unknown`
+
+本文档此前把 run-level 一段写成了 8 值的那一份（含 `provider` / `panic`），
+是把两个枚举当成一个读了。真源已写进 `src/lib/types.ts` 的 `run_failure` 注释，
+两套映射（`RUN_FAILURE_LABEL` / `ITEM_FAILURE_LABEL`）由
+`tools/service-smoke.mjs` 逐值断言，上游新增分类会让 `audit:service` 变红。
+
+desktop 的 `CoverageItem.classification` 现在会映射成中文，但仍只在 tooltip 里；
+剩下一刀是把 `run_failure.reason` 摆到报告页（见下方 P1）。
 
 > 注意：`run_failure` 在 `v1.13.0` 就已经存在，不是这三个版本带来的；
 > 只是这三个版本让「预算截断」更常出现，把它暴露得更明显了。

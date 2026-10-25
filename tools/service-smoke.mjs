@@ -298,6 +298,75 @@ svc.feedProgressLine(filteredProg, "[ocr] Filtered 12 file(s) by include/exclude
 check("aggregate filtered count parses", filteredProg.excluded === 12, String(filteredProg.excluded));
 
 
+/* ---- the failure vocabulary must still match upstream ----
+ * `manifest.run_failure.classification` and `coverage.failed[].classification`
+ * are two different enums upstream (`internal/session/manifest.go`), and the app
+ * maps them to Chinese in `src/lib/format.ts`. The map used to be one flat
+ * object whose comment described the run-level list as the per-file one — the
+ * two vocabularies read as a single enum. Every value in it translates today,
+ * so nothing ever looked wrong; the failure would only appear the day upstream
+ * added a class, as a raw English word on a failure badge.
+ *
+ * The lists below are transcribed from upstream at `v1.13.3`
+ * (`RunFailureClass` / `FailureClass` constant blocks). If upstream grows a
+ * class, this check fails and the fix is to add the label — not to delete the
+ * assertion.
+ */
+const UPSTREAM_RUN_CLASSES = ["input", "configuration", "timeout", "cancelled", "budget", "internal", "unknown"];
+const UPSTREAM_ITEM_CLASSES = ["provider", "timeout", "cancelled", "configuration", "input", "budget", "panic", "unknown"];
+
+const formatTs = fs.readFileSync(path.join(ROOT, "src/lib/format.ts"), "utf8");
+// The maps are literals with comments and trailing commas, so evaluate the body
+// rather than parsing it as JSON.
+const labelMap = (name) => {
+  const body = new RegExp(`export const ${name}: Record<string, string> = \\{([\\s\\S]*?)\\n\\};`).exec(formatTs);
+  if (!body) return null;
+  try {
+    return new Function(`return {${body[1].replace(/\/\/[^\n]*/g, "")}}`)();
+  } catch (_) {
+    return null;
+  }
+};
+const runLabels = labelMap("RUN_FAILURE_LABEL");
+const itemLabels = labelMap("ITEM_FAILURE_LABEL");
+const sorted = (a) => [...a].sort().join(",");
+const chinese = (v) => typeof v === "string" && /[\u4e00-\u9fa5]/.test(v) && !/[A-Za-z]/.test(v);
+
+check("both failure vocabularies are declared separately", Boolean(runLabels && itemLabels));
+check(
+  "the run-level map is exactly upstream's RunFailureClass",
+  Boolean(runLabels) && sorted(Object.keys(runLabels)) === sorted(UPSTREAM_RUN_CLASSES),
+  runLabels ? Object.keys(runLabels).join(",") : "missing"
+);
+check(
+  "the per-file map is exactly upstream's FailureClass",
+  Boolean(itemLabels) && sorted(Object.keys(itemLabels)) === sorted(UPSTREAM_ITEM_CLASSES),
+  itemLabels ? Object.keys(itemLabels).join(",") : "missing"
+);
+// "Translated" is the whole point: a value missing a label falls through to the
+// raw English enum, which is what a reader of a failure message must not see.
+const untranslated = (map) =>
+  Object.entries(map || {})
+    .filter(([k, v]) => v === k || !chinese(v))
+    .map(([k, v]) => `${k}=${v}`);
+check(
+  "every run-level class has a Chinese label",
+  Boolean(runLabels) && untranslated(runLabels).length === 0,
+  untranslated(runLabels).join(" ")
+);
+check(
+  "every per-file class has a Chinese label",
+  Boolean(itemLabels) && untranslated(itemLabels).length === 0,
+  untranslated(itemLabels).join(" ")
+);
+// A class this build has never heard of must surface as itself, not be folded
+// into 原因不明 — an unknown word is the one signal that upstream moved.
+check(
+  "an unrecognised class falls back to itself rather than to a guess",
+  /return FAILURE_LABEL\[c\] \|\| c;/.test(formatTs),
+  "failureLabel no longer returns the raw value for an unknown class"
+);
+
 /* ---- config / info ---- */
 const cfg = svc.readConfigView();
 check("readConfigView returns a usable shape", cfg && typeof cfg.path === "string" && typeof cfg.ready === "boolean" && typeof cfg.providers === "object", JSON.stringify(cfg)?.slice(0, 140));

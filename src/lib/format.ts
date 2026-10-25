@@ -217,19 +217,30 @@ export function manifestBudgetExceeded(manifest: RunManifest | null | undefined)
 /**
  * Why a run stopped, in the app's own language.
  *
- * The CLI writes a run-level failure as `manifest.run_failure`, with its own
- * fixed vocabulary (`internal/session/manifest.go`): input / configuration /
- * timeout / cancelled / budget / internal / unknown. It is a different enum
- * from the per-file classes carried by `coverage.failed[].classification`
- * (provider / timeout / cancelled / configuration / input / budget / panic /
- * unknown) — a run never fails with "provider", that is always one file — so
- * both are mapped here, and the header note says 失败原因 while a coverage row
- * says 未审 · 原因. Neither string is invented: an unknown value is shown as
- * itself rather than being folded into "unknown", because a value this build
- * has never heard of is the one a reader most needs to see.
+ * Upstream keeps two failure enumerations apart (`internal/session/manifest.go`,
+ * read at `v1.13.3`) and the app has to as well, because a coverage row and the
+ * run header are answering different questions:
+ *
+ * - `RunFailureClass` — `manifest.run_failure.classification`, seven values:
+ *     input / configuration / timeout / cancelled / budget / internal / unknown
+ * - `FailureClass` — `coverage.failed[].classification`, eight values:
+ *     provider / timeout / cancelled / configuration / input / budget / panic /
+ *     unknown
+ *
+ * The sets overlap but are not the same: a run never fails with `provider`
+ * (that is always one file), and only the run-level set has `internal` for
+ * scheduler/invariant failures. They used to live in one flat map whose comment
+ * claimed the run-level list was the eight-value one — the two vocabularies had
+ * been read as a single enum, which is exactly the drift a reader of a failure
+ * message cannot afford, since an unmapped value would surface as raw English.
+ * Both maps are checked against the upstream constant block by
+ * `tools/service-smoke.mjs`.
+ *
+ * Neither string is invented: an unknown value is shown as itself rather than
+ * being folded into "unknown", because a value this build has never heard of is
+ * the one a reader most needs to see.
  */
-export const FAILURE_LABEL: Record<string, string> = {
-  // run-level
+export const RUN_FAILURE_LABEL: Record<string, string> = {
   input: "审查范围无效",
   configuration: "配置不完整",
   timeout: "超时",
@@ -237,10 +248,26 @@ export const FAILURE_LABEL: Record<string, string> = {
   budget: "预算用尽",
   internal: "程序内部错误",
   unknown: "原因不明",
-  // per-file class, from coverage.failed
-  provider: "模型服务出错",
-  panic: "程序崩溃",
 };
+
+/** The per-file classes carried by `coverage.failed[].classification`. */
+export const ITEM_FAILURE_LABEL: Record<string, string> = {
+  provider: "模型服务出错",
+  timeout: "超时",
+  cancelled: "已取消",
+  configuration: "配置不完整",
+  input: "审查范围无效",
+  budget: "预算用尽",
+  panic: "程序崩溃",
+  unknown: "原因不明",
+};
+
+/**
+ * Both vocabularies as one lookup, for the surfaces that do not know which enum
+ * their string came from. The header note says 失败原因 while a coverage row
+ * says 未审 · 原因; the words are shared where the classes mean the same thing.
+ */
+export const FAILURE_LABEL: Record<string, string> = { ...ITEM_FAILURE_LABEL, ...RUN_FAILURE_LABEL };
 
 export function failureLabel(classification: string | undefined): string {
   const c = String(classification || "");

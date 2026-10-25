@@ -66,6 +66,16 @@ function createStore(file) {
     }
   }
 
+  /**
+   * Write the whole file, and say whether it landed.
+   *
+   * Every failure here is deliberately swallowed — a diagnostic must never be
+   * able to break a run — but swallowing it *and* reporting nothing is how the
+   * store's promise breaks quietly: a full disk or a read-only profile writes
+   * no evidence, the app says nothing, and the reopened session looks clean
+   * again. So the outcome is returned rather than assumed, and the caller
+   * (`main.js`) is the one deciding what to do about it.
+   */
   function writeAll(entries) {
     const data = JSON.stringify({ version: VERSION, entries });
     try {
@@ -82,26 +92,40 @@ function createStore(file) {
           fs.unlinkSync(tmp);
         } catch (_) {}
       }
-    } catch (_) {}
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
-  /** Record only when the run has truncation evidence; clean runs are not kept. */
+  /**
+   * Record only when the run has truncation evidence; clean runs are not kept.
+   *
+   * Returns whether the evidence is where a reopened session will look for it.
+   * `true` covers both "written" and "nothing needed writing" — a clean run is
+   * not a failure. `false` means evidence existed and did not land: the disk
+   * refused the write, or there is no session id to file it under. The caller
+   * cannot tell those apart from a return value alone, and does not need to —
+   * either way the truncation warning is gone after a restart, which is the one
+   * thing worth a line in the log.
+   */
   function record(repo, sessionId, result) {
-    if (!sessionId || !result || typeof result !== "object") return;
+    if (!result || typeof result !== "object") return true;
     const warnings = Array.isArray(result.warnings)
       ? result.warnings
           .filter((w) => w && w.type === LIMIT_WARNING)
           .map((w) => ({ type: LIMIT_WARNING, ...(w.file ? { file: String(w.file) } : {}) }))
       : [];
     const budget = Boolean(result.summary && result.summary.budget_exceeded);
-    if (!warnings.length && !budget) return;
+    if (!warnings.length && !budget) return true;
+    if (!sessionId) return false;
 
     const entries = readAll().filter((e) => key(e.repo, e.session_id) !== key(repo, sessionId));
     // Stored canonical, so the file does not accumulate one entry per spelling.
     entries.push({ repo: normalizeRepo(repo), session_id: sessionId, warnings, budget_exceeded: budget });
     // Insertion order is the age order; keeping the tail drops the oldest and
     // keeps the newest, without a timestamp that can tie inside one millisecond.
-    writeAll(entries.slice(-MAX_ENTRIES));
+    return writeAll(entries.slice(-MAX_ENTRIES));
   }
 
   function read(repo, sessionId) {

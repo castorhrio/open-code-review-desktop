@@ -296,7 +296,18 @@ ipcMain.handle("review:run", (_e, spec) => {
       // The CLI does not persist warnings, so this is the only moment the
       // round-limit signal exists. Record before the exit event reaches the
       // renderer, which may refresh history immediately.
-      runDiagnostics.record(spec.repo, result.sessionId || (result.value && result.value.session_id) || "", result.value || null);
+      //
+      // A false return means the evidence existed but did not land — a full
+      // disk, a read-only profile, or a run with no session id to file it
+      // under. Nothing in the UI can show that, because the screen is describing
+      // this run correctly; it is only the *reopened* session that will look
+      // clean again. So it goes to the log rather than being assumed written.
+      const wired = runDiagnostics.record(
+        spec.repo,
+        result.sessionId || (result.value && result.value.session_id) || "",
+        result.value || null
+      );
+      if (!wired) console.warn("[run-diagnostics] 本次运行的上限证据没能保存，重开会话后将看不到这条提示");
       send("run:exit", { id, result });
     },
     (id, progress) => send("run:progress", { id, progress })

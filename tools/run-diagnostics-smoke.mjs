@@ -110,6 +110,36 @@ check("the file is capped", raw.entries.length === MAX_ENTRIES, `${raw.entries.l
 check("the cap drops the oldest, not the newest", raw.entries.some((e) => e.session_id === `session-${String(MAX_ENTRIES + 4).padStart(3, "0")}`) && !raw.entries.some((e) => e.session_id === "session-000"));
 check("every entry fits the small schema", raw.entries.every((e) => typeof e.repo === "string" && typeof e.session_id === "string" && Array.isArray(e.warnings) && typeof e.budget_exceeded === "boolean"));
 
+/* ---- the store has to say whether it wrote ----
+ * Every write here is best-effort by design, and `main.js` used to call it as a
+ * statement: a full disk or a read-only profile wrote nothing, said nothing, and
+ * the reopened session looked clean again — the exact failure the store exists
+ * to prevent. `record()` now answers, so a caller can at least log it.
+ */
+const unwritableDir = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-run-diagnostics-ro-"));
+const blocker = path.join(unwritableDir, "blocker");
+fs.writeFileSync(blocker, "not a directory", "utf8");
+// A file where a directory would have to be, so mkdir fails on every platform —
+// chmod is not a portable way to make a path unwritable (root ignores it, and
+// Windows has no mode bits that mean this).
+const unwritable = createStore(path.join(blocker, "nested", "run-diagnostics.json"));
+let threw = null;
+let wrote = null;
+try {
+  wrote = unwritable.record(repo, session, limitResult);
+} catch (e) {
+  threw = e;
+}
+check("a write that cannot land returns false", wrote === false, String(wrote));
+check("and does not throw", threw === null, threw && String(threw));
+check("with nothing silently readable afterwards", unwritable.read(repo, session) === null);
+// `true` has to mean "handled": a clean run has nothing to write and is not a
+// failure, or every healthy run would log a warning.
+check("a clean run reports success without writing", store.record(repo, "clean-again", { status: "complete", warnings: [] }) === true);
+check("evidence with no session id is reported, not swallowed", store.record(repo, "", limitResult) === false);
+check("a recorded run reports success", store.record(repo, "reported", limitResult) === true);
+fs.rmSync(unwritableDir, { recursive: true, force: true });
+
 fs.rmSync(dir, { recursive: true, force: true });
 console.log(`\n${passed.length} ok, ${failed.length} failed`);
 if (failed.length) process.exit(1);
