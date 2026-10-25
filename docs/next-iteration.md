@@ -22,7 +22,7 @@
 | 4 | 2026-10-26 | `375f64c` | `v1.13.3` | 无新内容（这次 `git fetch upstream --tags` 成功，与本地 ref 一致） |
 | 5 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（`git fetch` 成功 + API 双核对） |
 
-结论：连续 4 轮没有需要移植的新功能 / 修复 / 破坏性变更，desktop 的封装（CLI flag、
+结论：连续 5 轮没有需要移植的新功能 / 修复 / 破坏性变更，desktop 的封装（CLI flag、
 输出解析、配置暴露点）无需改动。若某轮顶端 commit 仍为 `375f64c`，本表不新增行。
 
 只是拉 tag 时会看到几条 `would clobber existing tag`（本仓也用 `v0.1.x` 编号，
@@ -272,6 +272,74 @@ repo 不规范化（1 条）、不查早期 build 的 key（1 条）。
 
 ---
 
+## 本轮 desktop 侧加固（与上游无关，第 5 轮）
+
+本轮把上轮简报里「配置就绪判定」那条线**对到上游源码**上，并把 `MAX_ENTRIES`
+那条注释**变成会 FAIL 的断言**。上游本轮无新提交（顶端仍是 `375f64c` / `v1.13.3`），
+所以下面每一条都是「读上游源码 → 改 desktop → 用断言钉住」。
+
+### P0 — 模型名：两种形态读的是**不同的键**
+
+上轮简报问的是「上游在 provider 形态下是否读顶层 `raw.model`」。**读了**，而且
+读的地方和简报猜的相反——所以 `|| raw.model` 不是「漏了 llm 形态才该有」，而是
+**两处都算错了**。`internal/llm/resolver.go` @ `v1.13.3`：
+
+- **provider 形态**（`tryProviderConfig`）：先读顶层的 `model`（`cfg.Model`），再用
+  条目自己的 `model` 覆盖它；`llm` 段**完全不读**。
+- **legacy 形态**（`tryLegacyLlmConfig`）：**只**读 `llm.model`；顶层的 `model`
+  **不读**——而 `ocr config set model X`（没有 provider 时）写的正是顶层那个键。
+- **环境变量只在 legacy 形态补模型**：provider 形态压根不看 `OCR_LLM_MODEL`，而且
+  provider 缺模型是**硬错误**（`provider %q has no model configured`），不是
+  「下一个解析策略能补上」。
+
+desktop 此前把四种键混在一起数、不分形态，于是两种配置被说成「已就绪」，而 CLI
+当场拒绝：
+
+| 配置 | desktop 此前 | 上游实际 |
+| --- | --- | --- |
+| legacy 形态，只有顶层 `model` | 已就绪 | `no valid LLM endpoint configured` |
+| provider 形态，模型只在环境变量里 | 已就绪 | `provider ... has no model configured` |
+
+- **改动**（`ocr-service.js`）：`hasModel` 逐形态对齐上游；`view.model` 也改成
+  **真正会被发出去的那一个**（provider 形态：条目自己的 `model` 优先、顶层兜底；
+  legacy 形态：`llm.model`）。顺带修掉一个显示错位：切换服务时顶层 `model` 还是
+  上一个服务的，顶栏却按顶层显示——现在按上游的优先级显示。
+- **验证**：`tools/service-smoke.mjs` 新增 6 条断言。其中 4 条**去掉修复就会 FAIL**
+  （实测）：legacy 形态的顶层 `model`、provider 形态的环境变量模型、provider 形态
+  的 `llm.model`、以及显示的模型不是有效模型；另 2 条是防回退的（顶层 `model`
+  在 provider 形态算数、条目 `model` 优先）。新形态也进了「ready 与 missing 必须
+  同意」那条不变量。
+
+### P0 — `MAX_ENTRIES` 的全局裁剪：把注释变成断言
+
+上轮简报说这条注释「没写明是全局上限」——注释上一轮已经写清了（`run-diagnostics.js`
+第 27–43 行），缺的是**断言**：从**一个**仓库看，per-repo 上限和全局上限长得
+一模一样，只有**两个仓库**才分得开。
+
+- `tools/run-diagnostics-smoke.mjs`：两个仓库交替写 `MAX_ENTRIES + 1` 条，断言
+  文件里是 `MAX_ENTRIES` 条、两个仓库**共用**一个预算（各自都不到上限）、
+  **第一个仓库最老的那条**被淘汰（per-repo 上限下它会活下来）、存活的是
+  **全局尾巴**且写入顺序不变。
+- **验证**：把裁剪改成 per-repo → **4 条断言变红**（实测）。
+
+### 仍然开放（本轮查过上游源码，没改）
+
+- **P1 — `presetEntry` 还有一个乐观分支**：手改配置把**自定义名**放进 `providers`
+  段（缺 url）时，desktop 判定 ready。上游的判据是**内置服务注册表**
+  （`llm.LookupProvider`，大小写不敏感）：不在表里的名字，上游根本不去 `providers`
+  段找，而是去 `custom_providers` 段找 → 找不到 → 直接报错
+  `provider %q is set but not configured in custom_providers section`。所以那份配置
+  是被 CLI **整个拒绝**的，不是「缺一个 baseUrl」——把它算成 `missing: baseUrl`
+  反而是**说错了原因**。desktop 要判准这件事，得把内置服务名单带进主进程
+  （`ocr llm providers`），不是改一行表达式。
+- **P1 — provider 形态下端点与 Key 仍会数环境变量**：`OCR_LLM_URL` /
+  `ANTHROPIC_BASE_URL` 在 provider 形态下**不会**被读（端点只来自条目或内置服务
+  表）；`OCR_LLM_TOKEN` 同样不会，Key 只有**内置服务自己的**环境变量（如 anthropic
+  的 `ANTHROPIC_API_KEY`）才算数。这两处仍偏乐观，和上面的 `hasModel` 是同一类
+  问题，本轮只收了模型这一维。
+
+---
+
 ## 待移植 / 待验证
 
 ### 已完成 — `manifest.run_failure` 的中文映射与展示
@@ -343,19 +411,20 @@ desktop 的「工具调用 N（失败 M）」直接读 CLI 的 `tool_calls.failu
 
 ## 仍然开放的事项（非上游）
 
-本轮收了「卷的大小写」与「未知措辞的兜底」两条，其余按优先级排在这里，下一轮挑。
-标注「**未动**」的条目是本轮看过、确认仍然成立但没有改的——不是新发现。
+本轮收了「模型名按形态对齐上游」与「`MAX_ENTRIES` 全局裁剪」两条，其余按优先级排
+在这里，下一轮挑。标注「**未动**」的条目是本轮看过、确认仍然成立但没有改的——不是
+新发现。
 
-- **P1**：`readConfigView` 在 active 分支的 `missing` 只报 `credential`，忽略
-  「有 endpoint 无 model」。文件 `ocr-service.js`（既有代码，不是本轮引入）。
-  ——**未动**。`readConfigView` 是纯函数，四种组合各断言一次即可，顺手修 active
-  分支漏报 `model` 的问题。文件 `tools/service-smoke.mjs`。
+- **P1**：`presetEntry` 还有一个乐观分支：手改配置把自定义名放进 `providers` 段
+  （缺 url）时判定 ready。上游按**内置服务注册表**判，不是按「在不在 `providers`
+  段」，判错的后果是 CLI 整个拒绝这份配置。文件 `ocr-service.js`。——**未动**，
+  理由见上面第 5 轮那一节：要判准得把内置服务名单带进主进程。
+- **P1**：provider 形态下端点与 Key 仍会数环境变量（`OCR_LLM_URL` /
+  `OCR_LLM_TOKEN` 在 provider 形态下上游不读）。文件 `ocr-service.js`——
+  **未动**，与 `hasModel` 是同一类问题，本轮只收了模型这一维。
 - **P2**：`writeAll` 的 Windows 回退分支里 `unlink(tmp)` 失败被吞掉，进程立刻退出
   会留下 `*.tmp` 垃圾。文件 `run-diagnostics.js`。——**未动**。改成把失败记进
   outcome。
-- **P2**：`MAX_ENTRIES` 的注释没有写明它是「**全局**上限，按写入顺序淘汰」
-  （跨仓库一起算，不是每个仓库 200 条）。文件 `run-diagnostics.js`。若要改成
-  per-repo，则要改 `record` 的截断逻辑并加断言。
 - **P3**：`finding.tsx` 的 `RunFailureNote`（只显示 tooltip）与 `RunFailureNotice`
   （可见文本）名字相近，看代码的人容易认错。文件 `src/components/finding.tsx`。
 - **P3**：`settleRunExit` 的 `signal-failed` 分支——这一行到底写到哪里、用户在
@@ -365,6 +434,16 @@ desktop 的「工具调用 N（失败 M）」直接读 CLI 的 `tool_calls.failu
 
 ### 本轮做完、可以划掉的
 
+- ~~`readConfigView` 在 active 分支漏报 model~~ → 第 4 轮做完（`ab21f7d` /
+  `221e829`）：`hasModel` 不再漏报模型，`ready` 与 `missing` 出自同一张清单；
+  第 5 轮又把 `hasModel` 数的那几个键**按形态**对齐了上游（见上面第 5 轮）。
+- ~~`readConfigView` 的 `raw.model` / `presetEntry` 语义核对~~ → 第 5 轮做完：
+  逐形态对齐上游 `internal/llm/resolver.go`，`presetEntry` 剩下的那一个分支留在
+  「仍然开放」里，并写清了为什么不能靠改一行表达式解决。
+- ~~`spawnFailure` 没有导出、没有断言~~ → 第 4 轮做完（`ab11a4d`）：已导出，
+  三种情形都有断言（`tools/service-smoke.mjs`）。
+- ~~`MAX_ENTRIES` 只是注释里写着是全局上限~~ → 第 5 轮做完：两个仓库交替写的
+  4 条断言钉住了「全局、不是 per-repo」。
 - ~~`createStore` 的 `options.caseInsensitive` 没有接上真实卷的答案~~ →
   第 4 轮做完：`detectCaseInsensitive` 问**仓库自己的路径**（不写文件），
   `createAppStore` 收口，`main.js` 只剩一行调用。详见上面「P0 — store 的大小写」。
