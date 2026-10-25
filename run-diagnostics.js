@@ -50,6 +50,70 @@ const NO_SESSION = { ok: false, reason: "no-session" };
 const IO_ERROR = { ok: false, reason: "io-error" };
 
 /**
+ * How the two waits ended, in the same shape as a record outcome.
+ *
+ * `drain()` used to return nothing and stop silently after its round limit: a
+ * queue that never settled looked exactly like an empty one, so the app quit —
+ * or started the uninstaller — while a write was still pending, and nothing in
+ * the log said the truncation evidence might be gone. The three answers below
+ * are what the caller can act on (or at least log).
+ */
+const DRAINED = { ok: true, reason: "drained" };
+const MAX_ROUNDS = { ok: false, reason: "max-rounds" };
+const TIMEOUT = { ok: false, reason: "timeout" };
+const DRAIN_FAILED = { ok: false, reason: "drain-failed" };
+
+/**
+ * What a caller should say about an outcome, or `""` when there is nothing to
+ * say.
+ *
+ * The wording lives here rather than in `main.js` for two reasons: the exits
+ * (`before-quit`, uninstall) and the end of a run all report through the same
+ * vocabulary, and a check can assert the message without starting Electron.
+ * `clean` / `written` / `drained` are silent on purpose — a healthy run must not
+ * log a line, or the one that matters gets skimmed past.
+ *
+ * `late` is the outcome of a write that finished *after* the caller was told
+ * `timeout`: the run-exit path has already moved on, so the only useful thing
+ * left is to say that the evidence did (or did not) end up on disk.
+ */
+const OUTCOME_MESSAGES = {
+  "io-error": "本次运行的上限证据没能保存，重开会话后将看不到这条提示",
+  timeout: "上限证据写得太慢，运行结束没有等它；写盘仍在继续",
+  "max-rounds": "上限证据的写队列在退出前始终没停，可能仍有写入没落盘",
+  "drain-failed": "上限证据的退出冲刷出错，可能仍有写入没落盘",
+};
+const LATE_OUTCOME_MESSAGES = {
+  "io-error": "上限证据在运行结束后写盘失败，重开会话后将看不到这条提示",
+  timeout: "上限证据最后仍然没写完；重开会话后可能看不到这条提示",
+  "max-rounds": "上限证据的写队列始终没停，可能仍有写入没落盘",
+  "drain-failed": "上限证据在运行结束后冲刷出错，可能仍有写入没落盘",
+};
+
+function outcomeMessage(outcome, options) {
+  const reason = outcome && outcome.reason;
+  if (!reason) return "";
+  const table = options && options.late ? LATE_OUTCOME_MESSAGES : OUTCOME_MESSAGES;
+  return table[reason] || "";
+}
+
+/**
+ * Log one outcome, once. Returns the line it logged (or `""`).
+ *
+ * `main.js` calls this for every path that learns something about the evidence
+ * — the end of a run, a late write that only finished after the bound, the exit
+ * flush, the uninstall flush — so no path can quietly drop the news while
+ * another one warns about it.
+ */
+function reportOutcome(outcome, warn, options) {
+  const message = outcomeMessage(outcome, options);
+  if (!message) return "";
+  const line = `[run-diagnostics] ${message}`;
+  (typeof warn === "function" ? warn : console.warn)(line);
+  return line;
+}
+
+/**
  * The same repository, however the caller spelled it.
  *
  * The renderer sends the folder the user picked, and that spelling is not
@@ -74,6 +138,41 @@ function normalizeRepo(repo) {
     return raw;
   }
   return process.platform === "win32" ? abs.toLowerCase() : abs;
+}
+
+/**
+ * How many times the drain is willing to see the queue move on.
+ *
+ * A write can queue another one (a record landing while the window closes, or a
+ * remove racing it), so the wait repeats — but a queue that *keeps* re-arming
+ * would hold the exit (and the uninstaller) for as long as it kept going. The
+ * round limit is the bound; reaching it is a fact the caller has to hear about,
+ * not a silent stop.
+ */
+const MAX_DRAIN_ROUNDS = 100;
+
+/**
+ * Wait for a queue to stop moving, or give up and say why.
+ *
+ * `current()` returns the promise standing for "everything queued so far"; the
+ * same promise twice in a row means nothing new was queued while we waited, so
+ * the queue has settled. Going through a getter instead of a promise keeps this
+ * testable: a queue that never settles is hard to produce on a real disk and
+ * trivial to describe here.
+ *
+ * A rejected write is not a reason to stop — both a record and a remove still
+ * have to happen — so the tail is awaited with its failure swallowed (the write
+ * reports its own outcome through `record()` / `remove()` instead).
+ */
+async function drainQueue(current, maxRounds = MAX_DRAIN_ROUNDS) {
+  for (let i = 0; i < maxRounds; i++) {
+    const tail = current();
+    try {
+      await tail;
+    } catch (_) {}
+    if (tail === current()) return DRAINED;
+  }
+  return MAX_ROUNDS;
 }
 
 function createStore(file) {
@@ -203,16 +302,11 @@ function createStore(file) {
    * session looking clean again.
    *
    * A write can be queued while an earlier one is still landing — a run
-   * finishes exactly as the window closes — so the wait repeats until the
-   * queue stops moving. The bound keeps a writer that never stops from
-   * holding the exit hostage; the caller applies its own timeout on top.
+   * finishes exactly as the window closes — so the wait repeats until the queue
+   * stops moving. See `drainQueue` for what happens at the round limit.
    */
-  async function drain() {
-    for (let i = 0; i < 100; i++) {
-      const tail = queue;
-      await tail;
-      if (tail === queue) return;
-    }
+  function drain() {
+    return drainQueue(() => queue);
   }
 
   /** Queued like `record`, so a delete cannot race a write for the same file. */
@@ -237,8 +331,18 @@ function createStore(file) {
  * and the caller decides what a timeout means for it.
  */
 function flushNow(store, timeoutMs = 2000) {
-  const giveUp = new Promise((resolve) => setTimeout(resolve, timeoutMs));
-  return Promise.race([store.drain().catch(() => {}), giveUp]);
+  let timer;
+  const giveUp = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(TIMEOUT), timeoutMs);
+  });
+  const drained = Promise.resolve()
+    .then(() => store.drain())
+    .then((outcome) => (outcome && typeof outcome.ok === "boolean" ? outcome : DRAINED))
+    .catch(() => DRAIN_FAILED);
+  return Promise.race([drained, giveUp]).then((outcome) => {
+    clearTimeout(timer);
+    return outcome;
+  });
 }
 
 /**
@@ -262,15 +366,32 @@ const RECORD_TIMEOUT_MS = 2000;
  * it. So past the bound the caller is told `timeout` and carries on; the write
  * stays queued, and a quit still waits for it (`flushBeforeQuit`).
  */
-function recordBounded(store, repo, sessionId, result, timeoutMs = RECORD_TIMEOUT_MS) {
+function recordBounded(store, repo, sessionId, result, timeoutMs = RECORD_TIMEOUT_MS, onLate) {
   let timer;
+  let timedOut = false;
   const giveUp = new Promise((resolve) => {
-    timer = setTimeout(() => resolve({ ok: false, reason: "timeout" }), timeoutMs);
+    timer = setTimeout(() => {
+      timedOut = true;
+      resolve(TIMEOUT);
+    }, timeoutMs);
   });
-  return Promise.race([
-    store.record(repo, sessionId, result).catch(() => IO_ERROR),
-    giveUp,
-  ]).then((outcome) => {
+  const write = Promise.resolve()
+    .then(() => store.record(repo, sessionId, result))
+    .catch(() => IO_ERROR)
+    .then((outcome) => {
+      // The caller was already told `timeout` and has moved on. The write is
+      // still the only thing that knows whether the truncation evidence exists,
+      // so its real outcome goes to `onLate` — once, and only when the bound was
+      // actually hit. Letting it land in the void is how a full disk stays
+      // invisible: the run-exit path had already stopped listening.
+      if (timedOut && typeof onLate === "function") {
+        try {
+          onLate(outcome);
+        } catch (_) {}
+      }
+      return outcome;
+    });
+  return Promise.race([write, giveUp]).then((outcome) => {
     clearTimeout(timer);
     return outcome;
   });
@@ -291,13 +412,19 @@ function recordBounded(store, repo, sessionId, result, timeoutMs = RECORD_TIMEOU
  * Exported so the behaviour can be exercised inside a real Electron process
  * instead of only being reasoned about.
  */
-function flushBeforeQuit(app, store, timeoutMs = 2000) {
+function flushBeforeQuit(app, store, timeoutMs = 2000, warn) {
   let flushing = false;
   app.on("before-quit", (event) => {
     if (flushing) return;
     event.preventDefault();
     flushing = true;
-    flushNow(store, timeoutMs).then(() => app.quit());
+    // A quit that gives up on the evidence says so before it quits: after the
+    // process is gone there is nobody left to tell, and a silent stop is the
+    // failure this whole file exists to prevent.
+    flushNow(store, timeoutMs).then((outcome) => {
+      reportOutcome(outcome, warn);
+      app.quit();
+    });
   });
 }
 
@@ -307,6 +434,10 @@ module.exports = {
   MAX_ENTRIES,
   LIMIT_WARNING,
   RECORD_TIMEOUT_MS,
+  MAX_DRAIN_ROUNDS,
+  drainQueue,
+  outcomeMessage,
+  reportOutcome,
   recordBounded,
   flushNow,
   flushBeforeQuit,

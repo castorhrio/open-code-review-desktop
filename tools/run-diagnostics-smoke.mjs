@@ -9,7 +9,18 @@ import path from "node:path";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const { createStore, normalizeRepo, MAX_ENTRIES, LIMIT_WARNING, recordBounded } = require("../run-diagnostics.js");
+const {
+  createStore,
+  normalizeRepo,
+  MAX_ENTRIES,
+  LIMIT_WARNING,
+  RECORD_TIMEOUT_MS,
+  MAX_DRAIN_ROUNDS,
+  drainQueue,
+  reportOutcome,
+  recordBounded,
+  flushNow,
+} = require("../run-diagnostics.js");
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-run-diagnostics-"));
 const file = path.join(dir, "nested", "run-diagnostics.json");
@@ -221,6 +232,71 @@ check(
 const quick = await recordBounded(store, repo, "bounded-session", limitResult, 2000);
 check("a fast record still reports what it wrote", quick?.reason === "written", JSON.stringify(quick));
 check("and its evidence is readable", store.read(repo, "bounded-session")?.warnings?.length === 1);
+
+/* ---- a queue that never stops has to say so ----
+ * `drain()` used to stop after 100 rounds and return nothing, which made a
+ * queue that kept re-arming — a run finishing exactly as the window closes, or
+ * a remove racing a record — indistinguishable from an empty one. The app then
+ * quit (or started the uninstaller) while a write was still pending, and no
+ * line in the log said the truncation evidence might be gone. The bound is
+ * still there; reaching it is now a fact the caller can log.
+ */
+let rounds = 0;
+const churning = () => {
+  rounds += 1;
+  // A fresh promise every time, so the tail never repeats: this is a queue that
+  // always has one more write behind it, the shape no real disk can produce on
+  // demand and the only shape the limit exists for.
+  return Promise.resolve();
+};
+const stuck = await drainQueue(churning);
+check("a queue that keeps moving reports max-rounds instead of draining", stuck?.ok === false && stuck?.reason === "max-rounds", JSON.stringify(stuck));
+check("and it stops at the round limit", rounds === MAX_DRAIN_ROUNDS * 2, `${rounds} rounds for ${MAX_DRAIN_ROUNDS} rounds`);
+const stuckLog = [];
+reportOutcome(stuck, (line) => stuckLog.push(line));
+check("and the caller logs exactly one line about it", stuckLog.length === 1 && stuckLog[0].startsWith("[run-diagnostics]"), JSON.stringify(stuckLog));
+check("reaching the bound is not reported as success", reportOutcome({ ok: true, reason: "drained" }) === "");
+
+// The same answer has to survive the caller's own timeout wrapper: `flushNow`
+// is what `before-quit` and the uninstall path actually await.
+const stuckFlush = await flushNow({ drain: () => drainQueue(churning) }, 2000);
+check("the exit flush passes max-rounds through", stuckFlush?.reason === "max-rounds", JSON.stringify(stuckFlush));
+const slowFlush = await flushNow({ drain: () => new Promise(() => {}) }, 60);
+check("and a drain that never answers is reported as a timeout", slowFlush?.reason === "timeout", JSON.stringify(slowFlush));
+
+/* ---- a write that finishes after the bound must still be heard ----
+ * `recordBounded` gives up so `run:exit` is not held by a slow disk, but the
+ * write is still queued and it is the only thing that knows whether the
+ * evidence landed. Its real outcome has to reach the log — once — or a full
+ * disk under a slow profile directory loses the evidence in silence.
+ */
+const lateOutcomes = [];
+const slowLateStore = {
+  record: () =>
+    new Promise((resolve) => setTimeout(() => resolve({ ok: false, reason: "io-error" }), 120)),
+};
+const boundedFirst = await recordBounded(slowLateStore, repo, "late-session", limitResult, 40, (outcome) =>
+  lateOutcomes.push(outcome)
+);
+check("the run-exit path is not held by the slow write", boundedFirst?.reason === "timeout", JSON.stringify(boundedFirst));
+check("nothing is claimed about the write before it settles", lateOutcomes.length === 0, JSON.stringify(lateOutcomes));
+// The write lands after the bound, so its outcome can only arrive later — which
+// is the whole point: the caller has already sent `run:exit` by then.
+await new Promise((resolve) => setTimeout(resolve, 250));
+check("but a write that lands after the bound is still reported", lateOutcomes.length === 1 && lateOutcomes[0]?.reason === "io-error", JSON.stringify(lateOutcomes));
+const lateLog = [];
+reportOutcome(lateOutcomes[0], (line) => lateLog.push(line), { late: true });
+check("and it reaches the log the caller actually writes to", lateLog.length === 1 && lateLog[0].startsWith("[run-diagnostics]"), JSON.stringify(lateLog));
+check("and it is delivered exactly once", lateOutcomes.length === 1, `${lateOutcomes.length} calls`);
+
+// A write that beats the bound must not fire the late listener: a healthy run
+// would otherwise log twice about a fact it got right.
+let lateCalls = 0;
+const quickAgain = await recordBounded(store, repo, "bounded-no-late", limitResult, 2000, () => {
+  lateCalls += 1;
+});
+check("a write that beats the bound does not fire the late listener", quickAgain?.reason === "written" && lateCalls === 0, `${quickAgain?.reason} / ${lateCalls}`);
+check("the default bound is the one the run-exit path uses", RECORD_TIMEOUT_MS > 0 && Number.isFinite(RECORD_TIMEOUT_MS));
 
 fs.rmSync(unwritableDir, { recursive: true, force: true });
 

@@ -13,7 +13,9 @@ const { installNavigationGuards } = require("./security");
 const updater = require("./update-service");
 const {
   createStore: createRunDiagnostics,
+  RECORD_TIMEOUT_MS,
   recordBounded,
+  reportOutcome,
   flushNow,
   flushBeforeQuit,
 } = require("./run-diagnostics");
@@ -240,7 +242,12 @@ ipcMain.handle("app:uninstall", async () => {
   // queued one more write, which is exactly the case that should be waited for.
   // Nothing here writes after the uninstaller starts except that last write,
   // and a failed one reports `io-error` instead of throwing.
-  await flushNow(runDiagnostics);
+  //
+  // A flush that gave up (a queue that never stopped moving, or a disk that did
+  // not answer in time) is logged before the uninstaller starts: it deletes the
+  // profile directory right after, so this is the last moment the loss can be
+  // reported at all.
+  reportOutcome(await flushNow(runDiagnostics));
   try {
     spawn(target, [], { detached: true, stdio: "ignore", windowsHide: false }).unref();
   } catch (err) {
@@ -332,19 +339,20 @@ ipcMain.handle("review:run", (_e, spec) => {
       // though this one was truncated, and nothing in the UI can show that; a
       // `timeout` means the reader of this run may see the truncation missing
       // for a moment, which is the same loss but caused by a slow disk.
+      //
+      // A write that only finishes *after* the bound reports through `onLate`:
+      // by then `run:exit` has been sent, so the only place left for the news
+      // is this log. Without it, a full disk under a slow profile directory
+      // (the two usually arrive together) loses the evidence and says nothing.
       recordBounded(
         runDiagnostics,
         spec.repo,
         result.sessionId || (result.value && result.value.session_id) || "",
-        result.value || null
+        result.value || null,
+        RECORD_TIMEOUT_MS,
+        (late) => reportOutcome(late, undefined, { late: true })
       )
-        .then((outcome) => {
-          if (outcome && outcome.reason === "io-error") {
-            console.warn("[run-diagnostics] 本次运行的上限证据没能保存，重开会话后将看不到这条提示");
-          } else if (outcome && outcome.reason === "timeout") {
-            console.warn("[run-diagnostics] 上限证据写得太慢，运行结束没有等它；写盘仍在继续");
-          }
-        })
+        .then((outcome) => reportOutcome(outcome))
         .catch(() => {})
         .finally(() => send("run:exit", { id, result }));
     },
