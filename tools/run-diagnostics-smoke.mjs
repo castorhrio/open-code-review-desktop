@@ -4,6 +4,7 @@
 // silent failure here is exactly the one that makes a truncated run look clean
 // again after a restart.
 import fs from "node:fs";
+import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -128,9 +129,41 @@ check(
   `folded=${foldedHere} flag=${CASE_INSENSITIVE_PATHS}`
 );
 
+/* ---- a volume that folds case and a volume that does not are two worlds ----
+ * The store keys every entry by the folder it belongs to, and a folder is
+ * spelled by whoever typed it. Which spellings are the same folder is a
+ * property of the *volume*, not of the OS — a macOS volume can be formatted
+ * case-sensitive, a Linux one can be mounted case-insensitively — so the
+ * store takes the volume's answer and reads, writes and deletes the same way
+ * in each. The default is the platform's answer, which is what the app uses.
+ *
+ * Both answers are checked on every platform, because otherwise this file
+ * would only ever assert the behaviour of the machine it runs on: on a
+ * case-folding platform the two spellings must share one entry, on a
+ * case-sensitive one they must stay apart — and the delete has to follow the
+ * same rule in both, or it would either miss the entry it was asked to
+ * remove or take one that belongs to a different folder.
+ */
+const foldingStore = createStore(path.join(dir, "folding", "run-diagnostics.json"), { caseInsensitive: true });
+const sensitiveStore = createStore(path.join(dir, "sensitive", "run-diagnostics.json"), { caseInsensitive: false });
+const casedRepo = "/home/x/work/Payments-API";
+await foldingStore.record(casedRepo, "folded-session", limitResult);
+check("a volume that folds case keeps two spellings of one folder together", foldingStore.read(casedRepo.toLowerCase(), "folded-session")?.warnings?.length === 1);
+await foldingStore.remove(casedRepo.toLowerCase(), "folded-session");
+check("and a delete by the other spelling still removes it", foldingStore.read(casedRepo, "folded-session") === null);
+await sensitiveStore.record(casedRepo, "split-session", limitResult);
+check("a volume that keeps case keeps two folders apart", sensitiveStore.read(casedRepo.toLowerCase(), "split-session") === null);
+await sensitiveStore.remove(casedRepo.toLowerCase(), "split-session");
+check("and a delete of one of them leaves the other alone", sensitiveStore.read(casedRepo, "split-session")?.warnings?.length === 1);
+
 await store.remove(repo, session);
 check("deleting a session deletes its entry", store.read(repo, session) === null);
 check("deleting one entry leaves the others", store.read(repo, other)?.budget_exceeded === true);
+// A session id is not unique across repositories — the same id can exist under
+// two folders, and a delete removes one *entry*, not one id. Matching on the id
+// alone would take the other repository's truncation evidence with it, and
+// that evidence is the only record that a run there was truncated.
+check("deleting a session in one repository leaves the same session id in another", store.read(otherRepo, session)?.warnings?.length === 1);
 
 fs.writeFileSync(file, "{ not json", "utf8");
 check("a corrupt file reads as no evidence instead of throwing", store.read(repo, other) === null);
@@ -362,6 +395,51 @@ await pendingWrite;
 const stuckRead = await drainBounded(() => new Promise(() => {}), 60);
 check("and that wait gives up instead of hanging", stuckRead?.reason === "timeout", JSON.stringify(stuckRead));
 check("a settled read of a session that has no evidence is still null", (await pendingStore.readSettled(repo, "never-recorded")) === null);
+
+/* ---- a read must not hang on a disk that never answers ----
+ * `readSettled` waits for the writes still in flight, and that wait is bounded
+ * like every other one here: the store's file lives in the profile directory,
+ * which can be a network mount, and a history that never opens is worse than a
+ * history that opens a moment late. The bound is the promise this store makes
+ * to its caller, and it is the easiest thing in the file to lose — a plain
+ * `drain().then(...)` would wait forever, and the test below would hang with
+ * it rather than fail.
+ *
+ * The disk that never answers is a write that never settles: `fs/promises` is
+ * patched to block exactly that one temporary file, so the queue behind it
+ * never settles, and the read has to give up on the bound and answer with
+ * whatever was already on disk — the evidence of an earlier run, which is
+ * exactly what a reopened session is asking about.
+ */
+const stuckFile = path.join(dir, "stuck-read", "run-diagnostics.json");
+const stuckStore = createStore(stuckFile);
+await stuckStore.record(repo, "landed-session", limitResult);
+const realWriteFile = fsp.writeFile;
+let announceBlockedWrite;
+const blockedWrite = new Promise((resolve) => {
+  announceBlockedWrite = resolve;
+});
+fsp.writeFile = (target, ...rest) => {
+  if (String(target) !== `${stuckFile}.tmp`) return realWriteFile(target, ...rest);
+  announceBlockedWrite();
+  return new Promise(() => {});
+};
+// Not awaited on purpose: this write never settles, and waiting for it is the
+// very thing the read below must not do.
+const neverLands = stuckStore.record(repo, "never-lands", limitResult);
+const writeIsBlocked = await Promise.race([
+  blockedWrite.then(() => true),
+  new Promise((resolve) => setTimeout(() => resolve(false), 5000)),
+]);
+check("the write is blocked, so the queue behind it never settles", writeIsBlocked === true);
+fsp.writeFile = realWriteFile;
+const readStartedAt = Date.now();
+const stale = await stuckStore.readSettled(repo, "landed-session");
+const readWaited = Date.now() - readStartedAt;
+check("a read that waits on a disk that never answers gives up instead of hanging", readWaited < WRITE_TIMEOUT_MS + 1500, `${readWaited}ms`);
+check("and it gives up on the bound, not before it", readWaited >= WRITE_TIMEOUT_MS - 100, `${readWaited}ms`);
+check("and it answers with the evidence that was already on disk", stale?.warnings?.length === 1, JSON.stringify(stale));
+check("the session whose write never landed has no evidence to show", (await stuckStore.readSettled(repo, "never-lands", 60)) === null);
 
 /* ---- the exit has to come after the evidence, and say how it went ----
  * The renderer refreshes the history as soon as it hears `run:exit`, and a record

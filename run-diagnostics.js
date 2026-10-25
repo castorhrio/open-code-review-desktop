@@ -185,7 +185,9 @@ const CASE_INSENSITIVE_PATHS = process.platform === "win32" || process.platform 
  * case-sensitivity of a filesystem is a property of the volume and not of the
  * OS: a macOS volume can be formatted case-sensitive, and a Linux one can be
  * mounted case-insensitively. It is also the only way to check the macOS
- * behaviour from a machine that is not a Mac.
+ * behaviour from a machine that is not a Mac. The store passes its own
+ * options straight through, so a store can be told the truth about the volume
+ * it lives on instead of guessing it from the OS.
  */
 function normalizeRepo(repo, options = {}) {
   const raw = String(repo || "");
@@ -235,8 +237,28 @@ async function drainQueue(current, maxRounds = MAX_DRAIN_ROUNDS) {
   return MAX_ROUNDS;
 }
 
-function createStore(file) {
-  const key = (repo, sessionId) => `${normalizeRepo(repo)}\u0000${sessionId || ""}`;
+/**
+ * The evidence store for one profile directory.
+ *
+ * `options` is the volume's answer about case, passed straight to
+ * `normalizeRepo`. The store keys every entry by the folder it belongs to, so
+ * a volume that folds case and a volume that does not are two different
+ * worlds — and the store has to read, write and delete the same way in each.
+ * Leaving it out keeps the platform's answer, which is what the app uses; the
+ * seam exists because the platform's answer is a guess (a macOS volume can be
+ * formatted case-sensitive, a Linux one can be mounted case-insensitively),
+ * and because it is the only way to check the macOS behaviour from a machine
+ * that is not a Mac — the same reason `normalizeRepo` takes the option.
+ *
+ * The delete follows the key exactly, so a session id that exists under two
+ * folders is two entries and deleting one does not touch the other. On a
+ * volume that folds case this still holds: two spellings of one folder are
+ * one folder there, so one delete removing that entry is the answer rather
+ * than a loss. The dangerous shape would be a delete that matched on the
+ * session id alone — the session id is not unique across repositories.
+ */
+function createStore(file, options = {}) {
+  const key = (repo, sessionId) => `${normalizeRepo(repo, options)}\u0000${sessionId || ""}`;
 
   /**
    * One write at a time, in the order the caller asked for it.
