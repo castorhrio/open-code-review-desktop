@@ -125,18 +125,56 @@ function stripEntry(entry) {
 const mapSection = (section) =>
   Object.fromEntries(Object.entries(section || {}).map(([k, v]) => [k, stripEntry(v)]));
 
+/**
+ * The entry a service name refers to, spelled the way the CLI would find it.
+ *
+ * A built-in name is looked up by the registry, which is case insensitive
+ * (`llm.LookupProvider`), so `DeepSeek` in the file and `deepseek` from the form
+ * are the same service to `ocr`. An exact-string lookup then missed a Key the
+ * CLI was happily using: the settings page said "还没有已保存的 Key" while
+ * `ocr review` ran fine on that very config. The renderer's spelling is not ours
+ * to control either — it can come back from a restored form, a paste, or a
+ * config written by hand.
+ *
+ * A custom name is a plain map key upstream (`custom_providers[name]`), so it is
+ * matched exactly: answering for another spelling would hand out a Key for a
+ * config entry the CLI never opens.
+ *
+ * An exact match always wins over a case variant, in either section — the
+ * spelling the config already uses is the one the user meant.
+ */
+function entryByName(raw, name) {
+  if (!name) return null;
+  const providers = raw.providers || {};
+  const custom = raw.custom_providers || {};
+  const exact = providers[name] || custom[name];
+  if (exact) return exact;
+  // Only the built-in section folds case, because only it is resolved through
+  // the registry. Two entries whose names differ only by case: the all-lowercase
+  // one is the spelling the CLI's own table prints, so it is the canonical
+  // entry; anything else would be a guess between two configs.
+  const wanted = String(name).toLowerCase();
+  const matches = Object.entries(providers).filter(([key]) => key.toLowerCase() === wanted);
+  if (!matches.length) return null;
+  const canonical = matches.find(([key]) => key === wanted) || matches[0];
+  return canonical[1];
+}
+
 // The Key never travels to the renderer: the settings page asks "may I reuse
 // what is already saved for this service?" and only gets a value back when the
 // endpoint being tested is the one that Key belongs to. Sending a saved Key to
 // a URL the user just typed would leak it to another host.
-function savedKeyFor(name, url) {
+//
+// `configPath` is a parameter so the smoke checks can point this at a throwaway
+// file instead of the user's own `~/.opencodereview/config.json`.
+function savedKeyFor(name, url, configPath = CONFIG_PATH) {
   let raw = {};
   try {
-    raw = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
+    raw = JSON.parse(fs.readFileSync(configPath, "utf8"));
   } catch (_) {
     return "";
   }
-  const entry = (raw.providers || {})[name] || (raw.custom_providers || {})[name];
+  const entry = entryByName(raw, name);
   if (!entry) return "";
   const saved = String(entry.url || "").trim().replace(/\/+$/, "");
   const target = String(url || "").trim().replace(/\/+$/, "");

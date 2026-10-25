@@ -1154,6 +1154,60 @@ check(
   `${gapOf(r1)} | ${r1.blockedReason}`
 );
 
+/* ---- the saved Key is found by the name the CLI would use ----
+ * `ocr` resolves a built-in name through its own registry, which is case
+ * insensitive (`llm.LookupProvider`), so `DeepSeek` in the file and `deepseek`
+ * from the form are the same service. `savedKeyFor` matched the name as a raw
+ * string, so it missed a Key the CLI was already using and the settings page
+ * said "还没有已保存的 Key" for a config that `ocr review` runs fine on. A custom
+ * name is a plain map key upstream, so it keeps the exact-string rule: answering
+ * for another spelling would hand out a Key for an entry the CLI never opens.
+ */
+const savedKey = (config, name, url = "") => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-saved-key-"));
+  const file = path.join(dir, "config.json");
+  fs.writeFileSync(file, JSON.stringify(config));
+  try {
+    return svc.savedKeyFor(name, url, file);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+};
+check(
+  "a saved Key is reused when the config spells the built-in name differently",
+  savedKey({ providers: { DeepSeek: { api_key: "sk-upper" } } }, "deepseek") === "sk-upper"
+);
+check(
+  "and the other way round, because the registry folds case",
+  savedKey({ providers: { deepseek: { api_key: "sk-lower" } } }, "DeepSeek") === "sk-lower"
+);
+check(
+  "an exact match wins over a case variant in the other section",
+  savedKey(
+    {
+      providers: { deepseek: { api_key: "sk-builtin" } },
+      custom_providers: { DeepSeek: { api_key: "sk-custom" } },
+    },
+    "DeepSeek"
+  ) === "sk-custom"
+);
+check(
+  "a custom name is not folded, because the CLI looks it up exactly",
+  savedKey(
+    { custom_providers: { "corp-gateway": { url: gateway.url, api_key: "sk-custom" } } },
+    "Corp-Gateway",
+    gateway.url
+  ) === ""
+);
+check(
+  "a saved Key is still withheld from an endpoint it does not belong to",
+  savedKey(
+    { providers: { deepseek: { url: "https://api.deepseek.com", api_key: "sk-deep" } } },
+    "DeepSeek",
+    "https://elsewhere.example/v1"
+  ) === ""
+);
+
 /* ---- one list, one answer ----
  * `ready` and `missing` used to be separate expressions, so they could disagree:
  * `ready` was false while `missing` was empty, leaving the badge with nothing to
