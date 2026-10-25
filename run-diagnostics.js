@@ -125,21 +125,43 @@ function reportOutcome(outcome, warn, options) {
 }
 
 /**
+ * Whether a path on this platform compares case-insensitively.
+ *
+ * Windows always does. macOS does too by default — APFS and HFS+ are
+ * case-insensitive out of the box — so the same folder arrives there with a
+ * different casing too, and a byte-comparison key lost the truncation evidence
+ * on exactly the platform the app ships on.
+ *
+ * The exception is a macOS volume that was formatted case-sensitive, where two
+ * folders differing only in case really are two folders. There the key merges
+ * them, which is the safer of the two mistakes: a shared key needs the same
+ * session id under both folders, while a byte key loses the evidence of every
+ * run on a normal volume.
+ */
+const CASE_INSENSITIVE_PATHS = process.platform === "win32" || process.platform === "darwin";
+
+/**
  * The same repository, however the caller spelled it.
  *
  * The renderer sends the folder the user picked, and that spelling is not
  * stable: the picker hands back `/repo/` with a trailing separator, the CLI
  * echoes `/repo`, a spec built from a nested path carries `..`, and on Windows
- * the same folder can arrive with different casing. Keys used to be the raw
- * string, so a run recorded under one spelling was invisible under another —
- * and the entry it lost is the truncation evidence a reopened session exists
- * to keep. Resolving (and lower-casing on Windows, where paths compare
+ * and macOS the same folder can arrive with different casing. Keys used to be
+ * the raw string, so a run recorded under one spelling was invisible under
+ * another — and the entry it lost is the truncation evidence a reopened session
+ * exists to keep. Resolving (and lower-casing where paths compare
  * case-insensitively) makes the key about the folder rather than the typing.
  *
  * Reading normalises as well, so entries written by an earlier build — which
  * stored the raw string — still answer for any spelling of the same folder.
+ *
+ * `options.caseInsensitive` overrides the platform's answer, because the
+ * case-sensitivity of a filesystem is a property of the volume and not of the
+ * OS: a macOS volume can be formatted case-sensitive, and a Linux one can be
+ * mounted case-insensitively. It is also the only way to check the macOS
+ * behaviour from a machine that is not a Mac.
  */
-function normalizeRepo(repo) {
+function normalizeRepo(repo, options = {}) {
   const raw = String(repo || "");
   if (!raw) return "";
   let abs;
@@ -148,7 +170,8 @@ function normalizeRepo(repo) {
   } catch (_) {
     return raw;
   }
-  return process.platform === "win32" ? abs.toLowerCase() : abs;
+  const caseInsensitive = "caseInsensitive" in options ? Boolean(options.caseInsensitive) : CASE_INSENSITIVE_PATHS;
+  return caseInsensitive ? abs.toLowerCase() : abs;
 }
 
 /**

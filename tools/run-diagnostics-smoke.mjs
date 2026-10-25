@@ -81,15 +81,38 @@ check("a path spelled with .. resolves to the same repository", store.read(repo,
 check("normalizeRepo resolves a relative spelling", normalizeRepo(path.relative(process.cwd(), repo)) === normalizeRepo(repo));
 const rawSlash = JSON.parse(fs.readFileSync(file, "utf8"));
 check("the stored key is canonical, not the caller's spelling", rawSlash.entries.filter((e) => e.repo === repo).length >= 1 && rawSlash.entries.every((e) => e.repo === normalizeRepo(e.repo)));
-// Windows compares paths case-insensitively, so the same folder can arrive with
-// a different drive letter or folder casing; elsewhere a path is a byte string
-// and a different casing is a different folder, which must stay isolated.
+// Windows and macOS compare paths case-insensitively (NTFS, and APFS/HFS+ by
+// default), so the same folder can arrive with a different drive letter or
+// folder casing; on Linux a path is a byte string and a different casing is a
+// different folder, which must stay isolated.
 await store.record(repo, "case-session", limitResult);
-if (process.platform === "win32") {
+if (process.platform === "win32" || process.platform === "darwin") {
   check("a differently-cased path is the same repository", store.read(repo.toUpperCase(), "case-session")?.warnings?.length === 1);
 } else {
   check("elsewhere, casing is part of the path", store.read(repo.toUpperCase(), "case-session") === null);
 }
+// The macOS answer cannot be checked on a Linux box by running the macOS
+// branch, so the case-sensitivity is a property of the key rather than of the
+// OS, and both answers are checked on every platform. This is the assertion
+// that would have caught the macOS gap: the key was byte-compared there, so a
+// run recorded under one spelling of the folder was invisible under another —
+// and the entry it lost is the truncation evidence a reopened session exists to
+// keep.
+const caseRepo = "/home/x/work/Payments-API";
+check(
+  "a case-insensitive volume folds two spellings of one folder together",
+  normalizeRepo(`${caseRepo}/`, { caseInsensitive: true }) === normalizeRepo(caseRepo.toLowerCase(), { caseInsensitive: true }),
+  `${normalizeRepo(caseRepo, { caseInsensitive: true })} != ${normalizeRepo(caseRepo.toLowerCase(), { caseInsensitive: true })}`
+);
+check(
+  "a case-sensitive volume keeps two spellings apart",
+  normalizeRepo(caseRepo, { caseInsensitive: false }) !== normalizeRepo(caseRepo.toLowerCase(), { caseInsensitive: false })
+);
+check(
+  "the platform's own answer is the one the store uses",
+  normalizeRepo(caseRepo) === normalizeRepo(caseRepo.toLowerCase()) ===
+    (process.platform === "win32" || process.platform === "darwin")
+);
 
 await store.remove(repo, session);
 check("deleting a session deletes its entry", store.read(repo, session) === null);
