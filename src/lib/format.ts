@@ -202,6 +202,18 @@ export function runLimitReached(value: RunResult | null | undefined): boolean {
   return (value.warnings ?? []).some((w) => w?.type === WARNING_REVIEW_LIMIT);
 }
 
+/**
+ * Whether a persisted manifest records the aggregate token budget stopping the
+ * run. Upstream attributes every item the budget left undispatched to
+ * `failed(budget)` and deliberately keeps them in coverage — it is a controlled
+ * truncation, not a run failure — so this is the one budget signal a reopened
+ * session still carries. The round-limit warning is not persisted; the live
+ * result is recorded separately (see `run-diagnostics.js`).
+ */
+export function manifestBudgetExceeded(manifest: RunManifest | null | undefined): boolean {
+  return (manifest?.coverage?.failed ?? []).some((item) => item.classification === "budget");
+}
+
 export function needsContinuation(value: RunResult): boolean {
   const st = terminalState(value);
   return st === "partial" || st === "failed" || coverageOf(value, "failed").length > 0;

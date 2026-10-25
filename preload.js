@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld("api", {
 
   listSessions: (repo, limit) => ipcRenderer.invoke("session:list", { repo, limit }),
   sessionComments: (repo, sessionId) => ipcRenderer.invoke("session:comments", { repo, sessionId }),
+  sessionDiagnostics: (repo, sessionId) => ipcRenderer.invoke("session:diagnostics", { repo, sessionId }),
   exportSession: (repo, sessionId) => ipcRenderer.invoke("session:export", { repo, sessionId }),
   deleteSession: (repo, sessionId) => ipcRenderer.invoke("session:delete", { repo, sessionId }),
 

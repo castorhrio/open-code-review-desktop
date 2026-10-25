@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { api, type Provider } from "@/lib/api";
-import { coverageOf, needsContinuation, reviewedCommit, sessionFileRef, sessionState, terminalState } from "@/lib/format";
+import { coverageOf, manifestBudgetExceeded, needsContinuation, reviewedCommit, sessionFileRef, sessionState, terminalState } from "@/lib/format";
 import { intOrEmpty, MODE_META, resumableMode, validateSpec } from "@/lib/spec";
 import type {
   AppInfo,
@@ -620,15 +620,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const loadSession = useCallback(
     async (s: SessionSummary) => {
-      const res = await api.sessionComments(repoRef.current, s.session_id);
+      // The CLI persists counts and the manifest, but not the warnings — so a
+      // run that stopped at a declared limit reopens as if it had finished.
+      // Ask for the facts the app recorded at exit, and fall back to the one
+      // budget signal the manifest does keep: items swept to failed(budget).
+      const [res, diag] = await Promise.all([
+        api.sessionComments(repoRef.current, s.session_id),
+        api.sessionDiagnostics(repoRef.current, s.session_id),
+      ]);
       if (!res.ok) {
         toast.error("读取会话失败", { description: res.error });
         return;
       }
+      const evidence = diag.ok ? diag.value : null;
       // Manifest first, then the fallback — which infers from the file counts
       // for sessions written before the manifest format existed. It used to say
       // "complete" for all of them, including one that had failed every file.
       const st = (s.run_manifest && s.run_manifest.terminal_state) || sessionState(s);
+      const budgetExceeded = Boolean(evidence?.budget_exceeded) || manifestBudgetExceeded(s.run_manifest);
       applyResult(
         {
           comments: res.value || [],
@@ -636,6 +645,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           session_id: s.session_id,
           llm: { model: s.model },
           manifest: s.run_manifest || null,
+          warnings: evidence?.warnings?.length ? evidence.warnings : undefined,
           summary: {
             // A resumed session's covered set is completed + reused; reporting
             // only the newly completed files made 27/27 read as 3/27 on the
@@ -643,6 +653,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             files_reviewed: (s.completed_files || 0) + (s.reused_files || 0),
             comments: s.total_comments,
             elapsed: s.duration_ns ? `${Math.round(s.duration_ns / 1e9)}s` : "",
+            ...(budgetExceeded ? { budget_exceeded: true } : {}),
           },
         },
         {

@@ -165,6 +165,16 @@ export interface Preview {
   excluded_count: number;
 }
 
+/**
+ * What a run's result said about truncation, kept by the desktop because the
+ * CLI does not write warnings into the session stream. Only the fields the app
+ * renders are stored — never warning messages or provider payloads.
+ */
+export interface SessionDiagnostics {
+  warnings?: AgentWarning[];
+  budget_exceeded?: boolean;
+}
+
 /** session.Summary from `ocr session list --json` (prints `null` when empty). */
 export interface SessionSummary {
   session_id: string;

@@ -2102,6 +2102,62 @@ await shoot(page, "90-review-url-only-no-key", {
   },
 });
 
+// The truncation a session cannot carry by itself.
+//
+// The CLI persists coverage and counts, but never warnings, so a run that spent
+// its last tool-request round reopened from 历史 as an ordinary complete review:
+// the band that says "later files may be missing" existed only on the live
+// result. The desktop now records the warning's type and file at exit; opening
+// the session has to bring it back, on both results and the report. The
+// manifest here still says complete — that is the dishonest reading being
+// guarded against.
+await shoot(page, "91-session-limit-reached", {
+  query: "?sessionlimit=1",
+  after: openFindings,
+  expect: async (page) => {
+    const text = await page.locator("main").innerText();
+    const out = [];
+    if (!/该会话不等于全量审查/.test(text)) out.push("a reopened truncated session claims to be a complete review");
+    if (!/达到上限时停下/.test(text)) out.push("the reopened session does not say that it stopped at a limit");
+    if (!/internal\/service\/auth\/login\.go/.test(text)) out.push("the reopened session does not name the file that hit the limit");
+    if (!/密码校验用了普通的字符串比较/.test(text)) out.push("the findings survived but the truncation notice did not");
+    return out;
+  },
+});
+
+await shoot(page, "92-report-session-limit-reached", {
+  query: "?sessionlimit=1",
+  after: async (page) => {
+    await openFindings(page);
+    await page.getByRole("button", { name: "阅读", exact: true }).click();
+    await page.waitForTimeout(600);
+  },
+  expect: async (page) => {
+    const text = await page.locator("main").innerText();
+    const out = [];
+    if (!/本次报告不等于全量审查/.test(text)) out.push("the forwarded report of a truncated session reads as complete");
+    if (!/达到上限时停下/.test(text)) out.push("the report does not say that the run stopped at a limit");
+    return out;
+  },
+});
+
+// The other half of the same promise, from the data the CLI *does* persist: the
+// token budget sweeps undispatched items to failed(budget) in the manifest. No
+// local diagnostics record is available here (?sessionbudget returns none), so
+// this shot proves loadSession derives the truncation from the manifest alone.
+await shoot(page, "93-session-budget-truncated", {
+  query: "?sessionbudget=1",
+  after: openFindings,
+  expect: async (page) => {
+    const text = await page.locator("main").innerText();
+    const out = [];
+    if (!/token 预算上限/.test(text)) out.push("a session cut short by the token budget does not name the budget");
+    if (!/该会话不等于全量审查/.test(text)) out.push("a budget-truncated session still reads as a complete review");
+    if (!/aggregate token budget reached/.test(text)) out.push("the failed item's reason from the manifest is not shown");
+    return out;
+  },
+});
+
 // A finished review used to land on two empty panes ("在左侧选择一条评论"), so
 // the highest-value content needed a click before it existed on screen. Opening
 // the most severe finding is asserted here rather than assumed: the fixture's

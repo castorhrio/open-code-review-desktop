@@ -7,6 +7,7 @@ import type {
   Preview,
   RepoInfo,
   RunProgress,
+  SessionDiagnostics,
   SessionSummary,
   Spec,
   UpdateState,
@@ -96,6 +97,8 @@ export interface Bridge {
    *  data — callers should pass 0. */
   listSessions(repo: string, limit: number): Promise<Ok<SessionSummary[]>>;
   sessionComments(repo: string, sessionId: string): Promise<Ok<Finding[]>>;
+  /** Truncation facts the CLI does not persist with the session. */
+  sessionDiagnostics(repo: string, sessionId: string): Promise<Ok<SessionDiagnostics | null>>;
   exportSession(repo: string, sessionId: string): Promise<{ ok: boolean; file?: string; opened?: boolean; canceled?: boolean; error?: string }>;
   deleteSession(repo: string, sessionId: string): Promise<{ ok: boolean; error?: string }>;
   rulesCheck(repo: string, path: string, rule: string): Promise<Ok<string>>;

@@ -768,6 +768,36 @@ window.api = (() => {
       return { ok: false, error: "error: failed to read session index\\n  caused by: open /home/x/.opencodereview/sessions/demo/index.jsonl: permission denied\\n  hint: run 'ocr sessions --rebuild' to regenerate the index" };
     }
     const set = SETS[want] || SETS.default;
+    // ?sessionbudget=1 is a session the token budget cut short. The CLI does not
+    // persist warnings, but it does sweep undispatched items to failed(budget),
+    // so this is the one truncation a reopened session can still prove from the
+    // manifest alone.
+    if (q.get("sessionbudget") === "1")
+      return {
+        ok: true,
+        value: set.map((s, i) =>
+          i
+            ? s
+            : {
+                ...s,
+                run_manifest: {
+                  ...(s.run_manifest || {}),
+                  terminal_state: "partial",
+                  coverage: {
+                    ...((s.run_manifest && s.run_manifest.coverage) || {}),
+                    failed: [
+                      {
+                        item_id: "budget-item",
+                        path: "internal/service/auth/login.go",
+                        classification: "budget",
+                        reason: "aggregate token budget reached before dispatch completed",
+                      },
+                    ],
+                  },
+                },
+              }
+        ),
+      };
     // Keep the session's own comment count in step with ?many=1's payload, or
     // the shot renders a header that disagrees with the list beneath it and the
     // disagreement looks like the product's bug rather than the fixture's.
@@ -778,6 +808,21 @@ window.api = (() => {
     // a header promising 9 comments over a list that says there are none.
     if (q.get("clean") === "1") return { ok: true, value: set.map((s, i) => (i ? s : { ...s, total_comments: 0 })) };
     return { ok: true, value: set };
+  },
+  sessionDiagnostics: async (_repo, sessionId) => {
+    // ?sessionlimit=1 is a session whose run spent its last tool-request round.
+    // The CLI kept that only in the live JSON, so the desktop's own record is
+    // what makes it survive a reopen. The manifest says complete, which is
+    // exactly the dishonest reading this shot guards against.
+    if (q.get("sessionlimit") === "1" && sessionId === D.SESSIONS[0].session_id)
+      return {
+        ok: true,
+        value: {
+          warnings: [{ type: "review_limit_reached", file: "internal/service/auth/login.go" }],
+          budget_exceeded: false,
+        },
+      };
+    return { ok: true, value: null };
   },
   sessionComments: async () => {
     if (q.get("clean") === "1") return { ok: true, value: [] };

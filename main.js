@@ -11,12 +11,14 @@ const ocr = require("./ocr-service");
 const git = require("./git-service");
 const { installNavigationGuards } = require("./security");
 const updater = require("./update-service");
+const { createStore: createRunDiagnostics } = require("./run-diagnostics");
 
 const DOCS_URL = "https://open-codereview.ai/docs";
 
 let mainWindow = null;
 
 const boundsFile = () => path.join(app.getPath("userData"), "window-bounds.json");
+const runDiagnostics = createRunDiagnostics(path.join(app.getPath("userData"), "run-diagnostics.json"));
 
 function readBounds() {
   try {
@@ -290,7 +292,13 @@ ipcMain.handle("review:run", (_e, spec) => {
   return ocr.startRun(
     spec,
     (id, line) => send("run:log", { id, line }),
-    (id, result) => send("run:exit", { id, result }),
+    (id, result) => {
+      // The CLI does not persist warnings, so this is the only moment the
+      // round-limit signal exists. Record before the exit event reaches the
+      // renderer, which may refresh history immediately.
+      runDiagnostics.record(spec.repo, result.sessionId || (result.value && result.value.session_id) || "", result.value || null);
+      send("run:exit", { id, result });
+    },
     (id, progress) => send("run:progress", { id, progress })
   );
 });
@@ -450,6 +458,11 @@ ipcMain.handle("session:list", (_e, req) => ocr.listSessions(req.repo, req.limit
 
 ipcMain.handle("session:comments", (_e, req) => ocr.sessionComments(req.repo, req.sessionId));
 
+ipcMain.handle("session:diagnostics", (_e, req) => ({
+  ok: true,
+  value: runDiagnostics.read(req.repo, req.sessionId),
+}));
+
 ipcMain.handle("session:export", async (_e, req) => {
   const save = await dialog.showSaveDialog(mainWindow, {
     title: "导出会话报告",
@@ -461,7 +474,11 @@ ipcMain.handle("session:export", async (_e, req) => {
   return res.ok ? { ...res, opened: await shell.openPath(save.filePath) === "" } : res;
 });
 
-ipcMain.handle("session:delete", (_e, req) => ocr.deleteSession(req.sessionId, req.repo));
+ipcMain.handle("session:delete", async (_e, req) => {
+  const res = await ocr.deleteSession(req.sessionId, req.repo);
+  if (res.ok) runDiagnostics.remove(req.repo, req.sessionId);
+  return res;
+});
 
 ipcMain.handle("rules:check", (_e, req) => ocr.rulesCheck(req.repo, req.path, req.rule));
 
