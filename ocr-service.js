@@ -241,8 +241,6 @@ function readConfigView({ configPath = CONFIG_PATH, env = process.env, presetNam
   } catch (_) {}
   const llmRaw = raw.llm || {};
   const active = raw.provider || "";
-  const entry =
-    (raw.providers || {})[active] || (raw.custom_providers || {})[active] || {};
   // The config has two shapes, not one: the resolver stops at the provider
   // section as soon as `provider` is set and only reads the legacy `llm` block
   // when it is not (internal/llm/resolver.go, ResolveEndpointWithOptions →
@@ -257,14 +255,24 @@ function readConfigView({ configPath = CONFIG_PATH, env = process.env, presetNam
       ? new Set(presetList.map((name) => String(name).toLowerCase()))
       : null;
   const shape = usesLlmBlock ? "legacy" : "provider";
-  // "Is the selected name one of the CLI's built-in services?" is asked twice
-  // below — by the endpoint question and by the credential question — so it is
-  // answered once. A name the registry does not know never has its entry read
-  // (`tryProviderConfig` sends it to `custom_providers` instead), which is the
-  // `rejectedProvider` case further down.
-  const inProvidersSection = Boolean(active && (raw.providers || {})[active]);
-  const knownPreset = Boolean(presets && inProvidersSection && presets.has(String(active).toLowerCase()));
+  // "Is the selected name one of the CLI's built-in services?" is asked three
+  // times below — the endpoint, the credential, and which section the entry is
+  // read from — so it is answered once. `registryHit` is about the *name* (does
+  // the CLI know it), `knownPreset` about name plus entry: an entry under a
+  // built-in name is what the resolver reads.
+  const registryHit = Boolean(presets && active && presets.has(String(active).toLowerCase()));
+  const providerEntry = active ? (raw.providers || {})[active] : undefined;
+  const customEntry = active ? (raw.custom_providers || {})[active] : undefined;
+  const inProvidersSection = Boolean(active && providerEntry);
+  const knownPreset = registryHit && inProvidersSection;
   const activePreset = knownPreset ? String(active).toLowerCase() : "";
+  // The resolver reads exactly one section and the *name* picks it
+  // (`tryProviderConfig`): a built-in name comes from `providers`, every other
+  // name from `custom_providers` — an entry of the same name left in
+  // `providers` is never opened. Without the registry both sections are tried,
+  // which is the older, looser reading.
+  const entry =
+    (presets ? (registryHit ? providerEntry : customEntry) : providerEntry || customEntry) || {};
   const detectedEnv = ENV_SOURCES.filter(([name, , readBy, owner]) => {
     if (!env[name]) return false;
     if (readBy === "legacy") return shape === "legacy";
@@ -323,11 +331,15 @@ function readConfigView({ configPath = CONFIG_PATH, env = process.env, presetNam
   // not a preset entry that happens to be missing a URL. Naming `baseUrl` for it
   // would point the user at the one field that cannot fix anything.
   //
-  // `inProvidersSection` / `knownPreset` themselves are computed above, where
-  // the environment question needs them too. Without the registry all that can
-  // be said is the older, looser answer.
+  // `registryHit` / `inProvidersSection` / `knownPreset` themselves are computed
+  // above, where the environment question needs them too. Without the registry
+  // all that can be said is the older, looser answer.
   const presetEntry = presets ? knownPreset : inProvidersSection;
-  const rejectedProvider = presets && inProvidersSection && !knownPreset ? active : "";
+  // The same branch, now that the `custom_providers` fallback is checked: a name
+  // the registry does not know is rejected whether the stray entry sits in
+  // `providers` or nowhere at all, but a name that *does* live in
+  // `custom_providers` is the entry the resolver reads, so it is not rejected.
+  const rejectedProvider = presets && active && !registryHit && !customEntry ? active : "";
   const hasEntryKey = entryHasCredential(entry);
   // An `llm.auth_token` sitting next to a selected provider never reaches the
   // request, and counting it left the gap list empty for a service that had no

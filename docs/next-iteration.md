@@ -6,7 +6,7 @@
 
 ---
 
-## 上游状态（最近检查：2026-10-26）
+## 上游状态（最近检查：2026-10-26，第 6 轮复核）
 
 上游 `alibaba/open-code-review` 自 desktop 锁定的 `v1.13.0` 之后发布了
 **3 个补丁版本**：`v1.13.1` / `v1.13.2` / `v1.13.3`（共 18 个 commit）。
@@ -322,7 +322,10 @@ desktop 此前把四种键混在一起数、不分形态，于是两种配置被
   **全局尾巴**且写入顺序不变。
 - **验证**：把裁剪改成 per-repo → **4 条断言变红**（实测）。
 
-### 仍然开放（本轮查过上游源码，没改）
+### 当时仍然开放（第 5 轮结束时的两条，第 6 轮都收了）
+
+> 下面两条在第 6 轮收掉了，正文保留是因为它们记着**判据是什么**——尤其第一条：
+> 缺的不是脚手架，而是 `custom_providers` 那一次查找。详见「第 6 轮」一节。
 
 - **P1 — `presetEntry` 还有一个乐观分支**：手改配置把**自定义名**放进 `providers`
   段（缺 url）时，desktop 判定 ready。上游的判据是**内置服务注册表**
@@ -337,6 +340,54 @@ desktop 此前把四种键混在一起数、不分形态，于是两种配置被
   表）；`OCR_LLM_TOKEN` 同样不会，Key 只有**内置服务自己的**环境变量（如 anthropic
   的 `ANTHROPIC_API_KEY`）才算数。这两处仍偏乐观，和上面的 `hasModel` 是同一类
   问题，本轮只收了模型这一维。
+
+---
+
+## 本轮 desktop 侧加固（与上游无关，第 6 轮）
+
+上游顶端仍是 `375f64c` / `v1.13.3`（第 6 轮复核，无新提交）。本轮把上一轮留下的
+「`rejectedProvider` 分支」接完——缺的不是脚手架，是上游那半个判据。
+
+### P0 — 被判拒的服务名：缺的是 `custom_providers` 那一次查找
+
+`tryProviderConfig`（`internal/llm/resolver.go` @ `v1.13.3`）按**名字**选段：
+
+```go
+preset, isPreset := LookupProvider(cfg.Provider)
+if isPreset {
+    entry, ok = cfg.Providers[cfg.Provider]
+} else {
+    entry, ok = cfg.CustomProviders[cfg.Provider]
+}
+if !ok {
+    return ResolvedEndpoint{}, false, fmt.Errorf("provider %q is set but not configured in %s section", cfg.Provider, section)
+}
+```
+
+上一轮只判了「名字在 `providers` 段但不在内置名单里」这一种。剩下两种仍然说错话：
+
+| 配置 | 上周的 desktop | 上游 | 现在 |
+| --- | --- | --- | --- |
+| 同名条目同时出现在 `providers` 和 `custom_providers` | 判拒绝（理由是「没有 custom_providers 条目」） | 读 `custom_providers`，配置能跑 | ready，字段取自 custom 条目 |
+| `provider` 指向的名字两个段都没有 | `missing: baseUrl,model,credential` | `provider %q is set but not configured in custom_providers section` | `missing: provider` |
+
+第一类是把**能用**的配置说成整份被拒；第二类是让用户去填一个填了也不生效的字段。
+
+改动（`ocr-service.js` 的 `readConfigView`）：
+
+- **`registryHit` 与 `knownPreset` 拆开**：「名字在内置名单里」和「名字 + `providers`
+  条目都在」是两个问题。环境变量那一段问的是前者（`owner` 归属），条目取哪一段问
+  的也是前者；`presetEntry` 仍问后者（内置服务只在有条目时才有端点）。
+- **`entry` 按名字选段**：`registryHit` 读 `providers`，其余名字读
+  `custom_providers`——stray 条目不再借出端点、Key 或 model。注册表读不到时两份
+  都试，保持旧的宽松读法。
+- **`rejectedProvider` 加一个条件 `!customEntry`**：名字在 `custom_providers` 里有
+  条目时，那份条目正是 CLI 会读的，不该判拒。
+
+**验证**：`tools/service-smoke.mjs` 新增 6 条断言（同名两段仍 ready、字段取 custom
+条目、stray 条目不借端点/Key、两段都没有 → `missing: provider`、注册表读不到时不
+误拒、以及 `owner` 维度在 legacy 形态下的反向断言）。其中 **4 条去掉修复就 FAIL**
+（实测：stray 同名两条、shadowed 端点一条、两段都没有一条）。
 
 ---
 
@@ -415,13 +466,12 @@ desktop 的「工具调用 N（失败 M）」直接读 CLI 的 `tool_calls.failu
 在这里，下一轮挑。标注「**未动**」的条目是本轮看过、确认仍然成立但没有改的——不是
 新发现。
 
-- **P1**：`presetEntry` 还有一个乐观分支：手改配置把自定义名放进 `providers` 段
-  （缺 url）时判定 ready。上游按**内置服务注册表**判，不是按「在不在 `providers`
-  段」，判错的后果是 CLI 整个拒绝这份配置。文件 `ocr-service.js`。——**未动**，
-  理由见上面第 5 轮那一节：要判准得把内置服务名单带进主进程。
-- **P1**：provider 形态下端点与 Key 仍会数环境变量（`OCR_LLM_URL` /
-  `OCR_LLM_TOKEN` 在 provider 形态下上游不读）。文件 `ocr-service.js`——
-  **未动**，与 `hasModel` 是同一类问题，本轮只收了模型这一维。
+- **P1**：内置服务名写在**另一个段**里（`provider: anthropic`，条目只在
+  `custom_providers`）时，上游同样整份拒绝（报错换成
+  `provider %q is set but not configured in providers section`），desktop 现在报
+  `missing: baseUrl,model,credential`。这是第 6 轮收掉的那两类之外的**第三种形态**，
+  同一个判据；需要另一句「条目放错了段」的措辞，所以留到下一轮。文件
+  `ocr-service.js`。——**未动**（第 6 轮读上游源码时发现）。
 - **P2**：`writeAll` 的 Windows 回退分支里 `unlink(tmp)` 失败被吞掉，进程立刻退出
   会留下 `*.tmp` 垃圾。文件 `run-diagnostics.js`。——**未动**。改成把失败记进
   outcome。
@@ -451,6 +501,14 @@ desktop 的「工具调用 N（失败 M）」直接读 CLI 的 `tool_calls.failu
   第 4 轮做完：各配一条断言，分类逻辑一行未改，`spawnFailure` 顺便导出。
 - ~~`check("the stored key is canonical...")` 两个条件用 `&&` 串在一起~~ →
   第 4 轮拆成两条独立断言。
+- ~~`rejectedProvider` 分支没接上（`presetEntry` 的乐观分支）~~ → 第 6 轮做完：
+  按**名字**选段，并补上 `custom_providers` 那一次查找；同名两段 / 两段都没有两种
+  形态都有断言，4 条去掉修复即 FAIL。剩下「内置名只写在 custom_providers」一条按
+  上面的 P1 留给下一轮。
+- ~~provider 形态下端点与 Key 仍会数环境变量~~ → 第 5 轮的 `d464d5d` 已经收了：
+  `ENV_SOURCES` 第三列按形态、第四列按 preset 归属；`providerEnvUrl` /
+  `providerAnthropicBase` / `providerEnvToken` / `customEnvKey` 四条断言在看着。
+  第 6 轮又补了 legacy 形态下 `ANTHROPIC_API_KEY` 仍算数的反向断言。
 
 ### 一处与上轮简报不同的做法（留给下一个人）
 

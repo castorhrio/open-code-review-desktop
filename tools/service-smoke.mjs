@@ -754,6 +754,58 @@ check(
   customSameName.ready && !customSameName.rejectedProvider,
   `${gapOf(customSameName)} | ${customSameName.blockedReason}`
 );
+// The mirror case: a stray entry of the same name left in `providers`. The
+// resolver picks the section by the *name*, so for this name it reads
+// `custom_providers` and never opens the `providers` one — the name is not
+// rejected, and the fields that count are the custom entry's.
+const bothSections = withPresets({
+  provider: "corp-gateway",
+  providers: { "corp-gateway": { model: "wrong-model" } },
+  custom_providers: { "corp-gateway": { ...gateway, api_key: "sk-test" } },
+});
+check(
+  "a stray entry in providers does not reject a name that custom_providers configures",
+  bothSections.ready && !bothSections.rejectedProvider,
+  `${gapOf(bothSections)} | ${bothSections.blockedReason}`
+);
+check(
+  "and the fields counted are the custom entry's, not the stray one's",
+  bothSections.model === gateway.model,
+  `model=${bothSections.model}`
+);
+// ...and the stray entry cannot supply what the custom entry lacks.
+const shadowedCustom = withPresets({
+  provider: "corp-gateway",
+  providers: { "corp-gateway": { ...gateway, api_key: "sk-test" } },
+  custom_providers: { "corp-gateway": {} },
+});
+check(
+  "a stray providers entry does not lend its endpoint or Key to a custom name",
+  gapOf(shadowedCustom) === "baseUrl,model,credential",
+  `${gapOf(shadowedCustom)} | ${shadowedCustom.blockedReason}`
+);
+// A selected name with no entry anywhere is rejected by the same rule: the
+// resolver looks it up in `custom_providers` and stops with
+//   provider %q is set but not configured in custom_providers section
+// so naming the endpoint is naming a field that cannot fix the config.
+const nameOnly = withPresets({ provider: "corp-gateway" });
+check(
+  "a selected name that lives in neither section is the gap, not a field under it",
+  !nameOnly.ready && gapOf(nameOnly) === "provider" && /custom_providers/.test(nameOnly.blockedReason),
+  `${gapOf(nameOnly)} | ${nameOnly.blockedReason}`
+);
+// Without the registry this branch cannot be taken at all: "the CLI does not
+// know this name" is a fact only the CLI can tell, and guessing it would reject
+// every hand-edited `providers` entry that works.
+const looseHandEdit = readiness({
+  provider: "corp-gateway",
+  providers: { "corp-gateway": { api_key: "sk-test", model: "qwen3-max" } },
+});
+check(
+  "an unreadable registry does not reject a hand-edited providers entry either",
+  looseHandEdit.ready && !looseHandEdit.rejectedProvider,
+  `${gapOf(looseHandEdit)} | ${looseHandEdit.blockedReason}`
+);
 
 /* ---- the provider shape does not read the `OCR_LLM_*` overrides ----
  * The provider path stops at the selected entry: the endpoint comes from the
@@ -866,6 +918,17 @@ check(
   "the legacy shape still reads the OCR_LLM_* overrides",
   legacyEnvUrl.ready,
   `${gapOf(legacyEnvUrl)} | ${legacyEnvUrl.blockedReason}`
+);
+// The `owner` column narrows *which* preset a variable counts for in the
+// provider shape; it is not a filter in the legacy shape, where
+// `ANTHROPIC_API_KEY` has always been a Key. Dropping the variable from the
+// legacy reading would have blocked a documented way to run without a config
+// file, so the lenient direction is pinned here.
+const legacyAnthropicKey = withPresets({ llm: { ...llm } }, { ANTHROPIC_API_KEY: "k" });
+check(
+  "the legacy shape still counts a preset's own variable as the Key",
+  legacyAnthropicKey.ready && legacyAnthropicKey.envCredentials.includes("ANTHROPIC_API_KEY"),
+  `${gapOf(legacyAnthropicKey)} | ${JSON.stringify(legacyAnthropicKey.envCredentials)} | ${legacyAnthropicKey.blockedReason}`
 );
 
 /* ---- the `llm` block is not read once a provider is selected ----
