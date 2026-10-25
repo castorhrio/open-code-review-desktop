@@ -105,12 +105,19 @@ function maskSecret(value) {
   return value.length > 6 ? `${value.slice(0, 3)}****${value.slice(-2)}` : "****";
 }
 
+function entryHasCredential(entry) {
+  return Boolean(
+    entry &&
+      (entry.api_key || entry.auth_token || entry.api_key_cmd || entry.auth_token_cmd)
+  );
+}
+
 function stripEntry(entry) {
   if (!entry || typeof entry !== "object") return null;
   const { api_key: apiKey, auth_token: authToken, ...rest } = entry;
   return {
     ...rest,
-    hasKey: Boolean(apiKey || authToken || entry.api_key_cmd || entry.auth_token_cmd),
+    hasKey: entryHasCredential(entry),
     keyPreview: maskSecret(apiKey || authToken),
   };
 }
@@ -137,29 +144,40 @@ function savedKeyFor(name, url) {
   return String(entry.api_key || entry.auth_token || "");
 }
 
-function readConfigView() {
+// Endpoint and credential are different questions. A URL in the config or in
+// the environment says where to send the request, not that the CLI can
+// authenticate it, and treating the two as one turned the top bar green for a
+// custom gateway with no Key — the review then failed only after it started.
+const ENV_SOURCES = [
+  ["OCR_LLM_URL", "endpoint"],
+  ["OCR_LLM_TOKEN", "credential"],
+  ["OCR_LLM_MODEL", "model"],
+  ["ANTHROPIC_BASE_URL", "endpoint"],
+  ["ANTHROPIC_AUTH_TOKEN", "credential"],
+  ["ANTHROPIC_API_KEY", "credential"],
+  ["ANTHROPIC_MODEL", "model"],
+];
+
+function readConfigView({ configPath = CONFIG_PATH, env = process.env } = {}) {
   let raw = {};
   let fileExists = false;
   try {
-    raw = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
+    raw = JSON.parse(fs.readFileSync(configPath, "utf8"));
     fileExists = true;
   } catch (_) {}
   const llmRaw = raw.llm || {};
   const active = raw.provider || "";
   const entry =
     (raw.providers || {})[active] || (raw.custom_providers || {})[active] || {};
-  const envSources = [
-    ["OCR_LLM_URL", process.env.OCR_LLM_URL],
-    ["OCR_LLM_TOKEN", process.env.OCR_LLM_TOKEN],
-    ["OCR_LLM_MODEL", process.env.OCR_LLM_MODEL],
-    ["ANTHROPIC_BASE_URL", process.env.ANTHROPIC_BASE_URL],
-    ["ANTHROPIC_AUTH_TOKEN", process.env.ANTHROPIC_AUTH_TOKEN],
-    ["ANTHROPIC_MODEL", process.env.ANTHROPIC_MODEL],
-  ]
-    .filter(([, value]) => value)
+  const detectedEnv = ENV_SOURCES.filter(([name]) => env[name]);
+  const envSources = detectedEnv.map(([name]) => name);
+  const envCredentials = detectedEnv
+    .filter(([, kind]) => kind === "credential")
     .map(([name]) => name);
+  const envHasEndpoint = detectedEnv.some(([, kind]) => kind === "endpoint");
+  const envHasModel = detectedEnv.some(([, kind]) => kind === "model");
   const view = {
-    path: CONFIG_PATH,
+    path: configPath,
     fileExists,
     provider: active,
     model: raw.model || entry.model || "",
@@ -176,13 +194,29 @@ function readConfigView() {
       tokenPreview: maskSecret(llmRaw.auth_token),
     },
     envSources,
+    envCredentials,
   };
-  const hasEntryKey = Boolean(entry.hasKey || entry.url);
+  const hasEntryKey = entryHasCredential(entry);
+  const hasLlmEndpoint = Boolean(llmRaw.url);
+  const hasLlmKey = Boolean(llmRaw.auth_token || llmRaw.auth_token_cmd);
+  const hasModel = Boolean(llmRaw.model || raw.model);
   view.configured = Boolean(active || llmRaw.url || llmRaw.model);
   view.ready = Boolean(
-    view.envSources.length || (active && hasEntryKey) || (llmRaw.url && llmRaw.auth_token)
+    envCredentials.length || (active && hasEntryKey) || (hasLlmEndpoint && hasLlmKey)
   );
-  view.blockedReason = view.ready ? "" : active ? "已选服务，但缺少 API Key" : "未选择模型服务";
+  if (view.ready) view.blockedReason = "";
+  else if (active) view.blockedReason = `已选服务 ${active}，但缺少 API Key`;
+  else if (hasLlmEndpoint || envHasEndpoint) view.blockedReason = "已配置服务端点，但缺少 API Key";
+  else view.blockedReason = "未选择模型服务";
+  view.missing = view.ready
+    ? []
+    : active
+      ? ["credential"]
+      : [
+          ...(hasLlmEndpoint || envHasEndpoint ? [] : ["baseUrl"]),
+          ...(hasModel || envHasModel ? [] : ["model"]),
+          "credential",
+        ];
   return view;
 }
 

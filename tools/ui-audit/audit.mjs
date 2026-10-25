@@ -2077,6 +2077,31 @@ await shoot(page, "89-reused-session-files-reviewed", {
   },
 });
 
+// A custom gateway with a URL and a model but no Key. Readiness used to be
+// derived from the presence of a URL, so this state showed a green top bar and
+// an enabled 开始审查; the CLI then failed after the user had committed to a run.
+// The missing credential has to be visible before the button is pressed.
+await shoot(page, "90-review-url-only-no-key", {
+  query: "?nokey=1",
+  after: async (page) => {
+    await nav("审查")(page);
+    await page.waitForTimeout(1400);
+  },
+  expect: async (page) => {
+    const out = [];
+    const header = page.locator("header");
+    if (await header.locator(".bg-ok").count()) out.push("the top bar still shows a green ready dot without a credential");
+    if (!/缺少 API Key/.test(await header.innerText())) out.push("the top bar does not name the missing credential");
+    const btn = page.getByRole("button", { name: /开始审查/ });
+    if (!(await btn.count())) out.push("the run action disappeared entirely");
+    else if (!(await btn.first().isDisabled())) out.push("a review with a URL but no Key is still offered as clickable");
+    const text = await page.locator("main").innerText();
+    if (!/缺少 API Key/.test(text)) out.push("the review page does not name the missing credential");
+    if (/未选择模型服务/.test(text)) out.push("a selected provider is reported as no provider at all");
+    return out;
+  },
+});
+
 // A finished review used to land on two empty panes ("在左侧选择一条评论"), so
 // the highest-value content needed a click before it existed on screen. Opening
 // the most severe finding is asserted here rather than assumed: the fixture's

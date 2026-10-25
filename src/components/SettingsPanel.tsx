@@ -329,7 +329,14 @@ export function SettingsPanel() {
 
         <p className="text-meta text-faint">
           「测试连通」用你当前填写的值，不写配置、也不需要先保存；保存成功后会自动测一次。测已保存配置则按现在生效的那个服务测。
-          {config.envSources.length > 0 && <span className="ml-1">检测到环境变量端点：{config.envSources.join(", ")}（优先于该文件）。</span>}
+          {config.envSources.length > 0 && (
+            <span className="ml-1">
+              检测到环境变量：{config.envSources.join(", ")}
+              {config.envCredentials.length > 0
+                ? `（其中 ${config.envCredentials.join(", ")} 提供凭据，优先于该文件）。`
+                : "（没有提供凭据，不能单独让审查就绪）。"}
+            </span>
+          )}
         </p>
 
         {llmTest && (

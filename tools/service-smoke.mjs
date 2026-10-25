@@ -302,6 +302,60 @@ check("aggregate filtered count parses", filteredProg.excluded === 12, String(fi
 const cfg = svc.readConfigView();
 check("readConfigView returns a usable shape", cfg && typeof cfg.path === "string" && typeof cfg.ready === "boolean" && typeof cfg.providers === "object", JSON.stringify(cfg)?.slice(0, 140));
 
+// Readiness is about a credential, not a URL. These cases run against a
+// throwaway config path and an explicit environment, so the result does not
+// depend on the machine's own ~/.opencodereview or exported keys.
+const readiness = (config, env = {}) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-config-"));
+  const file = path.join(dir, "config.json");
+  if (config) fs.writeFileSync(file, JSON.stringify(config));
+  const view = svc.readConfigView({ configPath: file, env });
+  fs.rmSync(dir, { recursive: true, force: true });
+  return view;
+};
+const gateway = { url: "https://llm.corp.internal/v1", protocol: "openai", model: "qwen3-max" };
+const gatewayConfig = (entry) => ({ provider: "corp-gateway", custom_providers: { "corp-gateway": entry } });
+
+const noKey = readiness(gatewayConfig(gateway));
+check(
+  "a custom provider URL alone is not ready",
+  !noKey.ready && noKey.missing.includes("credential"),
+  JSON.stringify(noKey)
+);
+check("the missing Key is named for a selected provider", /缺少 API Key/.test(noKey.blockedReason), noKey.blockedReason);
+
+check("a saved provider Key makes it ready", readiness(gatewayConfig({ ...gateway, api_key: "sk-test" })).ready);
+check("a credential command makes it ready", readiness(gatewayConfig({ ...gateway, auth_token_cmd: "pass show llm" })).ready);
+check(
+  "a derived hasKey field is not mistaken for a credential",
+  !readiness(gatewayConfig({ ...gateway, hasKey: true })).ready
+);
+
+const llm = { url: "https://llm.corp.internal/v1", protocol: "openai", model: "qwen3-max" };
+check("an llm section with a token is ready", readiness({ llm: { ...llm, auth_token: "t" } }).ready);
+const urlOnly = readiness({ llm }, { OCR_LLM_URL: llm.url, ANTHROPIC_BASE_URL: "https://api.anthropic.com" });
+check(
+  "endpoint env vars alone are not ready",
+  !urlOnly.ready && urlOnly.missing.includes("credential"),
+  JSON.stringify(urlOnly)
+);
+check(
+  "endpoint env vars are not counted as credentials",
+  urlOnly.envCredentials.length === 0 && urlOnly.envSources.length === 2,
+  JSON.stringify({ sources: urlOnly.envSources, credentials: urlOnly.envCredentials })
+);
+check("a URL-only environment names the missing Key", /缺少 API Key/.test(urlOnly.blockedReason), urlOnly.blockedReason);
+check(
+  "a credential env var is ready",
+  readiness({}, { OCR_LLM_TOKEN: "t" }).ready && readiness({}, { ANTHROPIC_API_KEY: "k" }).ready
+);
+const empty = readiness({});
+check(
+  "an empty config names endpoint, model and credential",
+  ["baseUrl", "model", "credential"].every((key) => empty.missing.includes(key)),
+  JSON.stringify(empty.missing)
+);
+
 const rules = await svc.rulesCheck(dir, "a.go", "");
 check("rulesCheck answers without throwing", typeof rules.ok === "boolean", JSON.stringify(rules).slice(0, 120));
 

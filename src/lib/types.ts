@@ -222,9 +222,11 @@ export interface ConfigView {
   customProviders: Record<string, ProviderEntry>;
   llm: { url: string; model: string; protocol: string; hasToken: boolean; tokenPreview: string };
   envSources: string[];
+  envCredentials: string[];
   configured: boolean;
   ready: boolean;
   blockedReason: string;
+  missing: ("credential" | "baseUrl" | "model")[];
 }
 
 export interface ProviderEntry {

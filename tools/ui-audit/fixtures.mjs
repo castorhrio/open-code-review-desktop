@@ -365,9 +365,11 @@ const CONFIG = {
   },
   llm: { url: "https://api.deepseek.com/v1", model: "deepseek-v4-pro", protocol: "openai", hasToken: true, tokenPreview: "sk-…7f3a" },
   envSources: [],
+  envCredentials: [],
   configured: true,
   ready: true,
   blockedReason: "",
+  missing: [],
 };
 
 const INFO = {
@@ -693,7 +695,29 @@ window.api = (() => {
     // user discover it from a CLI error after spawning a process.
     // (No backticks in here: this whole bridge is one template literal.)
     if (q.get("nollm") === "1")
-      return { ...D.CONFIG, provider: "", model: "", configured: false, ready: false, blockedReason: "未选择模型服务" };
+      return {
+        ...D.CONFIG,
+        provider: "",
+        model: "",
+        configured: false,
+        ready: false,
+        blockedReason: "未选择模型服务",
+        missing: ["baseUrl", "model", "credential"],
+      };
+    // ?nokey=1 is a selected custom gateway with a URL and a model but no Key.
+    // It used to count as ready, so the top bar was green and 开始审查 ran until
+    // the CLI failed. Keep the llm fallback empty: a real config in this state
+    // has no second credential hidden behind the provider.
+    if (q.get("nokey") === "1")
+      return {
+        ...D.CONFIG,
+        provider: "corp-gateway",
+        model: "qwen3-max",
+        llm: { url: "", model: "", protocol: "", hasToken: false, tokenPreview: "" },
+        ready: false,
+        blockedReason: "已选服务 corp-gateway，但缺少 API Key",
+        missing: ["credential"],
+      };
     return D.CONFIG;
   },
   // ?update=<phase> renders the update banner and its status line, which are
