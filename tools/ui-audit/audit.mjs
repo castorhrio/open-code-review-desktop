@@ -2512,11 +2512,22 @@ await shoot(page, "88-run-failure-toast", {
     if (/^Error:/.test(title.trim())) out.push(`the toast still leads with the CLI's own line: ${title.slice(0, 60)}`);
     if (!/还没有配置模型服务/.test(title)) out.push(`the actionable hint is not the title: ${title.slice(0, 60)}`);
     if (!/no valid LLM endpoint configured/.test(desc)) out.push("the CLI's own wording is gone from the toast, so the provider's message is nowhere");
-    // A failed run must also hand the screen back: the same button that started
-    // it has to be usable again, and nothing may still claim a run is going.
+    // A failed run must also hand the screen back: nothing may still claim a
+    // run is going.
     const body = await page.locator("body").innerText();
     if (/审查运行中/.test(body)) out.push("the screen still says a run is going after it failed");
-    if ((await page.getByRole("button", { name: /开始审查/ }).isEnabled().catch(() => false)) === false)
+    // Starting a run moves the app to the results page, so the button that
+    // started it is not on screen at this moment — asking for it read as
+    // "disabled" and kept this shot red for a reason that had nothing to do
+    // with the failure. The contract is that the app is no longer running, and
+    // that going back to 审查 finds the button usable again.
+    await nav("审查")(page);
+    await page.waitForTimeout(600);
+    // The button that starts a run has to be usable again — whether it offers
+    // a fresh review or the resume of the session the failed run left behind.
+    const start = page.getByRole("button", { name: /开始审查|续跑未完成部分/ });
+    if ((await start.count()) === 0) out.push("the review page has no run button after the failure");
+    else if ((await start.first().isEnabled().catch(() => false)) === false)
       out.push("the run button stayed disabled after the run failed");
     return out;
   },
