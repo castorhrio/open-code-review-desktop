@@ -1,4 +1,4 @@
-import type { RunResult, SessionSummary, Severity } from "./types";
+import type { RunManifest, RunResult, SessionSummary, Severity } from "./types";
 
 export const SEVERITY_RANK: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, "": 4 };
 
@@ -119,6 +119,51 @@ export function sessionState(s: SessionSummary): string {
 
 export function coverageOf(value: RunResult | null | undefined, kind: "failed" | "waived") {
   return (value?.manifest?.coverage?.[kind] ?? []) as { item_id: string; path?: string; reason?: string; classification?: string }[];
+}
+
+/**
+ * The commit a run was actually executed against, when the CLI recorded it.
+ *
+ * The manifest's `input` holds the endpoints git resolved *before* the run
+ * started — upstream `internal/session/manifest.go`: "Resolved values are
+ * actual commit SHAs captured before execution, not the mutable refs the user
+ * typed". A ref is a name that moves; a commit is not. A workspace review has
+ * no immutable head (upstream leaves it empty — "workspace has no immutable
+ * head"), so it correctly answers "" here.
+ */
+export function reviewedCommit(manifest?: RunManifest | null): string {
+  return manifest?.input?.resolved_head || "";
+}
+
+/**
+ * A commit shown the way a terminal shows it: seven characters is what git
+ * itself abbreviates to, and a full SHA in a badge is unreadable.
+ */
+export function shortRef(ref: string | undefined): string {
+  const s = String(ref || "");
+  return /^[0-9a-f]{40}$/i.test(s) ? s.slice(0, 7) : s;
+}
+
+/**
+ * The ref a session's findings describe.
+ *
+ * A session records the *name* it was given ("main…feat/x"), and a branch is a
+ * moving target: reopen the session after the branch moved on and the code pane
+ * would show the branch's current content — not the code the findings were
+ * written about. The CLI freezes the real endpoints before it runs and keeps
+ * them in the manifest, which is persisted with the session and read back by
+ * `ocr session list --json`, so the reviewed commit is recoverable.
+ *
+ * Prefer the resolved commit. Fall back to the recorded ref name only for
+ * sessions written before the manifest existed (and for a scan), where the name
+ * is all there is.
+ */
+export function sessionFileRef(s: SessionSummary): string {
+  const resolved = reviewedCommit(s.run_manifest);
+  if (resolved) return resolved;
+  if (s.review_mode === "range") return s.diff_to || "";
+  if (s.review_mode === "commit") return s.diff_commit || "";
+  return "";
 }
 
 /**

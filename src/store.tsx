@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { api, type Provider } from "@/lib/api";
-import { coverageOf, needsContinuation, sessionState, terminalState } from "@/lib/format";
+import { coverageOf, needsContinuation, reviewedCommit, sessionFileRef, sessionState, terminalState } from "@/lib/format";
 import { intOrEmpty, MODE_META, resumableMode, validateSpec } from "@/lib/spec";
 import type {
   AppInfo,
@@ -97,6 +97,14 @@ export interface ResultOrigin {
    * a page that lists nothing as unreviewed.
    */
   failedFiles?: number;
+  /**
+   * The commit the review was actually executed against, when the CLI recorded
+   * one. A ref is a name that moves: a branch that advances after the review
+   * leaves the code pane showing content nobody reviewed. The CLI freezes the
+   * endpoints before the run and keeps them in the manifest, so this is the
+   * exact version the findings were written about.
+   */
+  pinnedCommit?: string;
 }
 
 /**
@@ -453,7 +461,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         toast.success("审查完成", { description: `${r.value?.comments?.length ?? 0} 条评论` });
       }
       if (r.value) {
-        applyResult({ ...r.value, session_id: r.value.session_id || r.sessionId || "" }, { kind: "run", fileRef: runFileRef.current, scope: runScope.current, resumable: canResume });
+        // The CLI resolved the endpoints with git before the run started and
+        // froze them into the manifest, so the findings belong to that commit —
+        // not to whatever the branch holds by the time the code pane is opened.
+        const pinned = reviewedCommit(r.value.manifest);
+        applyResult(
+          { ...r.value, session_id: r.value.session_id || r.sessionId || "" },
+          { kind: "run", fileRef: pinned || runFileRef.current, pinnedCommit: pinned, scope: runScope.current, resumable: canResume }
+        );
         setView("results");
         // The session the run just wrote is what the results header exports as an
         // HTML report, and it used to be absent from `history` until the user
@@ -635,7 +650,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
             : s.review_mode === "commit" ? `${MODE_META.commit.label} ${s.diff_commit}`
             : s.review_mode === "full_scan" ? MODE_META.scan.label
             : `${MODE_META.workspace.label} ${s.git_branch || ""}`.trim(),
-          fileRef: s.review_mode === "range" ? s.diff_to || "" : s.review_mode === "commit" ? s.diff_commit || "" : "",
+          fileRef: sessionFileRef(s),
+          pinnedCommit: reviewedCommit(s.run_manifest),
           failedFiles: s.failed_files || 0,
           resumable: resumableMode(s.review_mode),
         }

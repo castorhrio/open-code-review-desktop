@@ -562,12 +562,41 @@ const expectLogDrawer = async (page) => {
  * do with it. The code pane used to resolve its ref from the form, so opening a
  * history session showed the working tree beside a 历史会话 badge — the code next
  * to a finding could be a different file than the one that was reviewed.
+ *
+ * The ref it reads is the *commit*, not the branch name: the CLI froze the
+ * endpoints before the run and kept them in the manifest, and a branch that has
+ * moved on since the review now holds content nobody reviewed. So the pane must
+ * name the reviewed commit, and the whole SHA has to be what the read asked
+ * for — the title keeps it, the badge shows it abbreviated.
  */
-const expectCodeFollowsSession = async (page) => {
+const expectCodeReadAtCommit = async (page) => {
   const text = await page.locator("main").innerText();
-  return /来自 feat\/tenant-rate-limit/.test(text)
-    ? []
-    : ["the code pane is not read from the session's own ref, so it is showing the working tree"];
+  const out = [];
+  if (!/来自 d41c8b7/.test(text))
+    out.push("the code pane is not read from the reviewed commit, so it is showing the working tree or a moved branch");
+  const title = await page.locator('main span[title^="来自 d41c8b7"]').first().getAttribute("title").catch(() => null);
+  if (!title || !title.includes("d41c8b7a2e9f6013c5d8a4b6e2f7091c3a5d8e6b4"))
+    out.push(`the code pane's ref is not the reviewed commit in full (title: ${title})`);
+  return out;
+};
+
+/**
+ * The results header has to say which version was reviewed. The scope line names
+ * the refs the run was asked for, and a ref is a name that moves — a reader who
+ * forwards the report needs to know which commit the findings are about.
+ */
+const expectPinnedCommit = async (page) => {
+  const text = await page.locator("main").innerText();
+  const out = [];
+  if (!/固定在 d41c8b7/.test(text)) out.push("the results header does not say which commit was reviewed");
+  const title = await page
+    .locator('main span[title^="这次审查读的是这一版代码"]')
+    .first()
+    .getAttribute("title")
+    .catch(() => null);
+  if (!title || !title.includes("d41c8b7a2e9f6013c5d8a4b6e2f7091c3a5d8e6b4"))
+    out.push(`the pinned commit badge does not keep the full SHA reachable (title: ${title})`);
+  return out;
 };
 
 /** Wide: three columns, and the code column clears the widest line. */
@@ -1162,7 +1191,7 @@ await shoot(page, "09-results-findings", {
     await openFindings(page);
     await selectFirstFinding(page);
   },
-  expect: all(expectThreePanes, expectCleanSummaries, expectCodeFollowsSession, expectScrollAffordance, expectHighlightVisible),
+  expect: all(expectThreePanes, expectCleanSummaries, expectCodeReadAtCommit, expectScrollAffordance, expectHighlightVisible),
 });
 // A finding long enough to overflow the reading column, which the fixture's
 // three-line findings never do. Without this shot every fade assertion over the
@@ -1811,8 +1840,8 @@ await shoot(page, "37-results-clean", {
 // CLI's structured signal, not from its English prose, and the empty state
 // says what actually happened.
 //
-// The fixture is the CLI's own shape for it: `status: "success"`,
-// `terminal_state: "success"`, zero comments, one `review_limit_reached`
+// The fixture is the CLI's own shape for it: `status: "complete"`,
+// `terminal_state: "complete"`, zero comments, one `review_limit_reached`
 // warning. The status is deliberately a success — that is what the CLI reports
 // — so nothing but the warning can tell the two apart.
 await shoot(page, "80-results-limit-reached", {
@@ -1907,6 +1936,60 @@ await shoot(page, "83-results-ref-file-missing-min", {
     if (!/查看工作区版本/.test(text)) out.push("the code pane offers no way to look at the working tree");
     if (/func \(s \*Service\) Login/.test(text))
       out.push("the working tree was shown in place of the reviewed snapshot");
+    return out;
+  },
+});
+
+// The code beside a finding has to be the code that was reviewed — and "the code
+// that was reviewed" is a commit, not a branch name.
+//
+// A session recorded the *ref* it was given ("main…feat/tenant-rate-limit"), and a
+// ref is a name that moves. Reopen the session a week later, after the branch has
+// advanced, and the code pane read the branch's current content: a file nobody
+// reviewed, next to a finding that was written about a different one.
+//
+// The CLI already freezes the endpoints before the run and keeps the commits they
+// resolved to in the manifest, which `ocr session list --json` hands back
+// verbatim — so the reviewed commit is known, and the app has to read it.
+await shoot(page, "84-session-pinned-commit", {
+  after: async (page) => {
+    await openFindings(page);
+    await selectFirstFinding(page);
+  },
+  expect: all(expectCodeReadAtCommit, expectPinnedCommit),
+});
+
+// The same pin on the live-run path. A run's own manifest carries the commits
+// its endpoints resolved to, so a fresh run reads the exact commit it reviewed
+// as well — a branch that moves while the review is still going would otherwise
+// shift the code under a finding.
+await shoot(page, "85-run-pinned-commit", {
+  query: "?run=done",
+  after: async (page) => {
+    await nav("审查")(page);
+    await page.waitForTimeout(1600);
+    await page.getByRole("button", { name: /开始审查/ }).click();
+    await page.waitForTimeout(5200);
+  },
+  expect: all(expectCodeReadAtCommit, expectPinnedCommit),
+});
+
+// And on the report, which is the artifact a user forwards to someone else. A
+// reader who receives it has to be able to tell which version it is about —
+// the scope line names the refs the run was asked for, and those are names.
+await shoot(page, "86-report-pinned-commit", {
+  after: async (page) => {
+    await openFindings(page);
+    await selectFirstFinding(page);
+    await page.getByRole("button", { name: "阅读", exact: true }).click();
+    await page.waitForTimeout(600);
+  },
+  expect: async (page) => {
+    const text = await page.locator("main").innerText();
+    const out = [];
+    if (!/commit d41c8b7/.test(text)) out.push("the report does not say which commit it is about");
+    const title = await page.locator('main span[title="d41c8b7a2e9f6013c5d8a4b6e2f7091c3a5d8e6b4"]').first().getAttribute("title").catch(() => null);
+    if (!title) out.push("the report's commit is not kept in full");
     return out;
   },
 });

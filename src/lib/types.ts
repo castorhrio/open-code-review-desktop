@@ -64,7 +64,21 @@ export interface RunManifest {
   run_id: string;
   operation: string;
   terminal_state: TerminalState;
-  input?: { mode?: string; requested_from?: string; requested_head?: string };
+  input?: {
+    mode?: string;
+    requested_from?: string;
+    requested_head?: string;
+    /**
+     * The commits the run was executed against, resolved by git *before* it
+     * started — not the refs the user typed (upstream `internal/session/manifest.go`:
+     * "Resolved values are actual commit SHAs captured before execution"). A ref
+     * is a name that moves; these are the only record of which version was
+     * actually reviewed.
+     */
+    resolved_base?: string;
+    resolved_head?: string;
+    exact_range?: string;
+  };
   execution?: { ocr_version?: string; provider?: string; model?: string; configured_concurrency?: number };
   coverage?: {
     selected?: CoverageItem[];

@@ -208,7 +208,26 @@ const SESSIONS = [
     completed_files: 12,
     failed_files: 0,
     total_comments: 9,
-    run_manifest: { schema_version: "1", run_id: "9f2c41d0", operation: "review", terminal_state: "complete" },
+    // The endpoints the CLI resolved with git *before* the run started, and the
+    // commits they resolved to — upstream `internal/session/manifest.go`:
+    // "Resolved values are actual commit SHAs captured before execution, not the
+    // mutable refs the user typed". The branch has moved on since (that is the
+    // whole point of reading an old session), so the code pane has to read the
+    // reviewed commit, not `feat/tenant-rate-limit`.
+    run_manifest: {
+      schema_version: "ocr.run-manifest/v1",
+      run_id: "9f2c41d0",
+      operation: "review",
+      terminal_state: "complete",
+      input: {
+        mode: "range",
+        requested_from: "main",
+        requested_head: "feat/tenant-rate-limit",
+        resolved_base: "3f2a7c91d4b6e0852a1c9f7e3b5d80146c2ea7f93",
+        resolved_head: "d41c8b7a2e9f6013c5d8a4b6e2f7091c3a5d8e6b4",
+        exact_range: "3f2a7c91d4b6e0852a1c9f7e3b5d80146c2ea7f93..d41c8b7a2e9f6013c5d8a4b6e2f7091c3a5d8e6b4",
+      },
+    },
   },
   {
     session_id: "1a7b9c3d5e6f708192a3b4c5d6e7f809",
@@ -225,7 +244,7 @@ const SESSIONS = [
     failed_files: 1,
     total_comments: 4,
     aborted: true,
-    run_manifest: { schema_version: "1", run_id: "1a7b9c3d", operation: "review", terminal_state: "partial" },
+    run_manifest: { schema_version: "ocr.run-manifest/v1", run_id: "1a7b9c3d", operation: "review", terminal_state: "partial" },
   },
   {
     session_id: "c3d4e5f60718293a4b5c6d7e8f901234",
@@ -241,7 +260,7 @@ const SESSIONS = [
     failed_files: 0,
     total_comments: 63,
     resumed_from: "1a7b9c3d",
-    run_manifest: { schema_version: "1", run_id: "c3d4e5f6", operation: "scan", terminal_state: "completed_with_warnings" },
+    run_manifest: { schema_version: "ocr.run-manifest/v1", run_id: "c3d4e5f6", operation: "scan", terminal_state: "completed_with_warnings" },
   },
   {
     session_id: "77aa88bb99cc00dd11ee22ff33aa44bb",
@@ -256,7 +275,7 @@ const SESSIONS = [
     completed_files: 1,
     failed_files: 0,
     total_comments: 0,
-    run_manifest: { schema_version: "1", run_id: "77aa88bb", operation: "review", terminal_state: "success" },
+    run_manifest: { schema_version: "ocr.run-manifest/v1", run_id: "77aa88bb", operation: "review", terminal_state: "success" },
   },
   // A session from before the run-manifest format existed, taken from a real
   // machine's `ocr session list --json`: no manifest, no terminal_state, and
@@ -304,7 +323,7 @@ const MANY_SESSIONS = [
     completed_files: 4 + (i % 9),
     failed_files: 0,
     total_comments: i % 5,
-    run_manifest: { schema_version: "1", run_id: `bulk${i}`, operation: "review", terminal_state: "complete" },
+    run_manifest: { schema_version: "ocr.run-manifest/v1", run_id: `bulk${i}`, operation: "review", terminal_state: "complete" },
   })),
 ];
 
@@ -581,13 +600,29 @@ window.api = (() => {
   // and the app read "zero findings" as "your code is fine".
   const LIMIT = q.get("limit") === "1";
   const RUN_RESULT = {
-    status: "success",
+    status: "complete",
     session_id: "9f2c41d0a7b34e58b1c6d7e8f9a0b1c2",
     llm: { provider: "deepseek", model: "deepseek-v4-pro" },
     comments: LIMIT ? [] : D.FINDINGS,
     project_summary: LIMIT ? undefined : D.SUMMARY,
     summary: { files_reviewed: 5, comments: LIMIT ? 0 : 5, total_tokens: 412880, input_tokens: 401000, output_tokens: 11880, elapsed: "3m48s" },
-    manifest: { schema_version: "1", run_id: "9f2c41d0", operation: "review", terminal_state: "success", coverage: { failed: [], waived: [] } },
+    manifest: {
+      schema_version: "ocr.run-manifest/v1",
+      run_id: "9f2c41d0",
+      operation: "review",
+      // The CLI's own terminal states are complete/partial/failed/skipped; the
+      // status it reports is this one, not a separate "success".
+      terminal_state: "complete",
+      input: {
+        mode: "range",
+        requested_from: "main",
+        requested_head: "feat/tenant-rate-limit",
+        resolved_base: "3f2a7c91d4b6e0852a1c9f7e3b5d80146c2ea7f93",
+        resolved_head: "d41c8b7a2e9f6013c5d8a4b6e2f7091c3a5d8e6b4",
+        exact_range: "3f2a7c91d4b6e0852a1c9f7e3b5d80146c2ea7f93..d41c8b7a2e9f6013c5d8a4b6e2f7091c3a5d8e6b4",
+      },
+      coverage: { failed: [], waived: [] },
+    },
     warnings: LIMIT
       ? [{ type: "review_limit_reached", file: "internal/service/auth/login.go", message: "max tool rounds reached; task_done" }]
       : [],

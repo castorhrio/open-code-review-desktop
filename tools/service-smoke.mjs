@@ -124,6 +124,73 @@ check(
 const sessions = await svc.listSessions(dir, 0);
 check("listSessions on a fresh repo returns an empty list", sessions.ok && Array.isArray(sessions.value) && sessions.value.length === 0, JSON.stringify(sessions).slice(0, 120));
 
+/* ---- the reviewed commit survives the session round trip ----
+ * The app pins a reopened session's code pane to the commit the review actually
+ * ran against, and the only source for that is the manifest the CLI persists
+ * with the session and hands back from `session list --json`. If the CLI ever
+ * stopped handing it back, the app would quietly fall back to the ref name and
+ * read a branch that has moved on since — the failure would look like a normal
+ * screen. So it is checked against the real CLI, with a session file written
+ * the way the CLI writes one.
+ */
+const encodeRepoPath = (p) => {
+  // upstream internal/session/persist.go: strip the volume, trim the leading
+  // separators, turn every separator into a dash.
+  const vol = /^[a-zA-Z]:/.exec(p)?.[0] || "";
+  const rest = p.slice(vol.length).replace(/^[\\/]+/, "").replace(/[\\/]/g, "-");
+  return vol.replace(/:/g, "_") + rest || "empty";
+};
+const home = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-home-"));
+const sessionId = "smoke00000000000000000000000000";
+const head = await git(["rev-parse", "HEAD"]);
+const sessionDir = path.join(home, ".opencodereview", "sessions", encodeRepoPath(dir));
+fs.mkdirSync(sessionDir, { recursive: true });
+fs.writeFileSync(
+  path.join(sessionDir, `${sessionId}.jsonl`),
+  JSON.stringify({
+    uuid: "smoke-uuid-1",
+    type: "session_end",
+    sessionId,
+    timestamp: new Date().toISOString(),
+    files_reviewed: ["b.go"],
+    duration_seconds: 12,
+    llm_failures: 0,
+    run_manifest: {
+      schema_version: "ocr.run-manifest/v1",
+      run_id: sessionId,
+      operation: "review",
+      terminal_state: "complete",
+      input: {
+        mode: "range",
+        requested_from: "main",
+        requested_head: "feature",
+        resolved_base: firstCommit,
+        resolved_head: head,
+        exact_range: `${firstCommit}..${head}`,
+      },
+      coverage: { selected: [], completed: [], reused: [], failed: [], waived: [] },
+    },
+  }) + "\n"
+);
+// The CLI keeps its sessions under the user's home, so the check points it at a
+// throwaway one. HOME alone is not enough on Windows — os.UserHomeDir() prefers
+// USERPROFILE there.
+const prevHome = process.env.HOME;
+const prevProfile = process.env.USERPROFILE;
+process.env.HOME = home;
+process.env.USERPROFILE = home;
+const listed = await svc.listSessions(dir, 0);
+process.env.HOME = prevHome;
+process.env.USERPROFILE = prevProfile;
+const found = (listed.ok && listed.value ? listed.value : []).find((s) => s.session_id === sessionId);
+check("a session the CLI wrote is listed back", Boolean(found), JSON.stringify(listed).slice(0, 160));
+check("its manifest survives the round trip", Boolean(found && found.run_manifest), JSON.stringify(found && found.run_manifest).slice(0, 120));
+check(
+  "the commit the review ran against comes back with it",
+  Boolean(found && found.run_manifest && found.run_manifest.input && found.run_manifest.input.resolved_head === head),
+  JSON.stringify(found && found.run_manifest && found.run_manifest.input)
+);
+
 /* ---- progress parsing ----
  * A replay of the stderr from one real single-file review (`ocr review` on a
  * throwaway repo, 3m48s, 6 findings). The parser had no test at all, which is
@@ -239,7 +306,7 @@ const rules = await svc.rulesCheck(dir, "a.go", "");
 check("rulesCheck answers without throwing", typeof rules.ok === "boolean", JSON.stringify(rules).slice(0, 120));
 
 /* ---- cleanup ---- */
-for (const d of [dir, notRepo]) fs.rmSync(d, { recursive: true, force: true });
+for (const d of [dir, notRepo, home]) fs.rmSync(d, { recursive: true, force: true });
 
 console.log(`\n${failures.length ? `${failures.length} failed` : "all service checks passed"}`);
 if (failures.length) {

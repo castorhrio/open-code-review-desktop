@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Download, ExternalLink, FileCode2, FolderOpen, Search, Sparkles, TriangleAlert, Wrench, Copy, BookOpenText } from "lucide-react";
 import { api, type FileWindow } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import { SEVERITY_DOT, SEVERITY_LABEL, SEVERITY_RANK, SEVERITY_TEXT, STATUS, coverageOf, runLimitReached, summaryLine, terminalState } from "@/lib/format";
+import { SEVERITY_DOT, SEVERITY_LABEL, SEVERITY_RANK, SEVERITY_TEXT, STATUS, coverageOf, runLimitReached, shortRef, summaryLine, terminalState } from "@/lib/format";
 import { copyText } from "@/lib/clipboard";
 import type { Finding } from "@/lib/types";
 import { useStore } from "@/store";
@@ -113,12 +113,15 @@ function FileViewer({
         {/* A ref is a branch name or a SHA the user typed, and a Badge is
             `nowrap` and refuses to shrink: an uncapped one pushed this toolbar
             past the code pane and clipped the pane itself. Cap the box and keep
-            the full value in the title, as the top bar does. */}
+            the full value in the title, as the top bar does. A pinned commit is
+            shown abbreviated — seven characters is what git itself abbreviates
+            to, and a full SHA in a badge is unreadable; the title keeps the
+            whole thing. */}
         <Badge
           title={file.source === "git" ? `来自 ${file.ref}` : "工作区当前内容"}
           className="max-w-[180px] shrink-0"
         >
-          <span className="min-w-0 truncate">{file.source === "git" ? `来自 ${file.ref}` : "工作区当前内容"}</span>
+          <span className="min-w-0 truncate">{file.source === "git" ? `来自 ${shortRef(file.ref)}` : "工作区当前内容"}</span>
         </Badge>
         {file.absPath && (
           <>
@@ -531,6 +534,20 @@ export function ResultsPanel() {
           <span className="min-w-0 max-w-[320px] truncate text-meta text-ink" title={resultOrigin.scope}>
             {resultOrigin.scope}
           </span>
+        )}
+        {/* Which version was reviewed. The scope above names the *refs* the run
+            was asked for, and a ref is a name that moves — a branch that
+            advanced after the review leaves the code beside a finding showing
+            content nobody reviewed. The CLI froze the endpoints before the run
+            and kept them in the manifest, so the exact commit is known and is
+            said out loud here. */}
+        {resultOrigin?.pinnedCommit && (
+          <Badge
+            className="shrink-0 font-mono"
+            title={`这次审查读的是这一版代码：${resultOrigin.pinnedCommit}。之后分支再前进，这里读到的仍是当时那一版。`}
+          >
+            固定在 {shortRef(resultOrigin.pinnedCommit)}
+          </Badge>
         )}
         <div className="tnum flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-muted">
           <span>

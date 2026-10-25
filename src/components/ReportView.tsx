@@ -1,5 +1,5 @@
 import { ArrowLeft, FileCode2, Sparkles } from "lucide-react";
-import { SEVERITY_RANK, STATUS, coverageOf, runLimitReached, terminalState } from "@/lib/format";
+import { SEVERITY_RANK, STATUS, coverageOf, runLimitReached, shortRef, terminalState } from "@/lib/format";
 import type { Finding } from "@/lib/types";
 import { copyText } from "@/lib/clipboard";
 import { useStore } from "@/store";
@@ -111,6 +111,21 @@ export function ReportView() {
                   复制命令
                 </Button>
               </div>
+            )}
+            {/* Which version was reviewed. The title above names the refs the run
+                was asked for, and a ref is a name that moves — a branch that
+                advanced after the review means the report is about a version
+                nobody can point at any more. The CLI froze the endpoints before
+                the run, so the exact commit is known and belongs in the
+                document a reader forwards to someone else. */}
+            {resultOrigin?.pinnedCommit && (
+              <p className="text-meta text-faint">
+                审查版本{" "}
+                <span className="font-mono text-muted" title={resultOrigin.pinnedCommit}>
+                  commit {shortRef(resultOrigin.pinnedCommit)}
+                </span>
+                <span className="ml-1">· 固定到审查当时的那一版，之后分支再前进也不影响这份报告</span>
+              </p>
             )}
           </div>
 
