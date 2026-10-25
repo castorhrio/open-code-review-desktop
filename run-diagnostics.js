@@ -20,11 +20,32 @@
 // diagnostic must never be able to break a run or a session load.
 
 const fs = require("fs");
+const fsp = require("fs/promises");
 const path = require("path");
 
 const VERSION = 1;
 const MAX_ENTRIES = 200;
 const LIMIT_WARNING = "review_limit_reached";
+
+/**
+ * `record()` / `remove()` answer with an outcome instead of a bare boolean.
+ *
+ * - `clean`      nothing needed writing (a run with no evidence, or a delete
+ *                that found nothing) — success, and silent
+ * - `written`    the evidence landed where a reopened session will look
+ * - `no-session` there was evidence but no session id to file it under
+ * - `io-error`   there was something to write and the disk refused it
+ *
+ * The two failures used to share one `false`, so `main.js` could only warn
+ * about both or neither. They are not the same news: an `io-error` means the
+ * truncation warning is gone after a restart *and nobody chose that*, which is
+ * worth a line in the log; `no-session` (scan runs, or a CLI that printed no
+ * session id) is a known shape and warning about it every run is noise.
+ */
+const OK_WITHOUT_WRITING = { ok: true, reason: "clean" };
+const OK_WRITTEN = { ok: true, reason: "written" };
+const NO_SESSION = { ok: false, reason: "no-session" };
+const IO_ERROR = { ok: false, reason: "io-error" };
 
 /**
  * The same repository, however the caller spelled it.
@@ -56,6 +77,30 @@ function normalizeRepo(repo) {
 function createStore(file) {
   const key = (repo, sessionId) => `${normalizeRepo(repo)}\u0000${sessionId || ""}`;
 
+  /**
+   * One write at a time, in the order the caller asked for it.
+   *
+   * Every write here is a whole-file read-modify-write, so two overlapping ones
+   * lose an entry: both read the same list, both append their own, and whichever
+   * rename lands second silently drops the other. That is exactly the evidence
+   * the store exists to protect — two runs finishing close together (one per
+   * window, or one recording while another is deleted) is a normal shape, not a
+   * corner case.
+   *
+   * `then(fn, fn)` runs the task whether or not its predecessor settled, because
+   * both a record and a remove have to happen; the chain is re-armed on failure
+   * so one unexpected throw cannot poison every later write.
+   */
+  let queue = Promise.resolve();
+  function serialize(fn) {
+    const run = queue.then(fn, fn);
+    queue = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
+  }
+
   function readAll() {
     try {
       const raw = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -76,20 +121,27 @@ function createStore(file) {
    * again. So the outcome is returned rather than assumed, and the caller
    * (`main.js`) is the one deciding what to do about it.
    */
-  function writeAll(entries) {
+  async function writeAll(entries) {
     const data = JSON.stringify({ version: VERSION, entries });
     try {
-      fs.mkdirSync(path.dirname(file), { recursive: true });
+      await fsp.mkdir(path.dirname(file), { recursive: true });
       const tmp = `${file}.tmp`;
-      fs.writeFileSync(tmp, data, "utf8");
+      // Async on purpose: this file lives in the profile directory, which can be
+      // a network mount, and a synchronous write there freezes the whole main
+      // process — including every window — for as long as the disk takes. It
+      // also gives the queue above something to actually serialise: the
+      // read-modify-write now straddles a real suspension point, so two
+      // unsequenced records would both read the same list and the second rename
+      // would drop the first one's entry.
+      await fsp.writeFile(tmp, data, "utf8");
       try {
-        fs.renameSync(tmp, file);
+        await fsp.rename(tmp, file);
       } catch (_) {
         // Windows refuses to rename over an existing file; writing in place is
         // still better than losing the record.
-        fs.writeFileSync(file, data, "utf8");
+        await fsp.writeFile(file, data, "utf8");
         try {
-          fs.unlinkSync(tmp);
+          await fsp.unlink(tmp);
         } catch (_) {}
       }
       return true;
@@ -101,31 +153,29 @@ function createStore(file) {
   /**
    * Record only when the run has truncation evidence; clean runs are not kept.
    *
-   * Returns whether the evidence is where a reopened session will look for it.
-   * `true` covers both "written" and "nothing needed writing" — a clean run is
-   * not a failure. `false` means evidence existed and did not land: the disk
-   * refused the write, or there is no session id to file it under. The caller
-   * cannot tell those apart from a return value alone, and does not need to —
-   * either way the truncation warning is gone after a restart, which is the one
-   * thing worth a line in the log.
+   * Returns a promise of `{ ok, reason }` (see the vocabulary at the top of this
+   * file). The promise settles after the write, so a caller that needs to know
+   * before the renderer can ask for the session's diagnostics can await it.
    */
   function record(repo, sessionId, result) {
-    if (!result || typeof result !== "object") return true;
-    const warnings = Array.isArray(result.warnings)
-      ? result.warnings
-          .filter((w) => w && w.type === LIMIT_WARNING)
-          .map((w) => ({ type: LIMIT_WARNING, ...(w.file ? { file: String(w.file) } : {}) }))
-      : [];
-    const budget = Boolean(result.summary && result.summary.budget_exceeded);
-    if (!warnings.length && !budget) return true;
-    if (!sessionId) return false;
+    return serialize(async () => {
+      if (!result || typeof result !== "object") return OK_WITHOUT_WRITING;
+      const warnings = Array.isArray(result.warnings)
+        ? result.warnings
+            .filter((w) => w && w.type === LIMIT_WARNING)
+            .map((w) => ({ type: LIMIT_WARNING, ...(w.file ? { file: String(w.file) } : {}) }))
+        : [];
+      const budget = Boolean(result.summary && result.summary.budget_exceeded);
+      if (!warnings.length && !budget) return OK_WITHOUT_WRITING;
+      if (!sessionId) return NO_SESSION;
 
-    const entries = readAll().filter((e) => key(e.repo, e.session_id) !== key(repo, sessionId));
-    // Stored canonical, so the file does not accumulate one entry per spelling.
-    entries.push({ repo: normalizeRepo(repo), session_id: sessionId, warnings, budget_exceeded: budget });
-    // Insertion order is the age order; keeping the tail drops the oldest and
-    // keeps the newest, without a timestamp that can tie inside one millisecond.
-    return writeAll(entries.slice(-MAX_ENTRIES));
+      const entries = readAll().filter((e) => key(e.repo, e.session_id) !== key(repo, sessionId));
+      // Stored canonical, so the file does not accumulate one entry per spelling.
+      entries.push({ repo: normalizeRepo(repo), session_id: sessionId, warnings, budget_exceeded: budget });
+      // Insertion order is the age order; keeping the tail drops the oldest and
+      // keeps the newest, without a timestamp that can tie inside one millisecond.
+      return (await writeAll(entries.slice(-MAX_ENTRIES))) ? OK_WRITTEN : IO_ERROR;
+    });
   }
 
   function read(repo, sessionId) {
@@ -140,11 +190,15 @@ function createStore(file) {
     return { warnings, budget_exceeded: Boolean(found.budget_exceeded) };
   }
 
+  /** Queued like `record`, so a delete cannot race a write for the same file. */
   function remove(repo, sessionId) {
-    if (!sessionId) return;
-    const entries = readAll();
-    const kept = entries.filter((e) => key(e.repo, e.session_id) !== key(repo, sessionId));
-    if (kept.length !== entries.length) writeAll(kept);
+    return serialize(async () => {
+      if (!sessionId) return NO_SESSION;
+      const entries = readAll();
+      const kept = entries.filter((e) => key(e.repo, e.session_id) !== key(repo, sessionId));
+      if (kept.length === entries.length) return OK_WITHOUT_WRITING;
+      return (await writeAll(kept)) ? OK_WRITTEN : IO_ERROR;
+    });
   }
 
   return { record, read, remove };
