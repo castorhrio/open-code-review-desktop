@@ -493,6 +493,71 @@ check(
   JSON.stringify(empty.missing)
 );
 
+/* ---- the sentence and the gap list must agree ----
+ * `missing` is the machine-readable copy of the sentence shown next to the
+ * readiness badge, and the two used to be computed by separate code: the list
+ * looked at the `llm` section only, while the sentence told *any* selected
+ * provider that it lacked an API Key. A custom provider with an empty entry
+ * therefore offered one gap to fill, and it was the wrong one. The four
+ * endpoint/model combinations are asserted value by value, so the failure lands
+ * on the field that moved rather than on "the view changed".
+ */
+const gapOf = (view) => view.missing.join(",");
+const onlyEndpoint = readiness({ llm: { url: llm.url } });
+check(
+  "an endpoint without a model names the model",
+  gapOf(onlyEndpoint) === "model,credential" && /缺少模型名/.test(onlyEndpoint.blockedReason),
+  `${gapOf(onlyEndpoint)} | ${onlyEndpoint.blockedReason}`
+);
+const onlyModel = readiness({ llm: { model: "qwen3-max" } });
+check(
+  "a model without an endpoint names the endpoint",
+  gapOf(onlyModel) === "baseUrl,credential" && /缺少服务端点/.test(onlyModel.blockedReason),
+  `${gapOf(onlyModel)} | ${onlyModel.blockedReason}`
+);
+const bothLlm = readiness({ llm });
+check(
+  "endpoint and model together leave only the Key",
+  gapOf(bothLlm) === "credential" &&
+    /缺少 API Key/.test(bothLlm.blockedReason) &&
+    !/缺少服务端点|缺少模型名/.test(bothLlm.blockedReason),
+  `${gapOf(bothLlm)} | ${bothLlm.blockedReason}`
+);
+const nothing = readiness({});
+check(
+  "nothing at all configured names all three, and blames no single one",
+  gapOf(nothing) === "baseUrl,model,credential" && /未选择模型服务/.test(nothing.blockedReason),
+  `${gapOf(nothing)} | ${nothing.blockedReason}`
+);
+// A Key that is already saved is not a gap. The list used to append "credential"
+// unconditionally for an `llm` section, so a saved token was asked for twice.
+const keyOnlyLlm = readiness({ llm: { auth_token: "t" } });
+check(
+  "a Key that is already saved is not listed as missing",
+  gapOf(keyOnlyLlm) === "baseUrl,model" && !/API Key/.test(keyOnlyLlm.missing.join(",")),
+  `${gapOf(keyOnlyLlm)} | ${keyOnlyLlm.blockedReason}`
+);
+// A provider entry carries its own url and model — the case the old code could
+// not see at all, because it only ever read `raw.llm` for those two answers.
+const bareProvider = readiness({ provider: "corp-gateway", custom_providers: { "corp-gateway": {} } });
+check(
+  "a selected provider with an empty entry names its endpoint and model too",
+  gapOf(bareProvider) === "baseUrl,model,credential" && /缺少服务端点/.test(bareProvider.blockedReason),
+  `${gapOf(bareProvider)} | ${bareProvider.blockedReason}`
+);
+const providerModelOnly = readiness(gatewayConfig({ model: "qwen3-max" }));
+check(
+  "a provider that carries a model is not told the model is missing",
+  gapOf(providerModelOnly) === "baseUrl,credential" && /缺少服务端点/.test(providerModelOnly.blockedReason),
+  `${gapOf(providerModelOnly)} | ${providerModelOnly.blockedReason}`
+);
+const providerUrlOnly = readiness(gatewayConfig({ url: gateway.url }));
+check(
+  "a provider that carries a URL is not told the URL is missing",
+  gapOf(providerUrlOnly) === "model,credential" && /缺少模型名/.test(providerUrlOnly.blockedReason),
+  `${gapOf(providerUrlOnly)} | ${providerUrlOnly.blockedReason}`
+);
+
 const rules = await svc.rulesCheck(dir, "a.go", "");
 check("rulesCheck answers without throwing", typeof rules.ok === "boolean", JSON.stringify(rules).slice(0, 120));
 

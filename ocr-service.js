@@ -158,6 +158,21 @@ const ENV_SOURCES = [
   ["ANTHROPIC_MODEL", "model"],
 ];
 
+// A gap is named once, here: `missing` carries the keys and the sentence next to
+// the readiness badge is built from the same list, so the two cannot drift apart
+// (they used to: the list knew about a missing endpoint, the sentence did not).
+const GAP_LABEL = { baseUrl: "服务端点", model: "模型名", credential: "API Key" };
+// Chinese run straight into a latin word would read as one token ("缺少API Key"),
+// so an ASCII label carries a leading space, and the last one is introduced with
+// 和 rather than the enumeration comma.
+const listText = (labels) =>
+  labels.reduce((text, label, i) => {
+    const ascii = /^[A-Za-z]/.test(label);
+    const word = ascii ? ` ${label}` : label;
+    if (i === 0) return word;
+    return `${text}${ascii && i === labels.length - 1 ? "和" : "、"}${word}`;
+  }, "");
+
 function readConfigView({ configPath = CONFIG_PATH, env = process.env } = {}) {
   let raw = {};
   let fileExists = false;
@@ -197,26 +212,42 @@ function readConfigView({ configPath = CONFIG_PATH, env = process.env } = {}) {
     envCredentials,
   };
   const hasEntryKey = entryHasCredential(entry);
-  const hasLlmEndpoint = Boolean(llmRaw.url);
   const hasLlmKey = Boolean(llmRaw.auth_token || llmRaw.auth_token_cmd);
-  const hasModel = Boolean(llmRaw.model || raw.model);
+  // A provider entry carries its own endpoint and model, and the environment can
+  // supply them too, so all three places count. Reading only the `llm` section
+  // here made a selected provider with neither a URL nor a model report a single
+  // gap — the Key — and the settings page sent the user to add an API key while
+  // the endpoint was the actual hole.
+  const hasEndpoint = Boolean(llmRaw.url || String(entry.url || "").trim()) || envHasEndpoint;
+  const hasModel =
+    Boolean(llmRaw.model || raw.model || String(entry.model || "").trim()) || envHasModel;
+  const hasCredential = Boolean(envCredentials.length || (active && hasEntryKey) || hasLlmKey);
   view.configured = Boolean(active || llmRaw.url || llmRaw.model);
   view.ready = Boolean(
-    envCredentials.length || (active && hasEntryKey) || (hasLlmEndpoint && hasLlmKey)
+    envCredentials.length || (active && hasEntryKey) || (Boolean(llmRaw.url) && hasLlmKey)
   );
-  if (view.ready) view.blockedReason = "";
-  else if (active) view.blockedReason = `已选服务 ${active}，但缺少 API Key`;
-  else if (hasLlmEndpoint || envHasEndpoint) view.blockedReason = "已配置服务端点，但缺少 API Key";
-  else view.blockedReason = "未选择模型服务";
+  // One list, in the order the user should fill the gaps, and the sentence is
+  // read back off it — a Key that is already saved is not reported as missing.
   view.missing = view.ready
     ? []
-    : active
-      ? ["credential"]
-      : [
-          ...(hasLlmEndpoint || envHasEndpoint ? [] : ["baseUrl"]),
-          ...(hasModel || envHasModel ? [] : ["model"]),
-          "credential",
-        ];
+    : [
+        ...(hasEndpoint ? [] : ["baseUrl"]),
+        ...(hasModel ? [] : ["model"]),
+        ...(hasCredential ? [] : ["credential"]),
+      ];
+  const gapText = listText(view.missing.map((key) => GAP_LABEL[key] || key));
+  const configuredParts = [
+    hasEndpoint && "服务端点",
+    hasModel && "模型名",
+    hasCredential && "API Key",
+  ].filter(Boolean);
+  if (view.ready) view.blockedReason = "";
+  // `|| "必要配置"` is the belt: a not-ready view always has at least one gap, and
+  // a sentence ending in 但缺少 with nothing after it is worse than a vague one.
+  else if (active) view.blockedReason = `已选服务 ${active}，但缺少${gapText || "必要配置"}`;
+  else if (configuredParts.length)
+    view.blockedReason = `已配置${listText(configuredParts)}，但缺少${gapText || "必要配置"}`;
+  else view.blockedReason = "未选择模型服务";
   return view;
 }
 
