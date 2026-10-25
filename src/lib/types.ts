@@ -1,7 +1,7 @@
-// Contracts verified against @alibaba-group/open-code-review v1.12.13
+// Contracts verified against @alibaba-group/open-code-review v1.13.3
 // (`ocr review --help`, `ocr scan --help`, real `--format json` payloads and the
 // upstream structs in cmd/opencodereview/output.go, internal/model/review.go,
-// internal/session/{list,manifest}.go).
+// internal/llmloop/pool.go, internal/session/{list,manifest}.go).
 
 export type ReviewMode = "workspace" | "range" | "commit" | "scan";
 
@@ -76,6 +76,20 @@ export interface RunManifest {
   elapsed_ms?: number;
 }
 
+/**
+ * llmloop.AgentWarning — one non-fatal warning recorded during a subtask.
+ *
+ * `type` is the CLI's own vocabulary, and the app reads exactly one of them:
+ * `review_limit_reached`, which upstream v1.13.1 added to say that a declared
+ * limit (the tool-request rounds, or the aggregate token budget) spent the main
+ * loop's last round and sent the task into its grace round.
+ */
+export interface AgentWarning {
+  file?: string;
+  message?: string;
+  type?: string;
+}
+
 export interface RunResult {
   status?: TerminalState | string;
   llm?: { provider?: string; model?: string };
@@ -84,7 +98,7 @@ export interface RunResult {
   tool_calls?: { total?: number; by_tool?: Record<string, number>; failure?: number; failure_by_tool?: Record<string, number> };
   comments?: Finding[] | null;
   groups?: { label: string; files: string[] }[];
-  warnings?: unknown[];
+  warnings?: AgentWarning[];
   project_summary?: string;
   resume?: { resumed_from: string; reused_files: number; rerun_files: number };
   session_id?: string;

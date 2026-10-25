@@ -121,6 +121,42 @@ export function coverageOf(value: RunResult | null | undefined, kind: "failed" |
   return (value?.manifest?.coverage?.[kind] ?? []) as { item_id: string; path?: string; reason?: string; classification?: string }[];
 }
 
+/**
+ * The CLI's warning type for "a declared limit truncated this run".
+ *
+ * Upstream v1.13.1 added it: when the main loop spends its last tool-request
+ * round — or the aggregate token budget — the task is sent into a grace round
+ * that only offers `code_comment` and `task_done`, and the CLI records
+ * `review_limit_reached` so a spent limit stays visible. It covers the round
+ * budget too, which `summary.budget_exceeded` does not: that flag is only set
+ * for the *token* budget.
+ */
+export const WARNING_REVIEW_LIMIT = "review_limit_reached";
+
+/**
+ * Whether this run was cut short by a limit, and so cannot be read as a complete
+ * one.
+ *
+ * The app's own promise is that a truncated run never looks like a clean one
+ * (README, "Honest run status"), and "clean" is the claim this app makes most
+ * strongly — a review that found nothing is rendered as a finished, good
+ * result. That claim is only supported when the run was allowed to finish, so
+ * the two structured signals the CLI emits are checked rather than the comment
+ * count alone: the `review_limit_reached` warning, and `summary.budget_exceeded`
+ * for the token budget (upstream v1.13.1 made that flag correct for `scan`
+ * runs too, which used to report a budget stop as `false`).
+ *
+ * The CLI also says it in its own `message` ("A review limit was reached before
+ * finishing; some findings may be missing."), but that is prose in English and
+ * is not read here — a wording change upstream must not change what the app
+ * claims.
+ */
+export function runLimitReached(value: RunResult | null | undefined): boolean {
+  if (!value) return false;
+  if (value.summary?.budget_exceeded) return true;
+  return (value.warnings ?? []).some((w) => w?.type === WARNING_REVIEW_LIMIT);
+}
+
 export function needsContinuation(value: RunResult): boolean {
   const st = terminalState(value);
   return st === "partial" || st === "failed" || coverageOf(value, "failed").length > 0;

@@ -1793,6 +1793,82 @@ await shoot(page, "37-results-clean", {
   },
 });
 
+// A run that was cut short by a declared limit is not a clean run, even when
+// it found nothing.
+//
+// Upstream v1.13.1 added the `review_limit_reached` warning: when the main
+// loop spends its last tool-request round — or the aggregate token budget — the
+// task is sent into a grace round that only offers `code_comment` and
+// `task_done`, and the file is recorded as *completed*. The CLI reports such a
+// run as a success, and the warning is the only trace of the limit; before
+// v1.13.1 not even that existed, and the CLI's own message said "No comments
+// generated. Looks good to me." for a run that had been cut off.
+//
+// The app read "zero findings" as "your code is fine" and rendered it as a
+// finished, good result. That is the strongest claim this app makes, and a
+// truncated run cannot support it — the promise in the README is that a
+// truncated run never looks like a clean one. So the limit is read from the
+// CLI's structured signal, not from its English prose, and the empty state
+// says what actually happened.
+//
+// The fixture is the CLI's own shape for it: `status: "success"`,
+// `terminal_state: "success"`, zero comments, one `review_limit_reached`
+// warning. The status is deliberately a success — that is what the CLI reports
+// — so nothing but the warning can tell the two apart.
+await shoot(page, "80-results-limit-reached", {
+  query: "?limit=1&run=done",
+  after: async (page) => {
+    await nav("审查")(page);
+    await page.waitForTimeout(1600);
+    await page.getByRole("button", { name: /开始审查/ }).click();
+    await page.waitForTimeout(5200);
+  },
+  expect: async (page) => {
+    const text = await page.locator("main").innerText();
+    const out = [];
+    if (/这次审查没有提出问题/.test(text))
+      out.push("a run that stopped at a review limit is still rendered as a clean review");
+    if (!/达到上限/.test(text)) out.push("the run does not say that it stopped at a limit");
+    if (!/可能没被审到/.test(text)) out.push("the run does not say that findings may be missing");
+    if (!/已达审查上限/.test(text)) out.push("the header does not mark the truncated run");
+    // The same shape as a clean review: no master-detail grid over an empty
+    // list, and no severity filters over findings that do not exist.
+    const shape = await page.evaluate(() => ({
+      panes: document.querySelectorAll('main div[class*="grid-cols-[minmax(240px"]').length,
+      chips: [...document.querySelectorAll("main button")].filter((b) => /^(严重|高|中|低|未标注)$/.test((b.textContent || "").trim())).length,
+    }));
+    if (shape.panes) out.push(`a truncated run still renders the ${shape.panes} master-detail pane(s) over an empty list`);
+    if (shape.chips) out.push(`a truncated run still shows ${shape.chips} severity filter chips over a list that does not exist`);
+    if (!/回审查页换范围/.test(text)) out.push("a truncated run does not offer the action that ends it");
+    return out;
+  },
+});
+
+// The same run, read as a document. The report surface carries its own copy of
+// the zero-finding sentence, and the README's own rule is that the two results
+// surfaces must not drift — so the limit is asserted on both, not just on the
+// one the previous shot happened to open.
+await shoot(page, "81-report-limit-reached", {
+  query: "?limit=1&run=done",
+  after: async (page) => {
+    await nav("审查")(page);
+    await page.waitForTimeout(1600);
+    await page.getByRole("button", { name: /开始审查/ }).click();
+    await page.waitForTimeout(5200);
+    await page.getByRole("button", { name: "阅读", exact: true }).click();
+    await page.waitForTimeout(600);
+  },
+  expect: async (page) => {
+    const text = await page.locator("main").innerText();
+    const out = [];
+    if (/这次审查没有提出问题/.test(text))
+      out.push("the report still calls a limit-truncated run a clean review");
+    if (!/达到上限/.test(text)) out.push("the report does not say that the run stopped at a limit");
+    if (!/可能没被审到/.test(text)) out.push("the report does not say that findings may be missing");
+    return out;
+  },
+});
+
 // A finished review used to land on two empty panes ("在左侧选择一条评论"), so
 // the highest-value content needed a click before it existed on screen. Opening
 // the most severe finding is asserted here rather than assumed: the fixture's

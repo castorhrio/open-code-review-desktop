@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Download, ExternalLink, FileCode2, FolderOpen, Search, Sparkles, Wrench, Copy, BookOpenText } from "lucide-react";
+import { Download, ExternalLink, FileCode2, FolderOpen, Search, Sparkles, TriangleAlert, Wrench, Copy, BookOpenText } from "lucide-react";
 import { api, type FileWindow } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import { SEVERITY_DOT, SEVERITY_LABEL, SEVERITY_RANK, SEVERITY_TEXT, STATUS, coverageOf, summaryLine, terminalState } from "@/lib/format";
+import { SEVERITY_DOT, SEVERITY_LABEL, SEVERITY_RANK, SEVERITY_TEXT, STATUS, coverageOf, runLimitReached, summaryLine, terminalState } from "@/lib/format";
 import { copyText } from "@/lib/clipboard";
 import type { Finding } from "@/lib/types";
 import { useStore } from "@/store";
@@ -418,8 +418,17 @@ export function ResultsPanel() {
   const waived = coverageOf(result, "waived");
   const sessionId = result.session_id || "";
 
-  // A run that found nothing is a result, and it is rendered as one (see below).
-  const clean = comments.length === 0;
+  // A run that found nothing is a result, and it is rendered as one (see below)
+  // — but only if it was allowed to finish. The CLI records a
+  // `review_limit_reached` warning when a declared limit (the tool-request
+  // rounds, or the token budget) sent a task into its grace round, and sets
+  // `summary.budget_exceeded` for the token budget — so a run that stopped at a
+  // limit may be missing findings, and reading it as "没有提出问题" would be an
+  // affirmative claim the run cannot support. `noFindings` decides the layout
+  // (there is no list to triage); `limited` decides what the empty state is
+  // allowed to say.
+  const noFindings = comments.length === 0;
+  const limited = runLimitReached(result);
 
   const exportJson = async () => {
     const res = await api.saveText({
@@ -485,6 +494,10 @@ export function ResultsPanel() {
             </span>
           ) : null}
           {s.budget_exceeded && <span className="text-warn">已触达 token 上限</span>}
+          {/* A limit that is not the token budget — the tool-request rounds — has
+              no flag of its own, only the CLI's `review_limit_reached` warning.
+              Without this the run looked complete while files went unreviewed. */}
+          {limited && !s.budget_exceeded && <span className="text-warn">已达审查上限</span>}
           {(result.warnings?.length ?? 0) > 0 && <span className="text-warn">{result.warnings?.length} 条警告</span>}
         </div>
         <div className="ml-auto flex items-center gap-1.5">
@@ -557,7 +570,7 @@ export function ResultsPanel() {
         </div>
       )}
 
-      {!clean && (
+      {!noFindings && (
       <PanelHeader tone="canvas">
         <div className="flex items-center gap-1">
           {SEVERITIES.map((sev) => (
@@ -617,16 +630,25 @@ export function ResultsPanel() {
           same content, nothing hidden behind a breakpoint, and at 1000px the
           reading column ends up ~660px wide — wider than the 568px the code
           pane got at 1440px before this. */}
-      {clean ? (
+      {noFindings ? (
         <EmptyState
           className="min-h-0 flex-1"
-          icon={<FileCode2 className="size-8 text-faint" />}
-          title="这次审查没有提出问题。"
+          icon={limited ? <TriangleAlert className="size-8 text-warn" /> : <FileCode2 className="size-8 text-faint" />}
+          title={limited ? "这次审查在达到上限时停下，没有提出问题。" : "这次审查没有提出问题。"}
           description={
             <>
               <p className="text-meta text-faint">
                 已审 {String(s.files_reviewed ?? "—")} 个文件。范围不对的话，换个模式或改小排除规则再跑一次。
               </p>
+              {limited && (
+                /* The CLI stopped at a declared limit (the tool-request rounds or
+                   the token budget), so "nothing was found" is not "nothing was
+                   there" — some files may never have been looked at. The upstream
+                   fix is the signal this reads; the wording is the app's own. */
+                <p className="mt-1 text-meta text-warn">
+                  审查在达到上限时停下，后面的文件可能没被审到；提上限额或缩小范围再跑一次。
+                </p>
+              )}
               {failed.length > 0 && (
                 <p className="mt-1 text-meta text-warn">其中 {failed.length} 个文件没有审完，上方有提示。</p>
               )}
@@ -643,33 +665,24 @@ export function ResultsPanel() {
         <ScrollArea tone="canvas" className="min-h-0">
           {filtered.length === 0 && (
             <div className="p-6 text-center">
-              {comments.length === 0 ? (
-                <>
-                  {/* A review that found nothing is a result, not an empty screen.
-                      Saying only "没有匹配的评论" made a clean run look like a
-                      filter had eaten it. */}
-                  <p className="text-body text-ink">这次审查没有提出问题。</p>
-                  <p className="mt-1 text-meta text-faint">
-                    已审 {String(s.files_reviewed ?? "—")} 个文件。范围不对的话，换个模式或改小排除规则再跑一次。
-                  </p>
-                </>
-              ) : (
-                <>
-                  <p className="text-body text-muted">没有匹配当前筛选的评论。</p>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="mt-2"
-                    onClick={() => {
-                      setSevOn(new Set(SEVERITIES));
-                      setCat("");
-                      setText("");
-                    }}
-                  >
-                    清除筛选
-                  </Button>
-                </>
-              )}
+              {/* The grid only renders when there are findings, so an empty list
+                  here means the filters hid them — never a clean review. That
+                  sentence used to be duplicated in this branch as well, and the
+                  two copies drifted: the one above the fold learned about a
+                  truncated run, this one kept calling it clean. */}
+              <p className="text-body text-muted">没有匹配当前筛选的评论。</p>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="mt-2"
+                onClick={() => {
+                  setSevOn(new Set(SEVERITIES));
+                  setCat("");
+                  setText("");
+                }}
+              >
+                清除筛选
+              </Button>
             </div>
           )}
           {filtered.map(({ c, i }) => {

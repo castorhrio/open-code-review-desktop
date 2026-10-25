@@ -1,5 +1,5 @@
 import { ArrowLeft, FileCode2, Sparkles } from "lucide-react";
-import { SEVERITY_RANK, STATUS, coverageOf, terminalState } from "@/lib/format";
+import { SEVERITY_RANK, STATUS, coverageOf, runLimitReached, terminalState } from "@/lib/format";
 import type { Finding } from "@/lib/types";
 import { copyText } from "@/lib/clipboard";
 import { useStore } from "@/store";
@@ -55,6 +55,9 @@ export function ReportView() {
   const waived = coverageOf(result, "waived");
   const groups = groupByPath(comments);
   const sessionId = result.session_id || "";
+  // A declared limit truncated this run, so it cannot be called a clean result
+  // just because it found nothing — see `runLimitReached`.
+  const limited = runLimitReached(result);
   // A session reopened from history carries a model but no provider (`ocr session
   // comments` returns findings only), so the line is assembled from what exists
   // rather than interpolated — `${undefined}` printed a literal "undefined".
@@ -134,10 +137,19 @@ export function ReportView() {
 
           {comments.length === 0 ? (
             <Card>
-              <p className="text-body text-ink">这次审查没有提出问题。</p>
+              {/* The same distinction the results screen makes: a run that found
+                  nothing is only a clean result if it was allowed to finish. */}
+              <p className="text-body text-ink">
+                {limited ? "这次审查在达到上限时停下，没有提出问题。" : "这次审查没有提出问题。"}
+              </p>
               <p className="mt-1 text-meta text-faint">
                 已审 {String(s.files_reviewed ?? "—")} 个文件。范围不对的话，换个模式或改小排除规则再跑一次。
               </p>
+              {limited && (
+                <p className="mt-1 text-meta text-warn">
+                  审查在达到上限时停下，后面的文件可能没被审到；提上限额或缩小范围再跑一次。
+                </p>
+              )}
             </Card>
           ) : (
             groups.map(({ path, findings }) => (

@@ -572,15 +572,25 @@ window.api = (() => {
   // shows after a run comes from this shape, so the success transition is only
   // real if the whole payload is here — not just the comments.
   // (No backticks anywhere below: the bridge is one template literal.)
+  //
+  // ?limit=1 is the shape upstream v1.13.1 made possible: a run that spent its
+  // last tool-request round, finished in the grace round, and found nothing.
+  // The CLI reports it as a *success* — the file did complete — and the only
+  // trace of the limit is the review_limit_reached warning it now records.
+  // Before that warning existed the run was indistinguishable from a clean one,
+  // and the app read "zero findings" as "your code is fine".
+  const LIMIT = q.get("limit") === "1";
   const RUN_RESULT = {
     status: "success",
     session_id: "9f2c41d0a7b34e58b1c6d7e8f9a0b1c2",
     llm: { provider: "deepseek", model: "deepseek-v4-pro" },
-    comments: D.FINDINGS,
-    project_summary: D.SUMMARY,
-    summary: { files_reviewed: 5, comments: 5, total_tokens: 412880, input_tokens: 401000, output_tokens: 11880, elapsed: "3m48s" },
+    comments: LIMIT ? [] : D.FINDINGS,
+    project_summary: LIMIT ? undefined : D.SUMMARY,
+    summary: { files_reviewed: 5, comments: LIMIT ? 0 : 5, total_tokens: 412880, input_tokens: 401000, output_tokens: 11880, elapsed: "3m48s" },
     manifest: { schema_version: "1", run_id: "9f2c41d0", operation: "review", terminal_state: "success", coverage: { failed: [], waived: [] } },
-    warnings: [],
+    warnings: LIMIT
+      ? [{ type: "review_limit_reached", file: "internal/service/auth/login.go", message: "max tool rounds reached; task_done" }]
+      : [],
   };
   const replay = () => {
     const step = LONG ? 40 : 130;

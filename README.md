@@ -10,7 +10,7 @@ The review engine is the official, **unmodified** `ocr` binary. This project onl
 
 ## Status
 
-`v0.1.10` (latest) — usable, verified against `ocr v1.12.13`.
+`v0.1.13` (latest) — usable, verified against `ocr v1.13.3`.
 
 Verified end-to-end against the real CLI, without spending tokens:
 
@@ -26,6 +26,7 @@ Verified end-to-end against the real CLI, without spending tokens:
 - `ocr llm test` against a live provider, including the tool-call round trip
 - the two results surfaces at four figures: `?huge=1` mounts 1200 findings — every row in the triage list, every block in 阅读 — in 405ms, asserted against an 8s ceiling; neither virtualises, and that measurement is the reason
 - rendering at 125% and 150% system scale: the visual audit re-runs its eight tightest shots at both device pixel ratios, green at each
+- a run cut short by a limit is not clean: the CLI's `review_limit_reached` warning (upstream v1.13.1) and `summary.budget_exceeded` are read, so a run that stopped at the limit and found nothing says so instead of claiming the code is fine — on both results surfaces
 
 **Verified 2026-10-13**: a real full scan (12 files, 8 comments, 173K tokens, 1m41s) emitted a sectioned `project_summary`, and the band rendered that real text, capped and faded. Whether a run emits one is the CLI's decision — a workspace run over the same repo with 2 comments emitted none — so this project promises only to render it when present. Sessions still never persist it, so a session result showing no band remains correct behaviour, not missing rendering. A real review's findings themselves do render — a completed scan's 4 comments were loaded from its session and shown in the results list.
 
