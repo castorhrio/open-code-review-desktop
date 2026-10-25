@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/form";
 import { EmptyState, PanelHeader, ScrollArea } from "@/components/ui/layout";
 import { Badge } from "@/components/ui/overlay";
-import { CodeBlock, CoverageNotice, MarkdownLite, findingToMarkdown } from "@/components/finding";
+import { CodeBlock, CoverageNotice, MarkdownLite, RunLimitNotice, findingToMarkdown } from "@/components/finding";
 import { toast } from "sonner";
 
 const SEVERITIES = ["critical", "high", "medium", "low", ""] as const;
@@ -630,6 +630,12 @@ export function ResultsPanel() {
         }
       />
 
+      <RunLimitNotice
+        result={result}
+        subject={resultOrigin?.kind === "session" ? "该会话" : "本次结果"}
+        className="shrink-0 border-b border-warn/25"
+      />
+
       {result.project_summary && (
         <div className="shrink-0 border-b border-line bg-surface px-4 py-3">
           <div className="mb-2 flex items-center gap-1.5">
@@ -724,15 +730,6 @@ export function ResultsPanel() {
               <p className="text-meta text-faint">
                 已审 {String(s.files_reviewed ?? "—")} 个文件。范围不对的话，换个模式或改小排除规则再跑一次。
               </p>
-              {limited && (
-                /* The CLI stopped at a declared limit (the tool-request rounds or
-                   the token budget), so "nothing was found" is not "nothing was
-                   there" — some files may never have been looked at. The upstream
-                   fix is the signal this reads; the wording is the app's own. */
-                <p className="mt-1 text-meta text-warn">
-                  审查在达到上限时停下，后面的文件可能没被审到；提上限额或缩小范围再跑一次。
-                </p>
-              )}
               {failed.length > 0 && (
                 <p className="mt-1 text-meta text-warn">其中 {failed.length} 个文件没有审完，上方有提示。</p>
               )}

@@ -598,14 +598,19 @@ window.api = (() => {
   // trace of the limit is the review_limit_reached warning it now records.
   // Before that warning existed the run was indistinguishable from a clean one,
   // and the app read "zero findings" as "your code is fine".
+  // ?limit=1&findings=1 is the same run with findings: a truncated review is
+  // not a clean one just because it found something, and its report must say
+  // what it could not cover.
   const LIMIT = q.get("limit") === "1";
+  const LIMIT_FINDINGS = LIMIT && q.get("findings") === "1";
+  const LIMIT_EMPTY = LIMIT && !LIMIT_FINDINGS;
   const RUN_RESULT = {
     status: "complete",
     session_id: "9f2c41d0a7b34e58b1c6d7e8f9a0b1c2",
     llm: { provider: "deepseek", model: "deepseek-v4-pro" },
-    comments: LIMIT ? [] : D.FINDINGS,
-    project_summary: LIMIT ? undefined : D.SUMMARY,
-    summary: { files_reviewed: 5, comments: LIMIT ? 0 : 5, total_tokens: 412880, input_tokens: 401000, output_tokens: 11880, elapsed: "3m48s" },
+    comments: LIMIT_EMPTY ? [] : D.FINDINGS,
+    project_summary: LIMIT_EMPTY ? undefined : D.SUMMARY,
+    summary: { files_reviewed: 5, comments: LIMIT_EMPTY ? 0 : 5, total_tokens: 412880, input_tokens: 401000, output_tokens: 11880, elapsed: "3m48s" },
     manifest: {
       schema_version: "ocr.run-manifest/v1",
       run_id: "9f2c41d0",

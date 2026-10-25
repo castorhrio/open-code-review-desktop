@@ -1994,6 +1994,50 @@ await shoot(page, "86-report-pinned-commit", {
   },
 });
 
+// A run that found something and then hit a limit is still not a complete
+// review. The empty-result case is covered by 80/81; when findings are on
+// screen the app used to show only a small 已达审查上限 chip in the header, and
+// the report said nothing at all — so the one document a user forwards read as
+// a complete review of the change. Both surfaces now carry the same band.
+await shoot(page, "87-results-limit-reached-with-findings", {
+  query: "?limit=1&findings=1&run=done",
+  after: async (page) => {
+    await nav("审查")(page);
+    await page.waitForTimeout(1600);
+    await page.getByRole("button", { name: /开始审查/ }).click();
+    await page.waitForTimeout(5200);
+  },
+  expect: async (page) => {
+    const text = await page.locator("main").innerText();
+    const out = [];
+    if (!/达到上限/.test(text)) out.push("a truncated run with findings does not say that it stopped at a limit");
+    if (!/可能没被审到/.test(text)) out.push("the results do not warn that later files may be missing");
+    if (!/已达审查上限/.test(text)) out.push("the header does not mark the truncated run");
+    if (!/密码校验用了普通的字符串比较/.test(text)) out.push("the findings the run did produce are missing");
+    return out;
+  },
+});
+
+await shoot(page, "88-report-limit-reached-with-findings", {
+  query: "?limit=1&findings=1&run=done",
+  after: async (page) => {
+    await nav("审查")(page);
+    await page.waitForTimeout(1600);
+    await page.getByRole("button", { name: /开始审查/ }).click();
+    await page.waitForTimeout(5200);
+    await page.getByRole("button", { name: "阅读", exact: true }).click();
+    await page.waitForTimeout(600);
+  },
+  expect: async (page) => {
+    const text = await page.locator("main").innerText();
+    const out = [];
+    if (!/这次审查在达到上限时停下/.test(text)) out.push("the report does not say that the run stopped at a limit");
+    if (!/可能没被审到/.test(text)) out.push("the report does not warn that later files may be missing");
+    if (!/密码校验用了普通的字符串比较/.test(text)) out.push("the report does not contain the findings the run did produce");
+    return out;
+  },
+});
+
 // A finished review used to land on two empty panes ("在左侧选择一条评论"), so
 // the highest-value content needed a click before it existed on screen. Opening
 // the most severe finding is asserted here rather than assumed: the fixture's

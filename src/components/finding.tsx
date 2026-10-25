@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
 import { cn } from "@/lib/cn";
-import type { Finding } from "@/lib/types";
+import type { Finding, RunResult } from "@/lib/types";
 import { copyText } from "@/lib/clipboard";
-import { SEVERITY_LABEL, SEVERITY_TEXT } from "@/lib/format";
+import { SEVERITY_LABEL, SEVERITY_TEXT, WARNING_REVIEW_LIMIT, runLimitReached } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 
 /**
@@ -148,6 +148,49 @@ export function CoverageNotice({
         </div>
       )}
       {resumeHint}
+    </div>
+  );
+}
+
+/**
+ * What a truncated run could not tell you.
+ *
+ * `review_limit_reached` (upstream v1.13.1) and `summary.budget_exceeded` say a
+ * declared limit stopped the run, but the CLI still reports it as a success —
+ * the files it did read are complete. With findings on screen the app used to
+ * show only a small 已达审查上限 chip, and the report showed nothing at all; a
+ * reader had no way to know the review stopped early and more files may be
+ * missing. Both surfaces render this band, so they cannot drift.
+ */
+export function RunLimitNotice({ result, subject, className }: { result: RunResult; subject: string; className?: string }) {
+  if (!runLimitReached(result)) return null;
+  const files = [
+    ...new Set(
+      (result.warnings ?? [])
+        .filter((w) => w?.type === WARNING_REVIEW_LIMIT && w.file)
+        .map((w) => w.file as string)
+    ),
+  ];
+  const budget = Boolean(result.summary?.budget_exceeded);
+  return (
+    <div className={cn("bg-warn/5 px-4 py-2.5 text-warn", className)}>
+      <div className="text-body font-medium">
+        这次审查在达到{budget ? " token 预算" : ""}上限时停下
+      </div>
+      <div className="mt-1 text-meta text-muted">
+        {subject}不等于全量审查：后面的文件可能没被审到。提高上限或缩小范围再跑一次。
+      </div>
+      {files.length > 0 && (
+        <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-meta text-muted">
+          <span className="shrink-0">触到上限：</span>
+          {files.slice(0, 8).map((f) => (
+            <span key={f} className="min-w-0 max-w-[420px] truncate font-mono text-faint" title={f}>
+              {f}
+            </span>
+          ))}
+          {files.length > 8 && <span className="shrink-0 text-faint">等 {files.length} 个文件</span>}
+        </div>
+      )}
     </div>
   );
 }

@@ -6,7 +6,7 @@ import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
 import { Card, PageBody, PanelHeader, ScrollArea } from "@/components/ui/layout";
 import { Badge } from "@/components/ui/overlay";
-import { CoverageNotice, FindingBlock, MarkdownLite, findingToMarkdown } from "@/components/finding";
+import { CoverageNotice, FindingBlock, MarkdownLite, RunLimitNotice, findingToMarkdown } from "@/components/finding";
 
 /** Files first, worst file first, findings in line order inside a file.
  *  A reviewer reads a changeset one file at a time; the flat severity list on
@@ -142,6 +142,12 @@ export function ReportView() {
             </Card>
           )}
 
+          {/* A report with findings used to read as complete even when a limit
+              cut the run short: the header said 完成 and nothing else mentioned
+              it. This is the document people forward, so it has to say what it
+              does not cover. */}
+          <RunLimitNotice result={result} subject="本次报告" className="rounded-md border border-warn/25" />
+
           <CoverageNotice
             failed={failed}
             waived={waived}
@@ -160,11 +166,6 @@ export function ReportView() {
               <p className="mt-1 text-meta text-faint">
                 已审 {String(s.files_reviewed ?? "—")} 个文件。范围不对的话，换个模式或改小排除规则再跑一次。
               </p>
-              {limited && (
-                <p className="mt-1 text-meta text-warn">
-                  审查在达到上限时停下，后面的文件可能没被审到；提上限额或缩小范围再跑一次。
-                </p>
-              )}
             </Card>
           ) : (
             groups.map(({ path, findings }) => (
