@@ -528,6 +528,55 @@ check(
   `${raw.entries.length} entries for ${new Set(raw.entries.map((e) => e.repo)).size} repositories`
 );
 
+/* ---- the cap is one number for the whole file ----
+ * The comment on MAX_ENTRIES says the cap is "across *all* repositories", and
+ * the trim happens on the whole file in insertion order. From a single
+ * repository that reads exactly like a per-repository cap — the file never
+ * holds more than MAX_ENTRIES records either way — so only two repositories
+ * can tell the two apart: under a per-repository cap the oldest record of the
+ * first repository would survive while the second one filled the file, and
+ * under the global one the oldest record of *either* repository goes.
+ * Nothing asserted this, so the comment could drift away from the code without
+ * any test going red.
+ */
+const capFile = path.join(dir, "cap", "run-diagnostics.json");
+const capStore = createStore(capFile);
+const capA = "/home/x/work/cap-a";
+const capB = "/home/x/work/cap-b";
+// MAX_ENTRIES + 1 records, alternating between the two repositories, so the
+// first one written is also the first one eligible for eviction.
+for (let i = 0; i < MAX_ENTRIES + 1; i++) {
+  await capStore.record(i % 2 === 0 ? capA : capB, `cap-${String(i).padStart(3, "0")}`, limitResult);
+}
+const capRaw = JSON.parse(fs.readFileSync(capFile, "utf8"));
+check("the cap is one number for the whole file", capRaw.entries.length === MAX_ENTRIES, `${capRaw.entries.length} entries`);
+const capACount = capRaw.entries.filter((e) => e.repo === normalizeRepo(capA)).length;
+const capBCount = capRaw.entries.filter((e) => e.repo === normalizeRepo(capB)).length;
+check(
+  "the two repositories share one budget",
+  capACount + capBCount === MAX_ENTRIES && capACount < MAX_ENTRIES && capBCount < MAX_ENTRIES,
+  `A=${capACount} B=${capBCount}`
+);
+check(
+  "the oldest record of the first repository is gone",
+  capStore.read(capA, "cap-000") === null,
+  JSON.stringify(capStore.read(capA, "cap-000"))
+);
+check(
+  "while the newest one is still there",
+  capStore.read(capA, `cap-${String(MAX_ENTRIES).padStart(3, "0")}`)?.warnings?.length === 1,
+  JSON.stringify(capStore.read(capA, `cap-${String(MAX_ENTRIES).padStart(3, "0")}`))
+);
+// The survivors are the global tail in the order they were written — not one
+// repository's oldest kept and another's dropped, which is what a per-repository
+// cap would produce.
+check(
+  "the survivors are the global tail, in the order they were written",
+  capRaw.entries[0]?.session_id === "cap-001" &&
+    capRaw.entries[capRaw.entries.length - 1]?.session_id === `cap-${String(MAX_ENTRIES).padStart(3, "0")}`,
+  `${capRaw.entries[0]?.session_id} .. ${capRaw.entries[capRaw.entries.length - 1]?.session_id}`
+);
+
 /* ---- two writes must not lose each other ----
  * Every write is a whole-file read-modify-write, and it now awaits a real disk
  * write in the middle of it. Two runs finishing close together (one per window,
