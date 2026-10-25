@@ -61,8 +61,12 @@ export function SettingsPanel() {
     }
   };
 
+  // 刷新 is the one gesture that has to retry: a failed `ocr llm providers` read
+  // is remembered for a short window so a re-render cannot spawn a doomed
+  // process, and this button is what the hint beside the badge tells the user to
+  // press — so it asks the main process to forget that window.
   const load = async () => {
-    await reloadConfig();
+    await reloadConfig({ refresh: true });
     toast("配置已刷新");
   };
 

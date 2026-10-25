@@ -479,6 +479,111 @@ check(
   `${registry.ok} | ${registry.error} | ${registry.names.slice(0, 4).join(",")}`
 );
 
+/* ---- one table, two questions ----
+ * The settings page lists name / protocol / base URL; the readiness view only
+ * needs the names. Those used to be two parsers over the same bytes — the page's
+ * stricter one (lowercase names, and no `matched` check) would have disagreed
+ * with this one the first time the CLI widened a column or shipped an
+ * underscored service name. Same function now, so assert they cannot drift.
+ */
+const parsedTable = svc.parseProviderTable(PROVIDER_TABLE);
+check(
+  "the provider list and the registry read the same rows",
+  parsedTable.rows.map((row) => row.name).join(",") === table.names.join(",") &&
+    parsedTable.matched === table.matched,
+  `${JSON.stringify(parsedTable.rows)} | ${parsedTable.matched} vs ${table.matched}`
+);
+check(
+  "and each row keeps the columns the settings page shows",
+  parsedTable.rows[0].protocol === "anthropic" &&
+    parsedTable.rows[0].url === "https://api.anthropic.com" &&
+    parsedTable.rows[1].url === "",
+  JSON.stringify(parsedTable.rows.slice(0, 2))
+);
+check(
+  "a table whose shape changed yields no rows for the page either",
+  svc.parseProviderTable("no table here").rows.length === 0 &&
+    svc.parseProviderTable("no table here").matched === 0
+);
+
+/* ---- a failed read is reported, not re-spawned on every ask ----
+ * The settings page asks for the built-in list beside every readiness view and on
+ * every refresh, so an uncached failure spawned one doomed process per
+ * interaction: a missing or broken binary turned a single broken read into a
+ * stream of them. The failure is remembered for a short window, and the 刷新
+ * button (the thing the hint beside the badge tells the user to press) clears it
+ * — a cached failure that refresh could not clear would make that hint a lie.
+ *
+ * `runner` and `now` exist for this check: no clock to wait on, no binary to
+ * break on purpose.
+ */
+const failingRunner = { code: 1, stdout: "", stderr: "Error: provider registry unavailable" };
+let spawns = 0;
+let clock = 0;
+const runner = async () => {
+  spawns += 1;
+  return failingRunner;
+};
+const now = () => clock;
+const readWith = (opts = {}) => svc.providerTable({ runner, now, ...opts });
+
+svc.resetPresetCache();
+const firstFail = await readWith({ refresh: true });
+check(
+  "a failed read says why instead of looking empty",
+  !firstFail.ok && /provider registry unavailable/.test(firstFail.error) && firstFail.rows.length === 0,
+  JSON.stringify(firstFail)
+);
+const secondFail = await readWith();
+check(
+  "and the next ask inside the window does not spawn again",
+  spawns === 1 && !secondFail.ok && secondFail.cached === true,
+  `${spawns} spawn(s) | ${JSON.stringify(secondFail)}`
+);
+const successRunner = async () => {
+  spawns += 1;
+  return { code: 0, stdout: PROVIDER_TABLE, stderr: "" };
+};
+const refreshedNow = await readWith({ refresh: true, runner: successRunner });
+check(
+  "an explicit refresh retries inside the window instead of replaying the failure",
+  refreshedNow.ok && refreshedNow.rows.length === 3 && refreshedNow.matched === 4 && refreshedNow.cached !== true && spawns === 2,
+  `${spawns} spawn(s) | ${JSON.stringify(refreshedNow).slice(0, 160)}`
+);
+check(
+  "a success is then reused without another spawn",
+  (await readWith()).ok === true && spawns === 2,
+  `${spawns} spawn(s)`
+);
+// The window itself, on a failure read with no refresh in between: it expires on
+// its own, so a transient failure (a spawn racing an update) does not need the
+// user to press anything.
+svc.resetPresetCache();
+spawns = 0;
+clock = 0;
+await readWith({ refresh: true });
+const withinWindow = await readWith();
+clock += svc.PRESET_FAILURE_TTL_MS;
+const afterWindow = await readWith();
+check(
+  "the window is a delay, not a lock: after it the CLI is asked again",
+  spawns === 2 && withinWindow.cached === true && !afterWindow.ok && afterWindow.cached !== true,
+  `${spawns} spawn(s) | ${JSON.stringify(afterWindow)}`
+);
+// Back to the real CLI: a cached failure must not outlive the failure.
+const afterFailure = await svc.presetNames({ refresh: true });
+check(
+  "the real list still reads back after a failed one was cached",
+  afterFailure.ok && !afterFailure.cached && afterFailure.names.includes("deepseek"),
+  `${afterFailure.ok} | ${afterFailure.error} | ${afterFailure.names.slice(0, 3).join(",")}`
+);
+const realTable = await svc.providerTable();
+check(
+  "and it carries the columns the settings page renders",
+  realTable.ok && realTable.rows.every((row) => row.name && row.protocol !== undefined),
+  JSON.stringify(realTable.rows.slice(0, 2))
+);
+
 /* ---- config / info ---- */
 const cfg = svc.readConfigView();
 check("readConfigView returns a usable shape", cfg && typeof cfg.path === "string" && typeof cfg.ready === "boolean" && typeof cfg.providers === "object", JSON.stringify(cfg)?.slice(0, 140));

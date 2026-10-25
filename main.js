@@ -99,17 +99,6 @@ function send(channel, payload) {
 
 updater.init((state) => send("update:state", state));
 
-const parseProviderTable = (text) =>
-  text
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => /^[a-z0-9-]+\s{2,}/.test(l))
-    .map((l) => {
-      const cols = l.split(/\s{2,}/);
-      return { name: cols[0], protocol: cols[1] || "", url: cols[2] || "" };
-    })
-    .filter((p) => p.name && p.name !== "NAME" && !/^-+$/.test(p.name));
-
 // shell.showItemInFolder() does nothing at all when the path does not exist —
 // and the CLI config is absent until the first save, which is exactly when a
 // newcomer clicks this. Fall back to the nearest existing ancestor.
@@ -270,10 +259,16 @@ ipcMain.handle("app:uninstall", async () => {
   return { ok: true };
 });
 
+/* The table is parsed by ocr-service, not here: the readiness view judges
+ * built-in names by the same output, and two parsers for one table is how the
+ * list the user picks from and the list the config is judged by start disagreeing
+ * after an upstream column-width change. It also means both callers share one
+ * read (and one failure window) instead of one spawn each.
+ */
 ipcMain.handle("app:providers", async () => {
-  const res = await ocr.exec(["llm", "providers", "--color", "never"]);
-  if (res.code !== 0) return { ok: false, error: ocr.withHint(ocr.failureText(res)), value: [] };
-  return { ok: true, value: parseProviderTable(res.stdout) };
+  const table = await ocr.providerTable();
+  if (!table.ok) return { ok: false, error: ocr.withHint(table.error), value: [] };
+  return { ok: true, value: table.rows };
 });
 
 /* ---------------- ipc: repo ---------------- */
@@ -432,10 +427,15 @@ ipcMain.handle("file:openUrl", (_e, url) => {
  * in — the view stays a pure function of the file plus that list, and a
  * hand-edited `providers` entry is judged by the CLI's rule instead of by "the
  * section happens to have this key".
+ *
+ * `refresh` is only true when the user pressed 刷新: a failed read is remembered
+ * for a short window so the settings page cannot spawn a doomed process on every
+ * re-render, which would make that button the one thing that does *not* retry.
  */
-const configView = async () => ocr.readConfigView({ presetNames: await ocr.presetNames() });
+const configView = async (refresh = false) =>
+  ocr.readConfigView({ presetNames: await ocr.presetNames({ refresh }) });
 
-ipcMain.handle("config:read", () => configView());
+ipcMain.handle("config:read", (_e, opts) => configView(Boolean(opts && opts.refresh)));
 
 ipcMain.handle("config:save", async (_e, form) => {
   const pairs = [];

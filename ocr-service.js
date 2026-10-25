@@ -205,7 +205,14 @@ const listText = (labels) =>
 // (`llm.LookupProvider`, case insensitive); every other name goes to the
 // `custom_providers` section instead. So "is this name built in?" is a fact the
 // CLI owns and this app cannot guess — `ocr llm providers` prints it.
-const PROVIDER_ROW = /^([A-Za-z0-9][A-Za-z0-9._-]*)\s{2,}/;
+//
+// One parser, one table. The settings page lists name / protocol / base URL and
+// the readiness view needs only the names, and the two used to parse the same
+// bytes with their own regexes — the page's was stricter (lowercase names, no
+// `matched` check), so a wider column or an underscored service name would have
+// made them disagree about the same output. Both questions are now answered by
+// the one function below, so they cannot drift.
+const PROVIDER_ROW = /^([A-Za-z0-9][A-Za-z0-9._-]*)\s{2,}(.*)$/;
 // The rule under the header (`----   --------   --------`). It does not match
 // `PROVIDER_ROW` today — a rule may not start with a letter — but the table's
 // column widths are the CLI's to change, and a rule that ever did match would be
@@ -216,15 +223,15 @@ const RULE_ROW = /^-+$/;
 /**
  * Parse `ocr llm providers`.
  *
- * Returns `{ names, matched }` rather than a bare array: `matched` counts the
+ * Returns `{ rows, matched }` rather than a bare array: `matched` counts the
  * rows that had the table's *shape* (header included), so "the table changed and
  * nothing here looks like a row" (0) is a different answer from "the table is
  * empty". Both used to come back as `null`, and the caller then fell back to the
  * lenient judgement this whole registry lookup exists to replace — silently.
  */
-function parseProviderNames(text) {
+function parseProviderTable(text) {
   let matched = 0;
-  const names = [];
+  const rows = [];
   for (const line of (text || "").split(/\r?\n/)) {
     const m = PROVIDER_ROW.exec(line.trim());
     if (!m || RULE_ROW.test(m[1])) continue;
@@ -232,41 +239,85 @@ function parseProviderNames(text) {
     // The header is a row by shape and not a service; it still counts as
     // `matched`, because seeing it proves the shape is intact.
     if (m[1].toUpperCase() === "NAME") continue;
-    names.push(m[1]);
+    // The remaining columns are two-or-more spaces apart, and the last one is
+    // empty for a service whose URL the CLI prints blank (`bedrock`).
+    const cols = m[2].split(/\s{2,}/);
+    rows.push({ name: m[1], protocol: cols[0] || "", url: cols[1] || "" });
   }
-  return { names, matched };
+  return { rows, matched };
+}
+
+/** Just the names, for the readiness view. Same parse, same `matched`. */
+function parseProviderNames(text) {
+  const { rows, matched } = parseProviderTable(text);
+  return { names: rows.map((row) => row.name), matched };
 }
 
 // Read once per process: the table lives in the CLI, so it costs one process
 // spawn, and a stale list is safer than a guessed one (the registry only grows).
 //
-// `ok: false` means "could not be read", which is not the same as "empty". Only
-// an `ok` answer is cached — the failure is usually transient (a spawn that
-// raced an update, a binary that a reinstall is about to restore), so the next
-// read asks the CLI again. That fallback is the optimistic reading this app
-// spent a round getting rid of, so it is *reported* (`view.presetRegistry`)
-// instead of being silent, and the reason is kept for the settings page.
-let cachedPresetNames = null;
+// `ok: false` means "could not be read", which is not the same as "empty". A
+// failure is remembered for a short window instead of not at all: the settings
+// page asks for this list on every refresh and beside every readiness view, so
+// an uncached failure spawns one doomed process per interaction — a missing or
+// broken binary turns a single broken read into a stream of them, each one
+// waiting out its own spawn. The window is short enough that a transient failure
+// (a spawn racing an update, a binary a reinstall is about to restore) clears on
+// its own, and `refresh` clears it immediately — the settings page tells the user
+// to press 刷新, so that button has to actually retry.
+const PRESET_FAILURE_TTL_MS = 30_000;
+let cachedPresetTable = null; // a successful read, for the life of the process
+let cachedPresetFailure = null; // { at, result }, for PRESET_FAILURE_TTL_MS
 let lastPresetError = "";
 
-function presetNamesFailed(error) {
-  lastPresetError = error;
-  return { ok: false, names: [], matched: 0, error };
+function resetPresetCache() {
+  cachedPresetTable = null;
+  cachedPresetFailure = null;
 }
 
-async function presetNames() {
-  if (cachedPresetNames) return cachedPresetNames;
-  const res = await exec(["llm", "providers", "--color", "never"]);
-  if (res.error) return presetNamesFailed(res.error);
-  if (res.code !== 0) return presetNamesFailed(failureText(res));
-  const { names, matched } = parseProviderNames(res.stdout);
+/**
+ * `ocr llm providers`, at most once per process for a success and once per
+ * failure window.
+ *
+ * `refresh` is the settings page's 刷新 button; `runner` and `now` exist so the
+ * retry policy can be asserted without waiting on a clock or breaking a binary
+ * on purpose.
+ */
+async function providerTable({ refresh = false, runner = exec, now = Date.now } = {}) {
+  if (refresh) resetPresetCache();
+  if (cachedPresetTable) return cachedPresetTable;
+  if (cachedPresetFailure && now() - cachedPresetFailure.at < PRESET_FAILURE_TTL_MS)
+    return { ...cachedPresetFailure.result, cached: true };
+  const fail = (error) => {
+    lastPresetError = error;
+    const result = { ok: false, rows: [], matched: 0, error };
+    cachedPresetFailure = { at: now(), result };
+    return result;
+  };
+  const res = await runner(["llm", "providers", "--color", "never"]);
+  if (res.error) return fail(res.error);
+  if (res.code !== 0) return fail(failureText(res));
+  const { rows, matched } = parseProviderTable(res.stdout);
   // No row at all is a parsing problem, not an empty registry: the CLI always
   // ships built-in services, so an unreadable shape must not read as "no name is
   // built in" (which would reject every correctly configured entry).
-  if (!matched) return presetNamesFailed("ocr llm providers 的输出里没有可识别的服务行");
-  cachedPresetNames = { ok: true, names, matched, error: "" };
+  if (!matched) return fail("ocr llm providers 的输出里没有可识别的服务行");
+  cachedPresetTable = { ok: true, rows, matched, error: "" };
+  cachedPresetFailure = null;
   lastPresetError = "";
-  return cachedPresetNames;
+  return cachedPresetTable;
+}
+
+/** The names a built-in service can have, plus whether they could be read. */
+async function presetNames(options) {
+  const table = await providerTable(options);
+  return {
+    ok: table.ok,
+    names: table.rows.map((row) => row.name),
+    matched: table.matched,
+    error: table.error,
+    ...(table.cached ? { cached: true } : {}),
+  };
 }
 
 // `readConfigView` takes the list from its caller (the IPC layer hands in what
@@ -1114,8 +1165,12 @@ module.exports = {
   binaryPath,
   CONFIG_PATH,
   readConfigView,
+  parseProviderTable,
   parseProviderNames,
+  providerTable,
   presetNames,
+  resetPresetCache,
+  PRESET_FAILURE_TTL_MS,
   exec,
   llmTestEnv,
   savedKeyFor,

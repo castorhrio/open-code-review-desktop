@@ -162,7 +162,7 @@ interface Store {
   setView: (v: View) => void;
   info: AppInfo | null;
   config: ConfigView | null;
-  reloadConfig: () => Promise<void>;
+  reloadConfig: (opts?: { refresh?: boolean }) => Promise<void>;
   providers: Provider[];
   repo: string;
   repoInfo: RepoInfo | null;
@@ -287,8 +287,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [form]
   );
 
-  const loadConfig = useCallback(async () => {
-    setConfig(await api.readConfig());
+  const loadConfig = useCallback(async (opts?: { refresh?: boolean }) => {
+    setConfig(await api.readConfig(opts));
   }, []);
 
   const inspect = useCallback(async (dir: string) => {

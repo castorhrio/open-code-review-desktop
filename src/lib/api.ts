@@ -75,7 +75,11 @@ export interface Bridge {
     filters?: { name: string; extensions: string[] }[];
   }): Promise<{ ok: boolean; file?: string; canceled?: boolean; error?: string }>;
   openUrl(url: string): Promise<boolean>;
-  readConfig(): Promise<ConfigView>;
+  /**
+   * `refresh` re-reads the CLI's built-in service list instead of reusing a
+   * failure remembered for a short window — the settings page's 刷新 button.
+   */
+  readConfig(opts?: { refresh?: boolean }): Promise<ConfigView>;
   saveConfig(form: {
     provider: string;
     isCustom: boolean;
