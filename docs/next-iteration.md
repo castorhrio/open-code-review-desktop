@@ -20,6 +20,12 @@
   仍是 `375f64c`（2026-10-20），`tags` 列表最新仍是 `v1.13.3`，`releases` 无新条目。
 - 本仓 `upstream/main` 的本地 ref 也仍指向 `375f64c`，与上游一致。
 
+**本轮复核结论**（2026-10-26，第 3 轮）：上游**仍然没有新内容**。
+
+- `commits?sha=main` 的顶端仍是 `375f64c`（2026-10-20，日期未变）；
+  `tags` 最新仍是 `v1.13.3`；`releases` 最新仍是 `v1.13.3`（2026-10-22 发布）。
+- 本仓 `upstream/main` 的本地 ref 仍指向 `375f64c`，与上游一致。
+
 结论：本轮没有需要移植的新功能 / 修复 / 破坏性变更，desktop 的封装（CLI flag、
 输出解析、配置暴露点）无需改动。
 
@@ -87,7 +93,7 @@ curl -s 'https://api.github.com/repos/alibaba/open-code-review/tags?per_page=5'
 
 ---
 
-## 本轮 desktop 侧加固（与上游无关）
+## 上一轮 desktop 侧加固（与上游无关，第 2 轮）
 
 ### P0 — 重开被截断的会话，在证据还在落盘时不能看起来干净
 
@@ -139,18 +145,81 @@ settled 读能看到）、等待有界（磁盘不应声就放弃）、`run:exit
 
 ---
 
+## 本轮 desktop 侧加固（与上游无关，第 3 轮）
+
+本轮不做新功能，只把两条**「靠约定维持」的边界**钉成会 FAIL 的断言，并让 store
+能说出真实卷的大小写答案。
+
+### P1 — 删除的边界：跨仓库同名 session id
+
+「上限证据」是按**仓库 + session id** 存的。session id 本身**不跨仓库唯一**——两个
+仓库里可以各有一个同名会话，各自带一条自己的截断证据。于是删除有两条路：
+
+- 按 `session id` 删：会连带删掉**另一个仓库**的证据。那条证据是那个仓库里唯一
+  记着「这次运行被截断了」的东西，删掉它，那个仓库的会话就又显示成干净的。
+- 按 `仓库 + session id` 删：只删自己那条。**这是对的。**
+
+实测：`remove` 本来就是按后者做的（`key(repo, sessionId)` 整体比较），**没有真
+bug**。但这条边界此前**没有任何断言**——把它改成「只按 id 删」不会让任何测试变红。
+本轮补上：
+
+- `tools/run-diagnostics-smoke.mjs`：删掉一个仓库的会话后，另一个仓库里的同名
+  session id 仍在（证据还在）。
+
+顺带把**卷的大小写**这条轴也变成可断言的：
+
+- `run-diagnostics.js`：`createStore(file, options)` 现在把 `options` 透传给
+  `normalizeRepo`。此前 store 的 key 只吃平台默认答案，而**大小写敏感性是卷的
+  属性、不是 OS 的属性**（macOS 可以按大小写敏感格式化，Linux 可以挂成大小写
+  不敏感）——`normalizeRepo` 早就接受这个覆盖参数了，store 却没法用上它。
+- 两个答案都在**每个**平台上被断言：折叠大小写的卷上，同一个文件夹的两种拼法
+  共用一条记录，删除用另一种拼法也能删掉它；不折叠的卷上，两个目录各记各的，
+  删掉一个不影响另一个。
+  - 去掉 `createStore` 的透传 → **2 条断言变红**（实测）。
+
+`main.js` 目前仍不传这个参数（走平台默认，对 Windows/macOS 是对的）。真实卷的
+答案要能拿到才行，见「仍然开放的事项」。
+
+### P1 — 读的负向路径：`readSettled` 遇上不应声的磁盘
+
+`readSettled` 是「读侧不丢证据」的最后一块，它的**有界等待**是这个模块对调用方
+唯一的承诺，也是最容易被后人改坏的地方——把 `drainBounded(...).then(...)` 写成
+`drain().then(...)`，等待就没有上限了，而**没有任何断言会发现**（那会让测试自己
+挂住，而不是变红）。
+
+- `tools/run-diagnostics-smoke.mjs`：把 `fs/promises` 的 `writeFile` 临时改成
+  「永不落盘」，让 store 背后的队列永不停稳，然后断言：
+  - 读**给出答案**而不是挂死（去掉有界等待 → 测试挂住，被超时杀掉，实测）；
+  - 等待**不早于** `WRITE_TIMEOUT_MS` 放弃（不能提前放弃，否则写其实还有机会
+    落盘，提前读到的就是旧数据）；
+  - 放弃之后**回答盘上已有的证据**，而不是 `null`——重开一次会话问的就是上一次
+    运行的证据，答 `null` 等于说「上次没被截断」。
+
+**验证**：4 个失败模式都实测过会让断言变红或让测试挂住——去掉 `createStore` 的
+透传（2 条红）、去掉 `readSettled` 的有界等待（测试挂住）、把 `remove` 改成只按
+id 删（2 条红）、超时后返回 `null`（1 条红）。
+
+---
+
 ## 待移植 / 待验证
 
-### P1 — `manifest.run_failure` 的中文映射：已完成，剩报告页展示
+### 已完成 — `manifest.run_failure` 的中文映射与展示
 
-**状态（2026-10-26）**：失败原因的**中文映射已实现**（`bf065b5`，
-`src/lib/format.ts` 的 `RUN_FAILURE_LABEL` / `ITEM_FAILURE_LABEL`，两套词表由
-`tools/service-smoke.mjs` 逐值断言）。未做的只剩**把 `run_failure.reason` 摆到
-报告页**，以及 `CoverageItem.classification` 目前只在 tooltip 里。别再重复实现映射。
+**状态（2026-10-26）**：**全部做完，别再重复实现**。
+
+- 失败原因的**中文映射已实现**（`bf065b5`，`src/lib/format.ts` 的
+  `RUN_FAILURE_LABEL` / `ITEM_FAILURE_LABEL`，两套词表由 `tools/service-smoke.mjs`
+  逐值断言）。
+- **报告页已摆出 `run_failure.reason`**（`f884499`）：`finding.tsx` 新增
+  `RunFailureNotice`，结果页与报告页都写出一行失败原因；分类是本程序自己的句子，
+  CLI 的原话标成「CLI 原始原因」并保持可选中。
+- **`CoverageItem.classification` 也从 tooltip 提成了可见文本**（同一个提交）：
+  未审/跳过行现在直接显示中文分类，CLI 的原话挪到该行 tooltip，并按去重后在行
+  下方写出一次。
 
 上游的 `RunManifest` 有 `run_failure: { classification, reason }`，它会把
-`terminal_state` 强制成 `failed`。desktop 只显示一个红色「失败」徽章，
-**不显示失败原因**——用户知道失败了，但不知道为什么。
+`terminal_state` 强制成 `failed`。desktop 此前只显示一个红色「失败」徽章，
+**不显示失败原因**——用户知道失败了，但不知道为什么；这一刀已经补上。
 
 **词表（2026-10-25 复核，`internal/session/manifest.go` @ `v1.13.3`）**——上游是
 **两个**枚举，不是一份：
@@ -164,9 +233,6 @@ settled 读能看到）、等待有界（磁盘不应声就放弃）、`run:exit
 是把两个枚举当成一个读了。真源已写进 `src/lib/types.ts` 的 `run_failure` 注释，
 两套映射（`RUN_FAILURE_LABEL` / `ITEM_FAILURE_LABEL`）由
 `tools/service-smoke.mjs` 逐值断言，上游新增分类会让 `audit:service` 变红。
-
-desktop 的 `CoverageItem.classification` 现在会映射成中文，但仍只在 tooltip 里；
-剩下一刀是把 `run_failure.reason` 摆到报告页（见下方 P1）。
 
 > 注意：`run_failure` 在 `v1.13.0` 就已经存在，不是这三个版本带来的；
 > 只是这三个版本让「预算截断」更常出现，把它暴露得更明显了。
@@ -206,24 +272,34 @@ desktop 的「工具调用 N（失败 M）」直接读 CLI 的 `tool_calls.failu
 
 ## 仍然开放的事项（非上游）
 
-本轮只收了「证据落盘与重开」这一条。其余按优先级排在这里，下一轮挑：
+本轮收的是「删除的边界」与「读的负向路径」两条，其余按优先级排在这里，下一轮挑。
+标注「**未动**」的条目是本轮看过、确认仍然成立但没有改的——不是新发现。
 
-- **P1**：`manifest.run_failure.reason` 摆到报告页（用户知道失败，但不知道为什么）
-  ——文件 `src/components/ReportView.tsx`、`src/components/finding.tsx`；
-  `CoverageItem.classification` 从 tooltip 提为可见文本（触屏与键盘用户拿不到）。
-- **P2**：`normalizeRepo` 在 macOS 上按字节比较大小写，而 macOS 默认文件系统
-  大小写不敏感 —— 从 picker 拿到的路径大小写可能不同，会漏命中证据。
-  文件 `run-diagnostics.js`；注释目前只提了 Windows。
-- **P2**：`writeAll` 的 Windows 回退分支里 `unlink(tmp)` 失败被吞掉，进程立刻退出
-  会留下 `*.tmp` 垃圾。文件 `run-diagnostics.js`。
-- **P2**：`readConfigView` 在 active 分支的 `missing` 只报 `credential`，忽略
+- **P1**：`readConfigView` 在 active 分支的 `missing` 只报 `credential`，忽略
   「有 endpoint 无 model」。文件 `ocr-service.js`（既有代码，不是本轮引入）。
+  ——**未动**。`readConfigView` 是纯函数，四种组合各断言一次即可，顺手修 active
+  分支漏报 `model` 的问题。文件 `tools/service-smoke.mjs`。
 - **P2**：`readFileAtRef` 靠 stderr 措辞区分 `bad-ref` / `missing` / `failed`，
   本地化 git 可能对不上；`spawnFailure` 同理。至少补一条「未知措辞落到通用分支」
-  的断言。文件 `git-service.js`、`ocr-service.js`。
-- **P2（既有，非本轮引入）**：`audit:ui` 的 `88-run-failure-toast` 报「运行失败后
-  开始审查按钮仍是禁用的」。在**未改动的代码**上同样复现（`git stash` 后重跑，
-  报错一模一样），所以与本轮无关；但它确实是红的，下一轮该查。本机没有 Edge，
-  只能用 `PW_CHANNEL=chromium` 跑内置 Chromium，与 README 写的「驱动系统
-  Edge/Chrome」不是同一条路径。
+  的断言。文件 `git-service.js`、`ocr-service.js`、`tools/git-service-smoke.mjs`、
+  `tools/service-smoke.mjs`。——**未动**（不改分类逻辑，只加断言把兜底分支钉住）。
+- **P2**：`writeAll` 的 Windows 回退分支里 `unlink(tmp)` 失败被吞掉，进程立刻退出
+  会留下 `*.tmp` 垃圾。文件 `run-diagnostics.js`。——**未动**。改成把失败记进
+  outcome。
+- **P2**：`MAX_ENTRIES` 的注释没有写明它是「**全局**上限，按写入顺序淘汰」
+  （跨仓库一起算，不是每个仓库 200 条）。文件 `run-diagnostics.js`。若要改成
+  per-repo，则要改 `record` 的截断逻辑并加断言。
+- **P2**：`createStore` 现在能接住卷的大小写敏感性（`options.caseInsensitive`），
+  但 `main.js` 建 store 时没有传——仍走平台默认答案。文件 `main.js`。这不影响
+  现状（平台默认对 Windows/macOS 是对的），但一个**按大小写敏感格式化**的 macOS
+  卷仍会把两个目录的证据并成一条。要接上就得先能判断真实卷的答案。
+- **P3**：`finding.tsx` 的 `RunFailureNote`（只显示 tooltip）与 `RunFailureNotice`
+  （可见文本）名字相近，看代码的人容易认错。文件 `src/components/finding.tsx`。
+- **P3**：`settleRunExit` 的 `signal-failed` 分支——这一行到底写到哪里、用户在
+  renderer 已销毁时能不能看见，尚未确认。若确实不可见，应改写到主进程日志文件
+  而不是 stderr。
+- **P3**：`RunFailureNotice` 的「CLI 原始原因可选中」目前没有对应的 UI 断言。
+- **P3**：`tools/run-diagnostics-smoke.mjs` 的
+  `check("the stored key is canonical...")` 里两个条件用 `&&` 串在一起，应该拆成
+  两条独立断言。
 
