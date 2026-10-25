@@ -27,6 +27,7 @@ Verified end-to-end against the real CLI, without spending tokens:
 - the two results surfaces at four figures: `?huge=1` mounts 1200 findings — every row in the triage list, every block in 阅读 — in 405ms, asserted against an 8s ceiling; neither virtualises, and that measurement is the reason
 - rendering at 125% and 150% system scale: the visual audit re-runs its eight tightest shots at both device pixel ratios, green at each
 - a run cut short by a limit is not clean: the CLI's `review_limit_reached` warning (upstream v1.13.1) and `summary.budget_exceeded` are read, so a run that stopped at the limit and found nothing says so instead of claiming the code is fine — on both results surfaces
+- the code beside a finding is the code that was reviewed: against a real repository with a dirty working copy, a review at `HEAD` shows the committed file, a review at another branch shows that branch, and a file that is not in the ref fails loudly instead of being answered with the working copy
 
 **Verified 2026-10-13**: a real full scan (12 files, 8 comments, 173K tokens, 1m41s) emitted a sectioned `project_summary`, and the band rendered that real text, capped and faded. Whether a run emits one is the CLI's decision — a workspace run over the same repo with 2 comments emitted none — so this project promises only to render it when present. Sessions still never persist it, so a session result showing no band remains correct behaviour, not missing rendering. A real review's findings themselves do render — a completed scan's 4 comments were loaded from its session and shown in the results list.
 
@@ -44,7 +45,7 @@ The CLI is excellent but you live in a terminal: reading 40 line-level findings,
 | **Honest run status** | `complete / partial / failed / completed_with_errors` badges, plus the exact list of files that were **not** reviewed and why — a truncated run never looks like a clean one |
 | **Resume** | interrupted, cancelled or partially failed runs continue from the official session, and already-reviewed files are not billed twice — for range, commit and scan; a workspace session is saved but the CLI cannot resume it, and the UI says so instead of offering the button |
 | **Session history** | browse, load, resume, export a self-contained HTML report, delete |
-| **Accurate code context** | when a review targets a ref, the code pane reads that file *at that ref* (`git show`), not your working copy |
+| **Accurate code context** | when a review targets a ref, the code pane reads that file *at that ref* (`git show`) — `HEAD` included, not your working copy. If the file is not in that ref, the pane says so and offers the working tree as an explicit choice, rather than quietly showing you a different file |
 | **Triage** | severity / category / text filters, `↑` `↓` or `j` `k` navigation, copy suggestion code, export JSON |
 | **Read it whole** | one click turns a run into a document — grouped per file, worst file first, the CLI's markdown rendered — so a review can be read top to bottom and searched, not only clicked through one finding at a time |
 | **A run you can watch** | the CLI's own tool calls stream onto the screen while it works (which file, what it looked for, how long it took), because a 3-minute silence and a hung app look the same |
@@ -150,10 +151,11 @@ The UI once drifted, one reasonable-looking change at a time, into three differe
 Everything is checked by rendering the real bundle against a stubbed IPC bridge in headless Edge — no Electron, no desktop — plus one check that drives the actual Electron process, because some behaviour only exists there.
 
 ```
-npm run audit           # typecheck + all eight checks below
+npm run audit           # typecheck + all the checks below
 npm run audit:packaging # every runtime module is in the build.files allowlist
 npm run audit:bridge    # preload.js and the Bridge interface agree, both ways
 npm run audit:service   # the real CLI: arg building and output parsing, all 4 modes
+npm run audit:git       # the code pane reads the reviewed snapshot, not the worktree
 npm run audit:update    # the update state machine, with the updater stubbed
 npm run audit:ui        # 65 states x 3 window sizes x 2 themes
 npm run audit:contrast  # WCAG AA for every text/background pair
@@ -168,6 +170,8 @@ All of them exit non-zero on findings, so they work as a gate rather than a log,
 **`audit:e2e`** covers the seam between the two halves. `audit:service` drives `ocr-service` in plain Node, so it proves the arguments and the parsing but never that the renderer reaches them; `audit:ui` drives the renderer against a stub, so it proves the rendering but not that anything behind it exists. This runs the real `main.js` in real Electron, boots the real bundle against a throwaway git repository, and lets the app preview it on its own — so the spec the renderer builds, the preload call, the `ipcMain` handler, the CLI invocation and the reply all have to line up. It uses `--preview`, which costs no tokens and needs no API key, and asserts the file the CLI reports appears *and* that a file the CLI did not report does not.
 
 **`audit:service`** covers the layer that is the app's whole job: turning a spec into CLI arguments and turning the CLI's output back into something the UI can render. It runs the real binary against a throwaway git repo, using `--preview` so no API key or network is needed. It asserts all four modes parse into the expected shape and find files, that mode-specific flags do not leak into another mode (the CLI would reject the run), that a bad ref fails with an error rather than an empty preview the UI would render as "nothing to review", and that a non-repo directory is reported as such.
+
+**`audit:git`** covers the layer between a finding and the code beside it. A review that targeted a ref describes the code *at that ref*, so the code pane has to read that snapshot — and the rule that decides it used to be wrong twice: `HEAD` was read from the working tree, and any failed ref read fell back to the working tree too. Both failures are silent, because the pane looks normal either way and the only symptom is a finding whose code does not match the finding. The check builds a real repository with a dirty working copy and a second branch, and asserts that `HEAD` returns the committed file, another branch returns that branch, a file that is not in the ref fails with a reason instead of falling back, and a file deleted from the working tree is still readable at the ref.
 
 Two of the fixtures are not invented: `ocr session list --json` was run against real repositories on this machine, and the shapes it returns are what the fixtures encode — including a pre-manifest session (`legacy: true`, no `run_manifest`) whose 27 of 27 files failed. That is the session that exposed `sessionState()` returning `"complete"` for every manifest-less record, i.e. a green 完成 badge on a run that failed outright.
 

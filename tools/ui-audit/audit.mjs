@@ -1869,6 +1869,48 @@ await shoot(page, "81-report-limit-reached", {
   },
 });
 
+// The code beside a finding has to be the code that was reviewed.
+//
+// A review names a ref, and its findings describe the code *at that ref*. When
+// the file is not in that ref — deleted, renamed, or never committed there —
+// the app used to answer with the working tree instead, so the pane showed a
+// file the review never saw and the finding beside it looked wrong. So the
+// failure has to be visible, and the working tree has to be something the
+// reader asks for rather than something that happens to them.
+await shoot(page, "82-results-ref-file-missing", {
+  query: "?reffile=missing",
+  after: openFindings,
+  expect: async (page) => {
+    const text = await page.locator("main").innerText();
+    const out = [];
+    if (!/中找不到/.test(text)) out.push("the code pane does not say that the file is missing from the reviewed ref");
+    if (!/查看工作区版本/.test(text)) out.push("the code pane offers no way to look at the working tree");
+    if (/func \(s \*Service\) Login/.test(text))
+      out.push("the working tree was shown in place of the reviewed snapshot");
+    return out;
+  },
+});
+
+// The same failure at the window floor, where the code pane is not a column of
+// its own but a row under the finding — and the pane is only ~337px wide
+// there. The error text carries a ref name and a path, both unbreakable Latin
+// tokens, so this is where a message that overflows sideways would show up.
+await shoot(page, "83-results-ref-file-missing-min", {
+  width: 1000,
+  height: 660,
+  query: "?reffile=missing",
+  after: openFindings,
+  expect: async (page) => {
+    const text = await page.locator("main").innerText();
+    const out = [];
+    if (!/中找不到/.test(text)) out.push("the code pane does not say that the file is missing from the reviewed ref");
+    if (!/查看工作区版本/.test(text)) out.push("the code pane offers no way to look at the working tree");
+    if (/func \(s \*Service\) Login/.test(text))
+      out.push("the working tree was shown in place of the reviewed snapshot");
+    return out;
+  },
+});
+
 // A finished review used to land on two empty panes ("在左侧选择一条评论"), so
 // the highest-value content needed a click before it existed on screen. Opening
 // the most severe finding is asserted here rather than assumed: the fixture's

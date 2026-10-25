@@ -299,13 +299,17 @@ ipcMain.handle("review:cancel", (_e, id) => ocr.cancelRun(id));
 
 /* ---------------- ipc: files ---------------- */
 
-ipcMain.handle("file:read", async (_e, req) => {
-  if (req.ref && req.ref !== "HEAD") {
-    const at = await git.readFileAtRef(req.repo, req.path, req.ref, req.startLine, req.endLine, req.pad || 12);
-    if (at.ok) return at;
-  }
-  return git.readFileWindow(req.repo, req.path, req.startLine, req.endLine, req.pad || 12);
-});
+ipcMain.handle("file:read", async (_e, req) =>
+  // The policy lives in git-service: a ref means that ref's snapshot (HEAD
+  // included), no ref means the working tree, and a failed ref read is reported
+  // instead of quietly replaced by the working copy.
+  git.readFile(req.repo, req.path, {
+    ref: req.ref,
+    startLine: req.startLine,
+    endLine: req.endLine,
+    pad: req.pad || 12,
+  })
+);
 
 ipcMain.handle("file:open", (_e, absPath) => shell.openPath(absPath));
 

@@ -16,6 +16,21 @@ import { toast } from "sonner";
 const SEVERITIES = ["critical", "high", "medium", "low", ""] as const;
 
 /**
+ * What a failed read at a ref means, in one line.
+ *
+ * The three reasons are not interchangeable: a file that is not in the reviewed
+ * snapshot is a fact about the review, an unresolvable ref is a fact about the
+ * input, and a failed read is neither. The working tree is offered after all
+ * three, but only as a choice — it is often a different file from the one the
+ * finding is about.
+ */
+const REF_READ_HINT: Record<string, string> = {
+  missing: "这个文件在这次审查的 ref 里不存在——它可能在那之后被删除、改名，或从未提交到那里。",
+  "bad-ref": "这个 ref 解析不了：它可能已经不存在了。",
+  failed: "读取这个 ref 下的文件时出错了。",
+};
+
+/**
  * The file around a finding. Two homes, because the 3-pane grid only has room
  * for it above 1240px of container width:
  *
@@ -32,7 +47,17 @@ const SEVERITIES = ["critical", "high", "medium", "low", ""] as const;
  * fixture needs 629px — so on a 1280px laptop most lines of the very thing the
  * user came to read were cut off.
  */
-function FileViewer({ current, file, variant }: { current: Finding; file: FileWindow | null; variant: "pane" | "stacked" }) {
+function FileViewer({
+  current,
+  file,
+  variant,
+  onWorktree,
+}: {
+  current: Finding;
+  file: FileWindow | null;
+  variant: "pane" | "stacked";
+  onWorktree?: () => void;
+}) {
   const stacked = variant === "stacked";
   const scroller = useRef<HTMLDivElement>(null);
   const hit = useRef<HTMLDivElement>(null);
@@ -56,7 +81,27 @@ function FileViewer({ current, file, variant }: { current: Finding; file: FileWi
   }, [file, current.start_line, current.end_line]);
 
   if (!file) return <p className={cn("text-body text-faint", stacked ? "px-4 py-3" : "p-4")}>读取文件中…</p>;
-  if (!file.ok) return <p className={cn("text-body text-bad", stacked ? "px-4 py-3" : "p-4")}>{file.error}</p>;
+  if (!file.ok) {
+    // A read that failed is not a read. The pane used to answer a failed ref
+    // read with the working tree instead, so the code beside a finding could be
+    // a file the review never saw — and the only symptom was a finding that
+    // looked wrong. So the failure is stated, the ref it failed on is named,
+    // and the working tree is something the reader asks for on purpose.
+    return (
+      <div className={cn("flex min-w-0 flex-col items-start gap-2", stacked ? "px-4 py-3" : "p-4")}>
+        {/* A ref name and a path are both unbreakable Latin tokens, and this pane
+            is only ~337px wide at the window floor — so the message has to be
+            allowed to break rather than push the layout sideways. */}
+        <p className="min-w-0 break-all text-body text-bad">{file.error}</p>
+        <p className="min-w-0 text-meta text-faint">{REF_READ_HINT[file.reason || "failed"]}</p>
+        {file.ref && onWorktree && (
+          <Button variant="outline" size="sm" title="工作区里的版本未必是这次审查看到的那一版" onClick={onWorktree}>
+            查看工作区版本
+          </Button>
+        )}
+      </div>
+    );
+  }
   const firstHit = file.lines?.find(
     (l) => l.n >= current.start_line && l.n <= (current.end_line || current.start_line)
   )?.n;
@@ -317,6 +362,28 @@ export function ResultsPanel() {
     },
     [comments, repo, resultOrigin]
   );
+
+  /**
+   * Read the same file from the working tree — on purpose.
+   *
+   * Offered when the reviewed snapshot could not be read, and never the
+   * default: the working copy is not what was reviewed, so substituting it
+   * silently is exactly what made a correct finding look wrong. The reader
+   * asks for it, and the pane's badge then says 工作区当前内容 instead of the
+   * ref, so the two are never confused.
+   */
+  const openWorktree = useCallback(async () => {
+    const c = comments[selected];
+    if (!c) return;
+    const res = await api.readFile({
+      repo,
+      path: c.path,
+      startLine: c.start_line,
+      endLine: c.end_line,
+      pad: 16,
+    });
+    setFile(res);
+  }, [comments, repo, selected]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -787,14 +854,14 @@ export function ResultsPanel() {
           </ScrollArea>
           {current && (
             <div className="min-h-0 min-w-0 border-t border-line bg-canvas @min-[1240px]:hidden">
-              <FileViewer current={current} file={file} variant="stacked" />
+              <FileViewer current={current} file={file} variant="stacked" onWorktree={() => void openWorktree()} />
             </div>
           )}
         </div>
 
         <div className="hidden min-h-0 bg-canvas @min-[1240px]:block">
           {current ? (
-            <FileViewer current={current} file={file} variant="pane" />
+            <FileViewer current={current} file={file} variant="pane" onWorktree={() => void openWorktree()} />
           ) : (
             comments.length > 0 && <p className="p-4 text-body text-faint">选中评论后在这里显示对应代码位置。</p>
           )}

@@ -24,6 +24,14 @@ export interface Provider {
 export interface FileWindow {
   ok: boolean;
   error?: string;
+  /**
+   * Why a read at a ref failed, so the code pane can say more than "it failed".
+   *
+   * `missing` — the file is not in that ref (deleted, renamed, or never
+   * committed there); `bad-ref` — the ref itself does not resolve; `failed` —
+   * anything else, including a git error.
+   */
+  reason?: "missing" | "bad-ref" | "failed";
   path?: string;
   absPath?: string;
   ref?: string;
