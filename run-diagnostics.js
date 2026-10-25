@@ -115,10 +115,14 @@ const OUTCOME_MESSAGES = {
   "max-rounds": "上限证据的写队列在退出前始终没停，可能仍有写入没落盘",
   "drain-failed": "上限证据的退出冲刷出错，可能仍有写入没落盘",
   // Not a store outcome: the run ended, the evidence is on disk, but the screen
-  // was never told. Wording ends on 「运行」 so the log drawer keeps it — the
-  // renderer self-opens on a line that reads like trouble, and a session that
-  // stays "running" forever is exactly that.
-  "signal-failed": "本次运行已经结束，但结束信号没能送达界面，界面可能仍显示运行中",
+  // was never told. The drawer self-opens on a line that reads like trouble
+  // (`TROUBLE_LINE` in `src/lib/format.ts`: error / warning / 失败 / 无法 / ✗),
+  // so this wording has to carry one of those words — it used to end on 「运行中」,
+  // which the rule does not match, and the one line that says the screen never
+  // heard the run ended stayed behind a closed drawer. A failed *signal* is a
+  // failure, so it says so. `tools/run-diagnostics-smoke.mjs` reads the rule out
+  // of the renderer and asserts this line against it.
+  "signal-failed": "本次运行已经结束，但结束信号推送失败，界面可能仍显示运行中",
 };
 const LATE_OUTCOME_MESSAGES = {
   "io-error": "上限证据在运行结束后写盘失败，重开会话后将看不到这条提示",

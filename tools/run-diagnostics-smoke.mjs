@@ -272,6 +272,22 @@ const counting = createCaseDetector({
 counting(volumeRepo);
 counting(volumeRepo);
 check("the volume is asked once per path", probes === 1, `${probes} probes`);
+/* What counts as "the same path" is the *resolved* one, and that is the whole
+ * reason the cache exists: the renderer sends the folder it was handed, and the
+ * same folder arrives with a trailing separator, or with `..` in a spec built
+ * from a nested path. Resolve first, then ask — otherwise each spelling is
+ * another pair of stats on a disk that may be a network mount.
+ *
+ * The key is deliberately *not* case-folded: whether case folds is the answer
+ * being asked for, so folding the key first would be assuming the answer. Two
+ * casings of one folder therefore cost two probes — bounded, and correct. */
+const resolvedSame = [`${volumeRepo}/`, `${volumeRepo}/../Payments-API`];
+for (const spelling of resolvedSame) counting(spelling);
+check(
+  "spellings that resolve to one folder ask the volume once",
+  probes === 1,
+  `${probes} probes for ${[volumeRepo, ...resolvedSame].join(" ")}`
+);
 
 /* The answer the store keys by: an explicit answer wins, the volume's answer
  * is used when there is none, and a volume that cannot tell falls back to the
@@ -371,6 +387,24 @@ check(
   "and falls back to the platform's answer when the volume cannot say",
   appStoreUnknown.read(casedRepo.toLowerCase(), "app-unknown-session")?.warnings?.length === 1
 );
+/* Startup must not wait on a disk. `main.js` builds the app's store at module
+ * load, before Electron is ready — and the repository under review is often on a
+ * network mount, where one `stat` can be a round trip. So construction closes
+ * over the path and nothing else: no file is read, no volume is asked. The first
+ * question about a repository is the one that costs, and it happens on first use
+ * (a run recording its evidence, a session reopening), not on launch. */
+let startupProbes = 0;
+const lazyStore = createAppStore(path.join(dir, "lazy", "run-diagnostics.json"), {
+  stat: (target) => {
+    if (path.basename(target) === "Payments-API") startupProbes += 1;
+    return foldingStat("Payments-API")(target);
+  },
+});
+check("building the app's store asks the volume nothing", startupProbes === 0, `${startupProbes} probes at startup`);
+await lazyStore.record(casedRepo, "lazy-session", limitResult);
+check("and the first use of a repository is where it costs", startupProbes === 1, `${startupProbes} probes after one record`);
+check("while the answer it got is the one the entry is filed under", lazyStore.read(casedRepo.toLowerCase(), "lazy-session")?.warnings?.length === 1);
+
 const mainSrc = fs.readFileSync(path.join(ROOT, "main.js"), "utf8");
 const buildsItself = /createStore\(/.test(mainSrc);
 check(
@@ -762,6 +796,44 @@ check("and the exit says the evidence did not make it", outcomeMessage(slowExit)
 // trouble, and a stderr line nobody opens is not the same as saying it.
 const lostMessage = outcomeMessage({ ok: false, reason: "io-error" });
 check("a lost evidence reports something the app can show", lostMessage.includes("失败"), lostMessage);
+
+/* ---- the wording and the drawer's rule have to agree ----
+ * `OUTCOME_MESSAGES` in `run-diagnostics.js` is what the app says about a
+ * finished run; `TROUBLE_LINE` in `src/lib/format.ts` is when the run log's
+ * drawer opens by itself. The two used to be tied together by a comment on the
+ * main-process side only, and that comment was false: `signal-failed` ended on
+ * 「界面可能仍显示运行中」, which the rule does not match, so the one line that
+ * says *a finished run still looks like it is running* was written to a drawer
+ * that stayed shut. That is the silent failure it was written to end.
+ *
+ * The rule is read out of the renderer's source rather than copied here on
+ * purpose: a copy would be changed alongside the drawer and keep this green.
+ */
+const formatTs = fs.readFileSync(path.join(ROOT, "src/lib/format.ts"), "utf8");
+const ruleSrc = /export const TROUBLE_LINE = (\/.*?\/[a-z]*);/.exec(formatTs);
+let troubleLine = null;
+try {
+  troubleLine = ruleSrc ? new Function(`return ${ruleSrc[1]}`)() : null;
+} catch (_) {
+  troubleLine = null;
+}
+const opensDrawer = (message) => troubleLine instanceof RegExp && troubleLine.test(message);
+check(
+  "the drawer's own rule can be read from the renderer",
+  troubleLine instanceof RegExp,
+  ruleSrc ? ruleSrc[1] : "no `TROUBLE_LINE` in src/lib/format.ts"
+);
+// The two outcomes that mean something was lost — the evidence, or the screen —
+// have to read like trouble: nobody goes looking for them in a collapsed drawer.
+for (const reason of ["io-error", "signal-failed"]) {
+  const message = outcomeMessage({ ok: false, reason });
+  check(`「${reason}」 reads like trouble to the log drawer`, opensDrawer(message), message);
+}
+// The reverse, deliberately: `timeout` / `max-rounds` / `drain-failed` say "still
+// writing", which is news read on purpose — not a reason to take the drawer's
+// room away from the live feed on every slow disk.
+const stillWriting = outcomeMessage({ ok: false, reason: "timeout" });
+check("and a 「still writing」 outcome is not dressed up as trouble", !opensDrawer(stillWriting), stillWriting);
 
 fs.rmSync(unwritableDir, { recursive: true, force: true });
 

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/layout";
 import { copyText } from "@/lib/clipboard";
 import { cn } from "@/lib/cn";
+import { looksLikeTrouble } from "@/lib/format";
 
 export function LogDrawer() {
   const { log, running, clearLog } = useStore();
@@ -20,8 +21,10 @@ export function LogDrawer() {
     // The running screen carries the live feed now, so the drawer no longer has
     // to open itself for the app to look alive — and while it did, it took 170px
     // away from that feed on every single run. It still opens on its own for
-    // output that looks like trouble, which is the one thing the feed truncates.
-    if (log.length && !revealed.current && /error|warning|失败|无法|✗/i.test(log[log.length - 1])) {
+    // output that looks like trouble, which is the one thing the feed truncates
+    // — and the rule for "looks like trouble" lives in `lib/format`, where the
+    // main process's wording can be checked against it.
+    if (log.length && !revealed.current && looksLikeTrouble(log[log.length - 1])) {
       revealed.current = true;
       setOpen(true);
     }

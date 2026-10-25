@@ -375,6 +375,30 @@ export function humanDuration(ns: number | undefined): string {
 }
 
 /**
+ * Whether a line of run output is the kind that opens the log drawer by itself.
+ *
+ * The drawer is the only surface that outlives a run, and it is collapsed by
+ * default, so a line that means "something went wrong" has to be worded so this
+ * rule recognises it — otherwise it is written and never read. The two halves
+ * live in different processes: the wording is `run-diagnostics.js`'s
+ * `OUTCOME_MESSAGES`, the rule is here.
+ *
+ * That contract used to be a comment on the main-process side only, and it was
+ * wrong: `signal-failed` said "界面可能仍显示运行中", which contains none of
+ * these words, so the one line that says *the run ended and the screen never
+ * heard* was the one line that stayed behind a closed drawer.
+ *
+ * The literal is kept readable on purpose: `tools/run-diagnostics-smoke.mjs`
+ * reads it out of this file and asserts the main process's wording against it,
+ * so the halves cannot drift apart again without a red check.
+ */
+export const TROUBLE_LINE = /error|warning|失败|无法|✗/i;
+
+export function looksLikeTrouble(line: string): boolean {
+  return TROUBLE_LINE.test(String(line || ""));
+}
+
+/**
  * The one-line summary of a finding, for the master list.
  *
  * The CLI writes findings in light markdown, and the list rendered it raw: a row

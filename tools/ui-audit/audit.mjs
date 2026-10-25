@@ -2568,6 +2568,35 @@ await shoot(page, "97-run-diagnostics-lost", {
   },
 });
 
+// The other half of the same contract: the run finished and the evidence is on
+// disk, but the exit signal never reached the screen, so the app still believes
+// it is running — the spinner, the disabled button, the "停不下来" state. Nothing
+// on the results screen can say that, so the main process says it in the run log,
+// and the wording has to be one the drawer's own rule opens on. It used to end on
+// 「界面可能仍显示运行中」, which that rule does not match, so the one line about
+// a run that will never look finished was the one line behind a shut drawer.
+await shoot(page, "98-run-diagnostics-signal-failed", {
+  query: "?run=done&rundiag=2",
+  after: async (page) => {
+    await nav("审查")(page);
+    await page.waitForTimeout(1600);
+    await page.getByRole("button", { name: /开始审查/ }).click();
+    await page.waitForTimeout(5200);
+  },
+  expect: async (page) => {
+    const out = [];
+    const text = await page.locator("body").innerText();
+    if (!/结束信号推送失败/.test(text)) out.push("the failed exit signal is nowhere in the run log");
+    if (!/界面可能仍显示运行中/.test(text)) out.push("the log does not say what the failed signal means for the screen");
+    const open = await page
+      .locator("pre")
+      .filter({ hasText: "结束信号推送失败" })
+      .count();
+    if (!open) out.push("the run log did not open on a failed exit signal");
+    return out;
+  },
+});
+
 // The exact invocation is the first thing to read when a run did not do what you
 // expected, and it is in no other durable place — the log drawer collapsed, and a
 // toast is not selectable. It belongs in the document a run produces.

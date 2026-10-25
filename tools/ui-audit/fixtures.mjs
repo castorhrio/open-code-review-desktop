@@ -702,10 +702,11 @@ window.api = (() => {
           exitCb({
             id: "run-1",
             result: { code: 0, value: RUN_RESULT, sessionId: RUN_RESULT.session_id },
-            // ?rundiag=1 is a run whose truncation evidence could not be saved.
-            // The main process says so in the exit payload, in the wording
-            // run-diagnostics.js owns, and the app has to put it in the run
-            // log: a stderr line nobody opens is the same as not saying it.
+            // ?rundiag=1 is a run whose truncation evidence could not be saved;
+            // ?rundiag=2 is one whose exit signal never reached the screen, so a
+            // finished run stays looking like it is still running. Both lines are
+            // the wording run-diagnostics.js owns, and the app has to put them in
+            // the run log: a stderr line nobody opens is the same as not saying it.
             ...(q.get("rundiag") === "1"
               ? {
                   diagnostics: {
@@ -714,7 +715,15 @@ window.api = (() => {
                     message: "本次运行的上限证据保存失败，重开会话后将看不到这条提示",
                   },
                 }
-              : {}),
+              : q.get("rundiag") === "2"
+                ? {
+                    diagnostics: {
+                      ok: false,
+                      reason: "signal-failed",
+                      message: "本次运行已经结束，但结束信号推送失败，界面可能仍显示运行中",
+                    },
+                  }
+                : {}),
           }),
         step * FRAMES.length + 400
       );
