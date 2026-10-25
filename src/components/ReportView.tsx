@@ -6,7 +6,7 @@ import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
 import { Card, PageBody, PanelHeader, ScrollArea } from "@/components/ui/layout";
 import { Badge } from "@/components/ui/overlay";
-import { CoverageNotice, FindingBlock, MarkdownLite, RunLimitNotice, findingToMarkdown } from "@/components/finding";
+import { CoverageNotice, FindingBlock, MarkdownLite, RunFailureNote, RunLimitNotice, findingToMarkdown } from "@/components/finding";
 
 /** Files first, worst file first, findings in line order inside a file.
  *  A reviewer reads a changeset one file at a time; the flat severity list on
@@ -71,6 +71,7 @@ export function ReportView() {
           返回结果
         </Button>
         <Badge className={status.cls}>{status.label}</Badge>
+        <RunFailureNote result={result} />
         {resultOrigin?.kind === "session" && <Badge tone="accent">历史会话</Badge>}
         <span className="tnum min-w-0 truncate text-meta text-muted">
           <b className="text-ink">{s.files_reviewed ?? "—"}</b> 文件

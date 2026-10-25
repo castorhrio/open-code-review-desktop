@@ -87,6 +87,15 @@ export interface RunManifest {
     failed?: CoverageItem[];
     waived?: CoverageItem[];
   };
+  /**
+   * Why the whole run stopped, when it did. Upstream keeps this distinct from
+   * a file's own failure class (`internal/session/manifest.go`): a run never
+   * fails with `provider` or `panic` — those belong to a single item — and the
+   * run-level vocabulary adds `internal` for scheduler/invariant failures.
+   * Its presence forces `terminal_state` to `failed` while leaving the items
+   * that did complete intact. `reason` is the CLI's own prose.
+   */
+  run_failure?: { classification?: string; reason?: string };
   elapsed_ms?: number;
 }
 

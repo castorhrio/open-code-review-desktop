@@ -2480,6 +2480,48 @@ await shoot(page, "54-run-completes", {
   },
 });
 
+// A run that fails is the one moment the app has nobody's attention to fall back
+// on: the toast is on screen for fifteen seconds and then the evidence is a log
+// drawer the user has to know to open. Its title used to be
+// `error.split("\\n")[0]` — the CLI's own `Error: no valid LLM endpoint
+// configured for provider "deepseek"` — while the sentence written for a person
+// sat in the description underneath, in smaller type, below the fold of a glance.
+// So the readable line has to be the title, and the CLI's words have to survive
+// in the description for whoever needs the provider's own message.
+await shoot(page, "88-run-failure-toast", {
+  query: "?runfail=1",
+  after: async (page) => {
+    await nav("审查")(page);
+    await page.waitForTimeout(1600);
+    await page.getByRole("button", { name: /开始审查/ }).click();
+    await page.waitForTimeout(5200);
+  },
+  expect: async (page) => {
+    const out = [];
+    const title = await page
+      .locator("[data-sonner-toast] [data-title]")
+      .first()
+      .innerText()
+      .catch(() => "");
+    const desc = await page
+      .locator("[data-sonner-toast] [data-description]")
+      .first()
+      .innerText()
+      .catch(() => "");
+    if (!title) return ["a failed run shows no toast at all"];
+    if (/^Error:/.test(title.trim())) out.push(`the toast still leads with the CLI's own line: ${title.slice(0, 60)}`);
+    if (!/还没有配置模型服务/.test(title)) out.push(`the actionable hint is not the title: ${title.slice(0, 60)}`);
+    if (!/no valid LLM endpoint configured/.test(desc)) out.push("the CLI's own wording is gone from the toast, so the provider's message is nowhere");
+    // A failed run must also hand the screen back: the same button that started
+    // it has to be usable again, and nothing may still claim a run is going.
+    const body = await page.locator("body").innerText();
+    if (/审查运行中/.test(body)) out.push("the screen still says a run is going after it failed");
+    if ((await page.getByRole("button", { name: /开始审查/ }).isEnabled().catch(() => false)) === false)
+      out.push("the run button stayed disabled after the run failed");
+    return out;
+  },
+});
+
 // The exact invocation is the first thing to read when a run did not do what you
 // expected, and it is in no other durable place — the log drawer collapsed, and a
 // toast is not selectable. It belongs in the document a run produces.
@@ -2902,6 +2944,62 @@ await shoot(page, "94-settings-picker-model", {
       out.push(`switching to an unconfigured service kept "${t.blank}" in the model box, so saving would write another service's model`);
     if (t.back !== "claude-sonnet-4-5")
       out.push(`switching back to anthropic did not restore its model: "${t.back}"`);
+    return out;
+  },
+});
+
+// A run that failed partway is not the same failure for every cause, and the
+// app used to say only 失败. `manifest.run_failure` has carried the CLI's own
+// classification since v1.13.0, and neither results surface read it — so "the
+// model service refused every retry", "this machine has no usable config" and
+// "the token budget ran out" were the same red badge, even though the next
+// thing a reader does is different for each (retry later / go to 设置 / raise
+// the budget). The classification is mapped to Chinese; the CLI's prose names
+// providers and stays in the tooltip.
+//
+// The fixture keeps the two halves upstream keeps apart: run_failure forces
+// terminal_state failed, while the files that did complete keep their findings.
+await shoot(page, "95-results-run-failure-provider", {
+  query: "?failure=provider&run=done",
+  after: async (page) => {
+    await nav("审查")(page);
+    await page.waitForTimeout(1600);
+    await page.getByRole("button", { name: /开始审查/ }).click();
+    await page.waitForTimeout(5200);
+  },
+  expect: async (page) => {
+    const text = await page.locator("main").innerText();
+    const out = [];
+    if (!/失败原因：模型服务出错/.test(text)) out.push("the results header does not say why the run failed");
+    if (!/密码校验用了普通的字符串比较/.test(text)) out.push("the findings the run did produce are missing from the failed run");
+    // The reason is the CLI's English prose — it names the provider and the
+    // HTTP status, and it belongs in the tooltip, not in the sentence.
+    if (/429 Too Many Requests/.test(text)) out.push("the CLI's English reason is in the visible text instead of the tooltip");
+    if (!(await page.locator('main span[title*="429 Too Many Requests"]').count()))
+      out.push("the failure reason is not readable anywhere");
+    return out;
+  },
+});
+
+// The same note on the reading surface, with the other classification: the
+// report is the document a user forwards, and one that says 失败 without saying
+// 预算用尽 invites the wrong fix.
+await shoot(page, "96-report-run-failure-budget", {
+  query: "?failure=budget&run=done",
+  after: async (page) => {
+    await nav("审查")(page);
+    await page.waitForTimeout(1600);
+    await page.getByRole("button", { name: /开始审查/ }).click();
+    await page.waitForTimeout(5200);
+    await page.getByRole("button", { name: "阅读", exact: true }).click();
+    await page.waitForTimeout(600);
+  },
+  expect: async (page) => {
+    const text = await page.locator("main").innerText();
+    const out = [];
+    if (!/失败原因：预算用尽/.test(text)) out.push("the report does not say why the run failed");
+    if (!/密码校验用了普通的字符串比较/.test(text)) out.push("the report lost the findings the run did produce");
+    if (/aggregate token budget exhausted/.test(text)) out.push("the report shows the CLI's English reason instead of the classification");
     return out;
   },
 });

@@ -26,8 +26,35 @@ const VERSION = 1;
 const MAX_ENTRIES = 200;
 const LIMIT_WARNING = "review_limit_reached";
 
+/**
+ * The same repository, however the caller spelled it.
+ *
+ * The renderer sends the folder the user picked, and that spelling is not
+ * stable: the picker hands back `/repo/` with a trailing separator, the CLI
+ * echoes `/repo`, a spec built from a nested path carries `..`, and on Windows
+ * the same folder can arrive with different casing. Keys used to be the raw
+ * string, so a run recorded under one spelling was invisible under another —
+ * and the entry it lost is the truncation evidence a reopened session exists
+ * to keep. Resolving (and lower-casing on Windows, where paths compare
+ * case-insensitively) makes the key about the folder rather than the typing.
+ *
+ * Reading normalises as well, so entries written by an earlier build — which
+ * stored the raw string — still answer for any spelling of the same folder.
+ */
+function normalizeRepo(repo) {
+  const raw = String(repo || "");
+  if (!raw) return "";
+  let abs;
+  try {
+    abs = path.resolve(raw);
+  } catch (_) {
+    return raw;
+  }
+  return process.platform === "win32" ? abs.toLowerCase() : abs;
+}
+
 function createStore(file) {
-  const key = (repo, sessionId) => `${repo || ""}\u0000${sessionId || ""}`;
+  const key = (repo, sessionId) => `${normalizeRepo(repo)}\u0000${sessionId || ""}`;
 
   function readAll() {
     try {
@@ -70,7 +97,8 @@ function createStore(file) {
     if (!warnings.length && !budget) return;
 
     const entries = readAll().filter((e) => key(e.repo, e.session_id) !== key(repo, sessionId));
-    entries.push({ repo: repo || "", session_id: sessionId, warnings, budget_exceeded: budget });
+    // Stored canonical, so the file does not accumulate one entry per spelling.
+    entries.push({ repo: normalizeRepo(repo), session_id: sessionId, warnings, budget_exceeded: budget });
     // Insertion order is the age order; keeping the tail drops the oldest and
     // keeps the newest, without a timestamp that can tie inside one millisecond.
     writeAll(entries.slice(-MAX_ENTRIES));
@@ -98,4 +126,4 @@ function createStore(file) {
   return { record, read, remove };
 }
 
-module.exports = { createStore, MAX_ENTRIES, LIMIT_WARNING };
+module.exports = { createStore, normalizeRepo, MAX_ENTRIES, LIMIT_WARNING };

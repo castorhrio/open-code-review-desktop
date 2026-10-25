@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { api, type Provider } from "@/lib/api";
-import { coverageOf, manifestBudgetExceeded, needsContinuation, reviewedCommit, sessionFileRef, sessionState, terminalState } from "@/lib/format";
+import { cliFailure, coverageOf, manifestBudgetExceeded, needsContinuation, reviewedCommit, sessionFileRef, sessionState, terminalState } from "@/lib/format";
 import { intOrEmpty, MODE_META, resumableMode, validateSpec } from "@/lib/spec";
 import type {
   AppInfo,
@@ -454,7 +454,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         } else {
           // The log area is selectable; a toast is not, and it disappears.
           setLog((l) => [...l, "[error] " + r.error]);
-          toast.error(r.error.split("\n")[0], { description: r.error.split("\n").slice(1).join("\n") || undefined, duration: 15000 });
+          // The title is the one line written for a person; the CLI's own
+          // wording (provider names, flags, JSON fragments) goes underneath,
+          // where it is still selectable and the log keeps all of it.
+          const failure = cliFailure(r.error);
+          toast.error(failure.reason || "审查失败", { description: failure.detail, duration: 15000 });
         }
       } else {
         setRunLabel("完成");

@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/form";
 import { EmptyState, PanelHeader, ScrollArea } from "@/components/ui/layout";
 import { Badge } from "@/components/ui/overlay";
-import { CodeBlock, CoverageNotice, MarkdownLite, RunLimitNotice, findingToMarkdown } from "@/components/finding";
+import { CodeBlock, CoverageNotice, MarkdownLite, RunFailureNote, RunLimitNotice, findingToMarkdown } from "@/components/finding";
 import { toast } from "sonner";
 
 const SEVERITIES = ["critical", "high", "medium", "low", ""] as const;
@@ -526,6 +526,7 @@ export function ResultsPanel() {
       )}
       <PanelHeader>
         <Badge className={status.cls}>{status.label}</Badge>
+        <RunFailureNote result={result} />
         {resultOrigin?.kind === "session" && <Badge tone="accent">历史会话</Badge>}
         {/* The counts say how big the run was; nothing on this screen said what
             it covered, which is the first thing to know once a second run has

@@ -9,7 +9,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const { createStore, MAX_ENTRIES, LIMIT_WARNING } = require("../run-diagnostics.js");
+const { createStore, normalizeRepo, MAX_ENTRIES, LIMIT_WARNING } = require("../run-diagnostics.js");
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-run-diagnostics-"));
 const file = path.join(dir, "nested", "run-diagnostics.json");
@@ -52,6 +52,30 @@ check("a clean run leaves no entry", store.read(repo, cleanSession) === null);
 
 store.record(otherRepo, session, limitResult);
 check("the same session id in another repository is isolated", store.read(otherRepo, session)?.warnings?.length === 1 && store.read("/home/x/work/a-third", session) === null);
+
+// The repository key has to be the *folder*, not the spelling. The renderer
+// sends what the picker handed it (`.../payments-api/`), while a session load
+// sends what the CLI echoes (`.../payments-api`); a spec built from a nested
+// path can carry `..`. Recorded under one spelling and read under another, the
+// entry used to be invisible — and the entry is the truncation evidence that
+// makes a reopened session honest. All of these are the same folder.
+store.record(`${repo}/`, "slash-session", limitResult);
+check("a trailing separator does not create a second repository", store.read(repo, "slash-session")?.warnings?.length === 1);
+check("an entry recorded without a separator is found when read with one", store.read(`${repo}/`, session)?.warnings?.length === 1);
+store.record(`${repo}/../payments-api`, "dotdot-session", limitResult);
+check("a path spelled with .. resolves to the same repository", store.read(repo, "dotdot-session")?.warnings?.length === 1);
+check("normalizeRepo resolves a relative spelling", normalizeRepo(path.relative(process.cwd(), repo)) === normalizeRepo(repo));
+const rawSlash = JSON.parse(fs.readFileSync(file, "utf8"));
+check("the stored key is canonical, not the caller's spelling", rawSlash.entries.filter((e) => e.repo === repo).length >= 1 && rawSlash.entries.every((e) => e.repo === normalizeRepo(e.repo)));
+// Windows compares paths case-insensitively, so the same folder can arrive with
+// a different drive letter or folder casing; elsewhere a path is a byte string
+// and a different casing is a different folder, which must stay isolated.
+store.record(repo, "case-session", limitResult);
+if (process.platform === "win32") {
+  check("a differently-cased path is the same repository", store.read(repo.toUpperCase(), "case-session")?.warnings?.length === 1);
+} else {
+  check("elsewhere, casing is part of the path", store.read(repo.toUpperCase(), "case-session") === null);
+}
 
 store.remove(repo, session);
 check("deleting a session deletes its entry", store.read(repo, session) === null);

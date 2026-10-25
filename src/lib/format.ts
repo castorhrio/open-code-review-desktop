@@ -214,6 +214,59 @@ export function manifestBudgetExceeded(manifest: RunManifest | null | undefined)
   return (manifest?.coverage?.failed ?? []).some((item) => item.classification === "budget");
 }
 
+/**
+ * Why a run stopped, in the app's own language.
+ *
+ * The CLI writes a run-level failure as `manifest.run_failure`, with its own
+ * fixed vocabulary (`internal/session/manifest.go`): input / configuration /
+ * timeout / cancelled / budget / internal / unknown. It is a different enum
+ * from the per-file classes carried by `coverage.failed[].classification`
+ * (provider / timeout / cancelled / configuration / input / budget / panic /
+ * unknown) — a run never fails with "provider", that is always one file — so
+ * both are mapped here, and the header note says 失败原因 while a coverage row
+ * says 未审 · 原因. Neither string is invented: an unknown value is shown as
+ * itself rather than being folded into "unknown", because a value this build
+ * has never heard of is the one a reader most needs to see.
+ */
+export const FAILURE_LABEL: Record<string, string> = {
+  // run-level
+  input: "审查范围无效",
+  configuration: "配置不完整",
+  timeout: "超时",
+  cancelled: "已取消",
+  budget: "预算用尽",
+  internal: "程序内部错误",
+  unknown: "原因不明",
+  // per-file class, from coverage.failed
+  provider: "模型服务出错",
+  panic: "程序崩溃",
+};
+
+export function failureLabel(classification: string | undefined): string {
+  const c = String(classification || "");
+  return FAILURE_LABEL[c] || c;
+}
+
+/**
+ * The run-level failure a result carries, ready to render.
+ *
+ * The badge alone said 失败 and nothing else, so a reader could see that a run
+ * broke but not whether it was worth retrying (timeout), fixing (configuration),
+ * or asking again later (budget). The reason is the CLI's English prose and
+ * names providers, so it stays in a tooltip; the classification is the part
+ * that belongs in the sentence.
+ */
+export function failureOf(value: RunResult | null | undefined): { classification: string; label: string; reason: string } | null {
+  const failure = value?.manifest?.run_failure;
+  if (!failure) return null;
+  const classification = String(failure.classification || "");
+  return {
+    classification,
+    label: failureLabel(classification) || "原因不明",
+    reason: String(failure.reason || "").trim(),
+  };
+}
+
 export function needsContinuation(value: RunResult): boolean {
   const st = terminalState(value);
   return st === "partial" || st === "failed" || coverageOf(value, "failed").length > 0;
@@ -237,6 +290,30 @@ export function cliReason(text: string): string {
     .filter(Boolean);
   const hint = lines.find((l) => l.startsWith("→"));
   return (hint ? hint.replace(/^→\s*/, "") : lines[0] || "").trim();
+}
+
+/**
+ * The same failure split into a title and the context underneath it.
+ *
+ * A toast has one line of title and a description below it. A failed run used to
+ * take `error.split("\n")[0]` for the title — the CLI's own wording, naming
+ * providers and flags — and put the translated hint, the one line written for a
+ * person, second. ReviewPanel had already worked out that the hint belongs first;
+ * the run-failure toast had not, so the same error read differently depending on
+ * which surface reported it.
+ *
+ * The detail keeps everything else, hint line excepted, because the CLI's words
+ * are still the only place a provider's own message appears.
+ */
+export function cliFailure(text: string): { reason: string; detail?: string } {
+  const lines = String(text || "")
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const hint = lines.find((l) => l.startsWith("→"));
+  const reason = (hint ? hint.replace(/^→\s*/, "") : lines[0] || "").trim();
+  const detail = lines.filter((l) => l !== hint).join("\n").trim();
+  return { reason, detail: detail || undefined };
 }
 
 export function humanTime(iso: string): string {

@@ -627,6 +627,17 @@ window.api = (() => {
   const LIMIT = q.get("limit") === "1";
   const LIMIT_FINDINGS = LIMIT && q.get("findings") === "1";
   const LIMIT_EMPTY = LIMIT && !LIMIT_FINDINGS;
+  // ?failure=<class> is a run that broke partway: the CLI resolves a
+  // run-level cause, writes it into the manifest as run_failure, forces
+  // terminal_state to failed, and still keeps the files it did finish. Both
+  // classifications are the CLI's own enum (internal/session/manifest.go), and
+  // the reason is its prose - English, naming the provider, which is exactly
+  // why the app shows the classification and keeps this in a tooltip.
+  const FAILURE = q.get("failure") || "";
+  const FAILURE_REASON =
+    FAILURE === "budget"
+      ? "aggregate token budget exhausted before 3 of 5 files were dispatched"
+      : "provider deepseek returned 429 Too Many Requests for every retry";
   const RUN_RESULT = {
     status: "complete",
     session_id: "9f2c41d0a7b34e58b1c6d7e8f9a0b1c2",
@@ -655,6 +666,14 @@ window.api = (() => {
       ? [{ type: "review_limit_reached", file: "internal/service/auth/login.go", message: "max tool rounds reached; task_done" }]
       : [],
   };
+  if (FAILURE) {
+    RUN_RESULT.status = "failed";
+    RUN_RESULT.manifest.terminal_state = "failed";
+    RUN_RESULT.manifest.run_failure = { classification: FAILURE, reason: FAILURE_REASON };
+    RUN_RESULT.manifest.coverage.failed = [
+      { item_id: "internal/service/auth/session.go", path: "internal/service/auth/session.go", classification: FAILURE, reason: "" },
+    ];
+  }
   const replay = () => {
     const step = LONG ? 40 : 130;
     FRAMES.forEach((f, i) => setTimeout(() => progressCb && progressCb({ id: "run-1", progress: f }), step * i));
@@ -662,12 +681,54 @@ window.api = (() => {
     // ?run=done walks the transition nothing else in this file covered: the run
     // finishes, the payload arrives, and the app has to land on the results with
     // them. Every other "results" shot got there through 历史.
-    if (q.get("run") === "done") {
+    if (q.get("run") === "done" && !FAILURE) {
       setTimeout(
         () => logCb && logCb({ id: "run-1", line: "[cmd] ocr review --repo /home/x/work/payments-api --format json --color never" }),
         60
       );
       setTimeout(() => exitCb && exitCb({ id: "run-1", result: { code: 0, value: RUN_RESULT, sessionId: RUN_RESULT.session_id } }), step * FRAMES.length + 400);
+    }
+    // ?runfail=1 is a run the model service refused. The text is the pair
+    // ocr-service.js really produces: the CLI's own Error: line, which names
+    // the provider and talks about endpoints, and the translated hint appended
+    // under it. The toast used to lead with the first line and bury the hint in
+    // the description, so the one sentence written for a person was the part
+    // users had to go looking for.
+    if (q.get("runfail") === "1") {
+      setTimeout(
+        () =>
+          exitCb &&
+          exitCb({
+            id: "run-1",
+            result: {
+              code: 1,
+              value: null,
+              sessionId: "9f2c41d0a7b34e58b1c6d7e8f9a0b1c2",
+              error:
+                'Error: no valid LLM endpoint configured for provider "deepseek"\\n→ 还没有配置模型服务。到「设置」里选择服务、填入 API Key 并保存后再运行。',
+            },
+          }),
+        step * FRAMES.length + 400
+      );
+    }
+    // The failure run exits non-zero the way the CLI does, and still carries
+    // the partial value: that pair is what puts the results screen up with the
+    // failure cause beside the badge instead of ending in a toast alone.
+    if (FAILURE) {
+      setTimeout(
+        () =>
+          exitCb &&
+          exitCb({
+            id: "run-1",
+            result: {
+              code: 1,
+              value: RUN_RESULT,
+              sessionId: RUN_RESULT.session_id,
+              error: "Error: review stopped before every file was reviewed\\n→ 模型服务返回 429，稍后再试或换一个服务。",
+            },
+          }),
+        step * FRAMES.length + 400
+      );
     }
   };
   return {

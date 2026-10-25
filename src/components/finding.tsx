@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/cn";
 import type { Finding, RunResult } from "@/lib/types";
 import { copyText } from "@/lib/clipboard";
-import { SEVERITY_LABEL, SEVERITY_TEXT, WARNING_REVIEW_LIMIT, runLimitReached } from "@/lib/format";
+import { SEVERITY_LABEL, SEVERITY_TEXT, WARNING_REVIEW_LIMIT, failureLabel, failureOf, runLimitReached } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 
 /**
@@ -100,6 +100,30 @@ export function CodeBlock({ title, tone, text }: { title: string; tone: "ok" | "
 }
 
 /**
+ * Why the whole run stopped.
+ *
+ * `manifest.run_failure` is the CLI's structured answer, and it was the one
+ * part of a failed run the app dropped: both results surfaces showed a red 失败
+ * badge and nothing else, so "the model service refused us", "the config has no
+ * key" and "the budget ran out" all read the same — even though the follow-up
+ * is different for each. The reason stays in the tooltip: it is English prose
+ * naming endpoints, and the classification is the sentence written for a
+ * person. Rendered beside the badge on both surfaces so they cannot drift.
+ */
+export function RunFailureNote({ result, className }: { result: RunResult; className?: string }) {
+  const failure = failureOf(result);
+  if (!failure) return null;
+  return (
+    <span
+      className={cn("min-w-0 max-w-[240px] truncate text-meta text-bad", className)}
+      title={failure.reason || failure.classification}
+    >
+      失败原因：{failure.label}
+    </span>
+  );
+}
+
+/**
  * What the run did not cover.
  *
  * A live run carries `manifest.coverage`, so it can name the files. A session
@@ -119,8 +143,8 @@ export function CoverageNotice({
   resumeHint,
   className,
 }: {
-  failed: { item_id: string; path?: string; reason?: string }[];
-  waived: { item_id: string; path?: string; reason?: string }[];
+  failed: { item_id: string; path?: string; reason?: string; classification?: string }[];
+  waived: { item_id: string; path?: string; reason?: string; classification?: string }[];
   failedFiles: number;
   subject: string;
   resumeHint?: ReactNode;
@@ -138,7 +162,14 @@ export function CoverageNotice({
           {[...failed.map((f) => ({ f, kind: "未审" })), ...waived.map((f) => ({ f, kind: "跳过" }))].map(({ f, kind }) => (
             <span key={f.item_id} className="font-mono text-meta text-muted">
               <span className={kind === "未审" ? "text-bad" : "text-low"}>{kind}</span> {f.path || f.item_id}
-              {f.reason && <span className="text-faint"> · {f.reason}</span>}
+              {/* The CLI classifies every failed item; only some carry prose.
+                  A row that said nothing but "未审 internal/..." left the reader
+                  to guess whether it timed out or never got dispatched. */}
+              {f.reason ? (
+                <span className="text-faint"> · {f.reason}</span>
+              ) : f.classification ? (
+                <span className="text-faint"> · {failureLabel(f.classification)}</span>
+              ) : null}
             </span>
           ))}
         </div>
