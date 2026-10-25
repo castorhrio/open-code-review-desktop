@@ -26,6 +26,17 @@ const ROOT = path.resolve(import.meta.dirname, "..");
 const require = createRequire(path.join(ROOT, "package.json"));
 const SERVICE = path.join(ROOT, "update-service.js");
 
+/**
+ * The service models the Windows build, because that is the only build that can
+ * auto-update (`app.isPackaged && process.platform === "win32" && !portable`).
+ * Left alone, every install-related check would pass on a Windows machine and
+ * fail on the Linux box the audit actually runs on — the harness reporting the
+ * host rather than the product. `install()` reads `process.platform` when it is
+ * called, not when the module loads, so the value has to hold for the whole run
+ * (this file is a dedicated process; nothing else here looks at the host).
+ */
+Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+
 const failures = [];
 const check = (name, ok, detail = "") => {
   console.log(`${ok ? "ok      " : "FAIL    "} ${name}${detail ? `  <- ${detail}` : ""}`);
