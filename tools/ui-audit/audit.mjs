@@ -2864,6 +2864,48 @@ await shoot(page, "68-commit-mode-ready", {
   },
 });
 
+// The model box belongs to the service named in the picker. Switching the
+// picker used to leave the previous service's model in the box, so
+// "选 anthropic → 保存" wrote DeepSeek's model into anthropic — a config that
+// reads as complete and only fails once a review starts. The box now follows
+// the picker, and a service with nothing saved gets an empty box rather than
+// someone else's model.
+let pickerTrace = null;
+await shoot(page, "94-settings-picker-model", {
+  after: async (page) => {
+    await nav("设置")(page);
+    await page.waitForTimeout(400);
+    const trigger = page.locator('main [role="combobox"]').first();
+    const field = page.getByPlaceholder("deepseek-v4-pro");
+    const pick = async (label) => {
+      await trigger.click();
+      await page.waitForTimeout(150);
+      await page.getByRole("option", { name: label }).click();
+      await page.waitForTimeout(250);
+      return field.inputValue();
+    };
+    const active = await field.inputValue();
+    const saved = await pick(/^anthropic/);
+    const blank = await pick(/^openai/);
+    const back = await pick(/^anthropic/);
+    pickerTrace = { active, saved, blank, back };
+  },
+  expect: async () => {
+    const out = [];
+    const t = pickerTrace;
+    if (!t) return ["the picker never ran, so nothing about the model field was verified"];
+    if (t.active !== "deepseek-v4-pro")
+      out.push(`the active service's model is not in the box to begin with: "${t.active}"`);
+    if (t.saved !== "claude-sonnet-4-5")
+      out.push(`switching to anthropic left "${t.saved}" in the model box instead of its saved model claude-sonnet-4-5`);
+    if (t.blank !== "")
+      out.push(`switching to an unconfigured service kept "${t.blank}" in the model box, so saving would write another service's model`);
+    if (t.back !== "claude-sonnet-4-5")
+      out.push(`switching back to anthropic did not restore its model: "${t.back}"`);
+    return out;
+  },
+});
+
 await browser.close();
 server.close();
 

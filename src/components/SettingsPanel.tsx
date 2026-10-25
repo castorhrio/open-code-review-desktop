@@ -139,6 +139,23 @@ export function SettingsPanel() {
     if (!res.ok) toast.error("无法卸载", { description: res.error });
   };
 
+  // The model box belongs to exactly one service. Changing the picker used to
+  // leave the previous service's model in place, so "选 anthropic → 保存" wrote
+  // DeepSeek's model into anthropic: a config that looks complete and only
+  // fails when the review starts. Read the target's own saved model instead;
+  // for the active provider the top-level model wins, because that is the value
+  // `ocr` is actually running with.
+  const pickProvider = (value: string) => {
+    setPicked(value);
+    setApiKey("");
+    if (value === "__custom__") {
+      setModel("");
+      return;
+    }
+    const target = config.providers[value] || config.customProviders[value] || {};
+    setModel((value === config.provider ? config.model : "") || target.model || "");
+  };
+
   const save = async (setActive: boolean) => {
     if (!name) {
       return;
@@ -186,7 +203,7 @@ export function SettingsPanel() {
 
             <FieldGrid>
               <Field label="模型服务">
-                <Select value={picked} onValueChange={setPicked} options={options} placeholder="（未选择）" />
+                <Select value={picked} onValueChange={pickProvider} options={options} placeholder="（未选择）" />
                 <button
                   type="button"
                   className="self-start text-meta text-accent hover:underline"
