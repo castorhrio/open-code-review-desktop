@@ -13,29 +13,17 @@
 本轮已把 desktop 的依赖升到 `^1.13.3`（`package.json` / `package-lock.json`），
 并移植了其中对封装影响最大的一个修复。
 
-**本轮复核结论**（2026-10-26，第 2 轮）：上游**仍然没有新内容**。
+### 复核记录
 
-- `git fetch upstream --tags` 两次都因 `GnuTLS recv error (-110)` 失败（网络抖动），
-  改用 GitHub API 交叉核对：`repos/alibaba/open-code-review/commits?sha=main` 的顶端
-  仍是 `375f64c`（2026-10-20），`tags` 列表最新仍是 `v1.13.3`，`releases` 无新条目。
-- 本仓 `upstream/main` 的本地 ref 也仍指向 `375f64c`，与上游一致。
+| 轮次 | 日期 | 上游顶端 commit | 最新 tag / release | 结论 |
+| --- | --- | --- | --- | --- |
+| 2 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3` | 无新内容（fetch 因 `GnuTLS recv error (-110)` 失败，改用 API 核对） |
+| 3 | 2026-10-26 | `375f64c`（日期未变） | `v1.13.3`（2026-10-22 发布） | 无新内容（API 核对） |
+| 4 | 2026-10-26 | `375f64c` | `v1.13.3` | 无新内容（这次 `git fetch upstream --tags` 成功，与本地 ref 一致） |
+| 5 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（`git fetch` 成功 + API 双核对） |
 
-**本轮复核结论**（2026-10-26，第 3 轮）：上游**仍然没有新内容**。
-
-- `commits?sha=main` 的顶端仍是 `375f64c`（2026-10-20，日期未变）；
-  `tags` 最新仍是 `v1.13.3`；`releases` 最新仍是 `v1.13.3`（2026-10-22 发布）。
-- 本仓 `upstream/main` 的本地 ref 仍指向 `375f64c`，与上游一致。
-
-**本轮复核结论**（2026-10-26，第 4 轮）：上游**仍然没有新内容**。
-
-- `git fetch upstream --tags` 这次**成功**（前几轮的 `GnuTLS recv error (-110)` 是
-  网络抖动），本仓 `upstream/main` 仍指向 `375f64c`。
-- GitHub API 交叉核对：`commits?sha=main` 顶端仍是 `375f64c`（2026-10-20）；
-  `tags` 最新仍是 `v1.13.3`；`releases` 最新仍是 `v1.13.3`（2026-10-22 发布）。
-- 结论不变：本轮没有需要移植的新功能 / 修复 / 破坏性变更。
-
-结论：本轮没有需要移植的新功能 / 修复 / 破坏性变更，desktop 的封装（CLI flag、
-输出解析、配置暴露点）无需改动。
+结论：连续 4 轮没有需要移植的新功能 / 修复 / 破坏性变更，desktop 的封装（CLI flag、
+输出解析、配置暴露点）无需改动。若某轮顶端 commit 仍为 `375f64c`，本表不新增行。
 
 只是拉 tag 时会看到几条 `would clobber existing tag`（本仓也用 `v0.1.x` 编号，
 与上游 tag 撞名）：那是本地 remote 的 tag 同步提示，不影响 `upstream/main` 的

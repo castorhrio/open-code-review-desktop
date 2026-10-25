@@ -225,6 +225,38 @@ check(
   "a volume with no identity to compare cannot be judged",
   detectCaseInsensitive(volumeRepo, { stat: () => ({ dev: 1, ino: 0 }) }) === null
 );
+/* The probe spells the deepest segment that carries letters, so a path whose
+ * own leaf is a number still gets an answer from its nearest named ancestor:
+ * a repository at `/home/x/2024/10/26` is asked about `x`, not about `26`.
+ * Without the walk, the answer would be `null` ("cannot tell") and every such
+ * repository would fall back to the platform's guess. */
+const datedRepo = "/home/x/2024/10/26";
+check(
+  "a path whose leaf is a number is asked about its nearest named ancestor",
+  detectCaseInsensitive(datedRepo, { stat: foldingStat("x") }) === true
+);
+check(
+  "and the same walk reads a case-keeping volume the right way round",
+  detectCaseInsensitive(datedRepo, { stat: sensitiveStat("x") }) === false
+);
+/* The walk is bounded (MAX_LETTER_WALK, 8): it looks for a name with letters
+ * and stops even if it has not found one. Ten numeric segments below the named
+ * ancestor is two past the bound, so the probe must answer `null` ("cannot
+ * tell", and the caller falls back to the platform) rather than reach `/home/x`
+ * and answer — or throw. The stat here would happily answer `true`, so this
+ * assertion fails if the bound is ever raised without the caller's fallback
+ * being reconsidered. (Nine numeric segments is the last path that still
+ * answers, which is what pins the number to 8 rather than "some limit".) */
+const pastTheWalk = "/home/x/2024/10/26/01/02/03/04/05/06/07";
+const withinTheWalk = "/home/x/2024/10/26/01/02/03/04/05/06";
+check(
+  "a path whose nearest name is past the walk says it cannot tell",
+  detectCaseInsensitive(pastTheWalk, { stat: foldingStat("x") }) === null
+);
+check(
+  "and one whose nearest name is inside the walk still answers",
+  detectCaseInsensitive(withinTheWalk, { stat: foldingStat("x") }) === true
+);
 // The volume is asked once per path: a file with a hundred entries would
 // otherwise ask a hundred times, and the repository under review is often on a
 // network mount.

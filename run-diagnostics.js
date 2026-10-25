@@ -151,18 +151,23 @@ function reportOutcome(outcome, warn, options) {
 }
 
 /**
- * Whether a path on this platform compares case-insensitively.
+ * The *platform's* answer — the fallback, not the rule.
  *
- * Windows always does. macOS does too by default — APFS and HFS+ are
- * case-insensitive out of the box — so the same folder arrives there with a
- * different casing too, and a byte-comparison key lost the truncation evidence
- * on exactly the platform the app ships on.
+ * The rule is the *volume's* answer, asked per repository by
+ * `detectCaseInsensitive` (wired in `createAppStore`). Case-sensitivity is a
+ * property of the volume, not of the OS: a macOS volume can be formatted
+ * case-sensitive, and a Linux one can be mounted case-insensitively, so the
+ * platform alone is a guess that is wrong in both directions.
  *
- * The exception is a macOS volume that was formatted case-sensitive, where two
- * folders differing only in case really are two folders. There the key merges
- * them, which is the safer of the two mistakes: a shared key needs the same
- * session id under both folders, while a byte key loses the evidence of every
- * run on a normal volume.
+ * This constant is what the store falls back to when there is no explicit
+ * answer and the volume could not be asked (`null`: nothing to compare, the
+ * path is gone, or the volume reports no `dev`/`ino` identity). The fallback
+ * says Windows and macOS fold case and everyone else keeps it — always right
+ * on Windows, right on a default macOS volume, wrong on a case-sensitive one.
+ * Wrong-but-folding is the safer of the two mistakes *there*: a merged key
+ * needs the same session id under both spellings before anything is lost,
+ * while a byte key loses the truncation evidence of every run on a normal
+ * volume.
  */
 const CASE_INSENSITIVE_PATHS = process.platform === "win32" || process.platform === "darwin";
 
@@ -175,6 +180,16 @@ const CASE_INSENSITIVE_PATHS = process.platform === "win32" || process.platform 
  */
 const flipCase = (name) =>
   String(name || "").replace(/[A-Za-z]/g, (ch) => (ch === ch.toUpperCase() ? ch.toLowerCase() : ch.toUpperCase()));
+
+/**
+ * How many segments the probe may walk up looking for a name with letters.
+ *
+ * Small on purpose: the segment to spell twice is the deepest one that carries
+ * letters, which is one level up for a date-shaped path and never more than a
+ * few in practice. The bound only exists so a path of pure digits/symbols
+ * cannot walk to the filesystem root and ask a really different question.
+ */
+const MAX_LETTER_WALK = 8;
 
 /**
  * Whether the volume holding `target` folds case.
@@ -210,11 +225,20 @@ function detectCaseInsensitive(target, options = {}) {
     return null;
   }
   // The segment to spell twice: the deepest one that carries letters. A folder
-  // called `2024` has none, so the walk goes up to its parent.
+  // called `2024` has none, so the walk goes up to its parent — a date-shaped
+  // path like `/repo/2024/10/26` still gets an answer instead of "why is this
+  // folder case-sensitive on macOS".
+  //
+  // The walk is bounded by MAX_LETTER_WALK for one reason: the deepest segment
+  // that carries letters is normally one or two levels up, and a path made
+  // only of digits and symbols (`/2024/10/26/...`, a timestamped build dir)
+  // must not be walked to `/`. Past the bound the answer is "cannot tell"
+  // (`null`), which falls back to the platform's answer — an honest guess,
+  // not a wrong answer about a volume nobody asked.
   let dir = path.dirname(abs);
   let base = path.basename(abs);
   let spelled = abs;
-  for (let depth = 0; depth < 8 && !/[A-Za-z]/.test(base); depth += 1) {
+  for (let depth = 0; depth < MAX_LETTER_WALK && !/[A-Za-z]/.test(base); depth += 1) {
     const parent = path.dirname(dir);
     if (parent === dir) return null;
     dir = parent;
@@ -380,6 +404,13 @@ async function drainQueue(current, maxRounds = MAX_DRAIN_ROUNDS) {
  *
  * `options.detect` replaces the volume probe, which is how the behaviour can
  * be checked from a machine whose volume happens to answer the other way.
+ *
+ * `main.js` builds this at module load, before Electron is ready, so it must
+ * stay I/O-free: the constructor only closes over the path, the JSON file is
+ * first touched by a read or a write, and the volume probe is lazy (run once
+ * per repository, on first use, then cached). Startup therefore never blocks
+ * on the store — not on a slow disk, not on a network mount — and the order in
+ * which `main.js` runs relative to `app.whenReady()` cannot matter.
  */
 function createAppStore(file, options = {}) {
   const detect = options.detect || createCaseDetector(options);
@@ -412,7 +443,7 @@ function createStore(file, options = {}) {
   const key = (repo, sessionId) => `${normalizeRepo(repo, options)}\u0000${sessionId || ""}`;
   /**
    * The key the *earlier* build used: the platform's answer rather than the
-   * volume's.
+   * volume's. Kept for the upgrade window only, not as a second rule.
    *
    * Where the two answers agree this is the same key and nothing changes.
    * Where they do not — a macOS volume formatted case-sensitive — the earlier
@@ -420,6 +451,14 @@ function createStore(file, options = {}) {
    * entry would become invisible and the session it belongs to would look
    * clean again. The platform's answer is the earlier build's answer, so it is
    * the one to look under as well.
+   *
+   * Exit condition: the first build that files entries under the volume's
+   * answer is the one after 0.1.13 (every earlier build filed them under the
+   * platform's). Delete `legacyKey`/`keysFor`'s second key — and the
+   * `legacy === exact` branch with it — once installs older than that build
+   * are no longer supported, i.e. once the in-app updater has had one release
+   * cycle to move them across. Until then this costs one extra read per
+   * lookup and is the only thing that keeps an old entry visible.
    */
   const legacyOptions = { platformCaseInsensitive: options.platformCaseInsensitive };
   const legacyKey = (repo, sessionId) => `${normalizeRepo(repo, legacyOptions)}\u0000${sessionId || ""}`;
