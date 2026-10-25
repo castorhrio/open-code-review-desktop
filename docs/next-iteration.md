@@ -391,6 +391,42 @@ if !ok {
 
 ---
 
+## 本轮 desktop 侧加固（与上游无关，第 7 轮）
+
+上游顶端仍是 `375f64c` / `v1.13.3`（第 7 轮复核，`git fetch` + GitHub API 双核对），
+所以本轮不改封装面，只把「保存的 Key 属于哪一条服务条目」这条规则**从猜测改成上游
+的判据**。上一轮简报里的两条 P1（`presetEntry` 的乐观分支、provider 形态下端点/Key
+数环境变量）在第 6 轮就已收掉，断言在 `tools/service-smoke.mjs` 里；本轮只补了
+`entryByName` 这一处。
+
+### P2 — 大小写变体同时存在时，取哪一条：`provider` 自己说了算
+
+`providers` 段里同时有 `DeepSeek` 和 `deepseek` 时，desktop 一直取**全小写**那条，
+依据只写在注释里（「`ocr llm providers` 打印的就是小写」）。**读了上游，这条依据
+站不住**——`internal/llm/resolver.go` @ `v1.13.3` 的 `tryProviderConfig`：
+
+```go
+preset, isPreset := LookupProvider(cfg.Provider)   // 只有这一步折叠大小写
+if isPreset { entry, ok = cfg.Providers[cfg.Provider] } else { ... }
+```
+
+`cfg.Providers[cfg.Provider]` 用的是配置里 `provider` 字段的**原始字符串**，不是注册表
+返回的规范名（`LookupProvider` 只在 `providers.go` 里做 `strings.ToLower` 查表，
+`cfg.Provider` 本身没被改写）。所以哪一条会被 `ocr` 打开，答案在配置文件自己手里；
+小写那条只在「恰好与 `provider` 一致」时才是对的。判错的方向是把**另一条**的 Key
+交给「测试连通」，设置页于是拿着本次运行不会用的 Key 去测（例：`provider: DeepSeek`
+时上游读 `providers["DeepSeek"]`，desktop 说复用的是 `providers["deepseek"]` 的 Key）。
+
+- **改动**（`ocr-service.js` 的 `entryByName`）：变体的取舍顺序改成
+  ①配置 `provider` 字段点名的那条 → ②注册表拼法（`ocr llm providers` 打印的小写
+  形式，表单通常就是它的写法）→ ③文件里的第一条。精确命中仍然优先于任何变体
+  （这条没动：跨段同名时精确命中另一段仍是用户的意图）。
+- **验证**：`tools/service-smoke.mjs` 新增 3 条断言——`provider: DeepSeek` +
+  `providers` 两条变体、`provider: deepseek` + 两条变体（反向）、没有 `provider`
+  可依时退回注册表拼法。第一条**去掉修复就 FAIL**（实测变成 `sk-lower`）。
+
+---
+
 ## 待移植 / 待验证
 
 ### 已完成 — `manifest.run_failure` 的中文映射与展示
@@ -462,16 +498,10 @@ desktop 的「工具调用 N（失败 M）」直接读 CLI 的 `tool_calls.failu
 
 ## 仍然开放的事项（非上游）
 
-本轮收了「模型名按形态对齐上游」与「`MAX_ENTRIES` 全局裁剪」两条，其余按优先级排
-在这里，下一轮挑。标注「**未动**」的条目是本轮看过、确认仍然成立但没有改的——不是
-新发现。
+第 5 轮收了「模型名按形态对齐上游」与「`MAX_ENTRIES` 全局裁剪」，第 6 轮收了
+「按名字选配置段」，第 7 轮收了 `entryByName` 的变体取舍；剩下的按优先级排在这里，
+下一轮挑。标注「**未动**」的条目是最近一轮看过、确认仍然成立但没有改的——不是新发现。
 
-- **P1**：内置服务名写在**另一个段**里（`provider: anthropic`，条目只在
-  `custom_providers`）时，上游同样整份拒绝（报错换成
-  `provider %q is set but not configured in providers section`），desktop 现在报
-  `missing: baseUrl,model,credential`。这是第 6 轮收掉的那两类之外的**第三种形态**，
-  同一个判据；需要另一句「条目放错了段」的措辞，所以留到下一轮。文件
-  `ocr-service.js`。——**未动**（第 6 轮读上游源码时发现）。
 - **P2**：`writeAll` 的 Windows 回退分支里 `unlink(tmp)` 失败被吞掉，进程立刻退出
   会留下 `*.tmp` 垃圾。文件 `run-diagnostics.js`。——**未动**。改成把失败记进
   outcome。
@@ -501,6 +531,10 @@ desktop 的「工具调用 N（失败 M）」直接读 CLI 的 `tool_calls.failu
   第 4 轮做完：各配一条断言，分类逻辑一行未改，`spawnFailure` 顺便导出。
 - ~~`check("the stored key is canonical...")` 两个条件用 `&&` 串在一起~~ →
   第 4 轮拆成两条独立断言。
+- ~~内置服务名只写在 `custom_providers` 段（`provider: anthropic`）时仍报缺字段~~
+  → 第 6 轮 `c36daa9` 收了：`rejected = "provider-not-in-section"`，`missing` 留空、
+  `ready` 由拒绝决定，句子说「把条目移到 `providers.<name>`」；断言在
+  `tools/service-smoke.mjs`（`presetOnlyInCustom`）。
 - ~~`rejectedProvider` 分支没接上（`presetEntry` 的乐观分支）~~ → 第 6 轮做完：
   按**名字**选段，并补上 `custom_providers` 那一次查找；同名两段 / 两段都没有两种
   形态都有断言，4 条去掉修复即 FAIL。剩下「内置名只写在 custom_providers」一条按

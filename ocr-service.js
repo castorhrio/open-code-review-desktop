@@ -150,14 +150,26 @@ function entryByName(raw, name) {
   const exact = providers[name] || custom[name];
   if (exact) return exact;
   // Only the built-in section folds case, because only it is resolved through
-  // the registry. Two entries whose names differ only by case: the all-lowercase
-  // one is the spelling the CLI's own table prints, so it is the canonical
-  // entry; anything else would be a guess between two configs.
+  // the registry. Two entries whose names differ only by case (`DeepSeek` and
+  // `deepseek`) are two different entries to everything below, so which one is
+  // meant has to be decided here rather than guessed: `tryProviderConfig` tests
+  // the name against the registry, which folds case, and then reads
+  // `cfg.Providers[cfg.Provider]` — the *raw* string out of the config, not the
+  // registry's spelling (internal/llm/resolver.go, v1.13.3). So the entry the
+  // config's own `provider` field names is the one `ocr` actually opens, and it
+  // is the one asked about. The registry's spelling comes next (that is the form
+  // `ocr llm providers` prints, so it is what a form filled from the table
+  // holds); picking it first was a guess that only looked right while the two
+  // agreed.
   const wanted = String(name).toLowerCase();
   const matches = Object.entries(providers).filter(([key]) => key.toLowerCase() === wanted);
   if (!matches.length) return null;
-  const canonical = matches.find(([key]) => key === wanted) || matches[0];
-  return canonical[1];
+  const active = String(raw.provider || "");
+  const chosen =
+    matches.find(([key]) => key === active) ||
+    matches.find(([key]) => key === wanted) ||
+    matches[0];
+  return chosen[1];
 }
 
 // The Key never travels to the renderer: the settings page asks "may I reuse

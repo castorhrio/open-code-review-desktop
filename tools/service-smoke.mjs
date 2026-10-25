@@ -1191,6 +1191,41 @@ check(
     "DeepSeek"
   ) === "sk-custom"
 );
+/* Two entries whose names differ only by case are two different entries to
+ * `ocr`, so "which one did the user mean" has a right answer rather than a
+ * guess: `tryProviderConfig` folds the name only for the *registry* lookup and
+ * then reads `cfg.Providers[cfg.Provider]` with the raw string, so the entry the
+ * config's own `provider` field names is the one the CLI opens
+ * (internal/llm/resolver.go, v1.13.3). This used to always pick the all-lowercase
+ * spelling — right by luck whenever the two agreed, and wrong (the settings page
+ * then reuses a Key from an entry the run does not use) when they did not.
+ */
+const twoVariants = (provider, name) =>
+  savedKey(
+    {
+      provider,
+      providers: {
+        deepseek: { api_key: "sk-lower" },
+        DeepSeek: { api_key: "sk-upper" },
+      },
+    },
+    name
+  );
+check(
+  "with two case variants, the entry the config's own provider names wins",
+  twoVariants("DeepSeek", "DEEPSEEK") === "sk-upper",
+  twoVariants("DeepSeek", "DEEPSEEK")
+);
+check(
+  "and it still wins when the config spells it the other way",
+  twoVariants("deepseek", "DEEPSEEK") === "sk-lower",
+  twoVariants("deepseek", "DEEPSEEK")
+);
+check(
+  "with no provider to go by, the registry's own spelling is the fallback",
+  savedKey({ providers: { DeepSeek: { api_key: "sk-upper" }, deepseek: { api_key: "sk-lower" } } }, "DEEPSEEK") ===
+    "sk-lower"
+);
 check(
   "a custom name is not folded, because the CLI looks it up exactly",
   savedKey(
