@@ -629,15 +629,15 @@ window.api = (() => {
   const LIMIT_EMPTY = LIMIT && !LIMIT_FINDINGS;
   // ?failure=<class> is a run that broke partway: the CLI resolves a
   // run-level cause, writes it into the manifest as run_failure, forces
-  // terminal_state to failed, and still keeps the files it did finish. Both
-  // classifications are the CLI's own enum (internal/session/manifest.go), and
-  // the reason is its prose - English, naming the provider, which is exactly
-  // why the app shows the classification and keeps this in a tooltip.
+  // terminal_state to failed, and still keeps the files it did finish. The
+  // class is the CLI's own RunFailureClass (internal/session/manifest.go) and
+  // the reason is its prose - English, naming the provider, which is why the
+  // app says the class in its own words and labels the prose as the CLI's.
   const FAILURE = q.get("failure") || "";
-  const FAILURE_REASON =
-    FAILURE === "budget"
-      ? "aggregate token budget exhausted before 3 of 5 files were dispatched"
-      : "provider deepseek returned 429 Too Many Requests for every retry";
+  const FAILURE_REASON = {
+    timeout: "global review deadline of 30m elapsed before 3 of 5 files were dispatched",
+    budget: "aggregate token budget exhausted before 3 of 5 files were dispatched",
+  }[FAILURE] || "";
   const RUN_RESULT = {
     status: "complete",
     session_id: "9f2c41d0a7b34e58b1c6d7e8f9a0b1c2",
@@ -670,8 +670,18 @@ window.api = (() => {
     RUN_RESULT.status = "failed";
     RUN_RESULT.manifest.terminal_state = "failed";
     RUN_RESULT.manifest.run_failure = { classification: FAILURE, reason: FAILURE_REASON };
+    // Two items with two different classes, the way the manifest really looks:
+    // one file the model service refused — provider is a *per-file* class, a run
+    // never fails with it — and the rest swept by the stop that ended the run
+    // (upstream's itemFailureForRunClass maps the run-level class onto them).
     RUN_RESULT.manifest.coverage.failed = [
-      { item_id: "internal/service/auth/session.go", path: "internal/service/auth/session.go", classification: FAILURE, reason: "" },
+      {
+        item_id: "internal/service/auth/session.go",
+        path: "internal/service/auth/session.go",
+        classification: "provider",
+        reason: "provider deepseek returned 429 Too Many Requests",
+      },
+      { item_id: "internal/service/auth/login.go", path: "internal/service/auth/login.go", classification: FAILURE, reason: "" },
     ];
   }
   const replay = () => {

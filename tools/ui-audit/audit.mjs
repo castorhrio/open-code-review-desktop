@@ -3000,13 +3000,19 @@ await shoot(page, "94-settings-picker-model", {
 // model service refused every retry", "this machine has no usable config" and
 // "the token budget ran out" were the same red badge, even though the next
 // thing a reader does is different for each (retry later / go to 设置 / raise
-// the budget). The classification is mapped to Chinese; the CLI's prose names
-// providers and stays in the tooltip.
+// the budget). The classification is mapped to Chinese.
+//
+// The CLI's own reason is a separate thing: it is English prose naming the
+// provider and the HTTP status, and it is the line that says whether to retry
+// or to fix something. It used to live in a tooltip only — out of reach for
+// touch and for a keyboard, and absent from the report, which is the document
+// people forward. So it is written out, labelled as the CLI's words.
 //
 // The fixture keeps the two halves upstream keeps apart: run_failure forces
-// terminal_state failed, while the files that did complete keep their findings.
-await shoot(page, "95-results-run-failure-provider", {
-  query: "?failure=provider&run=done",
+// terminal_state failed, while the files that did complete keep their findings
+// and carry their own (per-file) class.
+await shoot(page, "95-results-run-failure-timeout", {
+  query: "?failure=timeout&run=done",
   after: async (page) => {
     await nav("审查")(page);
     await page.waitForTimeout(1600);
@@ -3016,20 +3022,25 @@ await shoot(page, "95-results-run-failure-provider", {
   expect: async (page) => {
     const text = await page.locator("main").innerText();
     const out = [];
-    if (!/失败原因：模型服务出错/.test(text)) out.push("the results header does not say why the run failed");
-    if (!/密码校验用了普通的字符串比较/.test(text)) out.push("the findings the run did produce are missing from the failed run");
-    // The reason is the CLI's English prose — it names the provider and the
-    // HTTP status, and it belongs in the tooltip, not in the sentence.
-    if (/429 Too Many Requests/.test(text)) out.push("the CLI's English reason is in the visible text instead of the tooltip");
+    if (!/失败原因：超时/.test(text)) out.push("the results header does not say why the run failed");
+    if (!/global review deadline of 30m/.test(text))
+      out.push("the CLI's own reason for the failure is not written out on the results screen");
+    // The per-file class is the visible text now; the CLI's per-file prose is
+    // the tooltip. A reader has to be able to see *what kind* of failure each
+    // file hit without hovering anything.
+    if (!/未审/.test(text)) out.push("the failed files are not listed at all");
+    if (!/模型服务出错/.test(text)) out.push("the per-file failure class is not visible text");
     if (!(await page.locator('main span[title*="429 Too Many Requests"]').count()))
-      out.push("the failure reason is not readable anywhere");
+      out.push("the per-file failure reason is not readable anywhere");
+    if (!/密码校验用了普通的字符串比较/.test(text)) out.push("the findings the run did produce are missing from the failed run");
     return out;
   },
 });
 
-// The same note on the reading surface, with the other classification: the
-// report is the document a user forwards, and one that says 失败 without saying
-// 预算用尽 invites the wrong fix.
+// The same on the reading surface, with the other classification: the report is
+// the document a user forwards, and one that says 失败 without saying why
+// invites the wrong fix. The reason travels with the document — it is the part
+// a colleague reading the forwarded report cannot get from a tooltip.
 await shoot(page, "96-report-run-failure-budget", {
   query: "?failure=budget&run=done",
   after: async (page) => {
@@ -3044,8 +3055,10 @@ await shoot(page, "96-report-run-failure-budget", {
     const text = await page.locator("main").innerText();
     const out = [];
     if (!/失败原因：预算用尽/.test(text)) out.push("the report does not say why the run failed");
+    if (!/aggregate token budget exhausted/.test(text))
+      out.push("the report does not write out the CLI's own reason for the failure");
+    if (!/预算用尽/.test(text)) out.push("the report does not name the class of the failure");
     if (!/密码校验用了普通的字符串比较/.test(text)) out.push("the report lost the findings the run did produce");
-    if (/aggregate token budget exhausted/.test(text)) out.push("the report shows the CLI's English reason instead of the classification");
     return out;
   },
 });

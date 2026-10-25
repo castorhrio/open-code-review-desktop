@@ -6,7 +6,7 @@ import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
 import { Card, PageBody, PanelHeader, ScrollArea } from "@/components/ui/layout";
 import { Badge } from "@/components/ui/overlay";
-import { CoverageNotice, FindingBlock, MarkdownLite, RunFailureNote, RunLimitNotice, findingToMarkdown } from "@/components/finding";
+import { CoverageNotice, FindingBlock, MarkdownLite, RunFailureNote, RunFailureNotice, RunLimitNotice, findingToMarkdown } from "@/components/finding";
 
 /** Files first, worst file first, findings in line order inside a file.
  *  A reviewer reads a changeset one file at a time; the flat severity list on
@@ -129,6 +129,12 @@ export function ReportView() {
               </p>
             )}
           </div>
+
+          {/* A report that failed has to say why, in the document itself. The
+              header note is one line beside a badge — enough to sort a failure
+              from a success, not enough to act on — and this document is the
+              one people forward, so the reason travels with it. */}
+          <RunFailureNotice result={result} className="rounded-md border border-bad/25" />
 
           {result.project_summary && (
             <Card

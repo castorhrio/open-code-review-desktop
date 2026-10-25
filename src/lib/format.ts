@@ -263,15 +263,28 @@ export const ITEM_FAILURE_LABEL: Record<string, string> = {
 };
 
 /**
- * Both vocabularies as one lookup, for the surfaces that do not know which enum
- * their string came from. The header note says 失败原因 while a coverage row
- * says 未审 · 原因; the words are shared where the classes mean the same thing.
+ * The Chinese words for one class of each vocabulary, looked up separately.
+ *
+ * The two enumerations are not interchangeable, and every caller here knows
+ * which one it holds: the run header reads `manifest.run_failure` (run-level),
+ * a coverage row reads `coverage.failed[]` (per-file). One merged table made
+ * them interchangeable, and the classes the two do not share are exactly where
+ * that shows: `provider` and `panic` are per-file only, `internal` is run-level
+ * only. A merged lookup answered for a value the CLI cannot produce at that
+ * level with a confident sentence, instead of a word this build does not
+ * recognise.
+ *
+ * An unrecognised class surfaces as itself, never folded into a guess: a word
+ * this build has never heard of is the one a reader most needs to see.
  */
-export const FAILURE_LABEL: Record<string, string> = { ...ITEM_FAILURE_LABEL, ...RUN_FAILURE_LABEL };
-
-export function failureLabel(classification: string | undefined): string {
+export function runFailureLabel(classification: string | undefined): string {
   const c = String(classification || "");
-  return FAILURE_LABEL[c] || c;
+  return RUN_FAILURE_LABEL[c] || c;
+}
+
+export function itemFailureLabel(classification: string | undefined): string {
+  const c = String(classification || "");
+  return ITEM_FAILURE_LABEL[c] || c;
 }
 
 /**
@@ -279,9 +292,11 @@ export function failureLabel(classification: string | undefined): string {
  *
  * The badge alone said 失败 and nothing else, so a reader could see that a run
  * broke but not whether it was worth retrying (timeout), fixing (configuration),
- * or asking again later (budget). The reason is the CLI's English prose and
- * names providers, so it stays in a tooltip; the classification is the part
- * that belongs in the sentence.
+ * or asking again later (budget). The classification is the CLI's own word for
+ * that, and it is translated here — through the run-level table, because that
+ * is the enum `run_failure` carries. The reason is the CLI's English prose and
+ * names providers; it is kept apart so a surface can show it as the CLI's own
+ * words rather than as the app's sentence.
  */
 export function failureOf(value: RunResult | null | undefined): { classification: string; label: string; reason: string } | null {
   const failure = value?.manifest?.run_failure;
@@ -289,7 +304,7 @@ export function failureOf(value: RunResult | null | undefined): { classification
   const classification = String(failure.classification || "");
   return {
     classification,
-    label: failureLabel(classification) || "原因不明",
+    label: runFailureLabel(classification) || "原因不明",
     reason: String(failure.reason || "").trim(),
   };
 }

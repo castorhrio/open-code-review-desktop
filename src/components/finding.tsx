@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/cn";
 import type { Finding, RunResult } from "@/lib/types";
 import { copyText } from "@/lib/clipboard";
-import { SEVERITY_LABEL, SEVERITY_TEXT, WARNING_REVIEW_LIMIT, failureLabel, failureOf, runLimitReached } from "@/lib/format";
+import { SEVERITY_LABEL, SEVERITY_TEXT, WARNING_REVIEW_LIMIT, failureOf, itemFailureLabel, runLimitReached } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 
 /**
@@ -124,6 +124,36 @@ export function RunFailureNote({ result, className }: { result: RunResult; class
 }
 
 /**
+ * Why the run stopped, in full — and in the document.
+ *
+ * The header note says the cause in a few words, which is enough to sort a
+ * failure from a success but not to act on it: "模型服务出错" says the model
+ * service, not whether it refused us, and the CLI's own prose — the line that
+ * names the provider and the HTTP status — was only in a tooltip. A tooltip is
+ * not reachable by touch or by keyboard, and it is not part of a document: the
+ * report is the thing a user forwards, and a forwarded report has to say why it
+ * is not the whole review.
+ *
+ * So the reason is written out, labelled as the CLI's own words, because it is
+ * English, it names endpoints, and it is not the app's opinion. The
+ * classification stays the app's sentence.
+ */
+export function RunFailureNotice({ result, className }: { result: RunResult; className?: string }) {
+  const failure = failureOf(result);
+  if (!failure) return null;
+  return (
+    <div className={cn("bg-bad/5 px-4 py-2.5 text-bad", className)}>
+      <div className="text-body font-medium">这次审查失败了：{failure.label}</div>
+      {failure.reason && (
+        <div className="mt-1 text-meta text-muted">
+          CLI 原始原因：<span className="font-mono break-words text-faint selectable">{failure.reason}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * What the run did not cover.
  *
  * A live run carries `manifest.coverage`, so it can name the files. A session
@@ -152,27 +182,47 @@ export function CoverageNotice({
 }) {
   const known = failed.length + waived.length;
   if (!known && !failedFiles) return null;
+  // The CLI writes a reason on every failed and waived item, and a run that
+  // stopped sweeps the *same* reason onto every item it never dispatched — so
+  // putting the reason on the row repeated one sentence per file. The class is
+  // the app's own sentence and belongs on the row; the CLI's own words are
+  // written out once below the rows, and stay in each row's tooltip for the
+  // case where they differ per file.
+  const reasons = [...new Set([...failed, ...waived].map((f) => f.reason).filter(Boolean))];
   return (
     <div className={cn("bg-warn/5 px-4 py-2.5 text-warn", className)}>
       <div className="mb-1 text-body font-medium">
         有 {Math.max(known, failedFiles)} 个文件没有完成，{subject}不等于全量审查
       </div>
       {known > 0 ? (
-        <div className="flex flex-wrap gap-x-4 gap-y-1">
-          {[...failed.map((f) => ({ f, kind: "未审" })), ...waived.map((f) => ({ f, kind: "跳过" }))].map(({ f, kind }) => (
-            <span key={f.item_id} className="font-mono text-meta text-muted">
-              <span className={kind === "未审" ? "text-bad" : "text-low"}>{kind}</span> {f.path || f.item_id}
-              {/* The CLI classifies every failed item; only some carry prose.
-                  A row that said nothing but "未审 internal/..." left the reader
-                  to guess whether it timed out or never got dispatched. */}
-              {f.reason ? (
-                <span className="text-faint"> · {f.reason}</span>
-              ) : f.classification ? (
-                <span className="text-faint"> · {failureLabel(f.classification)}</span>
-              ) : null}
-            </span>
-          ))}
-        </div>
+        <>
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            {[...failed.map((f) => ({ f, kind: "未审" })), ...waived.map((f) => ({ f, kind: "跳过" }))].map(({ f, kind }) => (
+              <span key={f.item_id} className="font-mono text-meta text-muted" title={f.reason || undefined}>
+                <span className={kind === "未审" ? "text-bad" : "text-low"}>{kind}</span> {f.path || f.item_id}
+                {/* The CLI classifies every failed item, and the class is the
+                    sentence a reader can act on ("模型服务出错" means retry,
+                    "预算用尽" means raise the limit). It used to be the tooltip
+                    and the *English* prose the visible text, which is the wrong
+                    way round: a tooltip is out of reach for touch and keyboard,
+                    and the prose is the CLI's words, not the app's. The class
+                    is now the visible text; the CLI's words are written out
+                    below the rows. */}
+                {f.classification ? (
+                  <span className="text-faint"> · {itemFailureLabel(f.classification)}</span>
+                ) : f.reason ? (
+                  <span className="text-faint"> · {f.reason}</span>
+                ) : null}
+              </span>
+            ))}
+          </div>
+          {reasons.length > 0 && (
+            <div className="mt-1 text-meta text-muted">
+              CLI 原始原因：<span className="font-mono break-words text-faint">{reasons.slice(0, 2).join("；")}</span>
+              {reasons.length > 2 && <span className="text-faint">（等 {reasons.length} 条）</span>}
+            </div>
+          )}
+        </>
       ) : (
         <div className="text-meta text-faint">
           会话记录里只有失败的文件数，CLI 的会话导出没有给出具体是哪些；续跑会重新派发它们。

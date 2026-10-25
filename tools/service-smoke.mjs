@@ -417,11 +417,22 @@ check(
   untranslated(itemLabels).join(" ")
 );
 // A class this build has never heard of must surface as itself, not be folded
-// into 原因不明 — an unknown word is the one signal that upstream moved.
+// into 原因不明 — an unknown word is the one signal that upstream moved. The
+// two vocabularies are looked up separately, so each has to keep that
+// behaviour on its own.
 check(
   "an unrecognised class falls back to itself rather than to a guess",
-  /return FAILURE_LABEL\[c\] \|\| c;/.test(formatTs),
-  "failureLabel no longer returns the raw value for an unknown class"
+  /return RUN_FAILURE_LABEL\[c\] \|\| c;/.test(formatTs) && /return ITEM_FAILURE_LABEL\[c\] \|\| c;/.test(formatTs),
+  "the two label lookups no longer return the raw value for an unknown class"
+);
+// The two enums are not interchangeable, and the one class they do not share
+// is where a merged table shows: provider and panic are per-file only,
+// internal is run-level only. A run-level field must never be translated with
+// the per-file vocabulary.
+check(
+  "the run-level and per-file vocabularies are looked up separately",
+  !/export const FAILURE_LABEL\b/.test(formatTs),
+  "the merged lookup is back, so a run-level class can be translated with the per-file word"
 );
 
 /* ---- config / info ---- */

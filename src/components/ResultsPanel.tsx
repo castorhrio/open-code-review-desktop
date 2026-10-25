@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/form";
 import { EmptyState, PanelHeader, ScrollArea } from "@/components/ui/layout";
 import { Badge } from "@/components/ui/overlay";
-import { CodeBlock, CoverageNotice, MarkdownLite, RunFailureNote, RunLimitNotice, findingToMarkdown } from "@/components/finding";
+import { CodeBlock, CoverageNotice, MarkdownLite, RunFailureNote, RunFailureNotice, RunLimitNotice, findingToMarkdown } from "@/components/finding";
 import { toast } from "sonner";
 
 const SEVERITIES = ["critical", "high", "medium", "low", ""] as const;
@@ -619,6 +619,11 @@ export function ResultsPanel() {
           </Button>
         </div>
       </PanelHeader>
+
+      {/* The header note says the cause in a few words; this says it in full,
+          because the CLI's own reason is the line that tells a reader whether
+          to retry, fix the config, or wait — and it was only in a tooltip. */}
+      <RunFailureNotice result={result} className="shrink-0 border-b border-bad/25" />
 
       <CoverageNotice
         failed={failed}
