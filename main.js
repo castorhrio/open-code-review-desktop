@@ -11,7 +11,7 @@ const ocr = require("./ocr-service");
 const git = require("./git-service");
 const { installNavigationGuards } = require("./security");
 const updater = require("./update-service");
-const { createStore: createRunDiagnostics } = require("./run-diagnostics");
+const { createStore: createRunDiagnostics, flushNow, flushBeforeQuit } = require("./run-diagnostics");
 
 const DOCS_URL = "https://open-codereview.ai/docs";
 
@@ -224,6 +224,11 @@ ipcMain.handle("app:uninstall", async () => {
   // The uninstaller deletes the directory this process runs from, so the app has
   // to be gone first — otherwise Windows keeps the files locked and the
   // uninstaller reports them as in use.
+  //
+  // The evidence is written before the uninstaller starts: the quit below is
+  // held by the exit flush, and a pending write would keep this process alive
+  // while the uninstaller is already deleting files.
+  await flushNow(runDiagnostics);
   try {
     spawn(target, [], { detached: true, stdio: "ignore", windowsHide: false }).unref();
   } catch (err) {
@@ -503,6 +508,13 @@ ipcMain.handle("session:delete", async (_e, req) => {
 ipcMain.handle("rules:check", (_e, req) => ocr.rulesCheck(req.repo, req.path, req.rule));
 
 /* ---------------- lifecycle ---------------- */
+
+// The truncation evidence is written asynchronously, and the app can be closed
+// right after a run finishes — the write may still be in flight. Electron does
+// not wait for pending promises when the main process exits, so that evidence
+// would be gone and the reopened session would look clean again, which is the
+// one thing the store exists to prevent. The quit waits for it.
+flushBeforeQuit(app, runDiagnostics);
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {

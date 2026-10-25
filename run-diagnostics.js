@@ -190,6 +190,29 @@ function createStore(file) {
     return { warnings, budget_exceeded: Boolean(found.budget_exceeded) };
   }
 
+  /**
+   * Wait until the queued writes are on disk.
+   *
+   * The store writes asynchronously, so a caller that is about to exit needs a
+   * way to hold the exit until the file is actually there: Electron does not
+   * wait for pending promises when the main process exits, and the evidence
+   * that write carries is the whole reason this store exists. Without the
+   * wait, closing the app right after a truncated run leaves the reopened
+   * session looking clean again.
+   *
+   * A write can be queued while an earlier one is still landing — a run
+   * finishes exactly as the window closes — so the wait repeats until the
+   * queue stops moving. The bound keeps a writer that never stops from
+   * holding the exit hostage; the caller applies its own timeout on top.
+   */
+  async function drain() {
+    for (let i = 0; i < 100; i++) {
+      const tail = queue;
+      await tail;
+      if (tail === queue) return;
+    }
+  }
+
   /** Queued like `record`, so a delete cannot race a write for the same file. */
   function remove(repo, sessionId) {
     return serialize(async () => {
@@ -201,7 +224,44 @@ function createStore(file) {
     });
   }
 
-  return { record, read, remove };
+  return { record, read, remove, drain };
 }
 
-module.exports = { createStore, normalizeRepo, MAX_ENTRIES, LIMIT_WARNING };
+/**
+ * Wait for the queued writes, but not forever.
+ *
+ * The profile directory can be a network mount, and an app that cannot be
+ * closed is worse than an app that lost one warning — so the wait is bounded,
+ * and the caller decides what a timeout means for it.
+ */
+function flushNow(store, timeoutMs = 2000) {
+  const giveUp = new Promise((resolve) => setTimeout(resolve, timeoutMs));
+  return Promise.race([store.drain().catch(() => {}), giveUp]);
+}
+
+/**
+ * Keep the app from exiting before the evidence is on disk.
+ *
+ * Electron does not wait for pending promises when the main process exits, so
+ * a write that is still in flight when the user closes the window is simply
+ * gone — and the reopened session looks clean again, which is the one thing
+ * this store exists to prevent. So the quit is held back until the store says
+ * it is done.
+ *
+ * The second pass is the real quit: `flushing` says the first one already took
+ * the event, so the retry is allowed to proceed.
+ *
+ * Exported so the behaviour can be exercised inside a real Electron process
+ * instead of only being reasoned about.
+ */
+function flushBeforeQuit(app, store, timeoutMs = 2000) {
+  let flushing = false;
+  app.on("before-quit", (event) => {
+    if (flushing) return;
+    event.preventDefault();
+    flushing = true;
+    flushNow(store, timeoutMs).then(() => app.quit());
+  });
+}
+
+module.exports = { createStore, normalizeRepo, MAX_ENTRIES, LIMIT_WARNING, flushNow, flushBeforeQuit };

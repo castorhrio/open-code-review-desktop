@@ -169,6 +169,36 @@ check("evidence with no session id is reported, not swallowed", noSession.ok ===
 const written = await store.record(repo, "reported", limitResult);
 check("a recorded run reports success", written.ok === true && written.reason === "written", JSON.stringify(written));
 check("and its evidence is there to read", store.read(repo, "reported")?.warnings?.length === 1);
+/* ---- the exit has to wait for the write ----
+ * The evidence is written asynchronously, and the app can be closed right after
+ * a run finishes — the write is still in flight. Electron does not wait for
+ * pending promises when the main process exits, so the app holds the quit
+ * until the store says it is done; `drain()` is the word it waits on.
+ *
+ * The writes below are issued and deliberately *not* awaited: only the drain
+ * can make them land.
+ */
+const drainStore = createStore(path.join(dir, "drain", "run-diagnostics.json"));
+const order = [];
+const queued = drainStore.record(repo, "drain-session", limitResult).then(() => order.push("record"));
+await drainStore.drain();
+order.push("drain");
+check("drain() resolves after the queued write", order.join(",") === "record,drain", order.join(","));
+check("and the evidence is on disk when it does", drainStore.read(repo, "drain-session")?.warnings?.length === 1);
+await queued;
+await drainStore.drain();
+check("a drain with nothing pending changes nothing", drainStore.read(repo, "drain-session")?.warnings?.length === 1);
+
+/* A run can finish exactly as the window closes, so a write may be queued
+ * while the drain is already waiting — the drain has to notice it. */
+const lateStore = createStore(path.join(dir, "drain-late", "run-diagnostics.json"));
+const lateFirst = lateStore.record(repo, "first", limitResult);
+const lateDraining = lateStore.drain();
+const lateSecond = lateStore.record(repo, "second", limitResult);
+await lateDraining;
+check("a write queued during the wait is not missed", lateStore.read(repo, "second")?.warnings?.length === 1);
+await Promise.all([lateFirst, lateSecond]);
+
 fs.rmSync(unwritableDir, { recursive: true, force: true });
 
 fs.rmSync(dir, { recursive: true, force: true });

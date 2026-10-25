@@ -19,7 +19,7 @@
     "fetch:binaries": "node build/fetch-binaries.cjs",
     "release": "node tools/release.mjs",
     "icon": "node build/make-icon.cjs",
-    "audit": "npm run typecheck && npm run audit:packaging && npm run audit:bridge && npm run audit:diagnostics && npm run audit:service && npm run audit:git && npm run audit:update && npm run audit:ui && npm run audit:ui-scaled && npm run audit:contrast && npm run audit:guards && npm run audit:e2e && npm run audit:secrets",
+    "audit": "npm run typecheck && npm run audit:packaging && npm run audit:bridge && npm run audit:diagnostics && npm run audit:service && npm run audit:git && npm run audit:update && npm run audit:ui && npm run audit:ui-scaled && npm run audit:contrast && npm run audit:guards && npm run audit:exit && npm run audit:e2e && npm run audit:secrets",
     "audit:packaging": "node tools/check-packaging.mjs",
     "audit:bridge": "node tools/bridge-contract.mjs",
     "audit:diagnostics": "node tools/run-diagnostics-smoke.mjs",
@@ -30,6 +30,7 @@
     "audit:ui-scaled": "cross-env SCALE=1.25 SHOT=01-review-wide,07-settings-top,09-results-findings,14-min-review,16-min-results,42-report-read,69-run-feed-full,73-results-long-finding-min,ref-file-missing node tools/ui-audit/audit.mjs && cross-env SCALE=1.5 SHOT=01-review-wide,07-settings-top,09-results-findings,14-min-review,16-min-results,42-report-read,69-run-feed-full,73-results-long-finding-min,ref-file-missing node tools/ui-audit/audit.mjs",
     "audit:contrast": "npm run build && node tools/ui-audit/contrast.mjs",
     "audit:guards": "npm run build && node tools/electron-guards.mjs",
+    "audit:exit": "node tools/exit-flush.mjs",
     "audit:e2e": "npm run build && node tools/e2e-flow.mjs",
     "audit:secrets": "node tools/secret-scan.mjs"
   },

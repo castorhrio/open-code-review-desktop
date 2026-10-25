@@ -29,6 +29,8 @@ Verified end-to-end against the real CLI, without spending tokens:
 - a run cut short by a limit is not clean: the CLI's `review_limit_reached` warning (upstream v1.13.1) and `summary.budget_exceeded` are read, so a run that stopped at the limit and found nothing says so instead of claiming the code is fine — on both results surfaces
 - the code beside a finding is the code that was reviewed: against a real repository with a dirty working copy, a review at `HEAD` shows the committed file, a review at another branch shows that branch, and a file that is not in the ref fails loudly instead of being answered with the working copy
 - a reopened session is read at the commit it was reviewed at: the CLI freezes the endpoints into the manifest before it runs, and the code pane, the results header and the report all name that commit — a branch that moved on afterwards no longer changes what you read next to a finding
+- the truncation evidence outlives the app: closing the window right after a run that hit the limit still flushes the pending write before the process exits, so the reopened session does not look clean again — checked in a real Electron process, not reasoned about
+- a run that could not start is reported once: a process that cannot be spawned emits both an error and a close, and the app used to show the same failure twice, as two toasts and two log lines
 
 **Verified 2026-10-13**: a real full scan (12 files, 8 comments, 173K tokens, 1m41s) emitted a sectioned `project_summary`, and the band rendered that real text, capped and faded. Whether a run emits one is the CLI's decision — a workspace run over the same repo with 2 comments emitted none — so this project promises only to render it when present. Sessions still never persist it, so a session result showing no band remains correct behaviour, not missing rendering. A real review's findings themselves do render — a completed scan's 4 comments were loaded from its session and shown in the results list.
 
@@ -156,12 +158,14 @@ Everything is checked by rendering the real bundle against a stubbed IPC bridge 
 npm run audit           # typecheck + all the checks below
 npm run audit:packaging # every runtime module is in the build.files allowlist
 npm run audit:bridge    # preload.js and the Bridge interface agree, both ways
+npm run audit:diagnostics # what the app keeps about a run the CLI does not persist
 npm run audit:service   # the real CLI: arg building and output parsing, all 4 modes
 npm run audit:git       # the code pane reads the reviewed snapshot, not the worktree
 npm run audit:update    # the update state machine, with the updater stubbed
 npm run audit:ui        # 65 states x 3 window sizes x 2 themes
 npm run audit:contrast  # WCAG AA for every text/background pair
 npm run audit:guards    # navigation + window-open policy, in real Electron
+npm run audit:exit      # the run evidence survives the app's exit, in real Electron
 npm run audit:e2e       # renderer -> preload -> ipcMain -> CLI, in real Electron
 ```
 
@@ -203,6 +207,8 @@ The stress set is the one that earns its keep. Any slot fed by a branch name, mo
 **`audit:guards`** runs the app in real Electron and asserts that `window.open` is denied (and never reaches the OS shell for a non-http scheme), that navigation off the app's own document is blocked, and that the app's own bundle still loads and reloads. It also asserts that *our handler* is what blocked a navigation, rather than the CSP or Chromium's own rules — otherwise the suite could pass while the guard did nothing.
 
 It needs the Electron binary, and on a machine with no GPU or a restrictive sandbox it retries once with `--no-sandbox`, saying so. Override with `PW_ELECTRON_ARGS`.
+
+**`audit:exit`** covers the moment the run evidence is most likely to be lost: the app closing. The CLI does not persist a run's warnings, so the desktop keeps them itself — and that write is asynchronous, which meant closing the window right after a truncated run dropped it and left the reopened session looking clean again. Whether an Electron quit really waits for a pending promise is not a question plain Node can answer, so this runs the real flush inside a real Electron process, drains on purpose slowly, and asserts that the exit took at least that long and that the evidence was on disk afterwards — the two ways this could go wrong (quitting too early, or never quitting at all) are both failures.
 
 `audit:ui` and `audit:contrast` drive the system Edge/Chrome rather than a downloaded Chromium, so Playwright is deliberately **not** a project dependency — installing it would pull a browser toolchain the app never uses. Resolve it via `PLAYWRIGHT_MODULE=<path>`, a local `npm i -D playwright`, or `NODE_PATH`; the harness reports which paths it searched when it cannot find one.
 

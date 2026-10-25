@@ -144,6 +144,39 @@ check(
   /扫描路径/.test(String(ghostPath.error || "")),
   String(ghostPath.error || "").slice(-200)
 );
+/* ---- a run that cannot start is reported once ----
+ * A process that could not be started emits `error` *and* `close`, and both used
+ * to call the exit callback — so the renderer put up two red "审查失败" toasts and
+ * two error lines for one run, and the second one reads like a separate event
+ * rather than a repeat. One run reports one outcome, and that outcome has to
+ * name what was actually wrong: the repository folder is gone, not the binary.
+ */
+const ghostRepo = path.join(dir, "no-such-folder");
+const exits = [];
+await new Promise((resolve) => {
+  // The timeout keeps a regression from hanging the smoke run instead of
+  // failing it: no exit at all is just as wrong as two.
+  const timer = setTimeout(resolve, 3000);
+  svc.startRun(
+    { repo: ghostRepo, mode: "workspace" },
+    () => {},
+    (_id, res) => {
+      exits.push(res);
+      clearTimeout(timer);
+      resolve();
+    },
+    () => {}
+  );
+});
+// Give a second exit the chance to arrive before the count is checked.
+await new Promise((r) => setTimeout(r, 400));
+check("a run that cannot start reports one outcome", exits.length === 1, `${exits.length} exits: ${JSON.stringify(exits.map((e) => e.error))}`);
+check(
+  "and names the missing folder, not a missing binary",
+  /仓库目录已经不存在/.test(String(exits[0]?.error || "")),
+  String(exits[0]?.error || "")
+);
+
 /* ---- sessions ---- */
 const sessions = await svc.listSessions(dir, 0);
 check("listSessions on a fresh repo returns an empty list", sessions.ok && Array.isArray(sessions.value) && sessions.value.length === 0, JSON.stringify(sessions).slice(0, 120));

@@ -706,25 +706,41 @@ function startRun(spec, onLine, onExit, onProgress) {
       if (milestone) onLine(id, milestone);
     });
   };
+  /**
+   * One run reports one outcome.
+   *
+   * A process that could not be started emits `error` *and* `close`, and both
+   * used to call `onExit` — so the renderer was told twice that the same run
+   * failed: two red toasts, two lines in the log, and a second one that reads
+   * like a separate event rather than a repeat. The first outcome is the
+   * informative one (it knows *why* the process could not start), so it wins
+   * and the later close is ignored.
+   */
+  let exited = false;
+  const finish = (payload) => {
+    if (exited) return;
+    exited = true;
+    flushReport();
+    running.delete(id);
+    onExit(id, payload);
+  };
+
   child.stdout.on("data", (d) => {
     stdout += d.toString("utf8");
   });
   child.stderr.on("data", emit);
   child.on("error", (err) => {
-    flushReport();
-    running.delete(id);
-    onExit(id, { code: -1, error: withHint(spawnFailure(err, bin, spec.repo)), sessionId, command: args.join(" ") });
+    finish({ code: -1, error: withHint(spawnFailure(err, bin, spec.repo)), sessionId, command: args.join(" ") });
   });
   child.on("close", (code) => {
     const tail = stderrBuf.trim();
     if (tail && !/^error:/i.test(tail) && !isPayloadFragment(tail)) onLine(id, tail);
-    flushReport();
-    running.delete(id);
+    if (exited) return; // the error path already reported this run
     if (code !== 0) {
       // A failed run may still have published partial findings on stdout, so
       // report the error and the payload separately instead of picking one.
       const parsed = parseJson(stdout);
-      onExit(id, {
+      finish({
         code,
         error: withHint(failureText({ code, stdout, stderr: stderrAll })),
         value: parsed.ok ? parsed.value : null,
@@ -735,10 +751,10 @@ function startRun(spec, onLine, onExit, onProgress) {
     }
     const parsed = parseJson(stdout);
     if (!parsed.ok) {
-      onExit(id, { code, error: parsed.error, raw: parsed.raw, sessionId, command: args.join(" ") });
+      finish({ code, error: parsed.error, raw: parsed.raw, sessionId, command: args.join(" ") });
       return;
     }
-    onExit(id, { code: 0, value: parsed.value, sessionId: parsed.value.session_id || sessionId, command: args.join(" ") });
+    finish({ code: 0, value: parsed.value, sessionId: parsed.value.session_id || sessionId, command: args.join(" ") });
   });
   return id;
 }
