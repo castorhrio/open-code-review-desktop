@@ -206,30 +206,79 @@ const listText = (labels) =>
 // `custom_providers` section instead. So "is this name built in?" is a fact the
 // CLI owns and this app cannot guess — `ocr llm providers` prints it.
 const PROVIDER_ROW = /^([A-Za-z0-9][A-Za-z0-9._-]*)\s{2,}/;
+// The rule under the header (`----   --------   --------`). It does not match
+// `PROVIDER_ROW` today — a rule may not start with a letter — but the table's
+// column widths are the CLI's to change, and a rule that ever did match would be
+// looked up as a service name: `LookupProvider("----")` misses, and a config the
+// user wrote correctly would be judged by the wrong section.
+const RULE_ROW = /^-+$/;
 
+/**
+ * Parse `ocr llm providers`.
+ *
+ * Returns `{ names, matched }` rather than a bare array: `matched` counts the
+ * rows that had the table's *shape* (header included), so "the table changed and
+ * nothing here looks like a row" (0) is a different answer from "the table is
+ * empty". Both used to come back as `null`, and the caller then fell back to the
+ * lenient judgement this whole registry lookup exists to replace — silently.
+ */
 function parseProviderNames(text) {
-  return (text || "")
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .map((line) => PROVIDER_ROW.exec(line))
-    .filter((m) => m && m[1].toUpperCase() !== "NAME")
-    .map((m) => m[1]);
+  let matched = 0;
+  const names = [];
+  for (const line of (text || "").split(/\r?\n/)) {
+    const m = PROVIDER_ROW.exec(line.trim());
+    if (!m || RULE_ROW.test(m[1])) continue;
+    matched += 1;
+    // The header is a row by shape and not a service; it still counts as
+    // `matched`, because seeing it proves the shape is intact.
+    if (m[1].toUpperCase() === "NAME") continue;
+    names.push(m[1]);
+  }
+  return { names, matched };
 }
 
 // Read once per process: the table lives in the CLI, so it costs one process
 // spawn, and a stale list is safer than a guessed one (the registry only grows).
-// `null` means "could not be read" — which is not the same as "empty", and the
-// view below falls back to its older reading rather than inventing a registry.
+//
+// `ok: false` means "could not be read", which is not the same as "empty". Only
+// an `ok` answer is cached — the failure is usually transient (a spawn that
+// raced an update, a binary that a reinstall is about to restore), so the next
+// read asks the CLI again. That fallback is the optimistic reading this app
+// spent a round getting rid of, so it is *reported* (`view.presetRegistry`)
+// instead of being silent, and the reason is kept for the settings page.
 let cachedPresetNames = null;
+let lastPresetError = "";
+
+function presetNamesFailed(error) {
+  lastPresetError = error;
+  return { ok: false, names: [], matched: 0, error };
+}
 
 async function presetNames() {
   if (cachedPresetNames) return cachedPresetNames;
   const res = await exec(["llm", "providers", "--color", "never"]);
-  if (res.code !== 0) return null;
-  const names = parseProviderNames(res.stdout);
-  if (!names.length) return null;
-  cachedPresetNames = names;
-  return names;
+  if (res.error) return presetNamesFailed(res.error);
+  if (res.code !== 0) return presetNamesFailed(failureText(res));
+  const { names, matched } = parseProviderNames(res.stdout);
+  // No row at all is a parsing problem, not an empty registry: the CLI always
+  // ships built-in services, so an unreadable shape must not read as "no name is
+  // built in" (which would reject every correctly configured entry).
+  if (!matched) return presetNamesFailed("ocr llm providers 的输出里没有可识别的服务行");
+  cachedPresetNames = { ok: true, names, matched, error: "" };
+  lastPresetError = "";
+  return cachedPresetNames;
+}
+
+// `readConfigView` takes the list from its caller (the IPC layer hands in what
+// `presetNames()` returned), and the smoke checks hand in a plain array. Both
+// forms answer the same question; anything else means "not read".
+function registryFrom(presetList) {
+  if (Array.isArray(presetList))
+    return presetList.length
+      ? { ok: true, names: presetList, error: "" }
+      : { ok: false, names: [], error: lastPresetError || "内置服务名单为空" };
+  if (presetList && typeof presetList === "object" && Array.isArray(presetList.names)) return presetList;
+  return { ok: false, names: [], error: lastPresetError || "还没有读取过内置服务名单" };
 }
 
 function readConfigView({ configPath = CONFIG_PATH, env = process.env, presetNames: presetList = null } = {}) {
@@ -249,10 +298,15 @@ function readConfigView({ configPath = CONFIG_PATH, env = process.env, presetNam
   // the `llm` block's own Key never reaches a selected service.
   const usesLlmBlock = !active;
   // The built-in registry, lowercased once. `null` here means "not known",
-  // which must not be read as "no name is built in".
+  // which must not be read as "no name is built in" — so it is a third state,
+  // reported as `presetRegistry: "unavailable"` rather than folded into either
+  // answer. Every question below that needs the registry stays on the older,
+  // lenient reading when it is missing, which is why the caller has to be able to
+  // see that it happened.
+  const registry = registryFrom(presetList);
   const presets =
-    Array.isArray(presetList) && presetList.length
-      ? new Set(presetList.map((name) => String(name).toLowerCase()))
+    registry.ok && registry.names.length
+      ? new Set(registry.names.map((name) => String(name).toLowerCase()))
       : null;
   const shape = usesLlmBlock ? "legacy" : "provider";
   // "Is the selected name one of the CLI's built-in services?" is asked three
@@ -335,11 +389,25 @@ function readConfigView({ configPath = CONFIG_PATH, env = process.env, presetNam
   // above, where the environment question needs them too. Without the registry
   // all that can be said is the older, looser answer.
   const presetEntry = presets ? knownPreset : inProvidersSection;
-  // The same branch, now that the `custom_providers` fallback is checked: a name
-  // the registry does not know is rejected whether the stray entry sits in
-  // `providers` or nowhere at all, but a name that *does* live in
-  // `custom_providers` is the entry the resolver reads, so it is not rejected.
-  const rejectedProvider = presets && active && !registryHit && !customEntry ? active : "";
+  // The other half of that rule, and the one that was still being answered
+  // wrongly: `tryProviderConfig` picks the section by the *name* and then stops
+  // if the entry is not there — it never falls back to the other section.
+  //   built-in name, entry only in `custom_providers`
+  //     → provider %q is set but not configured in providers section
+  //   any other name, entry only in `providers`
+  //     → provider %q is set but not configured in custom_providers section
+  // The entry that *does* exist is in the section the resolver will not open, so
+  // no field under it can change the outcome — this is a refused config, not a
+  // form with a missing field. The two causes are kept apart because the fix
+  // differs (move the entry one way or the other, or rename the service).
+  const rejected = !presets || !active
+    ? ""
+    : registryHit
+      ? (inProvidersSection ? "" : "provider-not-in-section")
+      : customEntry
+        ? ""
+        : "name-unknown";
+  const rejectedProvider = rejected ? active : "";
   const hasEntryKey = entryHasCredential(entry);
   // An `llm.auth_token` sitting next to a selected provider never reaches the
   // request, and counting it left the gap list empty for a service that had no
@@ -385,12 +453,25 @@ function readConfigView({ configPath = CONFIG_PATH, env = process.env, presetNam
   // model but no Key of its own emptied the list while the badge still said
   // "not ready", and the sentence then had no gap to name.
   const gapPresent = { baseUrl: hasEndpoint, model: hasModel, credential: hasCredential };
-  // A rejected name is not one of the three fields: the CLI never opens that
-  // section, so no URL, Key or model added under it changes the outcome. Its own
-  // gap key keeps `ready` and `missing` agreeing while naming the real problem.
+  // A refused name is not one of the three fields: the CLI never opens the
+  // section the entry sits in, so no URL, Key or model added under it changes the
+  // outcome — see `rejected` right below for what each cause names instead.
   view.rejectedProvider = rejectedProvider;
-  view.missing = rejectedProvider ? ["provider"] : GAP_ORDER.filter((key) => !gapPresent[key]);
-  view.ready = view.missing.length === 0;
+  view.rejected = rejected;
+  // A refusal is not a missing field: for a name the registry does not know, the
+  // gap *is* the name (`provider`, a field the user can act on by renaming), but
+  // for an entry in the wrong section there is nothing to fill in — `missing`
+  // stays empty and `ready` is decided by the refusal. Two states, not one.
+  view.missing = rejected
+    ? (rejected === "name-unknown" ? ["provider"] : [])
+    : GAP_ORDER.filter((key) => !gapPresent[key]);
+  view.ready = !rejected && view.missing.length === 0;
+  // Whether the built-in service list could be read at all. `unavailable` means
+  // every judgement above about built-in names took the older, lenient branch —
+  // the one that called a config "ready" and let the CLI refuse it — so the
+  // settings page says so instead of showing a confident badge.
+  view.presetRegistry = presets ? "ok" : "unavailable";
+  view.presetRegistryError = presets ? "" : registry.error || "";
   const gapText = listText(view.missing.map((key) => GAP_LABEL[key] || key));
   // Same order and same labels as the gap list above, so the two halves of the
   // sentence cannot spell a dimension differently.
@@ -398,7 +479,9 @@ function readConfigView({ configPath = CONFIG_PATH, env = process.env, presetNam
   if (view.ready) view.blockedReason = "";
   // The whole config is refused, so the sentence must not read like a form with
   // one empty field left: the fix is to rename or move the entry.
-  else if (rejectedProvider)
+  else if (rejected === "provider-not-in-section")
+    view.blockedReason = `已选服务 ${active} 是内置服务，但条目不在 providers 段，CLI 会整份拒绝这份配置：把条目移到 providers.${active}，或改用别的服务名`;
+  else if (rejected)
     view.blockedReason = `已选服务 ${active} 不在内置服务名单里，配置里也没有 custom_providers 条目，CLI 会整份拒绝这份配置：把这个服务写进 custom_providers，或改选一个内置服务`;
   // `|| "必要配置"` is still the belt: a not-ready view always has at least one
   // gap, so it can only fire if a gap key has no GAP_LABEL — and a sentence

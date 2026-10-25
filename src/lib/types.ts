@@ -272,10 +272,34 @@ export interface ConfigView {
   configured: boolean;
   ready: boolean;
   blockedReason: string;
-  /** Set when the selected service name is not one the CLI knows: the whole
-   * config is refused, so `missing` carries `provider` instead of a field. */
+  /** The service name the CLI refuses, when it refuses one (`""` otherwise). */
   rejectedProvider?: string;
+  /**
+   * Why the CLI refuses the whole config, mirroring `tryProviderConfig` in
+   * `internal/llm/resolver.go` @ v1.13.3: it picks the section by *name* and
+   * stops if the entry is not in that section, without trying the other one.
+   *
+   * - `name-unknown` — the name is not in the CLI's registry and there is no
+   *   `custom_providers` entry, so `missing` is `["provider"]`: the name is the
+   *   thing to change.
+   * - `provider-not-in-section` — the name *is* built in, but its entry is not
+   *   under `providers`; the section that holds it is never opened, so no field
+   *   can be filled in and `missing` stays empty.
+   *
+   * `""` means the config is not refused.
+   */
+  rejected: "" | "name-unknown" | "provider-not-in-section";
   missing: ("credential" | "baseUrl" | "model" | "provider")[];
+  /**
+   * Whether the CLI's own list of built-in services (`ocr llm providers`) could
+   * be read. `unavailable` means every question about built-in names was
+   * answered by the older, lenient fallback — the one that called a config
+   * "ready" and let the CLI refuse it at run time — so the settings page says so
+   * rather than showing a confident badge. `presetRegistryError` carries the
+   * reason (the CLI's own message) for the tooltip.
+   */
+  presetRegistry: "ok" | "unavailable";
+  presetRegistryError?: string;
 }
 
 export interface ProviderEntry {

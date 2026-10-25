@@ -435,6 +435,50 @@ check(
   "the merged lookup is back, so a run-level class can be translated with the per-file word"
 );
 
+/* ---- the registry table's shape, as the CLI prints it ----
+ * Captured from `ocr llm providers` on v1.13.3: a blank line, a title, the
+ * `NAME / PROTOCOL / BASE URL` header, a rule under it, then one row per service
+ * (with `\r\n` on Windows). Both non-name rows have the table's column layout, so
+ * a looser pattern folds them into the list and the app then looks up a service
+ * called `NAME` or `----`, misses, and picks the wrong config section for every
+ * real name. `matched` is what tells "the table changed shape" from "the table is
+ * empty" — the two used to be the same `null`.
+ */
+const PROVIDER_TABLE = [
+  "",
+  "Built-in providers:",
+  "  NAME                 PROTOCOL           BASE URL",
+  "  ----                 --------           --------",
+  "  anthropic            anthropic          https://api.anthropic.com",
+  "  bedrock              anthropic-bedrock  ",
+  "  deepseek             openai             https://api.deepseek.com",
+  "",
+].join("\r\n");
+const table = svc.parseProviderNames(PROVIDER_TABLE);
+check(
+  "the header and the rule under it are not service names",
+  !table.names.includes("NAME") && !table.names.some((name) => /^-+$/.test(name)),
+  JSON.stringify(table)
+);
+check(
+  "and every real row survives",
+  table.names.join(",") === "anthropic,bedrock,deepseek",
+  JSON.stringify(table)
+);
+check(
+  "a table whose shape changed is distinguishable from an empty one",
+  svc.parseProviderNames("no table here").matched === 0 && table.matched === 4,
+  `${JSON.stringify(svc.parseProviderNames("no table here"))} | ${table.matched}`
+);
+// ...and the real CLI's answer, end to end: this is the list the view judges
+// built-in names by.
+const registry = await svc.presetNames();
+check(
+  "the CLI's own built-in service list reads back",
+  registry.ok && registry.names.includes("deepseek") && registry.matched > 0 && !registry.names.includes("NAME"),
+  `${registry.ok} | ${registry.error} | ${registry.names.slice(0, 4).join(",")}`
+);
+
 /* ---- config / info ---- */
 const cfg = svc.readConfigView();
 check("readConfigView returns a usable shape", cfg && typeof cfg.path === "string" && typeof cfg.ready === "boolean" && typeof cfg.providers === "object", JSON.stringify(cfg)?.slice(0, 140));
@@ -794,6 +838,62 @@ check(
   !nameOnly.ready && gapOf(nameOnly) === "provider" && /custom_providers/.test(nameOnly.blockedReason),
   `${gapOf(nameOnly)} | ${nameOnly.blockedReason}`
 );
+/* ---- a built-in name whose entry sits in the wrong section ----
+ * `tryProviderConfig` picks the section by the *name* and then stops if the entry
+ * is not in that one — it never tries the other:
+ *   provider %q is set but not configured in providers section
+ * The desktop answered this shape with `missing: baseUrl,model,credential`, i.e.
+ * it named three fields inside an entry the resolver will never open: filling
+ * them in changes nothing. The config is refused whole, so `missing` is empty and
+ * the refusal itself is the machine-readable answer.
+ */
+const presetOnlyInCustom = withPresets({
+  provider: "deepseek",
+  custom_providers: { deepseek: { ...gateway, api_key: "sk-test" } },
+});
+check(
+  "a built-in name configured only in custom_providers is refused, not ready",
+  !presetOnlyInCustom.ready && presetOnlyInCustom.rejected === "provider-not-in-section",
+  `${presetOnlyInCustom.rejected} | ${gapOf(presetOnlyInCustom)} | ${presetOnlyInCustom.blockedReason}`
+);
+check(
+  "and nothing is named as missing, because no field would fix it",
+  gapOf(presetOnlyInCustom) === "",
+  gapOf(presetOnlyInCustom)
+);
+check(
+  "the sentence says the config is refused and which section the entry is in",
+  /providers 段/.test(presetOnlyInCustom.blockedReason) &&
+    /拒绝/.test(presetOnlyInCustom.blockedReason) &&
+    !/缺少/.test(presetOnlyInCustom.blockedReason),
+  presetOnlyInCustom.blockedReason
+);
+// The two shapes that must keep working: the same entry under a name the CLI
+// does not know, and a built-in name with its entry in `providers`.
+check(
+  "a name the CLI does not know with a custom_providers entry stays ready",
+  customSameName.ready && customSameName.rejected === "",
+  `${customSameName.rejected} | ${gapOf(customSameName)}`
+);
+check(
+  "a built-in name with its entry in providers stays ready",
+  presetReady.ready && presetReady.rejected === "",
+  `${presetReady.rejected} | ${gapOf(presetReady)}`
+);
+// Whether the registry could be read at all is a third state, and the settings
+// page shows it: every judgement above about a built-in name silently took the
+// older, lenient branch when it is missing.
+check(
+  "a registry that was read is reported as read",
+  presetCase.presetRegistry === "ok" && presetCase.presetRegistryError === "",
+  `${presetCase.presetRegistry} | ${presetCase.presetRegistryError}`
+);
+check(
+  "a registry that could not be read is reported, with a reason",
+  noRegistry.presetRegistry === "unavailable" && Boolean(noRegistry.presetRegistryError),
+  `${noRegistry.presetRegistry} | ${noRegistry.presetRegistryError}`
+);
+
 // Without the registry this branch cannot be taken at all: "the CLI does not
 // know this name" is a fact only the CLI can tell, and guessing it would reject
 // every hand-edited `providers` entry that works.
@@ -972,11 +1072,12 @@ const invariances = {
   "provider with an env model": providerEnvModel,
   "preset reading its own variable": presetOwnKey,
   "custom provider with an anthropic variable": customEnvKey,
+  "built-in name in the wrong section": presetOnlyInCustom,
 };
 for (const [name, view] of Object.entries(invariances)) {
   check(
     `ready and missing agree (${name})`,
-    view.ready === (view.missing.length === 0) && view.ready === (view.blockedReason === ""),
+    view.ready === (view.missing.length === 0 && !view.rejected) && view.ready === (view.blockedReason === ""),
     `ready=${view.ready} missing=${JSON.stringify(view.missing)} blockedReason=${view.blockedReason}`
   );
 }

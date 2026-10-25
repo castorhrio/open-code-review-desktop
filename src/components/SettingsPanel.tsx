@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { CheckCircle2, Copy, Download, Eye, EyeOff, FolderOpen, KeyRound, PlugZap, RefreshCw, Trash2 } from "lucide-react";
+import { CheckCircle2, Copy, Download, Eye, EyeOff, FolderOpen, KeyRound, PlugZap, RefreshCw, Trash2, TriangleAlert } from "lucide-react";
 import { api } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { cn } from "@/lib/cn";
@@ -196,6 +196,24 @@ export function SettingsPanel() {
           }
         >
           <Card>
+            {/* The registry decides which config section a service name is read
+                from (`internal/llm/resolver.go`, tryProviderConfig). Without it
+                every built-in name falls back to the older, lenient reading — the
+                one that called a refused config "ready". A fallback the user
+                cannot see is a silent downgrade, so it is said out loud, next to
+                the badge that it makes less trustworthy. */}
+            {config.presetRegistry === "unavailable" && (
+              <p
+                className="mb-4 flex items-start gap-1.5 text-body text-warn"
+                title={config.presetRegistryError || undefined}
+              >
+                <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+                <span>
+                  无法读取内置服务名单（<code className="font-mono text-meta">ocr llm providers</code> 执行失败），
+                  就绪判定可能偏乐观：内置服务与放错段的条目会按旧规则判。点「刷新」重试一次。
+                </span>
+              </p>
+            )}
             <p className="mb-4 text-body text-muted">
               这里改的是官方 CLI 的用户级配置，本程序只调用 <code className="font-mono text-accent">ocr config set</code> 写入，不自行拼接文件。
               同一份配置对命令行 <code className="font-mono">ocr review</code> 立即生效。
