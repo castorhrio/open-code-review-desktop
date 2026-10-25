@@ -789,16 +789,75 @@ check(
   !providerEnvToken.ready && providerEnvToken.missing.includes("credential"),
   `${gapOf(providerEnvToken)} | ${providerEnvToken.blockedReason}`
 );
-// The built-in service's own variable is where the provider path does read the
-// Key, so tightening this must not block a config that works.
-const providerOwnKey = readiness(
+/* ---- where the provider shape reads a Key from the environment ----
+ * `tryProviderConfig` reads the Key from the entry first and, when the entry has
+ * neither `api_key` nor `api_key_cmd`, from the *built-in service's own*
+ * variable — `preset.EnvVar`, and only for a preset. A custom provider has no
+ * environment fallback at all, and one preset's variable is not another
+ * preset's Key. Counting any ANTHROPIC_* for any selected name kept the badge
+ * green for a gateway with no Key of its own; the run then failed with
+ * "provider %q has no api_key or api_key_cmd configured and no environment
+ * variable fallback found".
+ */
+const presetOwnKey = withPresets(
+  { provider: "anthropic", providers: { anthropic: { model: "claude-sonnet-5" } } },
+  { ANTHROPIC_API_KEY: "k" }
+);
+check(
+  "a built-in service reads its own variable as the Key",
+  presetOwnKey.ready && presetOwnKey.envCredentials.includes("ANTHROPIC_API_KEY"),
+  `${gapOf(presetOwnKey)} | ${JSON.stringify(presetOwnKey.envCredentials)} | ${presetOwnKey.blockedReason}`
+);
+const customEnvKey = withPresets(
   { provider: "corp-gateway", custom_providers: { "corp-gateway": { url: gateway.url, model: "qwen3-max" } } },
   { ANTHROPIC_API_KEY: "k" }
 );
 check(
-  "a built-in service's own variable still counts as a Key",
-  providerOwnKey.ready,
-  `${gapOf(providerOwnKey)} | ${providerOwnKey.blockedReason}`
+  "a custom provider has no environment fallback, so that variable is not its Key",
+  !customEnvKey.ready && gapOf(customEnvKey) === "credential" && customEnvKey.envCredentials.length === 0,
+  `${gapOf(customEnvKey)} | ${JSON.stringify(customEnvKey.envCredentials)} | ${customEnvKey.blockedReason}`
+);
+const customAuthToken = withPresets(
+  { provider: "corp-gateway", custom_providers: { "corp-gateway": { url: gateway.url, model: "qwen3-max" } } },
+  { ANTHROPIC_AUTH_TOKEN: "t" }
+);
+check(
+  "the Claude-Code token is a legacy-shape variable and does not count for a provider",
+  !customAuthToken.ready && gapOf(customAuthToken) === "credential" && customAuthToken.envSources.length === 0,
+  `${gapOf(customAuthToken)} | ${JSON.stringify(customAuthToken.envSources)} | ${customAuthToken.blockedReason}`
+);
+const otherPresetKey = withPresets(
+  { provider: "deepseek", providers: { deepseek: { model: "deepseek-chat" } } },
+  { ANTHROPIC_API_KEY: "k" }
+);
+check(
+  "one preset's variable is not another preset's Key",
+  !otherPresetKey.ready && gapOf(otherPresetKey) === "credential",
+  `${gapOf(otherPresetKey)} | ${JSON.stringify(otherPresetKey.envCredentials)} | ${otherPresetKey.blockedReason}`
+);
+// Without the registry nothing can be said about which variable belongs to the
+// selected name, and assuming "none" would block a config that works — so the
+// older, lenient reading stays.
+const customNoRegistry = readiness(
+  { provider: "corp-gateway", custom_providers: { "corp-gateway": { url: gateway.url, model: "qwen3-max" } } },
+  { ANTHROPIC_API_KEY: "k" }
+);
+check(
+  "an unreadable registry keeps the lenient reading instead of inventing a missing Key",
+  customNoRegistry.ready && customNoRegistry.envCredentials.includes("ANTHROPIC_API_KEY"),
+  `${gapOf(customNoRegistry)} | ${JSON.stringify(customNoRegistry.envCredentials)} | ${customNoRegistry.blockedReason}`
+);
+// The lenient fallback above is about *which* built-in service owns a variable,
+// not about which shape reads it: the provider path never reads the Claude-Code
+// token, so not knowing the registry cannot make it count.
+const customNoRegistryToken = readiness(
+  { provider: "corp-gateway", custom_providers: { "corp-gateway": { url: gateway.url, model: "qwen3-max" } } },
+  { ANTHROPIC_AUTH_TOKEN: "t" }
+);
+check(
+  "the Claude-Code token stays out even when the registry is unreadable",
+  !customNoRegistryToken.ready && gapOf(customNoRegistryToken) === "credential",
+  `${gapOf(customNoRegistryToken)} | ${JSON.stringify(customNoRegistryToken.envSources)} | ${customNoRegistryToken.blockedReason}`
 );
 // The legacy shape keeps reading them: with no `provider` set, `OCR_LLM_*` is the
 // CLI's documented way to run without a config file.
@@ -848,6 +907,8 @@ const invariances = {
   "provider with a top-level model": providerTopModel,
   "legacy form with a top-level model": legacyTopModel,
   "provider with an env model": providerEnvModel,
+  "preset reading its own variable": presetOwnKey,
+  "custom provider with an anthropic variable": customEnvKey,
 };
 for (const [name, view] of Object.entries(invariances)) {
   check(

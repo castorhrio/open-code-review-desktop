@@ -155,17 +155,27 @@ function savedKeyFor(name, url) {
 // service's own table, and the `OCR_LLM_*` overrides are never consulted — so a
 // lone `OCR_LLM_URL` beside a `provider` is not an endpoint, and `OCR_LLM_TOKEN`
 // is not its Key. Counting them is how a provider entry with no URL came out
-// "ready" and then failed with `no valid LLM endpoint configured`. A built-in
-// service's own variable (ANTHROPIC_API_KEY) counts in both shapes, which is why
-// the credential dimension stays lenient: being wrong there costs a CLI error
-// instead of a disabled button.
+// "ready" and then failed with `no valid LLM endpoint configured`.
+//
+// `ANTHROPIC_AUTH_TOKEN` is the Claude-Code variable (tryCCEnv), which is one of
+// the *legacy* strategies — the provider shape never reads it.
+//
+// The fourth column names the built-in service whose `EnvVar` a variable is
+// (internal/llm/providers.go). In the provider shape the environment is a Key
+// source only through that table: `tryProviderConfig` falls back to
+// `preset.EnvVar` when the entry has neither `api_key` nor `api_key_cmd`, and
+// only for a preset — a custom provider has no fallback at all, and, say,
+// `ANTHROPIC_API_KEY` is not what the `deepseek` preset reads. Held as a list of
+// the variables this app knows about, not as a copy of the whole table, so a
+// provider whose variable is missing here reads as "no Key" (the CLI will still
+// run it) rather than as "ready".
 const ENV_SOURCES = [
   ["OCR_LLM_URL", "endpoint", "legacy"],
   ["OCR_LLM_TOKEN", "credential", "legacy"],
   ["OCR_LLM_MODEL", "model", "legacy"],
   ["ANTHROPIC_BASE_URL", "endpoint", "legacy"],
-  ["ANTHROPIC_AUTH_TOKEN", "credential", "both"],
-  ["ANTHROPIC_API_KEY", "credential", "both"],
+  ["ANTHROPIC_AUTH_TOKEN", "credential", "legacy"],
+  ["ANTHROPIC_API_KEY", "credential", "both", "anthropic"],
   ["ANTHROPIC_MODEL", "model", "legacy"],
 ];
 
@@ -247,9 +257,24 @@ function readConfigView({ configPath = CONFIG_PATH, env = process.env, presetNam
       ? new Set(presetList.map((name) => String(name).toLowerCase()))
       : null;
   const shape = usesLlmBlock ? "legacy" : "provider";
-  const detectedEnv = ENV_SOURCES.filter(
-    ([name, , readBy]) => env[name] && (readBy === "both" || readBy === shape)
-  );
+  // "Is the selected name one of the CLI's built-in services?" is asked twice
+  // below — by the endpoint question and by the credential question — so it is
+  // answered once. A name the registry does not know never has its entry read
+  // (`tryProviderConfig` sends it to `custom_providers` instead), which is the
+  // `rejectedProvider` case further down.
+  const inProvidersSection = Boolean(active && (raw.providers || {})[active]);
+  const knownPreset = Boolean(presets && inProvidersSection && presets.has(String(active).toLowerCase()));
+  const activePreset = knownPreset ? String(active).toLowerCase() : "";
+  const detectedEnv = ENV_SOURCES.filter(([name, , readBy, owner]) => {
+    if (!env[name]) return false;
+    if (readBy === "legacy") return shape === "legacy";
+    // `both` — the variables that count in either shape. In the provider shape
+    // only a preset's own variable does, and only for that preset.
+    if (shape === "legacy") return true;
+    // No registry yet: fall back to the older, lenient reading. Refusing a
+    // config that works is worse than letting the CLI say "no api_key" on a run.
+    return !presets || Boolean(owner && owner === activePreset);
+  });
   const envSources = detectedEnv.map(([name]) => name);
   const envCredentials = detectedEnv
     .filter(([, kind]) => kind === "credential")
@@ -297,10 +322,10 @@ function readConfigView({ configPath = CONFIG_PATH, env = process.env, presetNam
   // So a name hand-edited into `providers` is a config the CLI rejects outright,
   // not a preset entry that happens to be missing a URL. Naming `baseUrl` for it
   // would point the user at the one field that cannot fix anything.
-  const providerSection = raw.providers || {};
-  const inProvidersSection = Boolean(active && providerSection[active]);
-  const knownPreset = Boolean(presets && inProvidersSection && presets.has(String(active).toLowerCase()));
-  // Without the registry all that can be said is the older, looser answer.
+  //
+  // `inProvidersSection` / `knownPreset` themselves are computed above, where
+  // the environment question needs them too. Without the registry all that can
+  // be said is the older, looser answer.
   const presetEntry = presets ? knownPreset : inProvidersSection;
   const rejectedProvider = presets && inProvidersSection && !knownPreset ? active : "";
   const hasEntryKey = entryHasCredential(entry);
@@ -333,10 +358,14 @@ function readConfigView({ configPath = CONFIG_PATH, env = process.env, presetNam
   const hasModel = usesLlmBlock
     ? Boolean(llmRaw.model) || envHasModel
     : Boolean(raw.model) || Boolean(entryModel);
-  // Any credential counts, wherever it lives: the environment is the CLI's own
-  // last resort for the Key, and being wrong here in the optimistic direction
-  // only means a run that fails with the CLI's message instead of a disabled
-  // button. Being wrong the other way would block a config that works.
+  // Any credential counts, wherever the CLI would look for it: the entry's own
+  // Key, a built-in service's variable (`envCredentials` already holds only what
+  // the current shape reads, and in the provider shape only the selected
+  // preset's own variable), or — in the legacy shape — the `llm` block's token.
+  // Being wrong in the optimistic direction only means a run that fails with the
+  // CLI's message instead of a disabled button; being wrong the other way blocks
+  // a config that works, which is why a variable this app does not track is left
+  // out of the list rather than guessed at.
   const hasCredential = Boolean(envCredentials.length || (active && hasEntryKey) || hasLlmKey);
   view.configured = Boolean(active || llmRaw.url || llmRaw.model);
   // One list decides both answers. `ready` used to be its own expression and
