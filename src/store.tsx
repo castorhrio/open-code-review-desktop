@@ -637,7 +637,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
           llm: { model: s.model },
           manifest: s.run_manifest || null,
           summary: {
-            files_reviewed: s.completed_files,
+            // A resumed session's covered set is completed + reused; reporting
+            // only the newly completed files made 27/27 read as 3/27 on the
+            // results and report headers too.
+            files_reviewed: (s.completed_files || 0) + (s.reused_files || 0),
             comments: s.total_comments,
             elapsed: s.duration_ns ? `${Math.round(s.duration_ns / 1e9)}s` : "",
           },

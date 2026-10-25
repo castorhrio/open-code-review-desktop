@@ -1169,6 +1169,21 @@ await shoot(page, "06-history", {
     if (!rowText) return ["the legacy session row (0/27) is missing from the fixture"];
     if (/完成/.test(rowText)) out.push(`a legacy session with 27/27 failures is labelled 完成: "${rowText.slice(0, 90)}"`);
     if (!/失败/.test(rowText)) out.push(`the legacy session's failure is not surfaced at all: "${rowText.slice(0, 90)}"`);
+
+    // A resumed session covers completed + reused. Counting only the newly
+    // completed files rendered 3/27 — a run that looks like it failed almost
+    // everything — while the badge beside it said 完成.
+    const reusedText = await page.evaluate(() => {
+      const span = [...document.querySelectorAll("main span")].find((s) => s.textContent.trim() === "27/27");
+      return span ? span.parentElement.parentElement.textContent : null;
+    });
+    if (!reusedText) out.push("the resumed session row (27/27) is missing from the fixture");
+    else {
+      if (!/复用 24/.test(reusedText))
+        out.push(`the resumed session does not say that 24 files were reused: "${reusedText.slice(0, 90)}"`);
+      if (!/完成/.test(reusedText))
+        out.push(`a resumed session whose 27 files are all covered is not labelled 完成: "${reusedText.slice(0, 90)}"`);
+    }
     return out;
   },
 });
@@ -2034,6 +2049,30 @@ await shoot(page, "88-report-limit-reached-with-findings", {
     if (!/这次审查在达到上限时停下/.test(text)) out.push("the report does not say that the run stopped at a limit");
     if (!/可能没被审到/.test(text)) out.push("the report does not warn that later files may be missing");
     if (!/密码校验用了普通的字符串比较/.test(text)) out.push("the report does not contain the findings the run did produce");
+    return out;
+  },
+});
+
+// A session that reused files from its previous run. The CLI counts them as
+// covered (`selected = completed + reused + failed`), but reopening it reported
+// only the newly completed files: the header said 3 files over a session whose
+// 27 files had all been reviewed.
+await shoot(page, "89-reused-session-files-reviewed", {
+  after: async (page) => {
+    await nav("历史")(page);
+    await page.waitForTimeout(700);
+    await page.evaluate(() => {
+      const span = [...document.querySelectorAll("main span")].find((s) => s.textContent.trim() === "复用 24");
+      const row = span?.closest("div.flex.flex-wrap");
+      [...(row?.querySelectorAll("button") || [])].find((b) => b.textContent.trim() === "结果")?.click();
+    });
+    await page.waitForTimeout(900);
+  },
+  expect: async (page) => {
+    const text = await page.locator("main").innerText();
+    const out = [];
+    if (!/27\s*文件/.test(text)) out.push("the reopened resumed session does not count reused files in 文件");
+    if (/(^|\s)3\s*文件/.test(text)) out.push("the reopened resumed session counts only the 3 newly reviewed files");
     return out;
   },
 });

@@ -70,6 +70,13 @@ export function HistoryPanel() {
               const status = STATUS[st] || { label: st, cls: "border-line bg-raised text-muted" };
               const scope =
                 s.review_mode === "range" ? `${s.diff_from}…${s.diff_to}` : s.review_mode === "commit" ? s.diff_commit : s.git_branch;
+              // A resumed session records the files it did not re-review in
+              // `reused_files`, and the CLI counts them as covered too
+              // (`selected = completed + reused + failed`). Showing completed
+              // alone made 3 new + 24 reused out of 27 read as 3/27 — a mostly
+              // failed run — while the badge beside it said 完成.
+              const reused = s.reused_files || 0;
+              const reviewed = (s.completed_files || 0) + reused;
               return (
                 <div
                   key={s.session_id}
@@ -92,9 +99,20 @@ export function HistoryPanel() {
                   </div>
 
                   <div className="tnum flex shrink-0 items-center gap-2 text-meta text-muted">
-                    <span title="完成 / 选中文件数">
-                      <b className="text-ink">{s.completed_files}</b>/{s.selected_files}
+                    <span
+                      title={
+                        reused
+                          ? `完成 ${s.completed_files} + 复用 ${reused} / 选中 ${s.selected_files}`
+                          : "完成 / 选中文件数"
+                      }
+                    >
+                      <b className="text-ink">{reviewed}</b>/{s.selected_files}
                     </span>
+                    {reused > 0 && (
+                      <span className="text-faint" title="续跑时直接复用上一次的审查结果，未重新计费">
+                        复用 {reused}
+                      </span>
+                    )}
                     {s.failed_files > 0 && <span className="text-bad">✗{s.failed_files}</span>}
                     <Badge tone={s.total_comments ? "accent" : "neutral"}>{s.total_comments} 条</Badge>
                     <Badge className={status.cls}>{status.label}</Badge>

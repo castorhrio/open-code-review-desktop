@@ -263,6 +263,27 @@ const SESSIONS = [
     run_manifest: { schema_version: "ocr.run-manifest/v1", run_id: "c3d4e5f6", operation: "scan", terminal_state: "completed_with_warnings" },
   },
   {
+    // A resumed session reuses the files its previous run already covered.
+    // The CLI counts them in the selected total (`selected = completed +
+    // reused + failed`), so 3 newly completed + 24 reused out of 27 is a
+    // complete run — not the 3/27 this row used to read as.
+    session_id: "e5f60718293a4b5c6d7e8f9012345678",
+    file_path: "/home/x/.opencodereview/sessions/demo/e5f60718.jsonl",
+    repo_dir: "/home/x/work/payments-api",
+    git_branch: "main",
+    model: "claude-sonnet-4-5",
+    review_mode: "full_scan",
+    start_time: iso(1000 * 60 * 60 * 30),
+    duration_ns: 310_000_000_000,
+    selected_files: 27,
+    completed_files: 3,
+    reused_files: 24,
+    failed_files: 0,
+    total_comments: 12,
+    resumed_from: "9f2c41d0",
+    run_manifest: { schema_version: "ocr.run-manifest/v1", run_id: "e5f60718", operation: "scan", terminal_state: "complete" },
+  },
+  {
     session_id: "77aa88bb99cc00dd11ee22ff33aa44bb",
     file_path: "/home/x/.opencodereview/sessions/demo/77aa88bb.jsonl",
     repo_dir: "/home/x/work/payments-api",
