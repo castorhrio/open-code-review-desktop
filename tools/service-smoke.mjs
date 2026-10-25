@@ -120,6 +120,30 @@ check(
   missingText.slice(-160)
 );
 
+/* ---- an impossible `--path` is an error, not an empty scan ----
+ * Upstream v1.13.2 (27def86, #1709) made `--path` resolve against the
+ * filesystem: before, a path that does not exist selected 0 files and exited 0,
+ * so the app drew a preview with no rows and a run that "found nothing". The
+ * desktop exposes `--path` in scan mode, so this is the one place where the
+ * change has to land as a message — and the CLI's wording is English, so it also
+ * has to fall through the hint table.
+ */
+const ghostPath = await svc.preview({ ...base, mode: "scan", path: "no-such-dir/no-such.go" });
+check(
+  "a scan path that does not exist fails instead of previewing zero files",
+  !ghostPath.ok && Boolean(ghostPath.error) && !Array.isArray(ghostPath.value?.files),
+  ghostPath.ok ? `resolved ${ghostPath.value?.files?.length} files` : ""
+);
+check(
+  "and the message names the path that was not found",
+  /no-such-dir\/no-such\.go/.test(String(ghostPath.error || "")),
+  String(ghostPath.error || "").slice(0, 200)
+);
+check(
+  "with a hint that says what to do about it",
+  /扫描路径/.test(String(ghostPath.error || "")),
+  String(ghostPath.error || "").slice(-200)
+);
 /* ---- sessions ---- */
 const sessions = await svc.listSessions(dir, 0);
 check("listSessions on a fresh repo returns an empty list", sessions.ok && Array.isArray(sessions.value) && sessions.value.length === 0, JSON.stringify(sessions).slice(0, 120));

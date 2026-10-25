@@ -420,6 +420,12 @@ const HELP_HINTS = [
   [/resume requires --from\/--to or --commit/, "工作区改动无法续跑，请改用「分支对比」或「单个提交」。"],
   [/fatal: not a git repository/, "所选目录不是 git 仓库。请选仓库根目录，或改用「全量扫描」。"],
   [
+    // v1.13.2 turned a nonexistent `--path` from "select 0 files and exit 0"
+    // into an error, and its wording is the only thing the user sees.
+    /does not exist in the working tree/,
+    "扫描路径在仓库工作区里找不到：检查拼写与大小写（区分大小写的系统上 a.go 和 A.go 是两个文件），或清空「扫描路径」改为扫描全部文件。",
+  ],
+  [
     /仓库目录已经不存在/,
     "上次用的目录已经不在了——临时目录被清掉、克隆被删、换过盘符都会这样。在顶部重新选一个仓库目录即可，其它设置不受影响。",
   ],
