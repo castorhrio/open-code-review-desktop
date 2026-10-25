@@ -109,6 +109,31 @@ const badRef = await gitSvc.readFile(dir, "a.go", { ref: "no-such-ref" });
 check("an unresolvable ref fails instead of falling back", badRef.ok === false, badRef.ok ? "it succeeded" : "");
 check("...and is reported as an unresolvable ref", badRef.reason === "bad-ref", badRef.reason || "");
 
+/* ---- a wording that matches nothing is a plain failure ----
+ * The reasons above are read out of git's own stderr, and git's wording is
+ * not the app's to control: a localised git, or a newer git, says it
+ * differently. Anything that matches neither wording has to land on the
+ * generic branch — reported as a failure, with git's own first line, rather
+ * than guessed to be a missing file or an unresolvable ref.
+ *
+ * A directory that is not a repository is what produces such a wording
+ * ("fatal: not a git repository"), and the ceiling keeps git from finding a
+ * repository further up the tree.
+ */
+const notARepo = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-git-notrepo-"));
+const savedCeiling = process.env.GIT_CEILING_DIRECTORIES;
+process.env.GIT_CEILING_DIRECTORIES = path.dirname(notARepo);
+const unknownWording = await gitSvc.readFileAtRef(notARepo, "a.go", "HEAD", 1, 1, 0);
+if (savedCeiling === undefined) delete process.env.GIT_CEILING_DIRECTORIES;
+else process.env.GIT_CEILING_DIRECTORIES = savedCeiling;
+check(
+  "a wording that matches neither is reported as a plain failure",
+  unknownWording.ok === false && unknownWording.reason === "failed",
+  unknownWording.reason || unknownWording.error || ""
+);
+check("...and it keeps git's own words in the message", /git/i.test(unknownWording.error || ""), unknownWording.error || "");
+fs.rmSync(notARepo, { recursive: true, force: true });
+
 /* ---- the working tree does not hide the snapshot ---- */
 
 // The file is committed at HEAD and deleted in the working tree: the snapshot

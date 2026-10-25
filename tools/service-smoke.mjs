@@ -496,6 +496,37 @@ check(
 const rules = await svc.rulesCheck(dir, "a.go", "");
 check("rulesCheck answers without throwing", typeof rules.ok === "boolean", JSON.stringify(rules).slice(0, 120));
 
+/* ---- a spawn failure says which of the two is gone ----
+ * Node reports a spawn failure with the *program's* path even when what is
+ * missing is the working directory, so a repository that no longer exists
+ * surfaced as "spawn <binaryPath> ENOENT" and the user went looking for a
+ * missing executable.
+ *
+ * The fallback is the other half: an ENOENT that is neither of those — a
+ * third cause, or a wording this code does not know — keeps the original
+ * message instead of claiming an executable is missing. Guessing there would
+ * send the user looking for the wrong thing.
+ */
+const enoent = { code: "ENOENT", message: "spawn /usr/bin/ocr ENOENT" };
+const present = path.join(dir, "present.txt");
+fs.writeFileSync(present, "x", "utf8");
+check(
+  "a missing binary is named",
+  svc.spawnFailure(enoent, path.join(dir, "no-such-binary"), dir).includes("未找到 ocr 可执行文件")
+);
+check(
+  "a missing repository is named",
+  svc.spawnFailure(enoent, present, path.join(dir, "no-such-repo")).includes("仓库目录已经不存在")
+);
+check(
+  "and when neither is gone, the original message is kept",
+  svc.spawnFailure(enoent, present, dir) === enoent.message
+);
+check(
+  "a failure that is not ENOENT keeps its message too",
+  svc.spawnFailure({ code: "EACCES", message: "permission denied" }, present, dir) === "permission denied"
+);
+
 /* ---- cleanup ---- */
 for (const d of [dir, notRepo, home]) fs.rmSync(d, { recursive: true, force: true });
 

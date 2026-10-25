@@ -26,6 +26,14 @@
   `tags` 最新仍是 `v1.13.3`；`releases` 最新仍是 `v1.13.3`（2026-10-22 发布）。
 - 本仓 `upstream/main` 的本地 ref 仍指向 `375f64c`，与上游一致。
 
+**本轮复核结论**（2026-10-26，第 4 轮）：上游**仍然没有新内容**。
+
+- `git fetch upstream --tags` 这次**成功**（前几轮的 `GnuTLS recv error (-110)` 是
+  网络抖动），本仓 `upstream/main` 仍指向 `375f64c`。
+- GitHub API 交叉核对：`commits?sha=main` 顶端仍是 `375f64c`（2026-10-20）；
+  `tags` 最新仍是 `v1.13.3`；`releases` 最新仍是 `v1.13.3`（2026-10-22 发布）。
+- 结论不变：本轮没有需要移植的新功能 / 修复 / 破坏性变更。
+
 结论：本轮没有需要移植的新功能 / 修复 / 破坏性变更，desktop 的封装（CLI flag、
 输出解析、配置暴露点）无需改动。
 
@@ -201,6 +209,81 @@ id 删（2 条红）、超时后返回 `null`（1 条红）。
 
 ---
 
+## 本轮 desktop 侧加固（与上游无关，第 4 轮）
+
+本轮做两件事：把 store 的「卷大小写」那条线**接到真实卷的答案**（上轮留下的
+P0），以及给两条**静默降级**的兜底分支补断言（分类逻辑一行未改）。
+
+### P0 — store 的大小写：问卷，而不是问操作系统
+
+上轮 `createStore` 已经能接住 `options.caseInsensitive`，但 `main.js` 建 store 时
+仍走**平台默认**。平台默认是个猜测：macOS 可以把卷格式化成**大小写敏感**，Linux
+可以把卷挂成**大小写不敏感**——两个方向都猜错。于是「被截断的运行不能看起来
+干净」这条承诺，在一个按大小写敏感格式化的 macOS 卷上仍然会被破坏：两个只差
+大小写的目录会被并成一条证据，或者反过来，找不到自己那条。
+
+**问哪里的卷？** 这里和上轮简报里的建议不一样，值得记一笔：简报建议在
+`userData` 目录里写探针文件。但 **store 的 key 是「仓库路径」，不是 profile
+路径**——`normalizeRepo` 处理的是用户选的仓库目录，profile 卷的大小写与它无关。
+更糟的是，在 macOS 上答案通常正好是错的：系统盘是大小写不敏感的（所以
+`userData` 说「折叠」），而开发者格式化工作盘时往往**只格式化外置盘**，仓库在
+外置盘上（大小写敏感）——问 profile 卷得到的正是**相反**的答案。
+
+所以本轮改成：**问仓库自己的路径，而且不写任何东西**。
+
+- `run-diagnostics.js` 新增 `detectCaseInsensitive(target, options)`：
+  把路径里**最深的那一段带字母的**名字换一种拼法（`Payments-API` →
+  `PAYMENTS-API`），然后 `stat` 两个拼法，比对 `dev`/`ino`：
+  - 同一个 inode → 卷折叠大小写；
+  - 另一个 inode（两个只差大小写的目录真的都在）→ 卷**不**折叠；
+  - 另一种拼法**根本不存在** → 卷不折叠；
+  - 路径读不到（仓库被删了）→ **答不出来**（`null`），交给平台默认。
+- **不写文件**是刻意的：路径通常是用户自己的工作树，在里面留一个探针文件比
+  猜错更糟。探针只 `stat`，不写。
+- `createCaseDetector(options)`：每个路径只问一次。一份证据文件有上百条记录，
+  仓库又常在网络盘上，每条都问一遍就是上百次往返。
+- `createAppStore(file, options)`：**app 真正用的那个 store** 从这里建，探测
+  逻辑收在一个地方，检查够得着；`main.js` 只剩一行调用。
+- `main.js`：`createRunDiagnostics(...)` → `createAppStore(...)`。
+
+**三个来源，一个顺序**（`resolveCaseInsensitive`）：显式答案 → 卷的答案 → 平台
+的答案。卷**答不出来**时退回平台默认，**不是**当成「大小写敏感」——反过来读，
+一个问不出答案的探针会**弄丢**折叠大小写的卷上的每一条证据，正是这个 store
+存在的理由所要防的那件事。
+
+**顺带修好一个升级期的洞**：早期 build 用平台默认建 key，在大小写敏感的 macOS
+卷上它把目录**转成了小写**存进文件；新 build 按卷的答案（保留大小写）建 key，
+那条旧记录就找不到了——重开那个会话又会显示成「干净」。所以 store 现在**两个
+key 都查**（`keysFor`）：卷的答案，和早期 build 的答案。
+
+**验证**：`tools/run-diagnostics-smoke.mjs` 新增 22 条断言，覆盖两种卷的答案、
+答不出来时的退回、显式答案的优先级、只问一次、探针与真实文件系统的一致性、
+app 自己的 store 走的是「问卷」那条路，以及升级期旧记录仍能找到、仍能删。
+
+失败模式逐条实测过会让断言变红（9 个）：不把探测器交给 store（1 条）、`main.js`
+自己建 store（1 条）、探针把答案读反（2 条）、答不出来当成大小写敏感（3 条）、
+不缓存探测（1 条）、忽略平台答案（5 条）、路径不存在也判（1 条）、存进去的
+repo 不规范化（1 条）、不查早期 build 的 key（1 条）。
+
+### P1 — 未知措辞的兜底分支，各配一条断言
+
+两条分类都靠**外部的措辞**：`readFileAtRef` 靠 git 的 stderr 分
+`bad-ref` / `missing` / `failed`，`spawnFailure` 靠 `err.code` 分。措辞不是本程序
+的：本地化的 git、换版本的 git、上游改文案，都会让某个分支再也走不到——而**没有
+任何断言会发现**，只是分类悄悄变了。
+
+- `tools/git-service-smoke.mjs`：在**不是仓库**的目录里读一次（git 的话是
+  `fatal: not a git repository`，两种已知措辞都不匹配），断言落到 `failed`，
+  而且消息里保留 git 自己的原话。
+- `tools/service-smoke.mjs`：`spawnFailure` 原来**根本没有导出**，所以这个分支
+  一条断言也没有。本轮把它导出（纯函数，无行为变化），并断言三种情形：二进制
+  不在、仓库目录不在、以及**两者都在**时保留原始消息（而不是硬说「找不到可
+  执行文件」——那会把用户引到错的东西上）。
+
+分类逻辑一行未改。
+
+---
+
 ## 待移植 / 待验证
 
 ### 已完成 — `manifest.run_failure` 的中文映射与展示
@@ -272,34 +355,41 @@ desktop 的「工具调用 N（失败 M）」直接读 CLI 的 `tool_calls.failu
 
 ## 仍然开放的事项（非上游）
 
-本轮收的是「删除的边界」与「读的负向路径」两条，其余按优先级排在这里，下一轮挑。
+本轮收了「卷的大小写」与「未知措辞的兜底」两条，其余按优先级排在这里，下一轮挑。
 标注「**未动**」的条目是本轮看过、确认仍然成立但没有改的——不是新发现。
 
 - **P1**：`readConfigView` 在 active 分支的 `missing` 只报 `credential`，忽略
   「有 endpoint 无 model」。文件 `ocr-service.js`（既有代码，不是本轮引入）。
   ——**未动**。`readConfigView` 是纯函数，四种组合各断言一次即可，顺手修 active
   分支漏报 `model` 的问题。文件 `tools/service-smoke.mjs`。
-- **P2**：`readFileAtRef` 靠 stderr 措辞区分 `bad-ref` / `missing` / `failed`，
-  本地化 git 可能对不上；`spawnFailure` 同理。至少补一条「未知措辞落到通用分支」
-  的断言。文件 `git-service.js`、`ocr-service.js`、`tools/git-service-smoke.mjs`、
-  `tools/service-smoke.mjs`。——**未动**（不改分类逻辑，只加断言把兜底分支钉住）。
 - **P2**：`writeAll` 的 Windows 回退分支里 `unlink(tmp)` 失败被吞掉，进程立刻退出
   会留下 `*.tmp` 垃圾。文件 `run-diagnostics.js`。——**未动**。改成把失败记进
   outcome。
 - **P2**：`MAX_ENTRIES` 的注释没有写明它是「**全局**上限，按写入顺序淘汰」
   （跨仓库一起算，不是每个仓库 200 条）。文件 `run-diagnostics.js`。若要改成
   per-repo，则要改 `record` 的截断逻辑并加断言。
-- **P2**：`createStore` 现在能接住卷的大小写敏感性（`options.caseInsensitive`），
-  但 `main.js` 建 store 时没有传——仍走平台默认答案。文件 `main.js`。这不影响
-  现状（平台默认对 Windows/macOS 是对的），但一个**按大小写敏感格式化**的 macOS
-  卷仍会把两个目录的证据并成一条。要接上就得先能判断真实卷的答案。
 - **P3**：`finding.tsx` 的 `RunFailureNote`（只显示 tooltip）与 `RunFailureNotice`
   （可见文本）名字相近，看代码的人容易认错。文件 `src/components/finding.tsx`。
 - **P3**：`settleRunExit` 的 `signal-failed` 分支——这一行到底写到哪里、用户在
   renderer 已销毁时能不能看见，尚未确认。若确实不可见，应改写到主进程日志文件
   而不是 stderr。
 - **P3**：`RunFailureNotice` 的「CLI 原始原因可选中」目前没有对应的 UI 断言。
-- **P3**：`tools/run-diagnostics-smoke.mjs` 的
-  `check("the stored key is canonical...")` 里两个条件用 `&&` 串在一起，应该拆成
-  两条独立断言。
+
+### 本轮做完、可以划掉的
+
+- ~~`createStore` 的 `options.caseInsensitive` 没有接上真实卷的答案~~ →
+  第 4 轮做完：`detectCaseInsensitive` 问**仓库自己的路径**（不写文件），
+  `createAppStore` 收口，`main.js` 只剩一行调用。详见上面「P0 — store 的大小写」。
+- ~~`readFileAtRef` / `spawnFailure` 的未知措辞兜底分支没有断言~~ →
+  第 4 轮做完：各配一条断言，分类逻辑一行未改，`spawnFailure` 顺便导出。
+- ~~`check("the stored key is canonical...")` 两个条件用 `&&` 串在一起~~ →
+  第 4 轮拆成两条独立断言。
+
+### 一处与上轮简报不同的做法（留给下一个人）
+
+上轮简报建议「在 `userData` 目录下写探针文件」。本轮**没有**这么做，理由写在
+上面「P0 — store 的大小写」里：store 的 key 是**仓库路径**，profile 卷的大小写
+与它无关；在 macOS 上，profile（系统盘）的答案通常与仓库所在卷**正好相反**。
+探针改成只读、只问仓库自己的路径。如果下一个人想改回去，先读那一段。
+
 

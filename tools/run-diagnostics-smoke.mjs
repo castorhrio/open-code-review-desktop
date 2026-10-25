@@ -10,10 +10,15 @@ import path from "node:path";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
+const ROOT = path.resolve(import.meta.dirname, "..");
 const {
   createStore,
+  createAppStore,
   normalizeRepo,
   CASE_INSENSITIVE_PATHS,
+  detectCaseInsensitive,
+  createCaseDetector,
+  resolveCaseInsensitive,
   MAX_ENTRIES,
   LIMIT_WARNING,
   WRITE_TIMEOUT_MS,
@@ -83,7 +88,11 @@ await store.record(`${repo}/../payments-api`, "dotdot-session", limitResult);
 check("a path spelled with .. resolves to the same repository", store.read(repo, "dotdot-session")?.warnings?.length === 1);
 check("normalizeRepo resolves a relative spelling", normalizeRepo(path.relative(process.cwd(), repo)) === normalizeRepo(repo));
 const rawSlash = JSON.parse(fs.readFileSync(file, "utf8"));
-check("the stored key is canonical, not the caller's spelling", rawSlash.entries.filter((e) => e.repo === repo).length >= 1 && rawSlash.entries.every((e) => e.repo === normalizeRepo(e.repo)));
+// Two assertions, not one `a && b`: chained, the second condition is only
+// reached when the first holds, so a failure of the second says nothing about
+// which of the two broke.
+check("the stored key is the repository the caller asked for", rawSlash.entries.filter((e) => e.repo === repo).length >= 1);
+check("and every stored key is canonical", rawSlash.entries.every((e) => e.repo === normalizeRepo(e.repo)));
 // Windows and macOS compare paths case-insensitively (NTFS, and APFS/HFS+ by
 // default), so the same folder can arrive with a different drive letter or
 // folder casing; on Linux a path is a byte string and a different casing is a
@@ -155,6 +164,188 @@ await sensitiveStore.record(casedRepo, "split-session", limitResult);
 check("a volume that keeps case keeps two folders apart", sensitiveStore.read(casedRepo.toLowerCase(), "split-session") === null);
 await sensitiveStore.remove(casedRepo.toLowerCase(), "split-session");
 check("and a delete of one of them leaves the other alone", sensitiveStore.read(casedRepo, "split-session")?.warnings?.length === 1);
+
+/* ---- the volume is asked, not the OS ----
+ * Whether two spellings of one folder are the same folder is a property of
+ * the volume that folder is on: a macOS volume can be formatted case-sensitive,
+ * and a Linux one can be mounted case-insensitively. The platform's default is
+ * a guess, and it is wrong in both directions — so the app asks the volume,
+ * of the repository's own path (that is the path the key is about; the
+ * profile directory's volume would answer a different question), and without
+ * writing anything into the user's working tree.
+ *
+ * A case-folding filesystem is not something a test can mount, so the volume
+ * is *modelled* here: the probe is handed a `stat` that behaves the way such
+ * a volume behaves. That is still a real assertion — the probe has to ask the
+ * right question and read the answer the right way round — and the volume the
+ * check really runs on is compared with the probe's own answer further down.
+ */
+const enoent = (target) => {
+  const err = new Error(`ENOENT: no such file or directory, stat '${target}'`);
+  err.code = "ENOENT";
+  return err;
+};
+// A volume that folds case: every spelling of a name is the same entry.
+const foldingStat = (name, ino = 42) => (target) => {
+  const base = path.basename(target);
+  if (base.toLowerCase() !== name.toLowerCase()) throw enoent(target);
+  return { dev: 1, ino };
+};
+// A volume that keeps case: only the exact spelling is there.
+const sensitiveStat = (name, ino = 42) => (target) => {
+  const base = path.basename(target);
+  if (base !== name) throw enoent(target);
+  return { dev: 1, ino };
+};
+const volumeRepo = "/home/x/work/Payments-API";
+check(
+  "a volume that folds case is recognised",
+  detectCaseInsensitive(volumeRepo, { stat: foldingStat("Payments-API") }) === true
+);
+check(
+  "a volume that keeps case is recognised",
+  detectCaseInsensitive(volumeRepo, { stat: sensitiveStat("Payments-API") }) === false
+);
+check(
+  "two folders whose names differ in case are two folders",
+  detectCaseInsensitive(volumeRepo, {
+    stat: (target) => {
+      const base = path.basename(target);
+      if (base === "Payments-API") return { dev: 1, ino: 42 };
+      if (base === "PAYMENTS-API") return { dev: 1, ino: 43 };
+      throw enoent(target);
+    },
+  }) === false
+);
+check(
+  "a path that is not there cannot be judged",
+  detectCaseInsensitive(volumeRepo, { stat: sensitiveStat("Somewhere-Else") }) === null
+);
+check(
+  "a volume with no identity to compare cannot be judged",
+  detectCaseInsensitive(volumeRepo, { stat: () => ({ dev: 1, ino: 0 }) }) === null
+);
+// The volume is asked once per path: a file with a hundred entries would
+// otherwise ask a hundred times, and the repository under review is often on a
+// network mount.
+let probes = 0;
+const counting = createCaseDetector({
+  stat: (target) => {
+    // Only the path as spelled counts: the probe also asks about the other
+    // spelling, which is a second question, not a second probe.
+    if (path.basename(target) === "Payments-API") probes += 1;
+    return sensitiveStat("Payments-API")(target);
+  },
+});
+counting(volumeRepo);
+counting(volumeRepo);
+check("the volume is asked once per path", probes === 1, `${probes} probes`);
+
+/* The answer the store keys by: an explicit answer wins, the volume's answer
+ * is used when there is none, and a volume that cannot tell falls back to the
+ * platform's answer — which is right on Windows and on a default macOS
+ * volume, and no reason to second-guess when the volume said nothing.
+ *
+ * The platform's answer is injected here, because on the machine this runs on
+ * it happens to be the one that makes the difference invisible: a probe that
+ * could not answer would be read as "case-sensitive", which is the same as the
+ * platform's answer on Linux and the opposite of it on macOS. */
+check("an explicit answer wins over the volume's", resolveCaseInsensitive("/x", { caseInsensitive: true, detect: () => false }) === true);
+check("the volume's answer is used when there is no explicit one", resolveCaseInsensitive("/x", { detect: () => true }) === true);
+check(
+  "a volume that cannot answer falls back to the platform's",
+  resolveCaseInsensitive("/x", { detect: () => null, platformCaseInsensitive: true }) === true
+);
+check(
+  "and a store with no detector at all uses the platform's answer too",
+  resolveCaseInsensitive("/x", { platformCaseInsensitive: true }) === true
+);
+check(
+  "while a platform that keeps case is believed just as much",
+  resolveCaseInsensitive("/x", { detect: () => null, platformCaseInsensitive: false }) === false
+);
+
+/* The real filesystem, compared with the probe's own answer: the probe writes
+ * a file with a mixed-case name and asks whether the other spelling resolves
+ * to the same file, which is the ground truth the probe is compared against.
+ * The two use different means — the probe flips a sibling's spelling, this
+ * writes a file — so they can disagree if the probe is wrong. */
+const volumeTarget = path.join(dir, "Volume-Probe");
+fs.mkdirSync(volumeTarget, { recursive: true });
+const probeFile = path.join(volumeTarget, "MixedCase-Name");
+fs.writeFileSync(probeFile, "", "utf8");
+let volumeFolds = false;
+try {
+  const here = fs.statSync(probeFile);
+  const there = fs.statSync(path.join(volumeTarget, "mixedcase-name"));
+  volumeFolds = here.dev === there.dev && here.ino === there.ino;
+} catch (_) {
+  volumeFolds = false;
+}
+const probed = detectCaseInsensitive(volumeTarget);
+check("the probe agrees with the volume it ran on", probed === volumeFolds, `probe=${probed} volume=${volumeFolds}`);
+check("and it leaves nothing behind", !fs.existsSync(path.join(volumeTarget, "PROBE")) && fs.readdirSync(volumeTarget).length === 1);
+
+/* The store takes the volume's answer, so the app's store is not the only
+ * place the two worlds differ. */
+const detectedStore = createStore(path.join(dir, "detected", "run-diagnostics.json"), { detect: () => true });
+await detectedStore.record(casedRepo, "detected-session", limitResult);
+check("a store that asked the volume keeps two spellings of one folder together", detectedStore.read(casedRepo.toLowerCase(), "detected-session")?.warnings?.length === 1);
+const detectedRaw = JSON.parse(fs.readFileSync(path.join(dir, "detected", "run-diagnostics.json"), "utf8"));
+check("and it stores the spelling its key uses", detectedRaw.entries.every((e) => e.repo === e.repo.toLowerCase()));
+const unknownStore = createStore(path.join(dir, "unknown", "run-diagnostics.json"), { detect: () => null, platformCaseInsensitive: true });
+await unknownStore.record(casedRepo, "unknown-session", limitResult);
+check(
+  "a volume that cannot answer falls back to the platform's answer",
+  unknownStore.read(casedRepo.toLowerCase(), "unknown-session")?.warnings?.length === 1
+);
+
+/* A volume that keeps case, on a platform that folds: the earlier build
+ * lower-cased the folder, so its entry is filed under the lower-cased key.
+ * The new build keeps the case, and has to look under both — or the session
+ * that entry belongs to would look clean again after the upgrade. */
+const legacyStore = createStore(path.join(dir, "legacy", "run-diagnostics.json"), {
+  detect: () => false,
+  platformCaseInsensitive: true,
+});
+await legacyStore.record(casedRepo.toLowerCase(), "legacy-session", limitResult);
+check("an entry filed by the earlier build is still found", legacyStore.read(casedRepo, "legacy-session")?.warnings?.length === 1);
+await legacyStore.remove(casedRepo, "legacy-session");
+check("and it can still be deleted", legacyStore.read(casedRepo, "legacy-session") === null);
+
+/* ---- the app's own store ----
+ * The app used to build the store with the platform's answer, and nothing
+ * noticed: the volume was never asked. The wiring now lives in
+ * `createAppStore`, so it can be checked here — and this check makes sure
+ * `main.js` goes through it rather than building a store of its own.
+ *
+ * The volume is modelled rather than injected as an answer: handing the store
+ * a ready-made answer would prove nothing about the wiring, because the
+ * wiring is exactly what builds that answer. So the *filesystem* is modelled
+ * instead, and the store has to go and ask it.
+ */
+const appStore = createAppStore(path.join(dir, "app", "run-diagnostics.json"), { stat: foldingStat("Payments-API") });
+await appStore.record(casedRepo, "app-session", limitResult);
+check("the app's store asks the volume about case", appStore.read(casedRepo.toLowerCase(), "app-session")?.warnings?.length === 1);
+const appStoreSensitive = createAppStore(path.join(dir, "app-sensitive", "run-diagnostics.json"), { stat: sensitiveStat("Payments-API") });
+await appStoreSensitive.record(casedRepo, "app-sensitive-session", limitResult);
+check(
+  "and keeps two folders apart when the volume does",
+  appStoreSensitive.read(casedRepo.toLowerCase(), "app-sensitive-session") === null
+);
+const appStoreUnknown = createAppStore(path.join(dir, "app-unknown", "run-diagnostics.json"), { detect: () => null, platformCaseInsensitive: true });
+await appStoreUnknown.record(casedRepo, "app-unknown-session", limitResult);
+check(
+  "and falls back to the platform's answer when the volume cannot say",
+  appStoreUnknown.read(casedRepo.toLowerCase(), "app-unknown-session")?.warnings?.length === 1
+);
+const mainSrc = fs.readFileSync(path.join(ROOT, "main.js"), "utf8");
+const buildsItself = /createStore\(/.test(mainSrc);
+check(
+  "the app builds its store through the seam that asks the volume",
+  /createAppStore\(/.test(mainSrc) && !buildsItself,
+  buildsItself ? "main.js builds the store itself" : ""
+);
 
 await store.remove(repo, session);
 check("deleting a session deletes its entry", store.read(repo, session) === null);

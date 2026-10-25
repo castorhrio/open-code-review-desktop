@@ -167,6 +167,136 @@ function reportOutcome(outcome, warn, options) {
 const CASE_INSENSITIVE_PATHS = process.platform === "win32" || process.platform === "darwin";
 
 /**
+ * The other spelling of a name.
+ *
+ * Every ASCII letter is flipped, so the result differs from the original in
+ * more than one place: a volume that folded only *some* of the letters would
+ * still not answer to it.
+ */
+const flipCase = (name) =>
+  String(name || "").replace(/[A-Za-z]/g, (ch) => (ch === ch.toUpperCase() ? ch.toLowerCase() : ch.toUpperCase()));
+
+/**
+ * Whether the volume holding `target` folds case.
+ *
+ * The answer belongs to the volume, not to the OS: a macOS volume can be
+ * formatted case-sensitive, and a Linux one can be mounted case-insensitively.
+ * The platform's default is a guess, and it is wrong in both directions — so
+ * the volume is asked instead.
+ *
+ * The question is asked *of the path itself*, and nothing is written: the
+ * deepest segment that carries letters is spelled a second way, and the two
+ * spellings are compared by identity. The same file → the volume folds case.
+ * A second entry under the other spelling → two different folders, so the
+ * volume keeps case. No entry at all → the volume keeps case.
+ *
+ * Nothing is written, deliberately. The path usually belongs to the user's own
+ * repository, and a probe file left behind in someone's working tree is worse
+ * than a wrong answer. (The profile directory is not asked: the store's key is
+ * about the *repository* path, so the profile volume's answer would be the
+ * answer to a different question.)
+ *
+ * A path that cannot be read at all answers `null` — "cannot tell" — and the
+ * caller falls back to the platform's answer.
+ */
+function detectCaseInsensitive(target, options = {}) {
+  const stat = options.stat || fs.statSync;
+  const raw = String(target || "");
+  if (!raw) return null;
+  let abs;
+  try {
+    abs = path.resolve(raw);
+  } catch (_) {
+    return null;
+  }
+  // The segment to spell twice: the deepest one that carries letters. A folder
+  // called `2024` has none, so the walk goes up to its parent.
+  let dir = path.dirname(abs);
+  let base = path.basename(abs);
+  let spelled = abs;
+  for (let depth = 0; depth < 8 && !/[A-Za-z]/.test(base); depth += 1) {
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+    base = path.basename(dir);
+    spelled = dir;
+  }
+  if (!/[A-Za-z]/.test(base)) return null;
+  const other = flipCase(base);
+  if (other === base) return null;
+
+  let here;
+  let there;
+  try {
+    here = stat(spelled);
+  } catch (_) {
+    // The path is not there (a repository that was deleted, a spelling that
+    // never existed): there is nothing to compare, so there is no answer.
+    return null;
+  }
+  try {
+    there = stat(path.join(dir, other));
+  } catch (_) {
+    // The other spelling does not resolve — the volume keeps case.
+    return false;
+  }
+  // Both spellings exist. They are one folder only if they are one file: two
+  // entries whose names differ in case are two folders on a volume that keeps
+  // case, and the answer there is "keeps case".
+  if (!here || !there || !here.ino || !there.ino) return null;
+  if (here.dev !== there.dev || here.ino !== there.ino) return false;
+  return true;
+}
+
+/**
+ * A detector that asks each path once.
+ *
+ * The store keys every entry by folder, so a file with a hundred entries would
+ * otherwise ask the volume a hundred times for the same answer — and the
+ * repository under review is often on a network mount, where a hundred round
+ * trips for one read is a hundred round trips too many.
+ */
+function createCaseDetector(options = {}) {
+  const cache = new Map();
+  return (target) => {
+    let abs;
+    try {
+      abs = path.resolve(String(target || ""));
+    } catch (_) {
+      return null;
+    }
+    if (!cache.has(abs)) cache.set(abs, detectCaseInsensitive(abs, options));
+    return cache.get(abs);
+  };
+}
+
+/**
+ * The answer the store keys by.
+ *
+ * Three sources, in order: an explicit answer, the volume's own answer, and
+ * the platform's answer. A volume that cannot tell (`null`) falls through to
+ * the platform's answer instead of being read as "case-sensitive" — the
+ * platform's answer is right on Windows and on a default macOS volume, and a
+ * volume that could not be asked is no reason to second-guess it. (Read the
+ * other way round, a probe that could not answer would *lose* the evidence of
+ * every run on a case-folding volume, which is the one thing this store
+ * exists to prevent.)
+ *
+ * `options.platformCaseInsensitive` is the platform's answer, injectable so
+ * the rule can be checked from a platform whose default is the other way —
+ * otherwise the check would only ever be meaningful on one of them.
+ */
+function resolveCaseInsensitive(abs, options = {}) {
+  if (options && typeof options.caseInsensitive === "boolean") return options.caseInsensitive;
+  if (options && typeof options.detect === "function") {
+    const answer = options.detect(abs);
+    if (answer === true || answer === false) return answer;
+  }
+  if (options && typeof options.platformCaseInsensitive === "boolean") return options.platformCaseInsensitive;
+  return CASE_INSENSITIVE_PATHS;
+}
+
+/**
  * The same repository, however the caller spelled it.
  *
  * The renderer sends the folder the user picked, and that spelling is not
@@ -181,11 +311,12 @@ const CASE_INSENSITIVE_PATHS = process.platform === "win32" || process.platform 
  * Reading normalises as well, so entries written by an earlier build — which
  * stored the raw string — still answer for any spelling of the same folder.
  *
- * `options.caseInsensitive` overrides the platform's answer, because the
- * case-sensitivity of a filesystem is a property of the volume and not of the
- * OS: a macOS volume can be formatted case-sensitive, and a Linux one can be
- * mounted case-insensitively. It is also the only way to check the macOS
- * behaviour from a machine that is not a Mac. The store passes its own
+ * `options.caseInsensitive` overrides the platform's answer, and
+ * `options.detect` asks the volume instead — because the case-sensitivity of a
+ * filesystem is a property of the volume and not of the OS: a macOS volume can
+ * be formatted case-sensitive, and a Linux one can be mounted
+ * case-insensitively. The explicit override is also the only way to check the
+ * macOS behaviour from a machine that is not a Mac. The store passes its own
  * options straight through, so a store can be told the truth about the volume
  * it lives on instead of guessing it from the OS.
  */
@@ -198,7 +329,7 @@ function normalizeRepo(repo, options = {}) {
   } catch (_) {
     return raw;
   }
-  const caseInsensitive = "caseInsensitive" in options ? Boolean(options.caseInsensitive) : CASE_INSENSITIVE_PATHS;
+  const caseInsensitive = resolveCaseInsensitive(abs, options);
   return caseInsensitive ? abs.toLowerCase() : abs;
 }
 
@@ -238,17 +369,37 @@ async function drainQueue(current, maxRounds = MAX_DRAIN_ROUNDS) {
 }
 
 /**
+ * The store the app uses.
+ *
+ * The app's store keys every entry by the folder it belongs to, so it has to
+ * know whether the volume folds case — and that answer is asked of the volume,
+ * per repository, instead of being guessed from the OS. Building it here rather
+ * than in `main.js` keeps that wiring in one place a check can reach, which is
+ * the whole point: the app used to build the store with the platform's answer
+ * and nothing noticed.
+ *
+ * `options.detect` replaces the volume probe, which is how the behaviour can
+ * be checked from a machine whose volume happens to answer the other way.
+ */
+function createAppStore(file, options = {}) {
+  const detect = options.detect || createCaseDetector(options);
+  return createStore(file, { ...options, detect });
+}
+
+/**
  * The evidence store for one profile directory.
  *
- * `options` is the volume's answer about case, passed straight to
- * `normalizeRepo`. The store keys every entry by the folder it belongs to, so
- * a volume that folds case and a volume that does not are two different
- * worlds — and the store has to read, write and delete the same way in each.
- * Leaving it out keeps the platform's answer, which is what the app uses; the
- * seam exists because the platform's answer is a guess (a macOS volume can be
- * formatted case-sensitive, a Linux one can be mounted case-insensitively),
- * and because it is the only way to check the macOS behaviour from a machine
- * that is not a Mac — the same reason `normalizeRepo` takes the option.
+ * `options` carries the volume's answer about case and is passed straight to
+ * `normalizeRepo`: `options.caseInsensitive` is an explicit answer, and
+ * `options.detect` is asked about each repository's own path. The store keys
+ * every entry by the folder it belongs to, so a volume that folds case and a
+ * volume that does not are two different worlds — and the store has to read,
+ * write and delete the same way in each. Leaving both out keeps the
+ * platform's answer, which is what the app used to do; the seam exists because
+ * the platform's answer is a guess (a macOS volume can be formatted
+ * case-sensitive, a Linux one can be mounted case-insensitively), and because
+ * it is the only way to check the macOS behaviour from a machine that is not a
+ * Mac — the same reason `normalizeRepo` takes the option.
  *
  * The delete follows the key exactly, so a session id that exists under two
  * folders is two entries and deleting one does not touch the other. On a
@@ -259,6 +410,33 @@ async function drainQueue(current, maxRounds = MAX_DRAIN_ROUNDS) {
  */
 function createStore(file, options = {}) {
   const key = (repo, sessionId) => `${normalizeRepo(repo, options)}\u0000${sessionId || ""}`;
+  /**
+   * The key the *earlier* build used: the platform's answer rather than the
+   * volume's.
+   *
+   * Where the two answers agree this is the same key and nothing changes.
+   * Where they do not — a macOS volume formatted case-sensitive — the earlier
+   * build lower-cased the folder and this one keeps its case, so the old
+   * entry would become invisible and the session it belongs to would look
+   * clean again. The platform's answer is the earlier build's answer, so it is
+   * the one to look under as well.
+   */
+  const legacyOptions = { platformCaseInsensitive: options.platformCaseInsensitive };
+  const legacyKey = (repo, sessionId) => `${normalizeRepo(repo, legacyOptions)}\u0000${sessionId || ""}`;
+
+  /**
+   * The keys an entry may be filed under.
+   *
+   * The volume's answer is the one entries are written with; the earlier
+   * build's answer is the one some of them were written with, and both are
+   * looked for. An entry written by this build is only ever filed under the
+   * first, so the second cannot answer for a different folder.
+   */
+  function keysFor(repo, sessionId) {
+    const exact = key(repo, sessionId);
+    const legacy = legacyKey(repo, sessionId);
+    return legacy === exact ? [exact] : [exact, legacy];
+  }
 
   /**
    * One write at a time, in the order the caller asked for it.
@@ -352,9 +530,13 @@ function createStore(file, options = {}) {
       if (!warnings.length && !budget) return OK_WITHOUT_WRITING;
       if (!sessionId) return NO_SESSION;
 
-      const entries = readAll().filter((e) => key(e.repo, e.session_id) !== key(repo, sessionId));
-      // Stored canonical, so the file does not accumulate one entry per spelling.
-      entries.push({ repo: normalizeRepo(repo), session_id: sessionId, warnings, budget_exceeded: budget });
+      const wanted = keysFor(repo, sessionId);
+      const entries = readAll().filter((e) => !wanted.includes(key(e.repo, e.session_id)));
+      // Stored canonical, so the file does not accumulate one entry per
+      // spelling — and canonical *in this store's terms*: the same answer the
+      // key uses, so a volume that folds case stores one spelling of a folder
+      // rather than one per way of typing it.
+      entries.push({ repo: normalizeRepo(repo, options), session_id: sessionId, warnings, budget_exceeded: budget });
       // Insertion order is the age order; keeping the tail drops the oldest and
       // keeps the newest, without a timestamp that can tie inside one millisecond.
       return (await writeAll(entries.slice(-MAX_ENTRIES))) ? OK_WRITTEN : IO_ERROR;
@@ -363,7 +545,8 @@ function createStore(file, options = {}) {
 
   function read(repo, sessionId) {
     if (!sessionId) return null;
-    const found = readAll().find((e) => key(e.repo, e.session_id) === key(repo, sessionId));
+    const wanted = keysFor(repo, sessionId);
+    const found = readAll().find((e) => wanted.includes(key(e.repo, e.session_id)));
     if (!found) return null;
     // Re-normalise on the way out: the renderer's contract is type + file, even
     // if an older build (or a hand-edited file) left more behind.
@@ -418,7 +601,8 @@ function createStore(file, options = {}) {
     return serialize(async () => {
       if (!sessionId) return NO_SESSION;
       const entries = readAll();
-      const kept = entries.filter((e) => key(e.repo, e.session_id) !== key(repo, sessionId));
+      const wanted = keysFor(repo, sessionId);
+      const kept = entries.filter((e) => !wanted.includes(key(e.repo, e.session_id)));
       if (kept.length === entries.length) return OK_WITHOUT_WRITING;
       return (await writeAll(kept)) ? OK_WRITTEN : IO_ERROR;
     });
@@ -596,8 +780,12 @@ function flushBeforeQuit(app, store, timeoutMs = WRITE_TIMEOUT_MS, warn) {
 
 module.exports = {
   createStore,
+  createAppStore,
   normalizeRepo,
   CASE_INSENSITIVE_PATHS,
+  detectCaseInsensitive,
+  createCaseDetector,
+  resolveCaseInsensitive,
   MAX_ENTRIES,
   LIMIT_WARNING,
   WRITE_TIMEOUT_MS,

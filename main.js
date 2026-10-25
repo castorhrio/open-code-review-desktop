@@ -12,7 +12,7 @@ const git = require("./git-service");
 const { installNavigationGuards } = require("./security");
 const updater = require("./update-service");
 const {
-  createStore: createRunDiagnostics,
+  createAppStore,
   WRITE_TIMEOUT_MS,
   outcomeMessage,
   reportOutcome,
@@ -26,7 +26,19 @@ const DOCS_URL = "https://open-codereview.ai/docs";
 let mainWindow = null;
 
 const boundsFile = () => path.join(app.getPath("userData"), "window-bounds.json");
-const runDiagnostics = createRunDiagnostics(path.join(app.getPath("userData"), "run-diagnostics.json"));
+// The store keys every entry by the folder it belongs to, and whether two
+// spellings of one folder are the same folder is a property of the *volume*
+// that folder is on — not of the OS: a macOS volume can be formatted
+// case-sensitive, and a Linux one can be mounted case-insensitively. The
+// platform's default is a guess, so the volume is asked instead.
+//
+// The question is asked of the repository's own path, because that is the path
+// the key is about: the profile directory's volume would answer a different
+// question (and on macOS it usually gives the wrong one — the system disk is
+// case-insensitive even when the drive the work sits on is not). Nothing is
+// written to ask it, and a volume that cannot answer falls back to the
+// platform's default.
+const runDiagnostics = createAppStore(path.join(app.getPath("userData"), "run-diagnostics.json"));
 
 function readBounds() {
   try {

@@ -851,6 +851,7 @@ module.exports = {
   unsetConfig,
   withHint,
   failureText,
+  spawnFailure,
   createProgress,
   feedProgressLine,
   listSessions,
