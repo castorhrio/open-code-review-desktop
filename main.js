@@ -426,7 +426,16 @@ ipcMain.handle("file:openUrl", (_e, url) => {
 
 /* ---------------- ipc: config ---------------- */
 
-ipcMain.handle("config:read", () => ocr.readConfigView());
+/* The readiness view needs one fact this file can only get asynchronously: the
+ * CLI's own list of built-in services. `readConfigView` is a synchronous read of
+ * the config file, so the list is fetched once (ocr-service caches it) and handed
+ * in — the view stays a pure function of the file plus that list, and a
+ * hand-edited `providers` entry is judged by the CLI's rule instead of by "the
+ * section happens to have this key".
+ */
+const configView = async () => ocr.readConfigView({ presetNames: await ocr.presetNames() });
+
+ipcMain.handle("config:read", () => configView());
 
 ipcMain.handle("config:save", async (_e, form) => {
   const pairs = [];
@@ -451,7 +460,7 @@ ipcMain.handle("config:save", async (_e, form) => {
   const failed = steps.find((s) => !s.ok);
   return failed
     ? { ok: false, error: `${failed.key}: ${ocr.withHint(failed.message)}`, steps }
-    : { ok: true, steps, config: ocr.readConfigView() };
+    : { ok: true, steps, config: await configView() };
 });
 
 // Built-in provider entries cannot be removed (`config unset` rejects them), so
@@ -459,7 +468,7 @@ ipcMain.handle("config:save", async (_e, form) => {
 ipcMain.handle("config:removeEntry", async (_e, req) => {
   const name = (req.name || "").trim();
   if (!name) return { ok: false, error: "未指定服务名" };
-  const isCustom = Boolean(ocr.readConfigView().customProviders[name]);
+  const isCustom = Boolean((await configView()).customProviders[name]);
   if (isCustom) return ocr.unsetConfig(`custom_providers.${name}`);
   const steps = await ocr.setConfig([
     [`providers.${name}.api_key`, ""],
@@ -468,7 +477,7 @@ ipcMain.handle("config:removeEntry", async (_e, req) => {
   const failed = steps.find((s) => !s.ok);
   return failed
     ? { ok: false, error: `${failed.key}: ${ocr.withHint(failed.message)}`, steps }
-    : { ok: true, cleared: true, message: `已清空 ${name} 的 Key 与模型（内置服务无法删除，仅能解除配置）`, config: ocr.readConfigView() };
+    : { ok: true, cleared: true, message: `已清空 ${name} 的 Key 与模型（内置服务无法删除，仅能解除配置）`, config: await configView() };
 });
 
 ipcMain.handle("config:use", async (_e, req) => {
@@ -478,7 +487,7 @@ ipcMain.handle("config:use", async (_e, req) => {
   const failed = steps.find((s) => !s.ok);
   return failed
     ? { ok: false, error: `${failed.key}: ${ocr.withHint(failed.message)}`, steps }
-    : { ok: true, config: ocr.readConfigView() };
+    : { ok: true, config: await configView() };
 });
 
 ipcMain.handle("config:unset", (_e, key) => ocr.unsetConfig(key));

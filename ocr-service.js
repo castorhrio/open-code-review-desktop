@@ -148,20 +148,31 @@ function savedKeyFor(name, url) {
 // the environment says where to send the request, not that the CLI can
 // authenticate it, and treating the two as one turned the top bar green for a
 // custom gateway with no Key — the review then failed only after it started.
+//
+// The third column says which config shape reads the variable at all. The
+// provider shape stops at the selected entry (internal/llm/resolver.go,
+// tryProviderConfig): the endpoint comes from that entry or from the built-in
+// service's own table, and the `OCR_LLM_*` overrides are never consulted — so a
+// lone `OCR_LLM_URL` beside a `provider` is not an endpoint, and `OCR_LLM_TOKEN`
+// is not its Key. Counting them is how a provider entry with no URL came out
+// "ready" and then failed with `no valid LLM endpoint configured`. A built-in
+// service's own variable (ANTHROPIC_API_KEY) counts in both shapes, which is why
+// the credential dimension stays lenient: being wrong there costs a CLI error
+// instead of a disabled button.
 const ENV_SOURCES = [
-  ["OCR_LLM_URL", "endpoint"],
-  ["OCR_LLM_TOKEN", "credential"],
-  ["OCR_LLM_MODEL", "model"],
-  ["ANTHROPIC_BASE_URL", "endpoint"],
-  ["ANTHROPIC_AUTH_TOKEN", "credential"],
-  ["ANTHROPIC_API_KEY", "credential"],
-  ["ANTHROPIC_MODEL", "model"],
+  ["OCR_LLM_URL", "endpoint", "legacy"],
+  ["OCR_LLM_TOKEN", "credential", "legacy"],
+  ["OCR_LLM_MODEL", "model", "legacy"],
+  ["ANTHROPIC_BASE_URL", "endpoint", "legacy"],
+  ["ANTHROPIC_AUTH_TOKEN", "credential", "both"],
+  ["ANTHROPIC_API_KEY", "credential", "both"],
+  ["ANTHROPIC_MODEL", "model", "legacy"],
 ];
 
 // A gap is named once, here: `missing` carries the keys and the sentence next to
 // the readiness badge is built from the same list, so the two cannot drift apart
 // (they used to: the list knew about a missing endpoint, the sentence did not).
-const GAP_LABEL = { baseUrl: "服务端点", model: "模型名", credential: "API Key" };
+const GAP_LABEL = { baseUrl: "服务端点", model: "模型名", credential: "API Key", provider: "有效的服务名" };
 // The order the user should fill the gaps in, and the order they are named in.
 // Readiness, the gap list and the sentence are all derived from this array plus
 // the three booleans below, so adding a fourth dimension cannot leave one of the
@@ -178,7 +189,40 @@ const listText = (labels) =>
     return `${text}${ascii && i === labels.length - 1 ? "和" : "、"}${word}`;
   }, "");
 
-function readConfigView({ configPath = CONFIG_PATH, env = process.env } = {}) {
+/* ---- built-in service registry ---- */
+
+// `providers.<name>` is only read for a name the CLI's own registry knows
+// (`llm.LookupProvider`, case insensitive); every other name goes to the
+// `custom_providers` section instead. So "is this name built in?" is a fact the
+// CLI owns and this app cannot guess — `ocr llm providers` prints it.
+const PROVIDER_ROW = /^([A-Za-z0-9][A-Za-z0-9._-]*)\s{2,}/;
+
+function parseProviderNames(text) {
+  return (text || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .map((line) => PROVIDER_ROW.exec(line))
+    .filter((m) => m && m[1].toUpperCase() !== "NAME")
+    .map((m) => m[1]);
+}
+
+// Read once per process: the table lives in the CLI, so it costs one process
+// spawn, and a stale list is safer than a guessed one (the registry only grows).
+// `null` means "could not be read" — which is not the same as "empty", and the
+// view below falls back to its older reading rather than inventing a registry.
+let cachedPresetNames = null;
+
+async function presetNames() {
+  if (cachedPresetNames) return cachedPresetNames;
+  const res = await exec(["llm", "providers", "--color", "never"]);
+  if (res.code !== 0) return null;
+  const names = parseProviderNames(res.stdout);
+  if (!names.length) return null;
+  cachedPresetNames = names;
+  return names;
+}
+
+function readConfigView({ configPath = CONFIG_PATH, env = process.env, presetNames: presetList = null } = {}) {
   let raw = {};
   let fileExists = false;
   try {
@@ -196,7 +240,16 @@ function readConfigView({ configPath = CONFIG_PATH, env = process.env } = {}) {
   // lives under one key in one of them and under another key in the other, and
   // the `llm` block's own Key never reaches a selected service.
   const usesLlmBlock = !active;
-  const detectedEnv = ENV_SOURCES.filter(([name]) => env[name]);
+  // The built-in registry, lowercased once. `null` here means "not known",
+  // which must not be read as "no name is built in".
+  const presets =
+    Array.isArray(presetList) && presetList.length
+      ? new Set(presetList.map((name) => String(name).toLowerCase()))
+      : null;
+  const shape = usesLlmBlock ? "legacy" : "provider";
+  const detectedEnv = ENV_SOURCES.filter(
+    ([name, , readBy]) => env[name] && (readBy === "both" || readBy === shape)
+  );
   const envSources = detectedEnv.map(([name]) => name);
   const envCredentials = detectedEnv
     .filter(([, kind]) => kind === "credential")
@@ -236,7 +289,20 @@ function readConfigView({ configPath = CONFIG_PATH, env = process.env } = {}) {
   // unless the entry overrides it. This app configures a built-in service with a
   // Key and a model and no URL at all, which is complete, so a preset entry has
   // an endpoint even when the file never spells one out.
-  const presetEntry = Boolean(active && (raw.providers || {})[active]);
+  //
+  // "The key exists in `providers`" is therefore *not* the same question as "the
+  // CLI will read it": the resolver looks the name up in the registry first and,
+  // when it does not match, goes to `custom_providers` and fails there with
+  //   provider %q is set but not configured in custom_providers section
+  // So a name hand-edited into `providers` is a config the CLI rejects outright,
+  // not a preset entry that happens to be missing a URL. Naming `baseUrl` for it
+  // would point the user at the one field that cannot fix anything.
+  const providerSection = raw.providers || {};
+  const inProvidersSection = Boolean(active && providerSection[active]);
+  const knownPreset = Boolean(presets && inProvidersSection && presets.has(String(active).toLowerCase()));
+  // Without the registry all that can be said is the older, looser answer.
+  const presetEntry = presets ? knownPreset : inProvidersSection;
+  const rejectedProvider = presets && inProvidersSection && !knownPreset ? active : "";
   const hasEntryKey = entryHasCredential(entry);
   // An `llm.auth_token` sitting next to a selected provider never reaches the
   // request, and counting it left the gap list empty for a service that had no
@@ -278,13 +344,21 @@ function readConfigView({ configPath = CONFIG_PATH, env = process.env } = {}) {
   // model but no Key of its own emptied the list while the badge still said
   // "not ready", and the sentence then had no gap to name.
   const gapPresent = { baseUrl: hasEndpoint, model: hasModel, credential: hasCredential };
-  view.missing = GAP_ORDER.filter((key) => !gapPresent[key]);
+  // A rejected name is not one of the three fields: the CLI never opens that
+  // section, so no URL, Key or model added under it changes the outcome. Its own
+  // gap key keeps `ready` and `missing` agreeing while naming the real problem.
+  view.rejectedProvider = rejectedProvider;
+  view.missing = rejectedProvider ? ["provider"] : GAP_ORDER.filter((key) => !gapPresent[key]);
   view.ready = view.missing.length === 0;
   const gapText = listText(view.missing.map((key) => GAP_LABEL[key] || key));
   // Same order and same labels as the gap list above, so the two halves of the
   // sentence cannot spell a dimension differently.
   const configuredParts = GAP_ORDER.filter((key) => gapPresent[key]).map((key) => GAP_LABEL[key]);
   if (view.ready) view.blockedReason = "";
+  // The whole config is refused, so the sentence must not read like a form with
+  // one empty field left: the fix is to rename or move the entry.
+  else if (rejectedProvider)
+    view.blockedReason = `已选服务 ${active} 不在内置服务名单里，配置里也没有 custom_providers 条目，CLI 会整份拒绝这份配置：把这个服务写进 custom_providers，或改选一个内置服务`;
   // `|| "必要配置"` is still the belt: a not-ready view always has at least one
   // gap, so it can only fire if a gap key has no GAP_LABEL — and a sentence
   // ending in 但缺少 with nothing after it is worse than a vague one.
@@ -854,7 +928,7 @@ async function setConfig(pairs) {
 async function unsetConfig(key) {
   const res = await exec(["config", "unset", key]);
   return res.code === 0
-    ? { ok: true, config: readConfigView() }
+    ? { ok: true, config: readConfigView({ presetNames: await presetNames() }) }
     : { ok: false, error: withHint(failureText(res)) };
 }
 
@@ -916,6 +990,8 @@ module.exports = {
   binaryPath,
   CONFIG_PATH,
   readConfigView,
+  parseProviderNames,
+  presetNames,
   exec,
   llmTestEnv,
   savedKeyFor,

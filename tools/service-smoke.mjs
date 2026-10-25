@@ -442,11 +442,13 @@ check("readConfigView returns a usable shape", cfg && typeof cfg.path === "strin
 // Readiness is about a credential, not a URL. These cases run against a
 // throwaway config path and an explicit environment, so the result does not
 // depend on the machine's own ~/.opencodereview or exported keys.
-const readiness = (config, env = {}) => {
+const readiness = (config, env = {}, extra = {}) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-config-"));
   const file = path.join(dir, "config.json");
   if (config) fs.writeFileSync(file, JSON.stringify(config));
-  const view = svc.readConfigView({ configPath: file, env });
+  // `extra` carries the built-in registry (`presetNames`): the view is a pure
+  // function of the file plus that list, and the list is the CLI's own.
+  const view = svc.readConfigView({ configPath: file, env, ...extra });
   fs.rmSync(dir, { recursive: true, force: true });
   return view;
 };
@@ -676,6 +678,135 @@ check(
   "the same preset entry without a Key still names the Key",
   gapOf(presetNoKey) === "credential",
   `${gapOf(presetNoKey)} | ${presetNoKey.blockedReason}`
+);
+
+/* ---- "in the providers section" is not "a service the CLI knows" ----
+ * The resolver looks the name up in its own registry first (`llm.LookupProvider`,
+ * case insensitive) and, when that fails, goes to `custom_providers` and errors
+ * out:
+ *   provider %q is set but not configured in custom_providers section
+ * So a name hand-edited into `providers` is a config the CLI refuses whole — not
+ * a preset entry that merely lacks a URL. Naming `baseUrl` there sends the user
+ * to fill in the one field that cannot change the outcome, which is why the gap
+ * has its own key.
+ */
+const PRESETS = ["anthropic", "deepseek", "dashscope"];
+const withPresets = (config, env = {}) => readiness(config, env, { presetNames: PRESETS });
+const handEdited = withPresets({
+  provider: "corp-gateway",
+  providers: { "corp-gateway": { api_key: "sk-test", model: "qwen3-max" } },
+});
+check(
+  "a name the CLI does not know is not read as a preset entry",
+  !handEdited.ready && handEdited.rejectedProvider === "corp-gateway",
+  `${gapOf(handEdited)} | ${handEdited.blockedReason}`
+);
+check(
+  "and the gap it names is the name, not a field under it",
+  gapOf(handEdited) === "provider" && !handEdited.missing.includes("baseUrl"),
+  gapOf(handEdited)
+);
+check(
+  "the sentence says the config is refused, not that a field is empty",
+  /custom_providers/.test(handEdited.blockedReason) && !/缺少服务端点/.test(handEdited.blockedReason),
+  handEdited.blockedReason
+);
+// A URL under the rejected name must not launder it into a working entry: the
+// CLI never opens that section for a name it does not know.
+const handEditedWithUrl = withPresets({
+  provider: "corp-gateway",
+  providers: { "corp-gateway": { ...gateway, api_key: "sk-test" } },
+});
+check(
+  "a URL under a rejected name does not make it ready either",
+  !handEditedWithUrl.ready && handEditedWithUrl.missing.includes("provider"),
+  `${gapOf(handEditedWithUrl)} | ${handEditedWithUrl.blockedReason}`
+);
+// The registry is case insensitive upstream, so `DeepSeek` is still the preset.
+const presetCase = withPresets({
+  provider: "DeepSeek",
+  providers: { DeepSeek: { api_key: "sk-test", model: "deepseek-chat" } },
+});
+check(
+  "the registry is case insensitive, so DeepSeek is still a preset",
+  presetCase.ready && !presetCase.rejectedProvider,
+  `${gapOf(presetCase)} | ${presetCase.blockedReason}`
+);
+// Without the list nothing can be said about the name, and assuming "not built
+// in" would block every working preset config — so the older reading stays.
+const noRegistry = readiness({
+  provider: "deepseek",
+  providers: { deepseek: { api_key: "sk-test", model: "deepseek-chat" } },
+});
+check(
+  "an unreadable registry falls back instead of rejecting every entry",
+  noRegistry.ready && !noRegistry.rejectedProvider,
+  `${gapOf(noRegistry)} | ${noRegistry.blockedReason}`
+);
+// A name that lives in `custom_providers` is the entry the CLI actually reads
+// once the registry lookup fails, so it is not a rejected name.
+const customSameName = withPresets({
+  provider: "corp-gateway",
+  custom_providers: { "corp-gateway": { ...gateway, api_key: "sk-test" } },
+});
+check(
+  "a name that lives in custom_providers is not rejected",
+  customSameName.ready && !customSameName.rejectedProvider,
+  `${gapOf(customSameName)} | ${customSameName.blockedReason}`
+);
+
+/* ---- the provider shape does not read the `OCR_LLM_*` overrides ----
+ * The provider path stops at the selected entry: the endpoint comes from the
+ * entry or from the built-in service's own table, and the `OCR_LLM_*` variables
+ * are the legacy path's business. Counting them kept the top bar green for a
+ * provider whose entry had no URL, and the run then failed with `no valid LLM
+ * endpoint configured` after it had already started.
+ */
+const providerEntryNoUrl = {
+  provider: "corp-gateway",
+  custom_providers: { "corp-gateway": { model: "qwen3-max", api_key: "sk-test" } },
+};
+const providerEnvUrl = readiness(providerEntryNoUrl, { OCR_LLM_URL: gateway.url });
+check(
+  "an OCR_LLM_URL does not stand in for a selected provider's endpoint",
+  !providerEnvUrl.ready && providerEnvUrl.missing.includes("baseUrl"),
+  `${gapOf(providerEnvUrl)} | ${providerEnvUrl.blockedReason}`
+);
+const providerAnthropicBase = readiness(providerEntryNoUrl, {
+  ANTHROPIC_BASE_URL: "https://api.anthropic.com",
+});
+check(
+  "and neither does ANTHROPIC_BASE_URL",
+  providerAnthropicBase.missing.includes("baseUrl"),
+  `${gapOf(providerAnthropicBase)} | ${providerAnthropicBase.blockedReason}`
+);
+const providerEnvToken = readiness(
+  { provider: "corp-gateway", custom_providers: { "corp-gateway": { url: gateway.url, model: "qwen3-max" } } },
+  { OCR_LLM_TOKEN: "t" }
+);
+check(
+  "an OCR_LLM_TOKEN does not stand in for a selected provider's Key",
+  !providerEnvToken.ready && providerEnvToken.missing.includes("credential"),
+  `${gapOf(providerEnvToken)} | ${providerEnvToken.blockedReason}`
+);
+// The built-in service's own variable is where the provider path does read the
+// Key, so tightening this must not block a config that works.
+const providerOwnKey = readiness(
+  { provider: "corp-gateway", custom_providers: { "corp-gateway": { url: gateway.url, model: "qwen3-max" } } },
+  { ANTHROPIC_API_KEY: "k" }
+);
+check(
+  "a built-in service's own variable still counts as a Key",
+  providerOwnKey.ready,
+  `${gapOf(providerOwnKey)} | ${providerOwnKey.blockedReason}`
+);
+// The legacy shape keeps reading them: with no `provider` set, `OCR_LLM_*` is the
+// CLI's documented way to run without a config file.
+const legacyEnvUrl = readiness({}, { OCR_LLM_URL: llm.url, OCR_LLM_TOKEN: "t", OCR_LLM_MODEL: "qwen3-max" });
+check(
+  "the legacy shape still reads the OCR_LLM_* overrides",
+  legacyEnvUrl.ready,
+  `${gapOf(legacyEnvUrl)} | ${legacyEnvUrl.blockedReason}`
 );
 
 /* ---- the `llm` block is not read once a provider is selected ----

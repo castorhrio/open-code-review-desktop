@@ -272,7 +272,10 @@ export interface ConfigView {
   configured: boolean;
   ready: boolean;
   blockedReason: string;
-  missing: ("credential" | "baseUrl" | "model")[];
+  /** Set when the selected service name is not one the CLI knows: the whole
+   * config is refused, so `missing` carries `provider` instead of a field. */
+  rejectedProvider?: string;
+  missing: ("credential" | "baseUrl" | "model" | "provider")[];
 }
 
 export interface ProviderEntry {
