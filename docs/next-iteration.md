@@ -6,16 +6,20 @@
 
 ---
 
-## 上游状态（本轮检查：2026-10-25）
+## 上游状态（最近检查：2026-10-26）
 
 上游 `alibaba/open-code-review` 自 desktop 锁定的 `v1.13.0` 之后发布了
 **3 个补丁版本**：`v1.13.1` / `v1.13.2` / `v1.13.3`（共 18 个 commit）。
 本轮已把 desktop 的依赖升到 `^1.13.3`（`package.json` / `package-lock.json`），
 并移植了其中对封装影响最大的一个修复。
 
-**本轮复核结论**：`git fetch upstream --tags` 后最新 tag 仍是 `v1.13.3`，
-`v1.13.3..upstream/main` 为空——上游自上次检查以来没有新 commit / release，
-所以本轮没有需要移植的新内容，改动全部来自待办清单。
+**本轮复核结论**（2026-10-26）：`git fetch upstream --tags` 后最新 tag 仍是
+`v1.13.3`，`upstream/main` 顶端仍是 `375f64c`——上游自上次检查以来没有新
+commit / release / tag，本轮没有需要移植的新内容。
+
+只是拉 tag 时会看到几条 `would clobber existing tag`（本仓也用 `v0.1.x` 编号，
+与上游 tag 撞名）：那是本地 remote 的 tag 同步提示，不影响 `upstream/main` 的
+提交比对，也不要 `git fetch --tags --force` 去覆盖本仓自己的 tag。
 
 核对方式：
 
@@ -76,7 +80,12 @@ git log --oneline v1.13.0..upstream/main
 
 ## 待移植 / 待验证
 
-### P1 — `manifest.run_failure` 没有出现在 UI 里
+### P1 — `manifest.run_failure` 的中文映射：已完成，剩报告页展示
+
+**状态（2026-10-26）**：失败原因的**中文映射已实现**（`bf065b5`，
+`src/lib/format.ts` 的 `RUN_FAILURE_LABEL` / `ITEM_FAILURE_LABEL`，两套词表由
+`tools/service-smoke.mjs` 逐值断言）。未做的只剩**把 `run_failure.reason` 摆到
+报告页**，以及 `CoverageItem.classification` 目前只在 tooltip 里。别再重复实现映射。
 
 上游的 `RunManifest` 有 `run_failure: { classification, reason }`，它会把
 `terminal_state` 强制成 `failed`。desktop 只显示一个红色「失败」徽章，
@@ -107,9 +116,9 @@ desktop 的 `CoverageItem.classification` 现在会映射成中文，但仍只�
 `exit 0`；大小写写错在大小写敏感的文件系统上也是错误。
 desktop 在 scan 模式暴露 `--path`（`ocr-service.js` 的 `path` flag）。
 
-对 desktop 是改善（以前静默空扫描，现在 CLI 会报错），但**需要验证** desktop 的
-预览/「开始审查」路径能把这条错误落到 toast，而不是渲染成一个空的文件列表。
-本轮未验证。
+对 desktop 是改善（以前静默空扫描，现在 CLI 会报错）；desktop 侧**已修复并验证**
+（`293c891`）：`scan --path` 指向不存在的路径时，预览/「开始审查」会把 CLI 的报错
+落成中文提示，而不是渲染成一个空的文件列表。此项关闭，无需再验证。
 
 ### P1 — 空 code_comment 批次现在算工具失败（`v1.13.3` `375f64c`，#1773）
 
