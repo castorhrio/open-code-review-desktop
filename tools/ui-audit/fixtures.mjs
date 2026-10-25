@@ -686,7 +686,28 @@ window.api = (() => {
         () => logCb && logCb({ id: "run-1", line: "[cmd] ocr review --repo /home/x/work/payments-api --format json --color never" }),
         60
       );
-      setTimeout(() => exitCb && exitCb({ id: "run-1", result: { code: 0, value: RUN_RESULT, sessionId: RUN_RESULT.session_id } }), step * FRAMES.length + 400);
+      setTimeout(
+        () =>
+          exitCb &&
+          exitCb({
+            id: "run-1",
+            result: { code: 0, value: RUN_RESULT, sessionId: RUN_RESULT.session_id },
+            // ?rundiag=1 is a run whose truncation evidence could not be saved.
+            // The main process says so in the exit payload, in the wording
+            // run-diagnostics.js owns, and the app has to put it in the run
+            // log: a stderr line nobody opens is the same as not saying it.
+            ...(q.get("rundiag") === "1"
+              ? {
+                  diagnostics: {
+                    ok: false,
+                    reason: "io-error",
+                    message: "本次运行的上限证据保存失败，重开会话后将看不到这条提示",
+                  },
+                }
+              : {}),
+          }),
+        step * FRAMES.length + 400
+      );
     }
     // ?runfail=1 is a run the model service refused. The text is the pair
     // ocr-service.js really produces: the CLI's own Error: line, which names

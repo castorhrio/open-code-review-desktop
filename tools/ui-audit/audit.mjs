@@ -2522,6 +2522,41 @@ await shoot(page, "88-run-failure-toast", {
   },
 });
 
+// The truncation evidence is the desktop's own record — the CLI does not persist
+// a run's warnings — and a run that hit the limit is only honest on a reopen if
+// that record is on disk. When it is not, the reopened session looks clean again
+// and nothing on the results screen can say otherwise: the run itself succeeded,
+// so there is no error, no red badge, no failed toast. The main process knows
+// (it is the one that tried to write the file), so it says so in the exit
+// payload, and the app has to say it in the run log — the one surface that
+// survives the run and that the user can open. The drawer's own rule is "output
+// that looks like trouble opens the drawer", and a lost truncation record is
+// exactly that.
+await shoot(page, "97-run-diagnostics-lost", {
+  query: "?run=done&rundiag=1",
+  after: async (page) => {
+    await nav("审查")(page);
+    await page.waitForTimeout(1600);
+    await page.getByRole("button", { name: /开始审查/ }).click();
+    await page.waitForTimeout(5200);
+  },
+  expect: async (page) => {
+    const out = [];
+    const text = await page.locator("body").innerText();
+    if (!/上限证据保存失败/.test(text)) out.push("the lost truncation evidence is nowhere in the run log");
+    if (!/重开会话后将看不到这条提示/.test(text)) out.push("the log does not say what the loss means for the reopened session");
+    // The drawer opens itself on output that looks like trouble; a lost
+    // truncation record is trouble, and the user is not going to go looking
+    // for it.
+    const open = await page
+      .locator("pre")
+      .filter({ hasText: "上限证据保存失败" })
+      .count();
+    if (!open) out.push("the run log did not open on a lost truncation record");
+    return out;
+  },
+});
+
 // The exact invocation is the first thing to read when a run did not do what you
 // expected, and it is in no other durable place — the log drawer collapsed, and a
 // toast is not selectable. It belongs in the document a run produces.

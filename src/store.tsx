@@ -427,10 +427,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const offProgress = api.onProgress(({ id, progress: p }) => {
       if (runId.current && id === runId.current) setProgress(p);
     });
-    const offExit = api.onExit(({ id, result: r }) => {
+    const offExit = api.onExit(({ id, result: r, diagnostics }) => {
       if (!runId.current || id !== runId.current) return;
       stopTimer();
       setProgress(null);
+      // The CLI does not persist warnings, so the app records the truncation
+      // evidence itself when a run ends — and the main process says whether
+      // that record made it to disk. When it did not, the reopened session
+      // will look clean even though this run was truncated, and nothing else
+      // in the UI can show that: the line belongs in the run log the user can
+      // open, not only in the main process's stderr.
+      if (diagnostics?.message) setLog((l) => [...l, "[run-diagnostics] " + diagnostics.message]);
       // A cancel is the user choosing to stop, and the CLI reports it as a
       // non-zero exit. Treating that as a failure put a red 审查失败 toast on
       // exactly the action the app had just offered, and hid the one follow-up

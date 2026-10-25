@@ -13,9 +13,10 @@ const { installNavigationGuards } = require("./security");
 const updater = require("./update-service");
 const {
   createStore: createRunDiagnostics,
-  RECORD_TIMEOUT_MS,
-  recordBounded,
+  WRITE_TIMEOUT_MS,
+  outcomeMessage,
   reportOutcome,
+  settleRunExit,
   flushNow,
   flushBeforeQuit,
 } = require("./run-diagnostics");
@@ -336,25 +337,33 @@ ipcMain.handle("review:run", (_e, spec) => {
       // reopen, so the warning cannot be lost — and warning about it on every
       // such run would train the reader to ignore the line that matters. An
       // `io-error` means the *reopened* session will look clean again even
-      // though this one was truncated, and nothing in the UI can show that; a
-      // `timeout` means the reader of this run may see the truncation missing
-      // for a moment, which is the same loss but caused by a slow disk.
+      // though this one was truncated, and nothing in the UI can show that.
+      // A `timeout` is not a loss: the write stays queued and the read of the
+      // session waits for it (`readSettled`), so the reopened session still
+      // shows the truncation — it is only this run's exit that did not wait.
       //
       // A write that only finishes *after* the bound reports through `onLate`:
       // by then `run:exit` has been sent, so the only place left for the news
       // is this log. Without it, a full disk under a slow profile directory
       // (the two usually arrive together) loses the evidence and says nothing.
-      recordBounded(
-        runDiagnostics,
-        spec.repo,
-        result.sessionId || (result.value && result.value.session_id) || "",
-        result.value || null,
-        RECORD_TIMEOUT_MS,
-        (late) => reportOutcome(late, undefined, { late: true })
-      )
-        .then((outcome) => reportOutcome(outcome))
-        .catch(() => {})
-        .finally(() => send("run:exit", { id, result }));
+      //
+      // `settleRunExit` owns the order — the record first, the exit signal
+      // after — because the renderer refreshes the history the moment it hears
+      // `run:exit`, and a record that has not landed yet would make a
+      // truncated session look clean again. The outcome rides along with the
+      // signal so the app can say out loud when the evidence did not make it
+      // to disk; the wording comes from the same place as the log line below,
+      // so there is only one version of it.
+      settleRunExit({
+        store: runDiagnostics,
+        repo: spec.repo,
+        sessionId: result.sessionId || (result.value && result.value.session_id) || "",
+        result: result.value || null,
+        timeoutMs: WRITE_TIMEOUT_MS,
+        onLate: (late) => reportOutcome(late, undefined, { late: true }),
+        signal: (outcome) =>
+          send("run:exit", { id, result, diagnostics: { ...outcome, message: outcomeMessage(outcome) } }),
+      }).catch(() => {});
     },
     (id, progress) => send("run:progress", { id, progress })
   );
@@ -515,9 +524,15 @@ ipcMain.handle("session:list", (_e, req) => ocr.listSessions(req.repo, req.limit
 
 ipcMain.handle("session:comments", (_e, req) => ocr.sessionComments(req.repo, req.sessionId));
 
-ipcMain.handle("session:diagnostics", (_e, req) => ({
+// The truncation facts the CLI does not persist with the session. The read waits
+// for a write that is still in flight: the run-exit path only waits a bounded
+// time for the evidence (a profile directory on a network mount can be slow), so
+// a session reopened right after such a run could otherwise be read while its
+// own evidence was still being written — and a truncated session would look
+// clean again.
+ipcMain.handle("session:diagnostics", async (_e, req) => ({
   ok: true,
-  value: runDiagnostics.read(req.repo, req.sessionId),
+  value: await runDiagnostics.readSettled(req.repo, req.sessionId),
 }));
 
 ipcMain.handle("session:export", async (_e, req) => {

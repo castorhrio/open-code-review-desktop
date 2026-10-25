@@ -13,9 +13,15 @@
 本轮已把 desktop 的依赖升到 `^1.13.3`（`package.json` / `package-lock.json`），
 并移植了其中对封装影响最大的一个修复。
 
-**本轮复核结论**（2026-10-26）：`git fetch upstream --tags` 后最新 tag 仍是
-`v1.13.3`，`upstream/main` 顶端仍是 `375f64c`——上游自上次检查以来没有新
-commit / release / tag，本轮没有需要移植的新内容。
+**本轮复核结论**（2026-10-26，第 2 轮）：上游**仍然没有新内容**。
+
+- `git fetch upstream --tags` 两次都因 `GnuTLS recv error (-110)` 失败（网络抖动），
+  改用 GitHub API 交叉核对：`repos/alibaba/open-code-review/commits?sha=main` 的顶端
+  仍是 `375f64c`（2026-10-20），`tags` 列表最新仍是 `v1.13.3`，`releases` 无新条目。
+- 本仓 `upstream/main` 的本地 ref 也仍指向 `375f64c`，与上游一致。
+
+结论：本轮没有需要移植的新功能 / 修复 / 破坏性变更，desktop 的封装（CLI flag、
+输出解析、配置暴露点）无需改动。
 
 只是拉 tag 时会看到几条 `would clobber existing tag`（本仓也用 `v0.1.x` 编号，
 与上游 tag 撞名）：那是本地 remote 的 tag 同步提示，不影响 `upstream/main` 的
@@ -26,6 +32,9 @@ commit / release / tag，本轮没有需要移植的新内容。
 ```bash
 git fetch upstream --tags
 git log --oneline v1.13.0..upstream/main
+# fetch 失败时的兜底（不依赖 git 远端）
+curl -s 'https://api.github.com/repos/alibaba/open-code-review/commits?sha=main&per_page=5'
+curl -s 'https://api.github.com/repos/alibaba/open-code-review/tags?per_page=5'
 ```
 
 ---
@@ -75,6 +84,58 @@ git log --oneline v1.13.0..upstream/main
   desktop 的「已触达 token 上限」本来就读这个字段，**升级即生效**。
 - **grace round 完成的文件记为可复用 checkpoint**（`v1.13.1` `81df1f6`）：
   续跑不会再重跑这些文件。desktop 的「续跑」按钮直接走 CLI 会话，无需改。
+
+---
+
+## 本轮 desktop 侧加固（与上游无关）
+
+### P0 — 重开被截断的会话，在证据还在落盘时不能看起来干净
+
+这条线从 `93f3bd8` 开始，一直在做同一件事：**被上限截断的运行不能看起来像干净
+运行**。本轮补上了最后两个还是「靠约定维持」的环节。
+
+**1）读证据时等落盘（真的堵上了那个洞）**
+
+`run:exit` 会等证据写盘，但那个等待**有上限**（`WRITE_TIMEOUT_MS`）——store 的文件
+在 profile 目录里，可能是网络挂载，太慢不能一直占着 UI。越过上限后写入仍在队列里，
+而**会话重开走的是直接读文件**（`runDiagnostics.read`），于是：
+
+> 运行刚结束 → 写盘超时（写入还在队列里）→ 用户立刻重开会话 → 读到的是**没有证据
+> 的旧文件** → 被截断的会话又显示成「干净」。
+
+这条路径之前是通的：写盘有界等待（`a855e18`）、退出冲刷（`aa1668f`）都管住了「写」
+的一侧，没人管「读」的一侧。
+
+- `run-diagnostics.js`：新增 `store.readSettled(repo, sessionId)`——先等队列停稳
+  （同样有界），再读文件。队列平时是空的，等待只是一次微任务；不空的时候，这个
+  等待正是让答案为真的东西。
+- `main.js`：`session:diagnostics` 改用它（IPC 变成 async）。
+
+**2）`run:exit` 与证据落盘的顺序，从注释变成事实**
+
+之前 `main.js` 里那个顺序（「record 排在 exit 事件到达 renderer 之前」）只写在
+注释里，把 `send("run:exit")` 往上挪一行就会静默失效。
+
+- `run-diagnostics.js`：新增 `settleRunExit({ store, repo, sessionId, result, signal })`
+  ——**顺序是函数自己的形状**：先落盘、再发信号，并把结果交给信号。
+- `main.js`：`run:exit` 的载荷现在带 `diagnostics: { ok, reason, message }`。
+  渲染层据此知道「证据到底在不在盘上」。
+- `src/store.tsx`：证据没存上时（`message` 非空），在**运行日志**里说一行。stderr
+  上的一行用户看不到，等于没说；`io-error` 的措辞改成含「失败」，日志抽屉会自己
+  弹出来（抽屉的规则就是「看起来像麻烦」才自己开）。
+
+**顺带**：三处等待（运行退出、退出冲刷、读等落盘）原来各写各的 `2000`，现在收敛成
+一个 `WRITE_TIMEOUT_MS`。
+
+**验证**：`tools/run-diagnostics-smoke.mjs` 新增 11 条断言——读等落盘（普通读会漏、
+settled 读能看到）、等待有界（磁盘不应声就放弃）、`run:exit` 信号只在证据落盘后
+发出、信号带出结果、报结果失败时信号照样发出去（结束就必须把屏幕还回去）、
+慢盘不拖住退出但退出要说清证据没到、真正丢失证据时措辞能被界面显示。
+
+`tools/ui-audit` 新增 `97-run-diagnostics-lost`（夹具 `?run=done&rundiag=1`）：
+证据没存上时，运行日志必须自己说清「重开会话后将看不到这条提示」，日志抽屉也要
+自己弹出来（它的规则就是「看起来像麻烦」才自己开）。**去掉修复后会 FAIL**，
+三条断言同时变红。
 
 ---
 
@@ -140,3 +201,29 @@ desktop 的「工具调用 N（失败 M）」直接读 CLI 的 `tool_calls.failu
 - `410ddb8` MCP `tools/list` 分页（desktop 不暴露 MCP 配置）
 - `313519f` NixPkgs 的 `pkgs/` provider 目录
 - `55450a9` / `c0d623a` 上游 CI 的 PR 策略
+
+---
+
+## 仍然开放的事项（非上游）
+
+本轮只收了「证据落盘与重开」这一条。其余按优先级排在这里，下一轮挑：
+
+- **P1**：`manifest.run_failure.reason` 摆到报告页（用户知道失败，但不知道为什么）
+  ——文件 `src/components/ReportView.tsx`、`src/components/finding.tsx`；
+  `CoverageItem.classification` 从 tooltip 提为可见文本（触屏与键盘用户拿不到）。
+- **P2**：`normalizeRepo` 在 macOS 上按字节比较大小写，而 macOS 默认文件系统
+  大小写不敏感 —— 从 picker 拿到的路径大小写可能不同，会漏命中证据。
+  文件 `run-diagnostics.js`；注释目前只提了 Windows。
+- **P2**：`writeAll` 的 Windows 回退分支里 `unlink(tmp)` 失败被吞掉，进程立刻退出
+  会留下 `*.tmp` 垃圾。文件 `run-diagnostics.js`。
+- **P2**：`readConfigView` 在 active 分支的 `missing` 只报 `credential`，忽略
+  「有 endpoint 无 model」。文件 `ocr-service.js`（既有代码，不是本轮引入）。
+- **P2**：`readFileAtRef` 靠 stderr 措辞区分 `bad-ref` / `missing` / `failed`，
+  本地化 git 可能对不上；`spawnFailure` 同理。至少补一条「未知措辞落到通用分支」
+  的断言。文件 `git-service.js`、`ocr-service.js`。
+- **P2（既有，非本轮引入）**：`audit:ui` 的 `88-run-failure-toast` 报「运行失败后
+  开始审查按钮仍是禁用的」。在**未改动的代码**上同样复现（`git stash` 后重跑，
+  报错一模一样），所以与本轮无关；但它确实是红的，下一轮该查。本机没有 Edge，
+  只能用 `PW_CHANNEL=chromium` 跑内置 Chromium，与 README 写的「驱动系统
+  Edge/Chrome」不是同一条路径。
+

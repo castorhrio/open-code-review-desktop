@@ -331,6 +331,20 @@ export interface Spec {
   resume?: string;
 }
 
+/**
+ * What the main process managed to do with the truncation evidence of a run.
+ *
+ * The CLI does not persist warnings, so the app records them itself when a run
+ * ends; this says whether that record landed on disk. `message` is the same
+ * Chinese line the main process logged (empty when there is nothing to say), so
+ * the app can say the same thing instead of keeping a second copy of it.
+ */
+export interface DiagnosticsOutcome {
+  ok: boolean;
+  reason: string;
+  message?: string;
+}
+
 export interface ExitPayload {
   id: string;
   result: {
@@ -341,6 +355,8 @@ export interface ExitPayload {
     sessionId?: string;
     command?: string;
   };
+  /** Whether the truncation evidence of this run made it to disk. */
+  diagnostics?: DiagnosticsOutcome;
 }
 
 export type Ok<T> = { ok: true; value: T } | { ok: false; error: string; raw?: string };

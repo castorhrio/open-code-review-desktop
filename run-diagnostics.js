@@ -28,6 +28,17 @@ const MAX_ENTRIES = 200;
 const LIMIT_WARNING = "review_limit_reached";
 
 /**
+ * How long any one wait around a write may take.
+ *
+ * The store's file lives in the profile directory, which can be a network
+ * mount. Three waits touch it — the run-exit path waiting for the evidence,
+ * the quit waiting for the queue, and a read waiting for a write that is still
+ * in flight — and they used to spell the bound out separately, so changing it
+ * for one of them could leave the others behind. One constant for all three.
+ */
+const WRITE_TIMEOUT_MS = 2000;
+
+/**
  * `record()` / `remove()` answer with an outcome instead of a bare boolean.
  *
  * - `clean`      nothing needed writing (a run with no evidence, or a delete
@@ -78,7 +89,7 @@ const DRAIN_FAILED = { ok: false, reason: "drain-failed" };
  * left is to say that the evidence did (or did not) end up on disk.
  */
 const OUTCOME_MESSAGES = {
-  "io-error": "本次运行的上限证据没能保存，重开会话后将看不到这条提示",
+  "io-error": "本次运行的上限证据保存失败，重开会话后将看不到这条提示",
   timeout: "上限证据写得太慢，运行结束没有等它；写盘仍在继续",
   "max-rounds": "上限证据的写队列在退出前始终没停，可能仍有写入没落盘",
   "drain-failed": "上限证据的退出冲刷出错，可能仍有写入没落盘",
@@ -309,6 +320,28 @@ function createStore(file) {
     return drainQueue(() => queue);
   }
 
+  /**
+   * Read the evidence, but not before the writes still in flight have landed.
+   *
+   * `read()` is a plain file read, and the run-exit path only waits a bounded
+   * time for the evidence to be written — the profile directory can be a
+   * network mount, and a slow disk must not hold the UI. So a session reopened
+   * right after a run that hit that bound could be read while its own evidence
+   * was still being written, and a truncated session would look clean again.
+   * That is the one outcome this whole store exists to prevent, and it was
+   * still reachable through the timeout path.
+   *
+   * Waiting for the queue to settle first closes that window. The queue is
+   * empty almost always, so the wait costs a microtask; when it is not empty,
+   * the wait is exactly what makes the answer true. The wait is bounded like
+   * every other one here — if the disk never answers, the read answers with
+   * whatever is on disk rather than hanging.
+   */
+  function readSettled(repo, sessionId, timeoutMs = WRITE_TIMEOUT_MS) {
+    if (!sessionId) return Promise.resolve(null);
+    return drainBounded(() => drain(), timeoutMs).then(() => read(repo, sessionId));
+  }
+
   /** Queued like `record`, so a delete cannot race a write for the same file. */
   function remove(repo, sessionId) {
     return serialize(async () => {
@@ -320,23 +353,26 @@ function createStore(file) {
     });
   }
 
-  return { record, read, remove, drain };
+  return { record, read, readSettled, remove, drain };
 }
 
 /**
- * Wait for the queued writes, but not forever.
+ * Wait for a promise of an outcome, but not forever.
  *
- * The profile directory can be a network mount, and an app that cannot be
- * closed is worse than an app that lost one warning — so the wait is bounded,
- * and the caller decides what a timeout means for it.
+ * `current()` returns the promise standing for "the writes queued so far have
+ * landed"; the answer may be a real outcome (`drained`, `max-rounds`) or a
+ * failure. The clock is what keeps a caller off a disk that never answers —
+ * and both callers that need it (the quit flush and the read that waits for a
+ * pending write) used to spell this race out on their own, so the bound was
+ * easy to change in one place and forget in the other.
  */
-function flushNow(store, timeoutMs = 2000) {
+function drainBounded(current, timeoutMs = WRITE_TIMEOUT_MS) {
   let timer;
   const giveUp = new Promise((resolve) => {
     timer = setTimeout(() => resolve(TIMEOUT), timeoutMs);
   });
   const drained = Promise.resolve()
-    .then(() => store.drain())
+    .then(() => current())
     .then((outcome) => (outcome && typeof outcome.ok === "boolean" ? outcome : DRAINED))
     .catch(() => DRAIN_FAILED);
   return Promise.race([drained, giveUp]).then((outcome) => {
@@ -346,13 +382,15 @@ function flushNow(store, timeoutMs = 2000) {
 }
 
 /**
- * How long the end of a run may wait for the evidence.
+ * Wait for the queued writes, but not forever.
  *
- * The same bound the exit flush uses: the profile directory can be a network
- * mount, and a run that has finished should not keep the UI busy while a slow
- * disk is still settling.
+ * The profile directory can be a network mount, and an app that cannot be
+ * closed is worse than an app that lost one warning — so the wait is bounded,
+ * and the caller decides what a timeout means for it.
  */
-const RECORD_TIMEOUT_MS = 2000;
+function flushNow(store, timeoutMs = WRITE_TIMEOUT_MS) {
+  return drainBounded(() => store.drain(), timeoutMs);
+}
 
 /**
  * Record, but never hold the caller longer than `timeoutMs`.
@@ -366,7 +404,7 @@ const RECORD_TIMEOUT_MS = 2000;
  * it. So past the bound the caller is told `timeout` and carries on; the write
  * stays queued, and a quit still waits for it (`flushBeforeQuit`).
  */
-function recordBounded(store, repo, sessionId, result, timeoutMs = RECORD_TIMEOUT_MS, onLate) {
+function recordBounded(store, repo, sessionId, result, timeoutMs = WRITE_TIMEOUT_MS, onLate) {
   let timer;
   let timedOut = false;
   const giveUp = new Promise((resolve) => {
@@ -398,6 +436,44 @@ function recordBounded(store, repo, sessionId, result, timeoutMs = RECORD_TIMEOU
 }
 
 /**
+ * Record the evidence, then say that the run is over — in that order.
+ *
+ * The renderer refreshes the history as soon as it hears `run:exit`, and a
+ * record that has not landed yet would make a truncated session look clean
+ * again. That ordering used to live in a comment in `main.js` beside a promise
+ * chain, where nothing would have caught someone moving the `send()` up.
+ * Here it is the shape of the function: the signal is called after the record
+ * settled, and it is handed the outcome, so the caller does not have to
+ * re-derive whether the evidence is on disk.
+ *
+ * The wait is bounded (`recordBounded`) — a slow disk must not hold the UI —
+ * and past the bound the outcome says so, instead of the exit pretending that
+ * everything is in order.
+ */
+async function settleRunExit(options) {
+  const opts = options || {};
+  let outcome = null;
+  try {
+    outcome = await recordBounded(
+      opts.store,
+      opts.repo,
+      opts.sessionId,
+      opts.result,
+      opts.timeoutMs,
+      opts.onLate
+    );
+    reportOutcome(outcome, opts.warn);
+  } catch (_) {
+    // Reporting the outcome failed, but the run still ended. The exit signal is
+    // what hands the screen back, so it goes out either way — the old promise
+    // chain said so with a `finally`, and a run that ends without an exit is a
+    // spinner that never stops.
+  }
+  if (typeof opts.signal === "function") opts.signal(outcome);
+  return outcome;
+}
+
+/**
  * Keep the app from exiting before the evidence is on disk.
  *
  * Electron does not wait for pending promises when the main process exits, so
@@ -412,7 +488,7 @@ function recordBounded(store, repo, sessionId, result, timeoutMs = RECORD_TIMEOU
  * Exported so the behaviour can be exercised inside a real Electron process
  * instead of only being reasoned about.
  */
-function flushBeforeQuit(app, store, timeoutMs = 2000, warn) {
+function flushBeforeQuit(app, store, timeoutMs = WRITE_TIMEOUT_MS, warn) {
   let flushing = false;
   app.on("before-quit", (event) => {
     if (flushing) return;
@@ -433,12 +509,14 @@ module.exports = {
   normalizeRepo,
   MAX_ENTRIES,
   LIMIT_WARNING,
-  RECORD_TIMEOUT_MS,
+  WRITE_TIMEOUT_MS,
   MAX_DRAIN_ROUNDS,
   drainQueue,
+  drainBounded,
   outcomeMessage,
   reportOutcome,
   recordBounded,
+  settleRunExit,
   flushNow,
   flushBeforeQuit,
 };

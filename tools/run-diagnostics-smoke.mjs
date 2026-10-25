@@ -14,11 +14,14 @@ const {
   normalizeRepo,
   MAX_ENTRIES,
   LIMIT_WARNING,
-  RECORD_TIMEOUT_MS,
+  WRITE_TIMEOUT_MS,
   MAX_DRAIN_ROUNDS,
   drainQueue,
+  drainBounded,
+  outcomeMessage,
   reportOutcome,
   recordBounded,
+  settleRunExit,
   flushNow,
 } = require("../run-diagnostics.js");
 
@@ -296,7 +299,92 @@ const quickAgain = await recordBounded(store, repo, "bounded-no-late", limitResu
   lateCalls += 1;
 });
 check("a write that beats the bound does not fire the late listener", quickAgain?.reason === "written" && lateCalls === 0, `${quickAgain?.reason} / ${lateCalls}`);
-check("the default bound is the one the run-exit path uses", RECORD_TIMEOUT_MS > 0 && Number.isFinite(RECORD_TIMEOUT_MS));
+check("the default bound is the one the run-exit path uses", WRITE_TIMEOUT_MS > 0 && Number.isFinite(WRITE_TIMEOUT_MS));
+
+/* ---- a reopened session must not look clean while its evidence is in flight ----
+ * The run-exit path waits for the record, but only up to a bound: the store's file
+ * lives in the profile directory, and a network mount can be slower than that
+ * wait. A session reopened right after such a run was read straight from disk,
+ * while its own evidence was still being written — and a truncated session
+ * looked clean again, which is the one thing this store exists to prevent. The
+ * read waits for the writes that are still in flight now.
+ */
+const pendingStore = createStore(path.join(dir, "pending", "run-diagnostics.json"));
+const pendingWrite = pendingStore.record(repo, "pending-session", limitResult);
+check("a plain read can miss a write that is still queued", pendingStore.read(repo, "pending-session") === null);
+const settled = await pendingStore.readSettled(repo, "pending-session");
+check("but a read that waits for the pending write sees it", settled?.warnings?.length === 1, JSON.stringify(settled));
+await pendingWrite;
+// The wait is bounded like every other one here: a disk that never answers must
+// not keep the history from opening.
+const stuckRead = await drainBounded(() => new Promise(() => {}), 60);
+check("and that wait gives up instead of hanging", stuckRead?.reason === "timeout", JSON.stringify(stuckRead));
+check("a settled read of a session that has no evidence is still null", (await pendingStore.readSettled(repo, "never-recorded")) === null);
+
+/* ---- the exit has to come after the evidence, and say how it went ----
+ * The renderer refreshes the history as soon as it hears `run:exit`, and a record
+ * that has not landed yet would make a truncated session look clean again. That
+ * order used to live in a comment beside a promise chain, where moving one line
+ * would have broken it in silence. `settleRunExit` owns it now: the signal comes
+ * after the record settled, and it carries the outcome, so the app can say out
+ * loud when the evidence did not make it to disk.
+ */
+const exitStore = createStore(path.join(dir, "exit", "run-diagnostics.json"));
+const exitLog = [];
+const exitSeen = [];
+const exitOutcome = await settleRunExit({
+  store: exitStore,
+  repo,
+  sessionId: "exit-session",
+  result: limitResult,
+  timeoutMs: 2000,
+  warn: (line) => exitLog.push(line),
+  signal: (outcome) => exitSeen.push({ outcome, onDisk: exitStore.read(repo, "exit-session")?.warnings?.length === 1 }),
+});
+check("the exit signal is sent only once the evidence is on disk", exitSeen.length === 1 && exitSeen[0].onDisk, JSON.stringify(exitSeen));
+check("and it carries the outcome of the record", exitOutcome?.reason === "written" && exitSeen[0].outcome?.reason === "written", JSON.stringify(exitOutcome));
+check("a healthy run has nothing to report", exitLog.length === 0, JSON.stringify(exitLog));
+
+// The exit signal is what hands the screen back, so it goes out even if
+// reporting the outcome failed — a run that ends without an exit is a spinner
+// that never stops.
+let signalAfterBadReport = 0;
+await settleRunExit({
+  store: exitStore,
+  repo,
+  sessionId: "exit-session",
+  result: limitResult,
+  timeoutMs: 2000,
+  warn: () => {
+    throw new Error("the log line could not be written");
+  },
+  signal: () => {
+    signalAfterBadReport += 1;
+  },
+});
+check("the exit signal goes out even when reporting the outcome fails", signalAfterBadReport === 1, `${signalAfterBadReport}`);
+
+// A slow disk must not hold the run's exit — but the exit then has to say that
+// the evidence is not there yet, or the app would treat a truncated run as clean.
+const slowExitLog = [];
+const slowExitSeen = [];
+const slowExit = await settleRunExit({
+  store: { record: () => new Promise(() => {}) },
+  repo,
+  sessionId: "slow-exit",
+  result: limitResult,
+  timeoutMs: 80,
+  warn: (line) => slowExitLog.push(line),
+  signal: (outcome) => slowExitSeen.push(outcome),
+});
+check("a slow disk does not hold the run's exit", slowExitSeen.length === 1 && slowExit?.reason === "timeout", JSON.stringify(slowExit));
+check("and the exit says the evidence did not make it", outcomeMessage(slowExit) !== "", outcomeMessage(slowExit));
+
+// The one outcome that really loses the evidence has to reach the app as
+// something it can show: the log drawer opens itself on a line that reads like
+// trouble, and a stderr line nobody opens is not the same as saying it.
+const lostMessage = outcomeMessage({ ok: false, reason: "io-error" });
+check("a lost evidence reports something the app can show", lostMessage.includes("失败"), lostMessage);
 
 fs.rmSync(unwritableDir, { recursive: true, force: true });
 
