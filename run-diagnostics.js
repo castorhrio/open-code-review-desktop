@@ -24,6 +24,22 @@ const fsp = require("fs/promises");
 const path = require("path");
 
 const VERSION = 1;
+/**
+ * How many records the file keeps — across *all* repositories, not per folder.
+ *
+ * One file, one cap: fifty repositories still keep at most this many runs'
+ * worth of truncation evidence between them, because the whole file is read and
+ * rewritten on every recorded run. `record` trims on each write, keeping the
+ * newest and dropping the oldest (`entries.slice(-MAX_ENTRIES)`, insertion
+ * order being the age order), so the trim happens at *write* time and in file
+ * order rather than by any timestamp that could tie inside one millisecond.
+ *
+ * A trimmed session reopens as `null` — the same answer a clean run gives. That
+ * is the price of the cap and it is deliberate: the alternative is an unbounded
+ * file in the profile directory that grows forever. What must not happen is the
+ * trim looking like a *loss* the app could have reported; it is a rotation, and
+ * the newest records are exactly the ones a user is likely to reopen.
+ */
 const MAX_ENTRIES = 200;
 const LIMIT_WARNING = "review_limit_reached";
 
@@ -114,16 +130,28 @@ const OUTCOME_MESSAGES = {
   timeout: "上限证据写得太慢，运行结束没有等它；写盘仍在继续",
   "max-rounds": "上限证据的写队列在退出前始终没停，可能仍有写入没落盘",
   "drain-failed": "上限证据的退出冲刷出错，可能仍有写入没落盘",
-  // Not a store outcome: the run ended, the evidence is on disk, but the screen
-  // was never told. The drawer self-opens on a line that reads like trouble
-  // (`TROUBLE_LINE` in `src/lib/format.ts`: error / warning / 失败 / 无法 / ✗),
-  // so this wording has to carry one of those words — it used to end on 「运行中」,
-  // which the rule does not match, and the one line that says the screen never
-  // heard the run ended stayed behind a closed drawer. A failed *signal* is a
-  // failure, so it says so. `tools/run-diagnostics-smoke.mjs` reads the rule out
-  // of the renderer and asserts this line against it.
-  "signal-failed": "本次运行已经结束，但结束信号推送失败，界面可能仍显示运行中",
 };
+/**
+ * The wording for one failure that is *not* about the evidence at all.
+ *
+ * `signal-failed` is the run that ended with its evidence safely on disk and no
+ * one told the screen. It used to sit in `OUTCOME_MESSAGES` beside `io-error`
+ * and `timeout`, which are all facts about the file on disk, so asking
+ * `outcomeMessage` about the store answered with a sentence about a push — and
+ * the next store outcome added there would have inherited that confusion. It
+ * has its own name now: `outcomeMessage` answers `""` for it (it is not a store
+ * outcome) and `reportOutcome` routes it here instead.
+ *
+ * The wording still has to read like trouble: the drawer self-opens on a line
+ * matching `TROUBLE_LINE` in `src/lib/format.ts` (error / warning / 失败 /
+ * 无法 / ✗), and this line used to end on 「运行中」, which the rule does not
+ * match — so the one line saying the screen never heard the run ended stayed
+ * behind a closed drawer. A failed *signal* is a failure, so it says so.
+ * `tools/run-diagnostics-smoke.mjs` reads that rule out of the renderer and
+ * asserts this line against it.
+ */
+const SIGNAL_FAILED_MESSAGE = "本次运行已经结束，但结束信号推送失败，界面可能仍显示运行中";
+const signalFailedMessage = () => SIGNAL_FAILED_MESSAGE;
 const LATE_OUTCOME_MESSAGES = {
   "io-error": "上限证据在运行结束后写盘失败，重开会话后将看不到这条提示",
   timeout: "上限证据最后仍然没写完；重开会话后可能看不到这条提示",
@@ -139,6 +167,21 @@ function outcomeMessage(outcome, options) {
 }
 
 /**
+ * The message to log for *any* outcome, store or not.
+ *
+ * `outcomeMessage` speaks only for the store; the one non-store outcome the app
+ * reports (`signal-failed`) is answered by `signalFailedMessage`. Keeping the
+ * two answers apart here is what lets a caller ask "did the evidence make it"
+ * and "did the screen hear it" without one answer standing in for the other.
+ */
+function outcomeLogMessage(outcome, options) {
+  const store = outcomeMessage(outcome, options);
+  if (store) return store;
+  if (outcome && outcome.reason === SIGNAL_FAILED.reason) return signalFailedMessage();
+  return "";
+}
+
+/**
  * Log one outcome, once. Returns the line it logged (or `""`).
  *
  * `main.js` calls this for every path that learns something about the evidence
@@ -147,7 +190,7 @@ function outcomeMessage(outcome, options) {
  * another one warns about it.
  */
 function reportOutcome(outcome, warn, options) {
-  const message = outcomeMessage(outcome, options);
+  const message = outcomeLogMessage(outcome, options);
   if (!message) return "";
   const line = `[run-diagnostics] ${message}`;
   (typeof warn === "function" ? warn : console.warn)(line);
@@ -196,6 +239,37 @@ const flipCase = (name) =>
 const MAX_LETTER_WALK = 8;
 
 /**
+ * Whether the parent directory's own names settle the case question.
+ *
+ * Only one listing is evidence that the volume keeps case: an entry spelled
+ * exactly as the name that resolved, and no entry spelled exactly the other
+ * way. `readdir` returns the names as they are stored, so a folding volume
+ * holding `Payments-API` lists that even when the caller spelled it
+ * `payments-api` — the exact spelling is then missing and this returns `null`,
+ * because the listing cannot tell "folds case" from "kept, under another
+ * spelling". The comparison is deliberately exact and not case-folded: folding
+ * it here would make every listing match `other` (the two spellings differ only
+ * in case) and the probe could never answer `false` again.
+ *
+ * Two exact entries — the spelled one and the other — cannot happen on the path
+ * this runs on, because `stat` on the other spelling succeeded there and the
+ * dev/ino comparison already answered. Should it happen anyway, the answer
+ * stays `null` rather than a guess. A directory that cannot be listed is
+ * likewise "cannot tell".
+ */
+function keepsCaseByListing(dir, spelled, other, readdir) {
+  let listing;
+  try {
+    listing = Array.from(readdir(dir), (name) => String(name));
+  } catch (_) {
+    return null;
+  }
+  const spelledThere = listing.includes(spelled);
+  const otherThere = listing.includes(other);
+  return spelledThere && !otherThere ? false : null;
+}
+
+/**
  * Whether the volume holding `target` folds case.
  *
  * The answer belongs to the volume, not to the OS: a macOS volume can be
@@ -207,7 +281,12 @@ const MAX_LETTER_WALK = 8;
  * deepest segment that carries letters is spelled a second way, and the two
  * spellings are compared by identity. The same file → the volume folds case.
  * A second entry under the other spelling → two different folders, so the
- * volume keeps case. No entry at all → the volume keeps case.
+ * volume keeps case. `ENOENT` on the other spelling → *maybe* the volume keeps
+ * case, so the parent directory is read once (`keepsCaseByListing`) and the
+ * answer is `false` only when its own names settle it. An unresolved spelling
+ * alone is not evidence: a folding volume answers `ENOENT` for a name that was
+ * simply never there, and calling that "keeps case" would split one folder into
+ * two keys on the volume that folds.
  *
  * Nothing is written, deliberately. The path usually belongs to the user's own
  * repository, and a probe file left behind in someone's working tree is worse
@@ -218,6 +297,7 @@ const MAX_LETTER_WALK = 8;
  * A path that cannot be read at all answers `null` — "cannot tell" — and the
  * caller falls back to the platform's answer.
  */
+
 function detectCaseInsensitive(target, options = {}) {
   const stat = options.stat || fs.statSync;
   const raw = String(target || "");
@@ -264,9 +344,23 @@ function detectCaseInsensitive(target, options = {}) {
   }
   try {
     there = stat(path.join(dir, other));
-  } catch (_) {
-    // The other spelling does not resolve — the volume keeps case.
-    return false;
+  } catch (err) {
+    // "The other spelling does not resolve" is *not* the same fact as "the
+    // volume keeps case". On a case-folding volume it also means "there is no
+    // such name at all", because the segment being doubled can be one that was
+    // never there (a path typed wrong, a repository moved, a date-shaped leaf).
+    // Answering `false` there would hand the store a wrong certainty, let
+    // `resolveCaseInsensitive` skip the platform's fallback, and split one
+    // folder into two keys on the exact volume that folds case — which is the
+    // loss this probe exists to prevent.
+    //
+    // So `ENOENT` is evidence about the *volume* only after the parent
+    // directory has been read: the spelled name listed, and no entry answering
+    // to the other spelling. Everything else — an error that is not `ENOENT`,
+    // an unreadable directory, an entry in the other spelling — is "cannot
+    // tell" (`null`), which falls back to the platform's answer.
+    if (!err || err.code !== "ENOENT") return null;
+    return keepsCaseByListing(dir, base, other, options.readdir || fs.readdirSync);
   }
   // Both spellings exist. They are one folder only if they are one file: two
   // entries whose names differ in case are two folders on a volume that keeps
@@ -836,6 +930,8 @@ module.exports = {
   drainQueue,
   drainBounded,
   outcomeMessage,
+  outcomeLogMessage,
+  signalFailedMessage,
   reportOutcome,
   recordBounded,
   settleRunExit,

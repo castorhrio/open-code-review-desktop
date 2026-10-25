@@ -26,6 +26,8 @@ const {
   drainQueue,
   drainBounded,
   outcomeMessage,
+  outcomeLogMessage,
+  signalFailedMessage,
   reportOutcome,
   recordBounded,
   settleRunExit,
@@ -197,6 +199,12 @@ const sensitiveStat = (name, ino = 42) => (target) => {
   if (base !== name) throw enoent(target);
   return { dev: 1, ino };
 };
+/* The parent directory's own names, as `readdir` hands them back. The probe asks
+ * the parent *after* `stat` answered ENOENT for the other spelling, because
+ * ENOENT alone does not say which of two worlds the path is in: a volume that
+ * keeps case, or a folding volume where that name is not there at all. Names
+ * are the listing only — the checks never touch the disk for this. */
+const listingOf = (...names) => () => names;
 const volumeRepo = "/home/x/work/Payments-API";
 check(
   "a volume that folds case is recognised",
@@ -204,15 +212,66 @@ check(
 );
 check(
   "a volume that keeps case is recognised",
-  detectCaseInsensitive(volumeRepo, { stat: sensitiveStat("Payments-API") }) === false
+  detectCaseInsensitive(volumeRepo, {
+    stat: sensitiveStat("Payments-API"),
+    readdir: listingOf("Payments-API"),
+  }) === false
 );
+/* `stat` answering ENOENT for the other spelling is the *before* image of two
+ * different volumes: one that keeps case, and one that folds it but where the
+ * name being doubled is simply not there (a path typed wrong, a repository
+ * that moved, a spelled segment that never existed). The old probe called both
+ * of them "keeps case" — a wrong certainty that skipped the platform's
+ * fallback and split one folder into two keys on the very volume that folds
+ * case. Hence the listing: only "the spelled name is there and nothing answers
+ * to the other" is evidence about the volume. */
 check(
-  "two folders whose names differ in case are two folders",
+  "a folding volume asked about a name that is not there cannot be judged",
   detectCaseInsensitive(volumeRepo, {
     stat: (target) => {
       const base = path.basename(target);
       if (base === "Payments-API") return { dev: 1, ino: 42 };
-      if (base === "PAYMENTS-API") return { dev: 1, ino: 43 };
+      throw enoent(target);
+    },
+    // The folder is on disk under another casing, which is what a folding
+    // volume does; the listing therefore cannot tell it from "keeps case".
+    readdir: listingOf("PAYMENTS-API"),
+  }) === null
+);
+check(
+  "a parent directory that cannot be listed leaves the question open",
+  detectCaseInsensitive(volumeRepo, {
+    stat: sensitiveStat("Payments-API"),
+    readdir: () => {
+      throw new Error("EACCES: permission denied");
+    },
+  }) === null
+);
+check(
+  "a stat failure that is not ENOENT is no answer either",
+  detectCaseInsensitive(volumeRepo, {
+    stat: (target) => {
+      if (path.basename(target) === "Payments-API") return { dev: 1, ino: 42 };
+      const err = new Error("EIO");
+      err.code = "EIO";
+      throw err;
+    },
+    readdir: listingOf("Payments-API"),
+  }) === null
+);
+/* Two entries whose names differ in case are two folders on a volume that keeps
+ * case, and the answer there is "keeps case". The names are flipped by the
+ * probe itself (`flipCase`), so this models `Repo` / `rEPO` — an earlier version
+ * of this check compared `Payments-API` with `PAYMENTS-API`, which is *not* the
+ * other spelling the probe asks about: it only ever reached the ENOENT branch,
+ * so it stayed green while asserting nothing. */
+check(
+  "two folders whose names differ in case are two folders",
+  detectCaseInsensitive("/home/x/work/Repo", {
+    stat: (target) => {
+      const base = path.basename(target);
+      if (base === "Repo") return { dev: 1, ino: 42 };
+      if (base === "rEPO") return { dev: 1, ino: 43 };
       throw enoent(target);
     },
   }) === false
@@ -237,7 +296,7 @@ check(
 );
 check(
   "and the same walk reads a case-keeping volume the right way round",
-  detectCaseInsensitive(datedRepo, { stat: sensitiveStat("x") }) === false
+  detectCaseInsensitive(datedRepo, { stat: sensitiveStat("x"), readdir: listingOf("x") }) === false
 );
 /* The walk is bounded (MAX_LETTER_WALK, 8): it looks for a name with letters
  * and stops even if it has not found one. Ten numeric segments below the named
@@ -375,7 +434,10 @@ check("and it can still be deleted", legacyStore.read(casedRepo, "legacy-session
 const appStore = createAppStore(path.join(dir, "app", "run-diagnostics.json"), { stat: foldingStat("Payments-API") });
 await appStore.record(casedRepo, "app-session", limitResult);
 check("the app's store asks the volume about case", appStore.read(casedRepo.toLowerCase(), "app-session")?.warnings?.length === 1);
-const appStoreSensitive = createAppStore(path.join(dir, "app-sensitive", "run-diagnostics.json"), { stat: sensitiveStat("Payments-API") });
+const appStoreSensitive = createAppStore(path.join(dir, "app-sensitive", "run-diagnostics.json"), {
+  stat: sensitiveStat("Payments-API"),
+  readdir: listingOf("Payments-API"),
+});
 await appStoreSensitive.record(casedRepo, "app-sensitive-session", limitResult);
 check(
   "and keeps two folders apart when the volume does",
@@ -452,6 +514,19 @@ const raw = JSON.parse(fs.readFileSync(file, "utf8"));
 check("the file is capped", raw.entries.length === MAX_ENTRIES, `${raw.entries.length} entries`);
 check("the cap drops the oldest, not the newest", raw.entries.some((e) => e.session_id === `session-${String(MAX_ENTRIES + 4).padStart(3, "0")}`) && !raw.entries.some((e) => e.session_id === "session-000"));
 check("every entry fits the small schema", raw.entries.every((e) => typeof e.repo === "string" && typeof e.session_id === "string" && Array.isArray(e.warnings) && typeof e.budget_exceeded === "boolean"));
+/* The cap is per *file*, not per repository, and it trims on write in file
+ * order: the oldest records go, so the sessions a user is most likely to
+ * reopen are the ones that survive. What a trimmed session reads as matters as
+ * much as the trim itself — `null`, the same answer a clean run gives. That is
+ * the documented price of the cap (an unbounded file in the profile directory
+ * is the alternative), and it must not silently look like anything else. */
+check("a trimmed session reopens as no evidence, not as a failure", store.read(repo, "session-000") === null);
+check("while the newest record is still readable", store.read(repo, `session-${String(MAX_ENTRIES + 4).padStart(3, "0")}`)?.warnings?.length === 1);
+check(
+  "the cap counts records, not repositories",
+  raw.entries.filter((e) => e.repo === normalizeRepo(repo)).length === MAX_ENTRIES,
+  `${raw.entries.length} entries for ${new Set(raw.entries.map((e) => e.repo)).size} repositories`
+);
 
 /* ---- two writes must not lose each other ----
  * Every write is a whole-file read-modify-write, and it now awaits a real disk
@@ -773,7 +848,28 @@ check("the evidence was on disk before the signal even ran", signalSawEvidence =
 check("and it is still there afterwards", throwingSignalStore.read(repo, "throwing-signal")?.warnings?.length === 1);
 check("and the caller still gets the outcome of the record", settleAfterThrow?.reason === "written", JSON.stringify(settleAfterThrow));
 check("the failed signal is reported exactly once", throwingSignalLog.length === 1 && throwingSignalLog[0].startsWith("[run-diagnostics]"), JSON.stringify(throwingSignalLog));
-check("with a wording the app can show, since the screen may still be busy", outcomeMessage(SIGNAL_FAILED) === throwingSignalLog[0]?.replace("[run-diagnostics] ", "") && outcomeMessage(SIGNAL_FAILED).includes("界面"), outcomeMessage(SIGNAL_FAILED));
+check(
+  "with a wording the app can show, since the screen may still be busy",
+  signalFailedMessage() === throwingSignalLog[0]?.replace("[run-diagnostics] ", "") && signalFailedMessage().includes("界面"),
+  signalFailedMessage()
+);
+/* `signal-failed` is not a store outcome, so it must not answer a question
+ * about the store. It used to share `OUTCOME_MESSAGES` with `io-error` and
+ * `timeout`, which are facts about the file on disk; a caller asking
+ * `outcomeMessage(SIGNAL_FAILED)` then got a sentence about a push, and the
+ * next store outcome added to that table would have inherited the confusion. */
+const signalMessage = signalFailedMessage();
+const lostEvidenceMessage = outcomeMessage({ ok: false, reason: "io-error" });
+check("a failed signal is not answered as a store outcome", outcomeMessage(SIGNAL_FAILED) === "", outcomeMessage(SIGNAL_FAILED));
+check(
+  "and its wording is not the same as the lost-evidence wording",
+  lostEvidenceMessage !== "" && signalMessage !== "" && lostEvidenceMessage !== signalMessage,
+  `${lostEvidenceMessage} | ${signalMessage}`
+);
+check(
+  "the one log path still says both",
+  outcomeLogMessage(SIGNAL_FAILED) === signalMessage && outcomeLogMessage({ ok: false, reason: "io-error" }) === lostEvidenceMessage
+);
 
 // A slow disk must not hold the run's exit — but the exit then has to say that
 // the evidence is not there yet, or the app would treat a truncated run as clean.
@@ -825,15 +921,28 @@ check(
 );
 // The two outcomes that mean something was lost — the evidence, or the screen —
 // have to read like trouble: nobody goes looking for them in a collapsed drawer.
-for (const reason of ["io-error", "signal-failed"]) {
-  const message = outcomeMessage({ ok: false, reason });
-  check(`「${reason}」 reads like trouble to the log drawer`, opensDrawer(message), message);
+// The screen one comes from `signalFailedMessage`, because it is not a store
+// outcome and `outcomeMessage` deliberately answers nothing for it.
+for (const [name, message] of [
+  ["io-error", outcomeMessage({ ok: false, reason: "io-error" })],
+  ["signal-failed", signalFailedMessage()],
+]) {
+  check(`「${name}」 reads like trouble to the log drawer`, opensDrawer(message), message);
 }
 // The reverse, deliberately: `timeout` / `max-rounds` / `drain-failed` say "still
 // writing", which is news read on purpose — not a reason to take the drawer's
 // room away from the live feed on every slow disk.
 const stillWriting = outcomeMessage({ ok: false, reason: "timeout" });
 check("and a 「still writing」 outcome is not dressed up as trouble", !opensDrawer(stillWriting), stillWriting);
+/* The other direction, and the one that would bite in daily use: a *healthy*
+ * run has to say nothing at all. Both the drawer rule and this file's silence
+ * rule rest on "no message means nothing happened" — the moment a normal
+ * 「已保存」 line lands in the table, the drawer opens itself on every run and
+ * the lines that matter get skimmed past. */
+for (const reason of ["clean", "written", "drained"]) {
+  const message = outcomeMessage({ ok: true, reason });
+  check(`a healthy 「${reason}」 run logs nothing`, message === "" && !opensDrawer(message), JSON.stringify(message));
+}
 
 fs.rmSync(unwritableDir, { recursive: true, force: true });
 
