@@ -11,7 +11,12 @@ const ocr = require("./ocr-service");
 const git = require("./git-service");
 const { installNavigationGuards } = require("./security");
 const updater = require("./update-service");
-const { createStore: createRunDiagnostics, flushNow, flushBeforeQuit } = require("./run-diagnostics");
+const {
+  createStore: createRunDiagnostics,
+  recordBounded,
+  flushNow,
+  flushBeforeQuit,
+} = require("./run-diagnostics");
 
 const DOCS_URL = "https://open-codereview.ai/docs";
 
@@ -225,9 +230,16 @@ ipcMain.handle("app:uninstall", async () => {
   // to be gone first — otherwise Windows keeps the files locked and the
   // uninstaller reports them as in use.
   //
-  // The evidence is written before the uninstaller starts: the quit below is
-  // held by the exit flush, and a pending write would keep this process alive
-  // while the uninstaller is already deleting files.
+  // The evidence is written before the uninstaller starts, not during the quit:
+  // `flushBeforeQuit` fires on the `app.quit()` below, by which time the
+  // uninstaller is already deleting the profile directory it would write to.
+  //
+  // The second flush that `before-quit` then performs is deliberately harmless:
+  // it calls `drain()` on a queue this flush just emptied, so it settles in the
+  // same tick and the quit proceeds — unless a run finished in the meantime and
+  // queued one more write, which is exactly the case that should be waited for.
+  // Nothing here writes after the uninstaller starts except that last write,
+  // and a failed one reports `io-error` instead of throwing.
   await flushNow(runDiagnostics);
   try {
     spawn(target, [], { detached: true, stdio: "ignore", windowsHide: false }).unref();
@@ -305,17 +317,32 @@ ipcMain.handle("review:run", (_e, spec) => {
       // waits for it — otherwise the renderer could read `session:diagnostics`
       // and find nothing simply because the rename had not landed yet.
       //
-      // Only `io-error` is news. `no-session` (a scan run, or a CLI that printed
-      // no session id) is a known shape — there is no session to reopen, so the
-      // warning cannot be lost — and warning about it on every such run would
-      // train the reader to ignore the line that matters. An `io-error` means
-      // the *reopened* session will look clean again even though this one was
-      // truncated, and nothing in the UI can show that.
-      runDiagnostics
-        .record(spec.repo, result.sessionId || (result.value && result.value.session_id) || "", result.value || null)
+      // That wait is bounded (`recordBounded`, the same 2s the exit flush uses):
+      // the store's file lives in the profile directory, which can be a network
+      // mount, and an unbounded wait there would hold `run:exit` — and every
+      // spinner that ends on it — for as long as the disk took. Past the bound
+      // the renderer is told the run is over and the write stays queued, so it
+      // still lands (and a quit still waits for it).
+      //
+      // Only a lost `io-error` is real news. `no-session` (a scan run, or a CLI
+      // that printed no session id) is a known shape — there is no session to
+      // reopen, so the warning cannot be lost — and warning about it on every
+      // such run would train the reader to ignore the line that matters. An
+      // `io-error` means the *reopened* session will look clean again even
+      // though this one was truncated, and nothing in the UI can show that; a
+      // `timeout` means the reader of this run may see the truncation missing
+      // for a moment, which is the same loss but caused by a slow disk.
+      recordBounded(
+        runDiagnostics,
+        spec.repo,
+        result.sessionId || (result.value && result.value.session_id) || "",
+        result.value || null
+      )
         .then((outcome) => {
           if (outcome && outcome.reason === "io-error") {
             console.warn("[run-diagnostics] 本次运行的上限证据没能保存，重开会话后将看不到这条提示");
+          } else if (outcome && outcome.reason === "timeout") {
+            console.warn("[run-diagnostics] 上限证据写得太慢，运行结束没有等它；写盘仍在继续");
           }
         })
         .catch(() => {})

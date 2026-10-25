@@ -9,7 +9,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const { createStore, normalizeRepo, MAX_ENTRIES, LIMIT_WARNING } = require("../run-diagnostics.js");
+const { createStore, normalizeRepo, MAX_ENTRIES, LIMIT_WARNING, recordBounded } = require("../run-diagnostics.js");
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-run-diagnostics-"));
 const file = path.join(dir, "nested", "run-diagnostics.json");
@@ -198,6 +198,29 @@ const lateSecond = lateStore.record(repo, "second", limitResult);
 await lateDraining;
 check("a write queued during the wait is not missed", lateStore.read(repo, "second")?.warnings?.length === 1);
 await Promise.all([lateFirst, lateSecond]);
+
+/* ---- the end of a run must not wait on a slow disk ----
+ * `run:exit` waits for the record so the renderer cannot read a session before
+ * its evidence landed. The file lives in the profile directory, which can be a
+ * network mount, so that wait needs an upper bound: a store whose write never
+ * settles stands in for the slow disk here. Without the bound this check hangs
+ * (and `npm run audit:diagnostics` with it), which is the failure it is for.
+ */
+const hungStore = { record: () => new Promise(() => {}) };
+const startedAt = Date.now();
+const timedOut = await recordBounded(hungStore, repo, "slow-session", limitResult, 120);
+const waited = Date.now() - startedAt;
+check(
+  "a record that never settles gives up instead of holding run:exit",
+  timedOut?.reason === "timeout" && waited < 1500,
+  `reason=${timedOut?.reason} waited=${waited}ms`
+);
+
+// The bound must not swallow a real write: the same call still writes and
+// reports, which is what the run-exit path acts on.
+const quick = await recordBounded(store, repo, "bounded-session", limitResult, 2000);
+check("a fast record still reports what it wrote", quick?.reason === "written", JSON.stringify(quick));
+check("and its evidence is readable", store.read(repo, "bounded-session")?.warnings?.length === 1);
 
 fs.rmSync(unwritableDir, { recursive: true, force: true });
 

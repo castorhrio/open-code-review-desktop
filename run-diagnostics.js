@@ -35,6 +35,8 @@ const LIMIT_WARNING = "review_limit_reached";
  * - `written`    the evidence landed where a reopened session will look
  * - `no-session` there was evidence but no session id to file it under
  * - `io-error`   there was something to write and the disk refused it
+ * - `timeout`    the caller stopped waiting (see `recordBounded`); the write
+ *                itself is still queued and may yet land
  *
  * The two failures used to share one `false`, so `main.js` could only warn
  * about both or neither. They are not the same news: an `io-error` means the
@@ -240,6 +242,41 @@ function flushNow(store, timeoutMs = 2000) {
 }
 
 /**
+ * How long the end of a run may wait for the evidence.
+ *
+ * The same bound the exit flush uses: the profile directory can be a network
+ * mount, and a run that has finished should not keep the UI busy while a slow
+ * disk is still settling.
+ */
+const RECORD_TIMEOUT_MS = 2000;
+
+/**
+ * Record, but never hold the caller longer than `timeoutMs`.
+ *
+ * `record()` settles after the write, which is what the run-exit path wants: the
+ * renderer refreshes the session as soon as it hears `run:exit`, and a record
+ * that has not landed yet would make a truncated session look clean again.
+ * The wait has to have an upper bound, though — the file lives in the profile
+ * directory, which can be a network mount, and an unbounded wait there means the
+ * app's own "the run is over" signal arrives whenever the disk gets around to
+ * it. So past the bound the caller is told `timeout` and carries on; the write
+ * stays queued, and a quit still waits for it (`flushBeforeQuit`).
+ */
+function recordBounded(store, repo, sessionId, result, timeoutMs = RECORD_TIMEOUT_MS) {
+  let timer;
+  const giveUp = new Promise((resolve) => {
+    timer = setTimeout(() => resolve({ ok: false, reason: "timeout" }), timeoutMs);
+  });
+  return Promise.race([
+    store.record(repo, sessionId, result).catch(() => IO_ERROR),
+    giveUp,
+  ]).then((outcome) => {
+    clearTimeout(timer);
+    return outcome;
+  });
+}
+
+/**
  * Keep the app from exiting before the evidence is on disk.
  *
  * Electron does not wait for pending promises when the main process exits, so
@@ -264,4 +301,13 @@ function flushBeforeQuit(app, store, timeoutMs = 2000) {
   });
 }
 
-module.exports = { createStore, normalizeRepo, MAX_ENTRIES, LIMIT_WARNING, flushNow, flushBeforeQuit };
+module.exports = {
+  createStore,
+  normalizeRepo,
+  MAX_ENTRIES,
+  LIMIT_WARNING,
+  RECORD_TIMEOUT_MS,
+  recordBounded,
+  flushNow,
+  flushBeforeQuit,
+};
