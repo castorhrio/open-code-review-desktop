@@ -42,7 +42,7 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-config-handler-"));
  *   - a dotted custom name that has no entry yet is refused outright (the
  *     `strings.Contains(name, ".")` guard added in v1.13.1, 8eb8334).
  */
-const makeStub = ({ providers = {}, customProviders = {}, registry = ["deepseek"], savedKey } = {}) => {
+const makeStub = ({ providers = {}, customProviders = {}, registry = ["deepseek"], presetRegistry, savedKey } = {}) => {
   const state = {
     providers: structuredClone(providers),
     custom_providers: structuredClone(customProviders),
@@ -126,6 +126,7 @@ const makeStub = ({ providers = {}, customProviders = {}, registry = ["deepseek"
     readConfigView: () => view(),
     presetRegistry: async (options) => {
       registryCalls.push(options || {});
+      if (presetRegistry) return presetRegistry(options);
       return {
         ok: true,
         names: registry,
@@ -203,6 +204,59 @@ check(
   );
 }
 
+/* ---- a blank Key means "leave the saved one alone" ----
+ * The form shows an empty Key field when one is already saved. Saving with it
+ * blank must not push `api_key: ""`: empty is not the user asking to clear the
+ * Key, it is the field having nothing new to say. Clearing has its own channel
+ * (`removeEntry`), so a blank field neither writes nor erases.
+ */
+{
+  const stub = makeStub({ providers: { DeepSeek: { api_key: "sk-old" } } });
+  const h = make(stub);
+  const res = await h.save(null, {
+    provider: "DeepSeek",
+    isCustom: false,
+    apiKey: "",
+    model: "deepseek-reasoner",
+    setActive: true,
+  });
+  check("a save with a blank Key succeeds", res.ok === true, res.error);
+  check(
+    "and no api_key pair is written",
+    !stub.setPairs.some(([key]) => key === "providers.DeepSeek.api_key"),
+    JSON.stringify(stub.setPairs)
+  );
+  check(
+    "the saved Key is still there",
+    stub.state.providers.DeepSeek?.api_key === "sk-old",
+    JSON.stringify(stub.state.providers)
+  );
+}
+
+/* ---- a typed Key overwrites the saved one with the typed value ---- */
+{
+  const stub = makeStub({ providers: { DeepSeek: { api_key: "sk-old" } } });
+  const h = make(stub);
+  const res = await h.save(null, {
+    provider: "DeepSeek",
+    isCustom: false,
+    apiKey: "sk-new",
+    model: "deepseek-reasoner",
+    setActive: true,
+  });
+  check("a save with a typed Key succeeds", res.ok === true, res.error);
+  check(
+    "the typed Key is written as the new value",
+    stub.setPairs.some(([key, value]) => key === "providers.DeepSeek.api_key" && value === "sk-new"),
+    JSON.stringify(stub.setPairs)
+  );
+  check(
+    "and replaces the saved Key",
+    stub.state.providers.DeepSeek?.api_key === "sk-new",
+    JSON.stringify(stub.state.providers)
+  );
+}
+
 /* ---- a spelling collision is refused before the first write ----
  * The config already has `providers.deepseek`; the form says `DeepSeek`. The
  * resolver indexes `cfg.Providers[cfg.Provider]` by the raw string, so saving
@@ -258,6 +312,41 @@ check(
     "the custom section is still checked by its own spelling",
     res.ok === false && stub.calls.length === 0 && res.error.includes("my.gateway"),
     JSON.stringify(res)
+  );
+}
+
+/* ---- a registry that did not answer refuses both spellings ----
+ * Without the registry, the handler cannot know which section the CLI will
+ * read for "DeepSeek" (`providers` for a built-in name, `custom_providers` for
+ * anything else). The entry below sits in `custom_providers`, so a check that
+ * only looked at `providers` would let the save through and split the entry.
+ * Refusing is deliberate: a rejected save is cheaper than a second entry whose
+ * Key the run never opens.
+ */
+{
+  const stub = makeStub({
+    customProviders: { deepseek: { api_key: "sk-old" } },
+    presetRegistry: async () => ({ ok: false, names: [], rows: [], matched: 0, error: "registry unavailable" }),
+  });
+  const h = make(stub);
+  const res = await h.save(null, {
+    provider: "DeepSeek",
+    isCustom: false,
+    apiKey: "sk-new",
+    model: "deepseek-chat",
+    setActive: true,
+  });
+  check("a save is refused when the registry cannot say which section the CLI reads", res.ok === false, JSON.stringify(res));
+  check("and nothing was written to the CLI", stub.calls.length === 0 && stub.setPairs.length === 0, `${stub.calls.length} calls`);
+  check(
+    "the refusal names both spellings here too",
+    res.error.includes("deepseek") && res.error.includes("DeepSeek"),
+    res.error
+  );
+  check(
+    "the existing entry keeps the Key it had",
+    stub.state.custom_providers.deepseek?.api_key === "sk-old" && stub.state.providers.DeepSeek === undefined,
+    JSON.stringify(stub.state)
   );
 }
 

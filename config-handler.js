@@ -72,7 +72,12 @@ function makeConfigHandlers(options) {
     const isPreset = known && presetList.names.some((knownName) => String(knownName).toLowerCase() === name.toLowerCase());
     const sections = known
       ? [isPreset ? view && view.providers : view && view.customProviders]
-      : [view && view.providers, view && view.customProviders]; // the registry did not answer: check both
+      // The registry did not answer: check both. Refusing a save we might not
+      // have needed to refuse is deliberate — without the registry the desktop
+      // cannot tell which section the CLI will read, so it cannot know the entry
+      // it leaves behind is harmless. A rejected save costs a retry; a split
+      // entry costs a Key the run silently never reads.
+      : [view && view.providers, view && view.customProviders];
     for (const section of sections) {
       for (const key of Object.keys(section || {})) if (key === name) return "";
     }
@@ -103,6 +108,9 @@ function makeConfigHandlers(options) {
       if (form.url) pairs.push([`providers.${name}.url`, form.url]);
       if (form.protocol) pairs.push([`providers.${name}.protocol`, form.protocol]);
     }
+    // A blank Key means "leave the saved one alone", not "erase it": the form
+    // is empty whenever one is already stored. Clearing goes through
+    // `removeEntry`, so this branch must not write an empty value either.
     if (form.apiKey) pairs.push([`providers.${name}.api_key`, form.apiKey]);
     if (form.model) pairs.push([`providers.${name}.model`, form.model]);
     // Saving an entry must not silently switch the active service; the caller
