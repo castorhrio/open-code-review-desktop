@@ -4,13 +4,13 @@
 规则见 [`OCR-UPSTREAM-SYNC.md`](OCR-UPSTREAM-SYNC.md)：每轮至少检查一次上游，
 有更新就记在这里，不要静默忽略。
 
-本文件只留**现状**：上游状态表、待办、最近两轮的正文。第 2–17 轮的加固正文和
+本文件只留**现状**：上游状态表、待办、最近两轮的正文。第 2–21 轮的加固正文和
 已经划掉的待办搬到了 [`hardening-log.md`](hardening-log.md)——表和十几轮正文
 挤在一个文件里，正是那张表漏过四行的温床。
 
 ---
 
-## 上游状态（最近检查：2026-10-26，第 23 轮复核）
+## 上游状态（最近检查：2026-10-26，第 24 轮复核）
 
 上游 `alibaba/open-code-review` 自 desktop 锁定的 `v1.13.0` 之后发布了
 **3 个补丁版本**：`v1.13.1` / `v1.13.2` / `v1.13.3`（共 18 个 commit）。
@@ -46,8 +46,9 @@ desktop 的依赖已升到 `^1.13.3`（`package.json` / `package-lock.json`）�
 | 21 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（`git fetch upstream --tags` + GitHub API 三核对：commits / tags / releases；顶端 commit 与 tag 均未变） |
 | 22 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（`git fetch upstream --tags` + GitHub API 核对 commits / tags；顶端 commit 与 tag 均未变） |
 | 23 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（`git fetch upstream --tags` + GitHub API 双核对 commits / tags；顶端 commit 与 tag 均未变） |
+| 24 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（`git fetch upstream --tags` + GitHub API 双核对 commits / tags；顶端 commit 与 tag 均未变） |
 
-结论：第 2–12、14–23 轮都没有需要移植的新功能 / 修复 / 破坏性变更，desktop 的
+结论：第 2–12、14–24 轮都没有需要移植的新功能 / 修复 / 破坏性变更，desktop 的
 封装（CLI flag、输出解析、配置暴露点）无需改动；第 13 轮没有留下复核记录。
 顶端 commit 仍是 `375f64c`（2026-10-20，`fix(tool): report an empty code_comment
 batch instead of success (#1773)`），最新 tag / release 仍是 `v1.13.3`。
@@ -184,31 +185,49 @@ error string。`revealPath` 的祖先回退分支（配置文件还没保存过�
 
 ---
 
-## 第 21 轮 desktop 侧加固（与上游无关）
+## 第 24 轮 desktop 侧加固（与上游无关）
 
-上游本轮无新提交（顶端仍是 `375f64c` / `v1.13.3`，见上面第 21 轮复核）。
+上游本轮无新提交（顶端仍是 `375f64c` / `v1.13.3`，见上面第 24 轮复核）。
 
-### P0 — 保存的写序钉住：先把条目写完，再让运行指向它
+### P0 — 简报点的「`shell.openPath` 抛异常」缺口，已经补过了（本轮只补证据）
 
-`save` 把若干 `config set` 依次发出去，第一个被拒就停。所以顺序决定了「保存到一半」
-已经做了什么：`provider` 若先发，后面 Key 被拒时配置已经指向一个没有 Key 的条目，
-下一次运行会以「Key 不对」失败——而 Key 本身没错。`config-handler.js` 现在把这层
-理由写在生成 pair 的地方；`tools/config-handler-smoke.mjs` 用两条精确序列断言
-（内置服务 / 自定义服务）加一条后果断言（Key 被拒后 `provider` 仍停在原服务、
-新拼写下没有半成品条目）。
+简报要求补 `shell.openPath` 直接 `throw` 的夹具，`b820943` 已经补了三条：`revealPath`
+的 `open-parent` 分支、`openDir`、`openFile`。本轮不改代码，只把「这三条真的会红」验一遍：
+把 `install-info.js` 的 `openPathAnswer()` 退回成 `return { error: await shell.openPath(target) }`
+（即去掉 try/catch），`npm run audit:install` **8 条变红**（三个动作各自的
+`{ ok: false, error }`、`action` / `path`、`openFile` 的 `reason: "open-failed"`），
+改回来 `all ok`。所以这一条在 `b820943` 之后**不再是缺口**，简报里的描述是那一轮之前的。
 
-**实测**：把 `provider` 挪到最前面 → 6 条变红。
+### P1 — `requireBuilt()` 现在也看夹具与构建配置
 
-### P1 — 被拒的 `code_comment` 批次不再算成一条评论
+`bf727fc` 把 build 从每个 harness 自己的命令行里挪到 `npm run audit` 的一次构建，
+`requireBuilt()` 于是成了「bundle 会不会是旧的」唯一一道门——但它当时只比 `src/`。
+夹具（`tools/ui-audit/fixtures.mjs`、`audit.mjs` 里的断言）改了、`out/` 还是上一版，
+正是这道门想拦的场景，却能全绿通过。
 
-上游 `v1.13.3`（`375f64c`）把空批次从「成功」改成「错误」，CLI 的收尾行于是从
-`✔ code_comment` 变成 `✗ code_comment failed: Error: none of the 'comments'
-entries could be filed; …`。`ocr-service.js` 的计数器对每条收尾行都 `+1`，于是
-一个什么都没写进去的批次会让运行页显示「已产出 1 条评论」。现在只有 `✔` 计入；
-`SUMMARY_RE` 的 `Number(m[2]) || progress.comments` 也改成直接取 CLI 的总数——
-「0 comment(s)」是结论，不是「没有新消息」。
+- `tools/ui-audit/playwright.mjs`：`requireBuilt()` 现在取 `src/`、`tools/ui-audit/`、
+  `vite.config.mjs` 三处的**最新** mtime 与 `out/index.html` 比，报错时点名是哪一处更新的。
+- `newestMtime()` 跳过 `tools/ui-audit/shots/`：那是**审计自己写出来的**产物，算进来
+  会让「跑过一次审计」变成「bundle 过期」，第二次跑必红。
+- `audit.mjs` / `contrast.mjs` / `tools/e2e-flow.mjs` / `tools/electron-guards.mjs`
+  四个入口共用这一道门，所以四处的判断不会漂。
 
-**实测**：去掉 `mark !== "✗"` → 1 条变红；改回 `|| progress.comments` → 1 条变红。
+**实测**：`touch tools/ui-audit/fixtures.mjs` → `requireBuilt()` 以 `exit=2` 拒绝并点名
+`tools/ui-audit/`；`npm run build` 之后同一条命令通过；`touch tools/ui-audit/shots/*.png`
+之后仍然通过（跳过生效）。
+
+### P1 — README 里的实测数字搬进 `docs/measurements.md`
+
+这条在待办里挂了十一轮。README 的 Status 段承诺的是**能力**（能渲染 1200 条、有耗时
+上限断言、真机跑通过一次全量扫描），不是某台机器上某一次的毫秒数和 token 数——后者会腐，
+腐了之后没有任何检查会红。
+
+- 新增 `docs/measurements.md`：`405ms` / `8s` 上限 / `1200` 条、`103K token / 3m36s`、
+  `173K token / 1m41s`、`3m48s / 6 findings / 10 tool calls` 这些历史实测值，连同日期、
+  来源与复现方式（`SHOT=75-report-huge npm run audit:ui` 每次都会打印当次毫秒数）。
+- `README.md` / `README.zh-CN.md`：三处（真机全量扫描、千级结果页、`project_summary`
+  验证）改成能力描述 + 指向那一份；`1200` 条这个**夹具规模**留着——它是夹具事实，不是
+  某次测量。
 
 ---
 
@@ -257,18 +276,10 @@ provider 目录、上游 CI 的 PR 策略），正文搬去了
 「一次运行结束时的三句话归到一个去处」钉住，第 18 轮把这个去处接到 `run:log`
 并给 `REF_LIMIT` 的命名 bases 补上截断断言，第 20 轮把 `log` / `warn` 两个可注入点
 收成一个 `sink`，并给 `removeEntry` 的失败补上夹具，第 23 轮把 `revealPath` 读起
-`shell.openPath` 的返回值、给 `readdir` 抛错补上夹具；剩下的按优先级排在这里，下一轮挑。标注「**未动**」的条目是
+`shell.openPath` 的返回值、给 `readdir` 抛错补上夹具，第 24 轮把 `requireBuilt()` 的门扩大到
+夹具与 `vite.config.mjs`、把 README 的实测值搬进 `docs/measurements.md`；剩下的按优先级排在这里，下一轮挑。标注「**未动**」的条目是
 最近一轮看过、确认仍然成立但没有改的——不是新发现。
 
-- **P2**：README 的 Status 段落里有**一次实测值**（`1200 findings` / `405ms` /
-  `8s ceiling`）。实测数字会腐，腐了之后没有任何测试会红。README 承诺的应该是**能力**
-  （能渲染 1200 条、有 8s 预算），不是某次跑出来的毫秒数——把数字挪进 `docs/`，或
-  改成「实测值见 `tools/ui-audit/` 的输出」。文件 `README.md` / `README.zh-CN.md`。
-  ——**未动**（第 12 轮只做了断言，没碰 README）。
-- **P2**：`audit:ui` / `audit:ui-scaled` / `audit:contrast` / `audit:guards` /
-  `audit:e2e` 每个脚本前面都各带一次 `npm run build`，一次完整 audit 要 build 五次。
-  合并成一次（让 `audit` 脚本先 build 一次，后面的检查都假设 `out/` 存在）能省掉
-  四次构建。文件 `package.json`。——**未动**。
 - **P2**：`git-service.js` 的 `REF_LIMIT` 排序里，`upstream` 是完整名（`origin/main`），
   而 `refs` 里是剥掉 remote 前缀的 `main`；两者指向同一 commit 时各占一个名额、
   各跑一次 `rev-list`，`relations` 里留下两个键（界面只按 `refs` 里的名字查，

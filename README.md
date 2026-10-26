@@ -21,10 +21,10 @@ Verified end-to-end against the real CLI, without spending tokens:
 - failure output handling, session listing / loading / HTML export / deletion, `ocr rules check`, `ocr llm providers` parsing
 - the packaged app boots and reaches the bundled binary
 - the run log streams the CLI's own progress lines live (`full-scan: N file(s) discovered`, `estimated cost: …`, `scan dispatch: …`, `Session: …`, per-file exclusions and failures) while keeping the failure payload out of it
-- a completed whole-file scan against a live provider: 1 file, 4 findings, 103K tokens, 3m36s — the results page renders that payload
+- a completed whole-file scan against a live provider — the results page renders that payload (the run's own token count and duration are in [`docs/measurements.md`](docs/measurements.md))
 - live progress during a run (files discovered, completed tool calls, comments so far, the CLI's own cost estimate), with per-tool-call chatter counted rather than streamed; large scans are gated behind an explicit size/cost confirmation
 - `ocr llm test` against a live provider, including the tool-call round trip
-- the two results surfaces at four figures: `?huge=1` mounts 1200 findings — every row in the triage list, every block in 阅读 — in 405ms, asserted against an 8s ceiling; neither virtualises, and that measurement is the reason
+- the two results surfaces at four figures: `?huge=1` mounts 1200 findings — every row in the triage list, every block in 阅读 — and the audit prints that mount time on every run and fails it past a ceiling; neither virtualises, and that measurement is the reason (the measured numbers live in [`docs/measurements.md`](docs/measurements.md), not here)
 - rendering at 125% and 150% system scale: the visual audit re-runs its eight tightest shots at both device pixel ratios, green at each
 - a run cut short by a limit is not clean: the CLI's `review_limit_reached` warning (upstream v1.13.1) and `summary.budget_exceeded` are read, so a run that stopped at the limit and found nothing says so instead of claiming the code is fine — on both results surfaces
 - the code beside a finding is the code that was reviewed: against a real repository with a dirty working copy, a review at `HEAD` shows the committed file, a review at another branch shows that branch, and a file that is not in the ref fails loudly instead of being answered with the working copy
@@ -33,7 +33,7 @@ Verified end-to-end against the real CLI, without spending tokens:
 - a run that could not start is reported once: a process that cannot be spawned emits both an error and a close, and the app used to show the same failure twice, as two toasts and two log lines
 - a failed run says why, in the report itself: the CLI's own `manifest.run_failure` classification is translated (a timeout, a configuration problem, a spent budget — each a different next step) and written into the report next to the findings, so the document a reader forwards says why it is not the whole review; the CLI's own reason is quoted under it, labelled as the CLI's words
 
-**Verified 2026-10-13**: a real full scan (12 files, 8 comments, 173K tokens, 1m41s) emitted a sectioned `project_summary`, and the band rendered that real text, capped and faded. Whether a run emits one is the CLI's decision — a workspace run over the same repo with 2 comments emitted none — so this project promises only to render it when present. Sessions still never persist it, so a session result showing no band remains correct behaviour, not missing rendering. A real review's findings themselves do render — a completed scan's 4 comments were loaded from its session and shown in the results list.
+**Verified against a real full scan**: a real full scan emitted a sectioned `project_summary` (that run's size and duration are in [`docs/measurements.md`](docs/measurements.md)), and the band rendered that real text, capped and faded. Whether a run emits one is the CLI's decision — a workspace run over the same repo with 2 comments emitted none — so this project promises only to render it when present. Sessions still never persist it, so a session result showing no band remains correct behaviour, not missing rendering. A real review's findings themselves do render — a completed scan's 4 comments were loaded from its session and shown in the results list.
 
 ## Why a GUI
 

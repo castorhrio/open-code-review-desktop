@@ -1,6 +1,6 @@
 # desktop 加固日志（历史归档）
 
-第 2–16 轮的加固正文，和已经划掉的待办条目，都搬到了这里。
+第 2–21 轮的加固正文，和已经划掉的待办条目，都搬到了这里。
 **现在该看的是 [`next-iteration.md`](next-iteration.md)**：上游状态、
 本轮待办、最近两轮的正文都在那里。
 
@@ -1045,6 +1045,34 @@ desktop 恰恰读不到那张表，所以它没有资格替用户选一条。
 
 ---
 
+## 第 21 轮 desktop 侧加固（与上游无关）
+
+上游本轮无新提交（顶端仍是 `375f64c` / `v1.13.3`，见上面第 21 轮复核）。
+
+### P0 — 保存的写序钉住：先把条目写完，再让运行指向它
+
+`save` 把若干 `config set` 依次发出去，第一个被拒就停。所以顺序决定了「保存到一半」
+已经做了什么：`provider` 若先发，后面 Key 被拒时配置已经指向一个没有 Key 的条目，
+下一次运行会以「Key 不对」失败——而 Key 本身没错。`config-handler.js` 现在把这层
+理由写在生成 pair 的地方；`tools/config-handler-smoke.mjs` 用两条精确序列断言
+（内置服务 / 自定义服务）加一条后果断言（Key 被拒后 `provider` 仍停在原服务、
+新拼写下没有半成品条目）。
+
+**实测**：把 `provider` 挪到最前面 → 6 条变红。
+
+### P1 — 被拒的 `code_comment` 批次不再算成一条评论
+
+上游 `v1.13.3`（`375f64c`）把空批次从「成功」改成「错误」，CLI 的收尾行于是从
+`✔ code_comment` 变成 `✗ code_comment failed: Error: none of the 'comments'
+entries could be filed; …`。`ocr-service.js` 的计数器对每条收尾行都 `+1`，于是
+一个什么都没写进去的批次会让运行页显示「已产出 1 条评论」。现在只有 `✔` 计入；
+`SUMMARY_RE` 的 `Number(m[2]) || progress.comments` 也改成直接取 CLI 的总数——
+「0 comment(s)」是结论，不是「没有新消息」。
+
+**实测**：去掉 `mark !== "✗"` → 1 条变红；改回 `|| progress.comments` → 1 条变红。
+
+---
+
 ## 已经划掉的待办（历史）
 
 这些条目在写下时是开放的，现在都收掉了。留着它们是为了让「当时认为
@@ -1164,3 +1192,15 @@ desktop 恰恰读不到那张表，所以它没有资格替用户选一条。
   `ENV_SOURCES` 第三列按形态、第四列按 preset 归属；`providerEnvUrl` /
   `providerAnthropicBase` / `providerEnvToken` / `customEnvKey` 四条断言在看着。
   第 6 轮又补了 legacy 形态下 `ANTHROPIC_API_KEY` 仍算数的反向断言。
+
+- ~~README 的 Status 段落里留着一次实测值（`1200 findings` / `405ms` / `8s ceiling`）~~
+  → 第 24 轮做完：数字搬进 `docs/measurements.md`（带日期、来源、复现命令），
+  两份 README 只留能力描述。`1200` 这个夹具规模留在 README，因为它是夹具事实而不是
+  某次测量。原文里也记着这条待办挂着的原因：实测数字会腐，而腐掉的数字不会让任何检查
+  变红；能变红的是 `tools/ui-audit/` 里那条上限断言。详见上面第 24 轮。
+
+- ~~`audit:ui` / `audit:ui-scaled` / `audit:contrast` / `audit:guards` / `audit:e2e`
+  各自都带一次 `npm run build`，一次完整 audit 要 build 五次~~ → `bf727fc` 合并成一次：
+  `npm run audit` 先 build 一次，四个浏览器 harness 共用 `out/`，「bundle 比源码旧」
+  这件事改由 `requireBuilt()` 拒绝（第 24 轮再把这道门扩大到 `tools/ui-audit/` 与
+  `vite.config.mjs`）。条目挂在待办里的时候已经做完了，本轮复核时才发现。
