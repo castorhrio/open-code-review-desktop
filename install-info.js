@@ -39,6 +39,9 @@ function createInstall({
   // The `action` both ways of opening a directory answer with. One name, so the
   // plan's refusal and `openDir()`'s result cannot drift apart.
   const OPEN_DIR = "open-dir";
+  // 「用系统默认程序打开」 answers with its own name, so a failure report says
+  // which of the two buttons was pressed without the caller re-deriving it.
+  const OPEN_FILE = "open-file";
 
   // NSIS writes `Uninstall <productName>.exe` into the install root; scanning for
   // it is more robust than re-deriving the name from productName. A directory
@@ -154,7 +157,26 @@ function createInstall({
       : { ok: true, action: OPEN_DIR, path: target };
   }
 
-  return { installInfo, uninstallerPath, installDirPlan, uninstallPlan, revealPath, openDir };
+  // The third caller of `shell.openPath()` — 「用系统默认程序打开」 on a reviewed
+  // file — used to be a bare `() => shell.openPath(absPath)` in main.js, which
+  // hands the renderer a string: `""` when it worked, an error sentence when it
+  // did not. The renderer could only treat the truthy one as success, so a file
+  // that opened nothing looked like a file that opened. Reading the return value
+  // is the same contract `revealPath()` and `openDir()` above already implement,
+  // which is why the third reader lives beside them instead of in main.js.
+  //
+  // The two module names are separate on purpose: `open-dir` and `open-file`
+  // differ in `path` too (a directory vs. the file inside it), and a caller that
+  // logs or reports the action should not have to guess which was pressed.
+  async function openFile(target) {
+    if (!target) return { ok: false, error: "没有可打开的文件", action: OPEN_FILE, path: "" };
+    const error = await shell.openPath(target);
+    return error
+      ? { ok: false, error, action: OPEN_FILE, path: target }
+      : { ok: true, action: OPEN_FILE, path: target };
+  }
+
+  return { installInfo, uninstallerPath, installDirPlan, uninstallPlan, revealPath, openDir, openFile };
 }
 
 module.exports = { createInstall };

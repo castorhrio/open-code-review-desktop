@@ -311,6 +311,54 @@ for (const platform of ["darwin", "linux"]) {
   check("and the shell is left alone", shell.calls.open.length === 0);
 }
 
+/* ---------------- 用系统默认程序打开 a file ---------------- */
+
+{
+  // The third reader of `shell.openPath()`: 「用系统默认程序打开」 on a reviewed
+  // file. It used to be a bare `() => shell.openPath(absPath)` in main.js, which
+  // hands the renderer a string — `""` on success, a sentence on failure — so
+  // the renderer had no way to tell "no handler for .xyz" from "opened".
+  const shell = makeShell();
+  const tools = make({ packaged: true, resources: path.join(installed, "resources"), shell });
+  const target = path.join(installed, "Open Code Review.exe");
+  const res = await tools.openFile(target);
+  check("opening a file says which action it was", res.ok === true && res.action === "open-file" && res.path === target, JSON.stringify(res));
+  check("and the file is what got opened", shell.calls.open.length === 1 && shell.calls.open[0] === target);
+  check("opening a file never falls back to revealing it", shell.calls.reveal.length === 0);
+}
+
+{
+  const shell = makeShell("Failed to open path: no application for this file");
+  const tools = make({ packaged: true, resources: path.join(installed, "resources"), shell });
+  const target = path.join(installed, "Open Code Review.exe");
+  const res = await tools.openFile(target);
+  check(
+    "a file that could not be opened is reported, not swallowed",
+    res.ok === false && res.error === "Failed to open path: no application for this file",
+    JSON.stringify(res)
+  );
+  check("and the failure still names the action and the path", res.action === "open-file" && res.path === target, JSON.stringify(res));
+}
+
+{
+  const shell = makeShell();
+  const tools = make({ packaged: true, resources: path.join(installed, "resources"), shell });
+  const res = await tools.openFile("");
+  check("an empty file path is refused before the shell is asked", res.ok === false && res.action === "open-file" && res.path === "", JSON.stringify(res));
+  check("and the shell is left alone", shell.calls.open.length === 0);
+}
+
+{
+  // The action names stay apart on purpose: the renderer's two buttons are
+  // 「打开文件」 and 「在文件夹中显示」, and a failure report that called both
+  // `open-dir` would make the log say the wrong button was pressed.
+  const shell = makeShell("nope");
+  const tools = make({ packaged: true, resources: path.join(installed, "resources"), shell });
+  const file = await tools.openFile(path.join(installed, "Open Code Review.exe"));
+  const dir = await tools.openDir(installed);
+  check("a file failure and a directory failure do not share an action", file.action === "open-file" && dir.action === "open-dir");
+}
+
 {
   // The other half of the same shape: the plan's own refusal (there is no
   // directory to open) carries `action`/`path` too, so a caller can read the
@@ -428,6 +476,11 @@ for (const platform of ["darwin", "linux"]) {
   check("and it is the uninstaller that would not launch", /启动卸载程序失败/.test(uninstall));
   check("install-info.js answers the open-directory failure shape", /async function openDir\(\s*target\s*\)/.test(fs.readFileSync(path.join(ROOT, "install-info.js"), "utf8")));
   check("file:reveal returns what the module answered", /ipcMain\.handle\(\s*"file:reveal",\s*\(_e, absPath\)\s*=>\s*install\.revealPath\(absPath\)\s*\)/.test(main));
+  // `file:open` used to hand the renderer the raw string from `shell.openPath()`,
+  // which reads as success for `""` and as *anything* for a failure. It must go
+  // through the module now, and the module must be the one reading the answer.
+  check("file:open opens through the module", /ipcMain\.handle\(\s*"file:open",\s*\(_e, absPath\)\s*=>\s*install\.openFile\(absPath\)\s*\)/.test(main));
+  check("main.js no longer returns shell.openPath's raw string", !/ipcMain\.handle\(\s*"file:open"[^\n]*shell\.openPath/.test(main));
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });

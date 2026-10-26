@@ -66,7 +66,10 @@ export interface Bridge {
     ref?: string;
     pad?: number;
   }): Promise<FileWindow>;
-  openFile(absPath: string): Promise<string>;
+  /** Same shape as `revealFile`: `shell.openPath` fails by resolving to an error
+   *  string, so the main process reads it and answers `ok: false` — a bare string
+   *  would make "did not open" indistinguishable from "opened". */
+  openFile(absPath: string): Promise<{ ok: boolean; action?: "open-file"; path?: string; error?: string }>;
   revealFile(
     absPath: string
   ): Promise<{ ok: boolean; action?: "reveal" | "open-parent"; path?: string; missing?: string; error?: string }>;

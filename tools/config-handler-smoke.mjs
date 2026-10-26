@@ -599,6 +599,62 @@ check(
   check("and the old Key is still the only one", stub.state.providers.deepseek?.api_key === "sk-old" && !stub.state.providers.DeepSeek, JSON.stringify(stub.state));
 }
 
+/* ---- a hollow registry list still checks both sections ----
+ * The check above proves the empty list is not taken as knowledge, because the
+ * same-spelled entry sits in `providers` and a "custom name" reading would only
+ * have looked in `custom_providers`. These two pin the other half: with the list
+ * hollow, *both* sections are read, and *both* entries are named. Without them
+ * `spellingClash` could check only `providers` and stay green — which is the
+ * shape the earlier bug came in.
+ */
+{
+  // Only `custom_providers` holds a same-spelled entry. A handler that still
+  // treated `{ ok: true, names: [] }` as "every name is custom" would check
+  // exactly this section and pass, so the entry sits in `providers` above and in
+  // `custom_providers` here: one shape each way round.
+  const stub = makeStub({
+    customProviders: { deepseek: { api_key: "sk-custom" } },
+    presetRegistry: async () => ({ ok: true, names: [], rows: [], matched: 0, error: "" }),
+  });
+  const h = make(stub);
+  const res = await h.save(null, { provider: "DeepSeek", isCustom: false, apiKey: "sk-new", setActive: true });
+  check("a hollow registry list refuses a clash in custom_providers too", res.ok === false, JSON.stringify(res));
+  check(
+    "and that refusal points at custom_providers",
+    res.error.includes("deepseek") && sectionMentions(res.error).customProviders === 1 && sectionMentions(res.error).providers === 0,
+    res.error
+  );
+  check("nothing was written for it either", stub.calls.length === 0 && stub.setPairs.length === 0, `${stub.calls.length} calls`);
+}
+
+{
+  // Both sections hold one, spelled differently so the message has to say which
+  // is which. The two-entry advice is the only one that asks for every entry to
+  // be dealt with; a single-spelling pointer here is the unfixable refusal.
+  const stub = makeStub({
+    providers: { deepseek: { api_key: "sk-old" } },
+    customProviders: { DEEPSEEK: { api_key: "sk-other" } },
+    presetRegistry: async () => ({ ok: true, names: [], rows: [], matched: 0, error: "" }),
+  });
+  const h = make(stub);
+  const res = await h.save(null, { provider: "DeepSeek", isCustom: false, apiKey: "sk-new", setActive: true });
+  check("a hollow registry list refuses a clash in both sections", res.ok === false, JSON.stringify(res));
+  check("and lists both entries", res.error.includes("deepseek") && res.error.includes("DEEPSEEK"), res.error);
+  check(
+    "naming the section each one is in",
+    sectionMentions(res.error).providers === 1 && sectionMentions(res.error).customProviders === 1,
+    res.error
+  );
+  check("with the two-entry advice, not a single spelling", !res.error.includes("请改用已有的拼写") && res.error.includes("改掉或删掉"), res.error);
+  check(
+    "neither entry is touched",
+    stub.state.providers.deepseek?.api_key === "sk-old" &&
+      stub.state.custom_providers.DEEPSEEK?.api_key === "sk-other" &&
+      stub.state.provider === "",
+    JSON.stringify(stub.state)
+  );
+}
+
 /* ---- a dotted custom name is one name, not two segments ----
  * `my.gateway` already has a `custom_providers` entry, so upstream accepts the
  * field write and routes it there. The key has to stay `providers.my.gateway.

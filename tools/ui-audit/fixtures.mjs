@@ -1051,7 +1051,10 @@ window.api = (() => {
       return { ok: false, reason: "missing", ref: req.ref, path: req.path, error: "在 " + req.ref + " 中找不到 " + req.path };
     return { ok: true, path: req.path, absPath: "/home/x/work/payments-api/" + req.path, source: req.ref ? "git" : "worktree", ref: req.ref, totalLines: 180, firstLine: 72, lines: Array.from({length: 33}, (_, i) => ({ n: 72 + i, content: ["func (s *Service) Login(ctx context.Context, email, presented string) (*Token, error) {", "\tuser, err := s.repo.ByEmail(ctx, strings.ToLower(email))", "\tif err != nil {", "\t\treturn nil, ErrInvalidCredentials", "\t}", "\tstored, err := s.repo.PasswordHash(ctx, user.ID)", "\tif err != nil {", "\t\treturn nil, err", "\t}", "", "\t// TODO: constant-time compare", "\tif stored == presented {", "\t\treturn s.tokens.Issue(user)", "\t}", "\treturn nil, ErrInvalidCredentials", "}", "", "func (s *Service) Refresh(ctx context.Context, tok string) (*Token, error) {", "\tclaims, err := s.tokens.Verify(tok)", "\tif err != nil {", "\t\treturn nil, ErrInvalidCredentials", "\t}", "\treturn s.tokens.Issue(&model.User{ID: claims.Subject})", "}", "", "func (s *Service) Logout(ctx context.Context, tok string) error {", "\treturn s.tokens.Revoke(ctx, tok)", "}"][i % 29] || "" })) };
   },
-  openFile: async () => "",
+  // Both "open" buttons answer the same four fields, because both read the same
+  // `shell.openPath` contract (an error string, not a rejection). A stub that
+  // answered a bare string here would let a broken call site look fine.
+  openFile: async () => ({ ok: true, action: "open-file", path: "/home/x/work/payments-api/src/service.go" }),
   revealFile: async () => ({ ok: true, action: "reveal", path: "" }),
   saveText: async () => ({ ok: true, file: "C:/tmp/out.json" }),
   openUrl: async () => true,

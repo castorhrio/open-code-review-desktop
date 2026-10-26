@@ -128,7 +128,20 @@ function FileViewer({
             <Button variant="ghost" size="sm" onClick={() => void copyText(file.absPath || "", "文件绝对路径")}>
               复制路径
             </Button>
-            <Button variant="ghost" size="sm" title="用系统默认程序打开" onClick={() => file.absPath && void api.openFile(file.absPath)}>
+            <Button
+              variant="ghost"
+              size="sm"
+              title="用系统默认程序打开"
+              onClick={async () => {
+                if (!file.absPath) return;
+                // `openPath` fails by resolving to an error string, so the main
+                // process reads it and answers `{ ok, error }`. Ignoring it here
+                // (what this button used to do) means a file with no handler
+                // looks exactly like one that opened.
+                const res = await api.openFile(file.absPath);
+                if (!res.ok) toast.error("无法打开", { description: res.error });
+              }}
+            >
               <ExternalLink className="size-3.5" />
             </Button>
             <Button

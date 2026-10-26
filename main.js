@@ -304,7 +304,11 @@ ipcMain.handle("file:read", async (_e, req) =>
   })
 );
 
-ipcMain.handle("file:open", (_e, absPath) => shell.openPath(absPath));
+// `shell.openPath()` resolves to an error string rather than rejecting, so the
+// answer has to be read. `install.openFile()` does that and answers the same
+// `{ ok, error, action, path }` shape as `file:reveal`; returning the raw string
+// (what this line used to do) told the renderer a file opened when it did not.
+ipcMain.handle("file:open", (_e, absPath) => install.openFile(absPath));
 
 ipcMain.handle("file:reveal", (_e, absPath) => install.revealPath(absPath));
 
