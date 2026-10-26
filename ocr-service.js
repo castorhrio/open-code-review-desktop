@@ -606,6 +606,20 @@ function resetPresetCache() {
  * `refresh` is the settings page's 刷新 button; `runner` and `now` exist so the
  * retry policy can be asserted without waiting on a clock or breaking a binary
  * on purpose.
+ *
+ * This is the *only* read of the built-in table, and both of the answers the
+ * settings page gets come from it: the config view (`presetRegistry`) and the
+ * Key decision (`savedKeyLookupByName`). That is deliberate — the two are
+ * separate IPC calls, and if each read the table for itself they could disagree
+ * about the same moment: one would say "the built-in list is unreadable" (the
+ * banner) while the other said "your Key is fine" (the sentence under the Key
+ * field), and the two would be about the same table.
+ *
+ * So the rule is: within one process the two answers cannot disagree, and the
+ * only thing that may change the table's state is a `refresh` (the 刷新 button)
+ * or the failure window expiring. The renderer takes the same view — the banner
+ * follows the *latest* answer rather than the config view's — so a window that
+ * expired between the two calls changes both, not one.
  */
 async function providerTable({ refresh = false, runner = exec, now = Date.now } = {}) {
   if (refresh) resetPresetCache();

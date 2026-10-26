@@ -1629,6 +1629,91 @@ check(
 svc.resetPresetCache();
 fs.rmSync(presetDir, { recursive: true, force: true });
 
+/* ---- one table, two answers ----
+ * The settings page gets two separate answers about the same built-in table:
+ * the config view (`config:read`) and the Key decision (`config:savedKey`). If
+ * each of them read the table for itself, the two could disagree about the
+ * same moment — one saying "the built-in list is unreadable" (the banner)
+ * while the other said "your Key is fine" (the sentence under the Key field) —
+ * and both would be about the same table. The window where a failed read is
+ * remembered is exactly where that happens: the first call fails, the second
+ * call is answered from the remembered failure or from a fresh read, and the
+ * two answers describe different worlds.
+ *
+ * So they share one read, and the checks below hold them to it: the binary is
+ * spawned once, and both answers describe that one read. A second spawn is a
+ * second read, and a second read can fail where the first succeeded.
+ */
+const tableRunner = (result) => {
+  const calls = [];
+  return {
+    calls,
+    runner: () => {
+      calls.push(1);
+      return result;
+    },
+  };
+};
+const TABLE_OK = {
+  code: 0,
+  stdout: [
+    "NAME      PROTOCOL  BASE URL",
+    "--------  --------  --------",
+    `deepseek  openai    ${DEEPSEEK_URL}`,
+    "",
+  ].join("\n"),
+  stderr: "",
+};
+const TABLE_BAD = { code: 1, stdout: "", stderr: "ocr: not found" };
+const sharedDir = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-shared-table-"));
+const sharedFile = path.join(sharedDir, "config.json");
+fs.writeFileSync(sharedFile, JSON.stringify(presetKey));
+
+// The config view reads first, the Key decision second — the order the
+// settings page asks in.
+svc.resetPresetCache();
+const oneRead = tableRunner(TABLE_OK);
+const sharedRegistry = await svc.presetRegistry({ runner: oneRead.runner });
+const sharedLookup = await svc.savedKeyLookupByName("DeepSeek", DEEPSEEK_URL, sharedFile, { runner: oneRead.runner });
+check(
+  "the config view and the Key decision read the built-in table once",
+  oneRead.calls.length === 1,
+  `${oneRead.calls.length} reads`
+);
+check(
+  "and both answers describe that one read",
+  sharedRegistry.ok === true && sharedLookup.tableOk === true,
+  `${sharedRegistry.ok} | ${sharedLookup.tableOk}`
+);
+// And the other way round, because a call site may be added in either order.
+svc.resetPresetCache();
+const oneReadOther = tableRunner(TABLE_OK);
+await svc.savedKeyLookupByName("DeepSeek", DEEPSEEK_URL, sharedFile, { runner: oneReadOther.runner });
+const sharedRegistryAfter = await svc.presetRegistry({ runner: oneReadOther.runner });
+check(
+  "the same holds when the Key decision comes first",
+  oneReadOther.calls.length === 1 && sharedRegistryAfter.ok === sharedLookup.tableOk,
+  `${oneReadOther.calls.length} reads | ${sharedRegistryAfter.ok}`
+);
+// A read that fails is one failure for both answers: the second one is answered
+// from the remembered failure rather than from a new read, so the banner and
+// the Key sentence cannot describe different worlds.
+svc.resetPresetCache();
+const failedRead = tableRunner(TABLE_BAD);
+const failedRegistry = await svc.presetRegistry({ runner: failedRead.runner });
+const failedLookup = await svc.savedKeyLookupByName("DeepSeek", DEEPSEEK_URL, sharedFile, { runner: failedRead.runner });
+check(
+  "a table that cannot be read is one failure for both answers",
+  failedRegistry.ok === false && failedLookup.tableOk === false && failedRead.calls.length === 1,
+  `${failedRegistry.ok} | ${failedLookup.tableOk} | ${failedRead.calls.length} reads`
+);
+check(
+  "and the Key is withheld for that reason, not for a missing entry",
+  failedLookup.key === "" && failedLookup.reason === svc.KEY_WITHHELD_TABLE,
+  `${failedLookup.reason} | ${failedLookup.key}`
+);
+fs.rmSync(sharedDir, { recursive: true, force: true });
+
 /* ---- one rule, two ends ----
  * The settings page asks the main process "may I leave the Key blank for what
  * this form is pointed at?", and the main process answers by comparing the
