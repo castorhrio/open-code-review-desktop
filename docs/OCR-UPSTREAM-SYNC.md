@@ -12,40 +12,49 @@
 4. **不要**静默忽略上游 release：每轮把结论写进下面「当前状态」，并把上一轮的正文搬到
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。
 
-## 当前状态（第 69 轮，2026-10-27）
+## 当前状态（第 70 轮，2026-10-27）
 
-第 69 轮复核：**HEAD 未变，结论仍是「无新内容」；git 通路本轮可达。**
+第 70 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 两条通路都可达。**
 `git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
 refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
-（与第 49–68 轮同一个 commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
-`dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`（`--tags` 里最高版本仍是 `v1.13.3`）；
+（与第 49–69 轮同一个 commit），`--tags` 里最高版本仍是 `v1.13.3`；
 `npm view @alibaba-group/open-code-review version dist-tags` 仍是 `1.13.3` /
 `latest: 1.13.3`。desktop 的 `^1.13.3` 无需改动，**无移植项**。
 
-本轮不加新产品面，只把「pin 前进」这件事自己的后果变成断言：
+本轮不加上游面，做的是「承诺要么能被机器验证、要么就得说清楚」这件事：
 
-- **`[UPSTREAM-MOVED]` 现在自己点名要重读的 5 处对照点。** 此前 moved 分支只列出
-  四行，而对照表有 5 行——第五行（内置服务表**为空**是否合法，`llm_cmd.go`）只有
-  翻开本文件的人才会知道。现在 `ROWS_TO_REREAD`（`tools/upstream-watch.mjs`）是
-  5 个 `{ label, source, note }`：`source` 就是对照表「上游文件」列里的那个字符串，
-  moved 分支逐行打印 `序号. 对照点 —— 文件名（看什么）`。于是「pin 前进」这个事件
-  本身就给出阅读清单，不依赖人记得翻本文档。
-- **清单与对照表改成双射断言，而不是「标签出现在文档某处」。** 新增纯函数
-  `tableRowCoverage(doc)`（同文件）：按对照表的表头（`对照点` / `上游文件` 两列）取表体行，回答
-  每条 `source` 落在哪一行（`missing` = 清单里有、表里没有；`orphans` = 表里有、
-  清单里没有；`duplicated` = 一行被两处认领）。`audit:upstream` 断言表体行数等于
-  清单长度、三者皆空；`smoke` 还用真文档的两份副本各做一次负例——删掉 `llm_cmd.go`
-  那一行要求 `missing` 恰好点名它，插入一条新对照点要求 `orphans` 恰好点名它的行号，
-  且两份副本都只与原文差一行（否则红的原因可能是别处）。
-- **`formatDrift` 的清单是参数，不是字面量。** 传进去的 `rows` 决定打印几行与
-  「下面 N 处对照点」的 N；smoke 传一份四条清单，要求 `llm_cmd.go` 从输出里消失、
-  N 变成 4——否则「五行都在」可以在句子根本不读清单的情况下绿。
-- **P0-2 复核结论：`save` → `spellingClashMessage` 的 tie 断言已存在，本轮不写码。**
-  `tools/config-handler-smoke.mjs` 的 `refusalOf` 用 stub 的 `readConfigView()` 调
-  handler 自己的 `spellingClash` + `spellingClashMessage`，`saidVerbatim` 断言
-  `res.error === answer.message`（真句逐字），`entriesAre` 断言 `entries` 的
-  name/section 逐条相等且顺序一致；两处在五个用例里都被引用（内置名、自定义名、
-  同段两条、两段各一条、服务表静默 / 空表）。已有断言足够，不再加重复的一条。
+- **设置页不再可能因为 CLI 不回话而空白。** `app:info` 是设置页打开时唯一等着的那个
+  IPC，而它以前直接 `await ocr.exec(["version"])`：二进制被杀软占用、放在网络盘上，
+  或者 spawn 之后再也不 `close`，这个 promise 就永远 pending——页面一片空白，而且不
+  解释。现在这条取数路径有两层预算：`ocr-service.js` 的
+  `exec(args, cwd, env, { timeoutMs })` 到点 `kill()` 子进程（进程也不该留着），
+  `app-info.js` 的 `readVersionOutput` 在外层再等 `timeoutMs + 500ms` 的宽限，
+  **即使 `exec` 根本不理会那个预算**也照样有答案。取不到版本不是错误：`formatAppInfo`
+  把它读成 `version: ""`，页面仍拿到一个字段齐全的对象（二进制、配置路径、安装事实
+  都在）。`exec` 是注入参数，所以「服务挂死」这个形状在 `audit:appinfo` 里造得出来，
+  不必真去坏一台机器。
+- **「哪条命令可以恒绿」这件事自己进了断言。** 本文档此前把「退出码恒为 0、只报告不
+  失败」写在 `audit:upstream` 名下，而 `audit:upstream` 跑的正是这套断言本身——一句话
+  把下面所有 pin / 对照表 / 通路账的检查说成了装饰。现在这句话只属于哨兵
+  `upstream:check`，并由 `tools/upstream-watch-smoke.mjs` 钉住三件事：
+  `package.json` 里 `audit:upstream` → `tools/upstream-watch-smoke.mjs`、
+  `upstream:check` → `tools/upstream-watch.mjs`（两个脚本名只差一个词，正是会被换错的
+  地方）；这句话必须点名 `upstream:check`、不许把它归给 `audit:upstream`；**并且真的把
+  本文件当子进程再跑一次**（`OCR_UPSTREAM_WATCH_SELFTEST=1` 注入一条必红的检查），要求
+  子进程 `exit 1` 且 stderr 点名那条注入的失败——否则「failures 非空」可以在没走到
+  `process.exit` 的情况下继续打印 ok。
+- **通路账的轮次连续性也进了断言。** 此前只读末行，从中间删掉一行不会红，而「连续几轮
+  没核对 HEAD」正是这张表要回答的问题；现在要求轮次是连续整数、每轮恰好一行、不重复。
+- **P0-2 复核结论：`readFileAtRef` 的措辞漂移已经有断言，本轮不写码。**
+  `tools/git-service-smoke.mjs` 用桩 `spawn` 把九种 stderr 逐个喂进真函数：三种
+  `bad-ref` 措辞、三种 `missing` 措辞、两种「谁也不认识的改写」，以及一条中文 stderr
+  （`致命错误：无效的对象名称`）——后者必须落到 `failed`，且句子含 `退出码 128`。
+  把分类抽成 `classifyShowFailure` 只是换一个更容易测的入口，断言面不会变宽，故不改。
+- **`spellingClashMessage` 第三个分支补上了 entries 断言。** 该分支（两段 + 服务表已
+  回答）此前只断言了「不说什么」，没断言「说了哪几条」——一句只点名 `deepseek` 的句子
+  能通过全部否定断言。现在 `entries` 逐条相等（含各自 section 与顺序），并断言它既不
+  声称两段都在 `providers`、也不带任何可点的尾巴。
+
 ## 上游真变了怎么办（命令驱动，而不是「记得看一眼」）
 ```bash
 npm run audit:service   # CLI 参数构建 / 四种模式的输出解析 / resolver 查找顺序的投影
@@ -108,13 +117,13 @@ pin 或 ls-remote 给出的 SHA 短于 40 位时一律判「跳过」并说明�
 
 **但 audit 变红不等于覆盖完整**：下面这几处只有人工对照，改坏了不会让任何 audit 变红。
 
-**`audit:upstream` 退出码恒为 0，只报告不失败——恒绿不是安全网。** 上游漂移的唯一安全网
+**`upstream:check`（哨兵）的退出码恒为 0，只报告不失败——它的绿不是安全网；`audit:upstream` 跑的是本套断言（pin 三处声明、对照表双射、通路账），是会 `exit 1` 的那一半——恒绿不是安全网，所以红色的那一半必须真的红。** 上游漂移的唯一安全网
 是 `audit:service` / `audit:config` / `audit:git` 这三条，加上人工重读本节表格的 4 行；
 哨兵打印「跳过」（git 与 API 都不可达）时同样是绿的，**绿只说明这条命令跑过，不说明上游
 没变**，所以每轮的结论仍要写进上面「当前状态」——跳过时至少留下 `[UPSTREAM-DEBT]` 与
 「核对通路账」里的一行欠账。
 
-**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 69 轮：`git ls-remote` 退出码 0，`refs/heads/main` 与 pin 一致；tag、release 与 npm 一致；通路：git）**
+**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 70 轮：`git ls-remote` 退出码 0，`refs/heads/main` 与 pin 一致；tag 与 npm 均为 `1.13.3`；通路：git）**
 
 ### 核对通路账
 
@@ -149,14 +158,15 @@ pin 或 ls-remote 给出的 SHA 短于 40 位时一律判「跳过」并说明�
 | 67 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；e2e 判定纯函数、Windows 盘符相对、类型负例 | — |
 | 68 | 2026-10-27 | api | `375f64c` / `v1.13.3`，无新内容；git 超时、API 作答；npm `1.13.3`；picker 判定纯函数、读屏计数、顺序断言点名行号 | — |
 | 69 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；moved 分支自报 5 处对照点、清单与对照表双射断言 | — |
+| 70 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；`app:info` 版本探测加预算、恒绿归属纠正并加 exit 码自测 | — |
 
 「最近一次对照」只写**那一项最近被人工重新核对**的轮次。该列没有列出本轮，表示本轮
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
 对应行并把轮次与日期改成本轮。
 
-**第 46–69 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
+**第 46–70 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
 npm 通路可达，第 56 轮 git 超时但 API 可达，第 63–64 轮本文件无通路记录，第 68 轮 git
-超时但 API 可达，第 69 轮 git 可达），所以下表 5 行的
+超时但 API 可达，第 69–70 轮 git 可达），所以下表 5 行的
 「最近一次对照」停在第 45 轮是
 **没有理由重看**，不是忘了看：
 它记录的是「最后一次有人逐行读上游源码」的轮次，而不是「最后一次确认上游没变」的轮次。

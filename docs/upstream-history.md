@@ -18,6 +18,41 @@ pin 块，这样它就不会某天被当成第二个权威源。
 
 ---
 
+## 上游状态（最近检查：2026-10-27，第 69 轮）
+
+第 69 轮复核：**HEAD 未变，结论仍是「无新内容」；git 通路本轮可达。**
+`git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
+refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
+（与第 49–68 轮同一个 commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
+`dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`（`--tags` 里最高版本仍是 `v1.13.3`）；
+`npm view @alibaba-group/open-code-review version dist-tags` 仍是 `1.13.3` /
+`latest: 1.13.3`。desktop 的 `^1.13.3` 无需改动，**无移植项**。
+
+本轮不加新产品面，只把「pin 前进」这件事自己的后果变成断言：
+
+- **`[UPSTREAM-MOVED]` 现在自己点名要重读的 5 处对照点。** 此前 moved 分支只列出
+  四行，而对照表有 5 行——第五行（内置服务表**为空**是否合法，`llm_cmd.go`）只有
+  翻开本文件的人才会知道。现在 `ROWS_TO_REREAD`（`tools/upstream-watch.mjs`）是
+  5 个 `{ label, source, note }`：`source` 就是对照表「上游文件」列里的那个字符串，
+  moved 分支逐行打印 `序号. 对照点 —— 文件名（看什么）`。于是「pin 前进」这个事件
+  本身就给出阅读清单，不依赖人记得翻本文档。
+- **清单与对照表改成双射断言，而不是「标签出现在文档某处」。** 新增纯函数
+  `tableRowCoverage(doc)`（同文件）：按对照表的表头（`对照点` / `上游文件` 两列）取表体行，回答
+  每条 `source` 落在哪一行（`missing` = 清单里有、表里没有；`orphans` = 表里有、
+  清单里没有；`duplicated` = 一行被两处认领）。`audit:upstream` 断言表体行数等于
+  清单长度、三者皆空；`smoke` 还用真文档的两份副本各做一次负例——删掉 `llm_cmd.go`
+  那一行要求 `missing` 恰好点名它，插入一条新对照点要求 `orphans` 恰好点名它的行号，
+  且两份副本都只与原文差一行（否则红的原因可能是别处）。
+- **`formatDrift` 的清单是参数，不是字面量。** 传进去的 `rows` 决定打印几行与
+  「下面 N 处对照点」的 N；smoke 传一份四条清单，要求 `llm_cmd.go` 从输出里消失、
+  N 变成 4——否则「五行都在」可以在句子根本不读清单的情况下绿。
+- **P0-2 复核结论：`save` → `spellingClashMessage` 的 tie 断言已存在，本轮不写码。**
+  `tools/config-handler-smoke.mjs` 的 `refusalOf` 用 stub 的 `readConfigView()` 调
+  handler 自己的 `spellingClash` + `spellingClashMessage`，`saidVerbatim` 断言
+  `res.error === answer.message`（真句逐字），`entriesAre` 断言 `entries` 的
+  name/section 逐条相等且顺序一致；两处在五个用例里都被引用（内置名、自定义名、
+  同段两条、两段各一条、服务表静默 / 空表）。已有断言足够，不再加重复的一条。
+
 ## 上游状态（最近检查：2026-10-27，第 68 轮）
 
 第 68 轮复核：**HEAD 未变，结论仍是「无新内容」；本轮 git 通路超时，由 GitHub API 作答。**

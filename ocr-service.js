@@ -1162,7 +1162,28 @@ function spawnFailure(err, bin, cwd) {
   return err.message;
 }
 
-function exec(args, cwd, env) {
+/**
+ * Run the CLI once and collect its output.
+ *
+ * `options.timeoutMs` is the one thing a caller can ask for beyond the defaults,
+ * and it exists because of one caller: `app:info` asks the CLI for its version
+ * while the settings page is opening. A version probe has no legitimate reason
+ * to take longer than a second, and a *hung* one — binary locked by an
+ * antivirus, a copy on a network share — used to leave the promise pending
+ * forever, which left the page blank with nothing on screen to explain it. The
+ * budget kills the child (so the process does not linger) and answers
+ * `timedOut: true`; the caller may still impose its own deadline, and
+ * `app-info.js` does, because "the service never answers" must not be reachable
+ * from the UI.
+ *
+ * The flag is set by this timer rather than read off `child.killed`: `killed`
+ * is also true when *we* called `kill` for another reason, and the caller needs
+ * to tell "ran out of time" from "ended with no output". `code` stays whatever
+ * the close event reported (null for a signalled child), so existing callers
+ * that only look at `code !== 0` are unaffected.
+ */
+function exec(args, cwd, env, options = {}) {
+  const timeoutMs = options && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0 ? options.timeoutMs : 0;
   return new Promise((resolve) => {
     const bin = binaryPath();
     if (!bin) {
@@ -1176,14 +1197,27 @@ function exec(args, cwd, env) {
     });
     let stdout = "";
     let stderr = "";
+    let timedOut = false;
+    // Armed only when the caller asked for a budget, so every other call site
+    // keeps the old behaviour (a review run may legitimately take minutes).
+    const timer = timeoutMs ? setTimeout(() => {
+      timedOut = true;
+      child.kill();
+    }, timeoutMs) : null;
     child.stdout.on("data", (d) => {
       stdout += d.toString("utf8");
     });
     child.stderr.on("data", (d) => {
       stderr += d.toString("utf8");
     });
-    child.on("error", (err) => resolve({ code: -1, stdout, stderr, error: spawnFailure(err, bin, cwd) }));
-    child.on("close", (code) => resolve({ code, stdout, stderr }));
+    child.on("error", (err) => {
+      if (timer) clearTimeout(timer);
+      resolve({ code: -1, stdout, stderr, error: spawnFailure(err, bin, cwd), ...(timedOut ? { timedOut } : {}) });
+    });
+    child.on("close", (code) => {
+      if (timer) clearTimeout(timer);
+      resolve({ code, stdout, stderr, ...(timedOut ? { timedOut } : {}) });
+    });
   });
 }
 

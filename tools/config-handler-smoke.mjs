@@ -1425,6 +1425,36 @@ check(
       !twoSectionsAnswered.message.includes("服务表读回来是空的"),
     twoSectionsAnswered.message
   );
+  // The wording above is the *negative* half ("claims nothing false"). The
+  // positive half is the entries: this branch is reachable only by handing the
+  // exported function a clash `spellingClash` would not produce, so the caller is
+  // a future one, and what it must still get right is which entries are named —
+  // first one, other one, with the section each sits in, in the order they were
+  // found. A sentence that named only `deepseek` would pass every check above.
+  check(
+    "...and it still names both entries, each with its own section, in order",
+    JSON.stringify(twoSectionsAnswered.entries) ===
+      JSON.stringify([
+        { name: "deepseek", section: "providers" },
+        { name: "DEEPSEEK", section: "custom_providers" },
+      ]),
+    JSON.stringify(twoSectionsAnswered.entries)
+  );
+  check(
+    "...and says the two entries are spread across sections without claiming which one the run reads",
+    twoSectionsAnswered.message.includes("这 2 条分布在不同的配置段里") &&
+      !twoSectionsAnswered.message.includes("都在 providers 段"),
+    twoSectionsAnswered.message
+  );
+  // The two tails are the *actionable* halves of the silent-table sentences. This
+  // branch has no action to offer, so it ends where the advice ends; a `tail`
+  // inherited by accident (the `||` fallback in `spellingClashMessage`) would
+  // append a refresh hint to a sentence about a table that answered.
+  check(
+    "...and appends no tail, so the sentence ends on the advice",
+    twoSectionsAnswered.message.endsWith("保存。") ,
+    twoSectionsAnswered.message
+  );
 }
 
 /* ---- a dotted custom name is one name, not two segments ----

@@ -18,7 +18,7 @@ const { makeConfigHandlers } = require("./config-handler");
 const { createInstall } = require("./install-info");
 const { repoIsPickable, pickInsideAnswer, pickInsidePayload, pickFileOptions } = require("./path-guard");
 const { providersAnswer } = require("./provider-handler");
-const { formatAppInfo } = require("./app-info");
+const { formatAppInfo, readVersionOutput } = require("./app-info");
 
 const DOCS_URL = "https://open-codereview.ai/docs";
 
@@ -149,15 +149,18 @@ function buildMenu() {
 // The assembly lives in `app-info.js`: a value built inside a handler can only
 // be observed by launching Electron, and the absent-data shapes (no binary, a
 // version on stderr) are exactly the ones the settings page shows verbatim.
+//
+// The version probe is bounded there as well, and that matters here more than
+// anywhere else: this handler answers the settings page, so a `ocr version` that
+// never returns is a blank page rather than a wrong field. `exec` keeps its own
+// (args, cwd, env, options) signature; the adapter is the one place the probe's
+// `{ timeoutMs }` becomes the service's fourth argument.
 ipcMain.handle("app:info", async () => {
   const binary = ocr.binaryResolution();
-  let versionStdout = "";
-  let versionStderr = "";
-  if (binary.path) {
-    const res = await ocr.exec(["version"]);
-    versionStdout = res.stdout || "";
-    versionStderr = res.stderr || "";
-  }
+  const { versionStdout, versionStderr } = await readVersionOutput({
+    binary,
+    exec: (args, options) => ocr.exec(args, undefined, undefined, options),
+  });
   return formatAppInfo({
     binary,
     versionStdout,

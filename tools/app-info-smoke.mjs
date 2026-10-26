@@ -13,7 +13,9 @@ import path from "node:path";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const require = createRequire(path.join(ROOT, "package.json"));
-const { formatAppInfo } = require(path.join(ROOT, "app-info.js"));
+const { formatAppInfo, readVersionOutput, VERSION_PROBE_MS, VERSION_PROBE_GRACE_MS } = require(
+  path.join(ROOT, "app-info.js")
+);
 const { createInstall } = require(path.join(ROOT, "install-info.js"));
 
 const failures = [];
@@ -304,6 +306,133 @@ const base = {
         ].includes(key) || key in installInfo
     ),
     "a field from nowhere is a typo the renderer would read as absent"
+  );
+}
+
+/* ---- the probe: bounded, and never a rejection ----
+ * Everything above is about the *shape* of the answer; none of it covers the
+ * wait before the answer exists. `app:info` is what the settings page renders
+ * while it opens, so a `ocr version` that never returns is not a wrong field —
+ * it is a blank page with nothing on screen to explain it. `readVersionOutput`
+ * is the part that makes the wait finite, and it takes `exec` as an argument so
+ * every way a service can fail to answer is producible here without breaking a
+ * machine.
+ */
+{
+  const answered = { stdout: "open-code-review 1.13.3\n", stderr: "" };
+  const calls = [];
+  const normal = await readVersionOutput({
+    binary: { path: "/opt/app/ocr" },
+    exec: (args, options) => {
+      calls.push({ args, options });
+      return Promise.resolve({ code: 0, ...answered });
+    },
+    timeoutMs: 2000,
+  });
+  check(
+    "the probe asks the CLI for `version` exactly once",
+    calls.length === 1 && JSON.stringify(calls[0].args) === '["version"]',
+    JSON.stringify(calls.map((call) => call.args))
+  );
+  check(
+    "...and hands the service the budget it was given, so the child is killed with it",
+    calls[0] && calls[0].options && calls[0].options.timeoutMs === 2000,
+    JSON.stringify(calls[0] && calls[0].options)
+  );
+  check(
+    "...and passes the output on unchanged, with timedOut false",
+    normal.versionStdout === answered.stdout && normal.versionStderr === "" && normal.timedOut === false,
+    JSON.stringify(normal)
+  );
+  check(
+    "...so the page still gets the version the CLI printed",
+    formatAppInfo({ ...base, binary: { path: "/opt/app/ocr" }, ...normal }).version === "1.13.3",
+    JSON.stringify(normal)
+  );
+
+  // No binary: the question must not be asked at all. `ocr.exec` answers "no
+  // binary" as a failure, and a caller that asked anyway would turn a missing
+  // CLI into a version read that "failed".
+  let asked = 0;
+  const noBinary = await readVersionOutput({
+    binary: { path: null },
+    exec: () => {
+      asked += 1;
+      return Promise.resolve({ code: 0, ...answered });
+    },
+  });
+  check(
+    "no binary: the CLI is not asked at all and the probe says nothing",
+    asked === 0 && noBinary.versionStdout === "" && noBinary.versionStderr === "" && noBinary.timedOut === false,
+    JSON.stringify({ asked, ...noBinary })
+  );
+
+  // A throw is "said nothing", not a rejection: a rejected `app:info` blinks the
+  // settings page out, which is the failure this whole function exists to stop.
+  const thrown = await readVersionOutput({
+    binary: { path: "/opt/app/ocr" },
+    exec: () => Promise.reject(new Error("spawn ENOTDIR")),
+    timeoutMs: 2000,
+  });
+  check(
+    "a probe that throws answers empty output instead of rejecting",
+    thrown.versionStdout === "" && thrown.versionStderr === "" && thrown.timedOut === false,
+    JSON.stringify(thrown)
+  );
+
+  // The shape the budgets exist for: `exec` that never settles and ignores the
+  // budget it was handed. Asserted on the clock, because "it returned" is the
+  // whole promise — a probe that resolves the *right* object after a minute has
+  // still left the page blank for a minute.
+  const startedAt = Date.now();
+  const hung = await readVersionOutput({
+    binary: { path: "/opt/app/ocr" },
+    exec: () => new Promise(() => {}),
+    timeoutMs: 40,
+    graceMs: 60,
+  });
+  const elapsed = Date.now() - startedAt;
+  check(
+    "a service that never answers is given up on at the deadline, not waited out",
+    hung.versionStdout === "" && hung.versionStderr === "" && hung.timedOut === true,
+    JSON.stringify(hung)
+  );
+  check(
+    "...and that happens after the budget and the grace, and well before a user would call the page broken",
+    elapsed >= 80 && elapsed < 1500,
+    `${elapsed}ms for 40+60`
+  );
+  check(
+    "...and the settings page gets a complete object anyway, with an empty version",
+    (() => {
+      const info = formatAppInfo({ ...base, binary: { path: "/opt/app/ocr", source: "local" }, ...hung });
+      const verdict = info.version === "" && info.binary === "/opt/app/ocr" && info.binarySource === "local";
+      return verdict && info.configPath === base.configPath && info.packaged === true;
+    })(),
+    JSON.stringify(formatAppInfo({ ...base, binary: { path: "/opt/app/ocr" }, ...hung }))
+  );
+
+  // The service's own flag is forwarded so a caller can tell "ran out of time"
+  // from "ended with no output" — two answers that look identical in the text.
+  const serviceTimedOut = await readVersionOutput({
+    binary: { path: "/opt/app/ocr" },
+    exec: () => Promise.resolve({ code: null, stdout: "", stderr: "", timedOut: true }),
+    timeoutMs: 2000,
+  });
+  check(
+    "the service's own timedOut flag survives the probe",
+    serviceTimedOut.timedOut === true && serviceTimedOut.versionStdout === "",
+    JSON.stringify(serviceTimedOut)
+  );
+
+  // The defaults have to be usable, and the grace has to be *after* the budget:
+  // the child must be allowed to die on its own (its close event is what the
+  // service reports) before this side stops waiting. Reversed, every slow CLI
+  // would be reported as `timedOut` while actually finishing.
+  check(
+    "the default budget is a positive number of milliseconds and the grace comes after it",
+    Number.isFinite(VERSION_PROBE_MS) && VERSION_PROBE_MS > 0 && VERSION_PROBE_GRACE_MS > 0,
+    JSON.stringify({ VERSION_PROBE_MS, VERSION_PROBE_GRACE_MS })
   );
 }
 

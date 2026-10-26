@@ -10,8 +10,10 @@
 // normal run.
 //
 // No network, no Electron, no CLI. Run with `npm run audit:upstream`.
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   DEBT_MARKER,
@@ -51,6 +53,19 @@ const check = (name, ok, detail = "") => {
   console.log(`${ok ? "ok      " : "FAIL    "} ${name}${detail ? `  <- ${detail}` : ""}`);
   if (!ok) failures.push(name);
 };
+
+// Read by this file when it re-runs itself as a child process at the bottom of
+// the suite, to prove that a failed check reaches `process.exit(1)`. Never set
+// by a normal run, and never set by the child's own children (there are none):
+// the spawn is guarded on the same variable, so the self-test is one level deep.
+const SELF_TEST_ENV = "OCR_UPSTREAM_WATCH_SELFTEST";
+if (process.env[SELF_TEST_ENV] === "1") {
+  check(
+    "[self-test] a check that fails on purpose",
+    false,
+    "injected by the exit-code self-test"
+  );
+}
 
 const PINNED_SHA = PINNED_UPSTREAM.sha;
 // A full-length commit that is not the pinned one. Written out rather than
@@ -805,6 +820,23 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
     latestLedger !== undefined && channel !== null && latestLedger[2] === channel[1],
     JSON.stringify({ ledger: latestLedger && latestLedger[2], fixed: channel && channel[1] })
   );
+  // One row per round, and the rounds are consecutive. Only the last row is read
+  // by the checks above, so without this a round could be dropped from the middle
+  // of the ledger — the table stays "valid", the debt count silently falls by
+  // one, and "how many rounds in a row went unchecked" (the question the ledger
+  // exists to answer) becomes wrong by an amount nobody can see. Duplicates are
+  // the same failure from the other side: two rows for one round let a later
+  // round's debt be paid twice.
+  const ledgerRounds = ledgerRows.map((row) => Number(row[0]));
+  const gaps = ledgerRounds
+    .slice(1)
+    .map((round, index) => (round === ledgerRounds[index] + 1 ? null : `${ledgerRounds[index]}→${round}`))
+    .filter(Boolean);
+  check(
+    "the ledger's rounds are consecutive integers, one row each, with no repeat",
+    ledgerRounds.every((round) => Number.isInteger(round)) && gaps.length === 0,
+    JSON.stringify({ rounds: ledgerRounds.length, first: ledgerRounds[0], last: ledgerRounds[ledgerRounds.length - 1], gaps })
+  );
   // The reading list is generated from `ROWS_TO_REREAD`; the table is hand-
   // written. Asking "does each label appear somewhere in the doc" (the previous
   // shape of this check) passes while the table has a sixth row nobody will ever
@@ -1060,6 +1092,106 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
   check(
     "...and the sync doc links back to the log, so the split is discoverable from either end",
     syncDoc.includes("upstream-history.md")
+  );
+}
+
+/* ---- which command may stay green, and which one has to go red ----
+ * Two commands sit next to each other and answer opposite questions:
+ *
+ *   `npm run upstream:check`  asks the network. A moved HEAD and an unreachable
+ *                             GitHub are both *answers*, so it exits 0 by
+ *                             design; its three states are greps, not exit codes.
+ *   `npm run audit:upstream`  runs this file: the pin, the comparison table and
+ *                             the ledger. Nothing here needs the network, and
+ *                             everything here is a claim that must be able to
+ *                             fail.
+ *
+ * That split was written down backwards in the sync doc: the "exit code is always
+ * 0 — green is not a safety net" paragraph pointed at `audit:upstream`, which is
+ * *this* suite. The sentence is worse than a typo, because it tells the next
+ * reader that every assertion below it is decorative — the natural response is to
+ * stop trusting the red (or to move the checks somewhere louder) instead of
+ * reading it. So both halves are pinned here: the script→file mapping is read out
+ * of `package.json`, the sentence is required to name the sentinel, and the last
+ * check actually runs this file with one check forced to fail and asserts the
+ * child's exit code. Without that last one, `failures` could stop reaching
+ * `process.exit` and every check above would still print `ok`.
+ */
+{
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
+  const scripts = pkg.scripts || {};
+  const DOTTED = path.join("tools", "upstream-watch-smoke.mjs");
+  const SENTINEL = path.join("tools", "upstream-watch.mjs");
+  check(
+    "`audit:upstream` runs this suite, the half that is allowed to fail",
+    scripts["audit:upstream"] === `node tools/upstream-watch-smoke.mjs`,
+    scripts["audit:upstream"]
+  );
+  check(
+    "...and `upstream:check` runs the sentinel, the half that always exits 0",
+    scripts["upstream:check"] === `node tools/upstream-watch.mjs`,
+    scripts["upstream:check"]
+  );
+  check(
+    "...and the failing half is in `audit:static`, so it is not a command nobody runs",
+    String(scripts["audit:static"] || "").includes("audit:upstream"),
+    scripts["audit:static"]
+  );
+  // The two script names differ by one word and the files by one suffix, which is
+  // exactly how a mapping gets swapped in an edit. Name both files, not just the
+  // commands.
+  check(
+    "...with the two files distinct and both present on disk",
+    DOTTED !== SENTINEL &&
+      fs.existsSync(path.join(ROOT, DOTTED)) &&
+      fs.existsSync(path.join(ROOT, SENTINEL)),
+    JSON.stringify({ DOTTED, SENTINEL })
+  );
+
+  const doc = fs.readFileSync(SYNC_DOC, "utf8");
+  const greenLine = doc
+    .split(/\r?\n/)
+    .find((line) => line.includes("恒绿不是安全网"));
+  check(
+    "the sync doc still says which command's green is not a safety net",
+    greenLine !== undefined,
+    greenLine ? greenLine.slice(0, 80) : "no line mentions 恒绿不是安全网"
+  );
+  check(
+    "...and attributes always-exit-0 to `upstream:check`, not to this suite",
+    greenLine !== undefined &&
+      greenLine.includes("`upstream:check`") &&
+      !/`audit:upstream`\s*退出码恒为\s*0/.test(greenLine),
+    greenLine || ""
+  );
+  check(
+    "...and says out loud that this suite is the half that fails",
+    greenLine !== undefined && greenLine.includes("`audit:upstream`"),
+    greenLine || ""
+  );
+  // The sentence that claims exit 0 for this suite is not a sentence anybody
+  // reads twice, so it is also refused wherever else it might be copied to.
+  check(
+    "and no line of the sync doc claims this suite exits 0",
+    !doc.split(/\r?\n/).some((line) => /`audit:upstream`\s*退出码恒为\s*0/.test(line)),
+    "the failing half must not be described as green"
+  );
+}
+
+if (process.env[SELF_TEST_ENV] !== "1") {
+  const child = spawnSync(process.execPath, [fileURLToPath(import.meta.url)], {
+    env: { ...process.env, [SELF_TEST_ENV]: "1" },
+    encoding: "utf8",
+  });
+  check(
+    "a failing check makes this command exit non-zero",
+    child.status === 1,
+    `status=${child.status} signal=${child.signal || "none"}`
+  );
+  check(
+    "...and the injected failure is named on stderr, so the red says what failed",
+    /a check that fails on purpose/.test(child.stderr || ""),
+    String(child.stderr || "").trim().split(/\r?\n/).slice(-2).join(" | ")
   );
 }
 
