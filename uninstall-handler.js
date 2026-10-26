@@ -32,7 +32,10 @@
 // step that went wrong is written — `main.js` points it at the renderer's log
 // drawer, because a packaged app has no terminal to read `console.warn` from),
 // and `schedule`/`quitDelayMs`. The last two are what make "the reply arrives
-// before the quit" checkable without waiting 400ms in a test.
+// before the quit" checkable without waiting 400ms in a test. The defaults for
+// the two collaborators `main.js` leaves out — a real `setTimeout` and a no-op
+// `quit` — are themselves exercised by `tools/uninstall-flush.mjs`, with each
+// one omitted rather than replaced by a double.
 
 const { flushAndReport } = require("./run-diagnostics");
 

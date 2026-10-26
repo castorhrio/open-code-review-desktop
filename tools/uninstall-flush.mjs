@@ -48,18 +48,23 @@ const TARGET = path.join("C:", "Program Files", "Open Code Review", "Uninstall O
  * race with a timer that a loaded machine could lose.
  */
 function harness(overrides = {}) {
+  const has = (key) => Object.prototype.hasOwnProperty.call(overrides, key);
   const order = [];
   const logs = [];
   const scheduled = [];
   const spawnCalls = [];
   const state = { quitCalls: 0 };
-  const store = overrides.store || {
-    drain: async () => {
-      order.push("flush");
-      return { ok: true, reason: "drained" };
-    },
-  };
-  const handler = makeUninstallHandler({
+  // `"store" in overrides` rather than `overrides.store ||`: one case is *no
+  // store at all*, which the `||` would replace with the working one.
+  const store = has("store")
+    ? overrides.store
+    : {
+        drain: async () => {
+          order.push("flush");
+          return { ok: true, reason: "drained" };
+        },
+      };
+  const options = {
     install: overrides.install || { uninstallPlan: () => ({ ok: true, target: TARGET }) },
     store,
     spawn: (target) => {
@@ -75,9 +80,20 @@ function harness(overrides = {}) {
     schedule: (fn, ms) => {
       scheduled.push({ fn, ms });
     },
-    warn: (line) => logs.push(line),
-    ...(overrides.handler || {}),
-  });
+    warn: (line) => {
+      logs.push(line);
+      order.push("warn");
+    },
+  };
+  // Dropping a collaborator is how a case tests the handler's own default
+  // instead of a double: `quit` becomes `() => {}`, `schedule` becomes a real
+  // `setTimeout`. `Object.assign` below is still the override path for a case
+  // that wants a *different* double (a quitting one that throws, say).
+  if (overrides.omitQuit) delete options.quit;
+  if (overrides.omitSchedule) delete options.schedule;
+  if (Number.isFinite(overrides.quitDelayMs)) options.quitDelayMs = overrides.quitDelayMs;
+  Object.assign(options, overrides.handler || {});
+  const handler = makeUninstallHandler(options);
   return { handler, order, logs, scheduled, spawnCalls, state };
 }
 
@@ -112,6 +128,74 @@ function harness(overrides = {}) {
   h.scheduled[0].fn();
   check("and the app quits once, after the reply", h.state.quitCalls === 1 && h.order[2] === "quit", h.order.join(" -> "));
   check("a clean flush says nothing in the log", h.logs.length === 0, JSON.stringify(h.logs));
+}
+
+/* ---- the production defaults: a real setTimeout, and a no-op quit ----
+ * Every check above injects both `schedule` and `quit`, which leaves the values
+ * `main.js` actually omits unexercised. The defaults are `(fn, ms) =>
+ * setTimeout(fn, ms)` and `() => {}`; if either stopped being one, the injected
+ * doubles would keep passing while the shipped path scheduled nothing or threw
+ * in a timer.
+ */
+{
+  // 1. no `schedule`: the handler's own timer has to do the delaying.
+  const h = harness({ omitSchedule: true, quitDelayMs: 0 });
+  const answer = await h.handler();
+  check(
+    "with no schedule supplied the reply is still answered before the quit",
+    answer && answer.ok === true && h.state.quitCalls === 0,
+    `${JSON.stringify(answer)} / ${h.state.quitCalls} quits`
+  );
+  check(
+    "...and the real setTimeout is what runs it, on a later tick",
+    h.order.join(" -> ") === `flush -> spawn:${TARGET}`,
+    h.order.join(" -> ")
+  );
+  // One macrotask is enough for `setTimeout(fn, 0)`; the delay was given as 0
+  // precisely so this check does not wait for the production 400ms.
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  check(
+    "...and the defaulted timer fired the quit on its own",
+    h.state.quitCalls === 1 && h.order[2] === "quit",
+    `${h.order.join(" -> ")} / ${h.state.quitCalls} quits`
+  );
+}
+
+{
+  // 2. no `quit`: the default is a no-op, so running the captured callback must
+  // neither throw (which `quitAfterReply` would turn into a warning line) nor
+  // do anything else.
+  const h = harness({ omitQuit: true });
+  const answer = await h.handler();
+  check(
+    "with no quit supplied the handler still answers and schedules",
+    answer && answer.ok === true && h.scheduled.length === 1,
+    JSON.stringify(answer)
+  );
+  h.scheduled[0].fn();
+  check(
+    "and the default quit is a no-op, not a throw and not a line",
+    h.logs.length === 0 && h.state.quitCalls === 0,
+    JSON.stringify(h.logs)
+  );
+}
+
+{
+  // 3. the shipped shape exactly: every collaborator defaulted, nothing injected
+  // but the four the caller does supply.
+  const stray = [];
+  const onException = (err) => stray.push(`未捕获的异常：${(err && err.message) || err}`);
+  process.on("uncaughtException", onException);
+  const h = harness({ omitSchedule: true, omitQuit: true, quitDelayMs: 0 });
+  const answer = await h.handler();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  process.off("uncaughtException", onException);
+  check(
+    "with every collaborator defaulted the uninstall still runs",
+    answer && answer.ok === true && h.spawnCalls.length === 1 && stray.length === 0,
+    `${JSON.stringify(answer)} / ${stray.join(" | ")}`
+  );
+  check("and nothing is logged on the shipped path", h.logs.length === 0, JSON.stringify(h.logs));
 }
 
 /* ---- a flush that did not work must not cancel the uninstall ---- */
@@ -182,6 +266,35 @@ function harness(overrides = {}) {
     broken.logs.length === 1 && broken.logs[0].includes("冲刷出错"),
     JSON.stringify(broken.logs)
   );
+}
+
+/* ---- a flush with nothing to drain: still a value, still the uninstall ----
+ * `flushAndReport` answers `drain-failed` for a store whose `drain` throws, but a
+ * caller wired with *no* store — or with an object that has no `drain` at all —
+ * fails one step earlier, inside the store lookup itself. That path is what
+ * `main.js` would hit on a bad wiring, and it must end the same way as every
+ * other flush failure: a line, then the uninstall, then the quit. A rejection
+ * here would be the same silent uninstall the module exists to prevent.
+ */
+{
+  for (const [label, store] of [
+    ["a store object without drain", {}],
+    ["no store at all", undefined],
+  ]) {
+    const h = harness({ store });
+    const answer = await h.handler();
+    check(`a flush over ${label} still answers the page`, answer && answer.ok === true, JSON.stringify(answer));
+    check(`...and still starts the uninstaller`, h.spawnCalls.length === 1, h.order.join(" -> "));
+    check(`...and still schedules the quit`, h.scheduled.length === 1, `${h.scheduled.length} scheduled`);
+    check(
+      `...and logs the flush failure before the uninstaller starts`,
+      h.logs.length === 1 &&
+        h.logs[0].startsWith("[run-diagnostics]") &&
+        h.logs[0].includes("上限证据的退出冲刷出错") &&
+        h.order.indexOf("warn") < h.order.findIndex((e) => e.startsWith("spawn:")),
+      JSON.stringify({ logs: h.logs, order: h.order })
+    );
+  }
 }
 
 /* ---- nothing to uninstall: answer the plan, touch nothing ---- */

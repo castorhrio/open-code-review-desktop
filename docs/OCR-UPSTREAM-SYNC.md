@@ -12,16 +12,16 @@
 4. **不要**静默忽略上游 release：每轮把结论追加到下面「上游状态」，哪怕结论是
    「无新内容」。
 
-## 上游状态（最近检查：2026-10-26，第 44 轮）
+## 上游状态（最近检查：2026-10-27，第 45 轮）
 
 - 顶端 commit：`375f64c`（2026-10-20，
   `fix(tool): report an empty code_comment batch instead of success (#1773)`）
 - 最新 tag / release：`v1.13.3`（2026-10-22 发布）
 - desktop 依赖：`@alibaba-group/open-code-review` `^1.13.3`
 
-**自最近一次有内容变更（`v1.13.3` / `375f64c`）以来，第 27–43 轮复核均无新内容。**
+**自最近一次有内容变更（`v1.13.3` / `375f64c`）以来，第 27–45 轮复核均无新内容。**
 每轮都核对了 `git fetch upstream --tags` 以及 GitHub API 的 commits / tags /
-releases 三处，三处一致：顶端仍是 `375f64c`，最新仍是 `v1.13.3`（第 44 轮复核同）。
+releases 三处，三处一致：顶端仍是 `375f64c`，最新仍是 `v1.13.3`（第 45 轮复核同）。
 desktop 的 CLI flag、输出解析、配置暴露点都无需改动。（`git fetch` 期间只有本仓同名的
 `v0.1.x` 发布 tag 因已存在被拒，与上游无关。）
 
@@ -48,10 +48,10 @@ npm run audit:git       # `git show` 的分类与按 ref 读文件
 
 | 对照点 | 上游文件 | 人工看什么 | 最近一次对照（轮次 / 日期） |
 | --- | --- | --- | --- |
-| provider 解析顺序 | `internal/llm/resolver.go` | 是否仍按 `cfg.Providers[cfg.Provider]`（原始拼写）读；大小写折叠、回退到 registry 拼写、miss 兜底任一变化都改变设置页「Key 属于哪条」的答案 → 同步改模拟（`UPSTREAM_RESOLVER`）与 `MATCH_RULES` | 第 44 轮 / 2026-10-26（上游 HEAD 未变） |
-| `config set` 的 key 语法 | `cmd/opencodereview/config_cmd.go` | 点名到最后一个点的分段（带点的自定义名）、未配置带点名直接拒绝 | 第 44 轮 / 2026-10-26（上游 HEAD 未变） |
-| 内置服务表 | `ocr llm providers` 输出 | 列、表头、失败时的 stderr 措辞 | 第 44 轮 / 2026-10-26（上游 HEAD 未变） |
-| 运行期失败分类 | 运行 JSON 的 `failure_class` / 每文件 `failure_class` | 枚举值增删（`RunFailureClass` 与 `FailureClass` 是两张表） | 第 44 轮 / 2026-10-26（上游 HEAD 未变） |
+| provider 解析顺序 | `internal/llm/resolver.go` | 是否仍按 `cfg.Providers[cfg.Provider]`（原始拼写）读；大小写折叠、回退到 registry 拼写、miss 兜底任一变化都改变设置页「Key 属于哪条」的答案 → 同步改模拟（`UPSTREAM_RESOLVER`）与 `MATCH_RULES` | 第 45 轮 / 2026-10-27（上游 HEAD 未变） |
+| `config set` 的 key 语法 | `cmd/opencodereview/config_cmd.go` | 点名到最后一个点的分段（带点的自定义名）、未配置带点名直接拒绝 | 第 45 轮 / 2026-10-27（上游 HEAD 未变） |
+| 内置服务表 | `ocr llm providers` 输出 | 列、表头、失败时的 stderr 措辞 | 第 45 轮 / 2026-10-27（上游 HEAD 未变） |
+| 运行期失败分类 | 运行 JSON 的 `failure_class` / 每文件 `failure_class` | 枚举值增删（`RunFailureClass` 与 `FailureClass` 是两张表） | 第 45 轮 / 2026-10-27（上游 HEAD 未变） |
 
 `resolver` 的查找顺序变化**不会**让 `audit:service` 全面变红——它只覆盖上面那几种形状
 （provider 与 registry 拼写不一致、provider 落在 registry 拼写上、provider 指向别的服务）。

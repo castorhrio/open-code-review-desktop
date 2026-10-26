@@ -72,3 +72,46 @@ export function releasePrecheck(capture) {
 }
 
 export const RELEASE_GUARD_MESSAGES = { DETACHED, DIRTY };
+
+/**
+ * The release's steps, in the order that makes each one safe.
+ *
+ * `precheck` is first because it is the only step that can answer "there is no
+ * branch to release from" before anything is written. The rest are the commands
+ * `tools/release.mjs` runs once it has passed.
+ *
+ * Kept here as names — and the commands below — so the check can assert the
+ * order, rather than compare source offsets. A guard that had drifted below the
+ * version bump would still pass every check that only looked at its answer;
+ * asserting the plan is what makes the position a property of the code the
+ * release actually executes.
+ */
+export const RELEASE_STEPS = ["precheck", "bump", "commit", "audit", "dist", "secret-scan"];
+
+/** Everything after the precheck, with the version already substituted. */
+function releaseCommands(version) {
+  return [
+    { name: "bump", command: `npm version ${version} --no-git-tag-version` },
+    {
+      name: "commit",
+      command: `git add package.json package-lock.json && git commit -m "chore(release): ${version}"`,
+    },
+    { name: "audit", command: "npm run audit" },
+    { name: "dist", command: "npm run dist:win" },
+    { name: "secret-scan", command: "npm run audit:secrets" },
+  ];
+}
+
+/**
+ * The one decision `tools/release.mjs` makes before it writes anything.
+ *
+ * A refusal carries `steps: []`: the short-circuit is the answer, not something
+ * the caller has to remember to do. So "the precheck runs first, and nothing
+ * runs after it failed" is checkable by calling this with a detached HEAD and
+ * finding an empty plan — no source offsets involved.
+ */
+export function planRelease({ version, capture } = {}) {
+  const pre = releasePrecheck(capture);
+  if (!pre.ok) return { ...pre, steps: [] };
+  return { ...pre, steps: releaseCommands(version) };
+}

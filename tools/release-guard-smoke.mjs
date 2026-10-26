@@ -14,7 +14,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { releasePrecheck, RELEASE_GUARD_MESSAGES } from "./release-guard.mjs";
+import { releasePrecheck, planRelease, RELEASE_GUARD_MESSAGES, RELEASE_STEPS } from "./release-guard.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const failures = [];
@@ -123,38 +123,99 @@ const STATUS = "git status --porcelain";
   check("...and still naming the branch it got that far with", answer.branch === "main", answer.branch);
 }
 
-/* ---- the script actually uses the guard, and before it writes anything ---- */
+/* ---- the plan: the precheck is first, and a refusal has nothing after it ----
+ * The order used to be checked by comparing string offsets in `release.mjs`,
+ * which is a property of how the file was written — not of what the release
+ * executes. `planRelease` answers both: the ordered steps on a pass, and an
+ * empty plan on a refusal.
+ */
+{
+  check("the plan's first step is the precheck", RELEASE_STEPS[0] === "precheck", RELEASE_STEPS.join(" -> "));
+
+  const clean = fakeGit({ [SYMBOLIC]: "main\n", [STATUS]: "" });
+  const plan = planRelease({ version: "0.1.14", capture: clean.capture });
+  check("a clean tree plans a release", plan.ok === true && plan.branch === "main", JSON.stringify(plan));
+  check(
+    "and the steps are the release's, in order",
+    plan.steps.map((s) => s.name).join(" -> ") === RELEASE_STEPS.slice(1).join(" -> "),
+    plan.steps.map((s) => s.name).join(" -> ")
+  );
+  const commands = Object.fromEntries(plan.steps.map((s) => [s.name, s.command]));
+  check(
+    "the bump carries the version",
+    commands.bump === "npm version 0.1.14 --no-git-tag-version",
+    commands.bump
+  );
+  check(
+    "the commit is the release commit",
+    commands.commit === 'git add package.json package-lock.json && git commit -m "chore(release): 0.1.14"',
+    commands.commit
+  );
+  check("the gate is the full audit", commands.audit === "npm run audit", commands.audit);
+  check("packaging comes after the gate", commands.dist === "npm run dist:win", commands.dist);
+  check(
+    "and the key scan comes last, over the packages that step produced",
+    commands["secret-scan"] === "npm run audit:secrets",
+    commands["secret-scan"]
+  );
+
+  const detached = fakeGit({ [SYMBOLIC]: "throw" });
+  const refused = planRelease({ version: "0.1.14", capture: detached.capture });
+  check(
+    "a detached HEAD plans nothing to run",
+    refused.ok === false && refused.steps.length === 0,
+    JSON.stringify(refused)
+  );
+  check(
+    "...so nothing is bumped from a detached HEAD",
+    refused.error === RELEASE_GUARD_MESSAGES.DETACHED,
+    refused.error
+  );
+  check("...and only the branch question was asked", detached.calls.length === 1, JSON.stringify(detached.calls));
+
+  const dirty = fakeGit({ [SYMBOLIC]: "main\n", [STATUS]: " M package.json\n" });
+  const refusedDirty = planRelease({ version: "0.1.14", capture: dirty.capture });
+  check(
+    "a dirty tree plans nothing to run either",
+    refusedDirty.ok === false && refusedDirty.steps.length === 0,
+    JSON.stringify(refusedDirty)
+  );
+  check(
+    "...and both questions were asked, in that order",
+    dirty.calls.join(" | ") === `${SYMBOLIC} | ${STATUS}`,
+    dirty.calls.join(" | ")
+  );
+}
+
+/* ---- the script executes that plan, rather than a second copy of it ---- */
 {
   const src = fs.readFileSync(path.join(ROOT, "tools/release.mjs"), "utf8");
   const why = (ok, message) => (ok ? "" : message);
 
-  const imports = /import\s*\{\s*releasePrecheck\s*\}\s*from\s*["']\.\/release-guard\.mjs["']/.test(src);
-  check("release.mjs imports the guard", imports, why(imports, "no import of release-guard.mjs"));
+  const imports = /import\s*\{\s*planRelease\s*\}\s*from\s*["']\.\/release-guard\.mjs["']/.test(src);
+  check("release.mjs takes its plan from the guard", imports, why(imports, "no import of planRelease"));
 
-  const callsGuard = /releasePrecheck\(capture\)/.test(src);
-  check("...and calls it with its own capture", callsGuard, why(callsGuard, "the guard is imported but not called"));
+  const callsPlan = /planRelease\(\{\s*version,\s*capture\s*\}\)/.test(src);
+  check("...and builds it before running anything", callsPlan, why(callsPlan, "the plan is imported but not built"));
 
-  const aborts = /if\s*\(!pre\.ok\)[\s\S]{0,200}process\.exit\(2\)/.test(src);
+  const aborts = /if\s*\(!plan\.ok\)[\s\S]{0,200}process\.exit\(2\)/.test(src);
   check("...and aborts on a refusal", aborts, why(aborts, "the refusal does not stop the script"));
 
-  // The order is the point: a guard that runs after `npm version` has already
-  // modified two files, and one that runs after `git commit` has already
-  // committed them to nowhere.
-  const guardAt = src.indexOf("releasePrecheck(capture)");
-  const bumpAt = src.indexOf("npm version ${version}");
-  const commitAt = src.indexOf("git commit -m");
+  const executes = /for\s*\(\s*const\s+step\s+of\s+plan\.steps\s*\)/.test(src);
   check(
-    "the guard runs before the version bump",
-    guardAt !== -1 && bumpAt !== -1 && guardAt < bumpAt,
-    `guard at ${guardAt}, bump at ${bumpAt}`
+    "...and executes the steps in the order the plan gave them",
+    executes,
+    why(executes, "release.mjs does not iterate plan.steps")
   );
+
+  // The commands must not exist in both places: a second copy in the script is
+  // the one that would drift from the one the check asserts.
+  const inlineCommands = /npm version \$\{version\}|git commit -m/.test(src);
   check(
-    "and well before the release commit",
-    guardAt !== -1 && commitAt !== -1 && guardAt < commitAt,
-    `guard at ${guardAt}, commit at ${commitAt}`
+    "the step commands are written in exactly one place",
+    !inlineCommands,
+    why(!inlineCommands, "release.mjs still spells out a step command")
   );
-  // The old inline check must not have been left behind beside the guard: two
-  // copies of "the tree must be clean" is one copy that drifts.
   const inline = (src.match(/git status --porcelain/g) || []).length;
   check("the clean-tree question is asked in exactly one place", inline === 0, `${inline} inline uses in release.mjs`);
 }

@@ -20,7 +20,7 @@ import { execSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-import { releasePrecheck } from "./release-guard.mjs";
+import { planRelease } from "./release-guard.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const version = process.argv[2];
@@ -43,22 +43,21 @@ const capture = (cmd) => execSync(cmd, { cwd: ROOT, encoding: "utf8" });
 // a clean-tree check on a dirty tree ships someone's half-finished work, and a
 // detached HEAD gives every step below a place to succeed — the bump, the
 // commit, the build — that no branch points at, so the release is unreachable
-// from the moment it is made. The decisions live in `release-guard.mjs`, where
-// `tools/release-guard-smoke.mjs` can feed them one fixture at a time; this is
-// the call, and it happens before anything is written.
-const pre = releasePrecheck(capture);
-if (!pre.ok) {
-  console.error(`release aborted: ${pre.error}`);
+// from the moment it is made. The decision, and the ordered steps that follow
+// it, live in `release-guard.mjs`, where `tools/release-guard-smoke.mjs` can
+// call them one fixture at a time. This script only executes the plan — and the
+// precheck has refused before a single command is built.
+const plan = planRelease({ version, capture });
+if (!plan.ok) {
+  console.error(`release aborted: ${plan.error}`);
   process.exit(2);
 }
-console.log(`releasing ${version} from ${pre.branch}`);
+console.log(`releasing ${version} from ${plan.branch}`);
 
-run(`npm version ${version} --no-git-tag-version`);
-run(`git add package.json package-lock.json && git commit -m "chore(release): ${version}"`);
-run("npm run audit");
-
-const dist = spawnSync("npm run dist:win", { shell: true, cwd: ROOT, stdio: "inherit" });
-if (dist.status !== 0) {
+const runDist = (command) => {
+  console.log(`\n$ ${command}`);
+  const dist = spawnSync(command, { shell: true, cwd: ROOT, stdio: "inherit" });
+  if (dist.status === 0) return;
   const alt = `release-${version}`;
   console.log(`\ndist:win failed; retrying into ${alt}/ to sidestep a locked win-unpacked.tmp`);
   run(`npx electron-builder --win -c.directories.output=${alt}`);
@@ -72,11 +71,15 @@ if (dist.status !== 0) {
     fs.renameSync(path.join(from, f), path.join(to, f));
   }
   fs.rmSync(from, { recursive: true, force: true });
-}
+};
 
-// The packages just rebuilt are the thing the scan has to look at, so it runs
-// after packaging, not before.
-run("npm run audit:secrets");
+// The order is the plan's, not this loop's: every step runs in the sequence the
+// guard built, and the key scan is last because it reads the packages the
+// previous step produced.
+for (const step of plan.steps) {
+  if (step.name === "dist") runDist(step.command);
+  else run(step.command);
+}
 
 console.log(`\nrelease ${version} packaged under release/`);
 console.log("remaining, both human acts: git push, then publish a GitHub Release if you want installed clients to update.");
