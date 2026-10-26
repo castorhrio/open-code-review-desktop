@@ -574,6 +574,36 @@ check(
   );
 }
 
+/* ---- a built-in clear the CLI refuses is a failure, not a success ----
+ * The clear is two writes, and either can be refused. Returning the steps with
+ * `ok: true` would let the settings page announce 已清空 while the entry is
+ * still configured and the next run still reads its Key — the same silent
+ * half-success `save` already answers with an error. The failure has to name
+ * the write that failed and keep the CLI's own message, so the page can say
+ * which one to fix.
+ */
+{
+  const stub = makeStub({ providers: { deepseek: { api_key: "sk-saved", model: "deepseek-chat" } } });
+  const ocr = {
+    ...stub.ocr,
+    // Only the second write fails: this is a clear that was half done, not a
+    // clear that never reached the CLI.
+    setConfig: async (pairs) => {
+      stub.setPairs.push(...pairs);
+      return pairs.map(([key]) => ({
+        key,
+        ok: key !== "providers.deepseek.model",
+        message: key === "providers.deepseek.model" ? 'invalid field "model"' : "",
+      }));
+    },
+  };
+  const h = makeConfigHandlers({ ocr, tempRoot: dir });
+  const res = await h.removeEntry(null, { name: "deepseek" });
+  check("a built-in clear the CLI refuses is not reported as cleared", res.ok === false && !res.cleared, JSON.stringify(res));
+  check("and the refusal names the write that failed", String(res.error).includes("providers.deepseek.model"), res.error);
+  check("with the CLI's own message kept", String(res.error).includes("invalid field"), res.error);
+}
+
 /* ---- the withheld-Key answer is passed through, not flattened ----
  * `order-guess` means an entry exists under a spelling no run opens. The old
  * field hint said "该服务还没有 Key" for this, which sends the user to type a
