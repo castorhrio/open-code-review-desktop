@@ -12,7 +12,16 @@
 4. **不要**静默忽略上游 release：每轮把结论追加到下面「上游状态」，哪怕结论是
    「无新内容」。
 
-## 上游状态（最近检查：2026-10-27，第 48 轮）
+## 上游状态（最近检查：2026-10-27，第 49 轮）
+
+第 49 轮复核（**网络恢复，欠账已清**）：`git ls-remote https://github.com/alibaba/open-code-review.git`
+可达，`refs/heads/main` = `375f64c`，`git fetch upstream --tags` 成功后
+`git log --oneline -1 upstream/main` = `375f64c`，`git describe --tags --abbrev=0 upstream/main`
+= `v1.13.3`（tag 指向同一 commit），`npm view @alibaba-group/open-code-review version`
+= `1.13.3`。三条通路一致，**上游无新 commit、无新 release/tag**，`v1.13.3` 即 main HEAD，
+desktop 的 `^1.13.3` 无需改动。第 47–48 轮欠的 `git fetch upstream --tags` +
+`HEAD..upstream/main` 对照本轮已补做（desktop 与上游无共同祖先，`rev-list` 计数不可用，
+故以 `upstream/main` 顶端 SHA 与 tag 指针比对为准）。
 
 - 顶端 commit：`375f64c`（2026-10-20，
   `fix(tool): report an empty code_comment batch instead of success (#1773)`）

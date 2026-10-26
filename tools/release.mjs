@@ -78,9 +78,9 @@ const runDist = (step) => {
   // Clear, retry, move — in that order, and the order is the whole point: a
   // same-version retry otherwise builds on top of the previous attempt's output
   // and the move then meets names it cannot rename over. That sequence lives in
-  // `release-dist.mjs` so `audit:release` can drive it against a fake disk; a
-  // failing retried build throws out of `run` (which exits), so nothing is moved
-  // for a build that produced nothing.
+  // `release-dist.mjs` so `audit:release` can drive it against a fake disk and
+  // against a real temp root; a failing retried build throws out of `run` (which
+  // exits), so nothing is moved for a build that produced nothing.
   const { cleared, landed } = retryDistIntoFallback({ version, root: ROOT, run });
   if (cleared.removed.length) console.log(`\ncleared ${cleared.removed.length} stale entr${cleared.removed.length === 1 ? "y" : "ies"} from ${cleared.dir}/`);
   console.log(

@@ -26,6 +26,14 @@
 //   - the fallback dir is removed *last* — removing it first would delete the
 //     very files this function exists to keep.
 //
+// The same check then runs the move once with `fs`/`path` left at their defaults
+// against a real root under the OS temp dir. The fake table proves the order of
+// the calls; only the real disk proves the calls are the right ones — a double
+// accepts whatever names it is handed, so "the app dir lands in `release/`" would
+// otherwise stay a claim about names the double made up. That matters most here:
+// this is the only path in the release chain whose first real run would otherwise
+// be release day.
+//
 // The answer names what happened (`moved`, `skipped`, `replaced`) so the release
 // log can say it, and so a caller cannot mistake "it returned" for "everything
 // landed".
@@ -126,6 +134,11 @@ export function fallbackOutputDir(version) {
  * Answers the entries that went, so the release log can say how much was stale
  * rather than only that it did something. A path that is missing is a no-op;
  * `force` covers the case where it is already gone by the time `rm` runs.
+ *
+ * The file-shaped case is pinned against a real file (a `readdirSync` that
+ * answers `ENOTDIR`, not a double that throws on request) in
+ * `tools/release-guard-smoke.mjs`, because the `try` below only ever runs on that
+ * shape: writing it as a comment is what let it stay a guess.
  */
 export function clearStaleDistOutput({ dir, fs: fsApi = fs } = {}) {
   if (!dir) throw new Error("clearStaleDistOutput needs a `dir`");

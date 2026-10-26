@@ -21,7 +21,13 @@
 // (`retryDistIntoFallback` — clear the stale output dir, retry the build into it,
 // move the result out), which is the path a same-version retry takes.
 //
+// The last block walks the same move against a *real* temp root
+// (`fs.mkdtempSync`): a fake disk proves the order of the calls, a real one
+// proves the calls are the right ones.
+//
 // Run with `npm run audit:release`.
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import { clearStaleDistOutput, fallbackOutputDir, relocateDistOutput, retryDistIntoFallback } from "./release-dist.mjs";
@@ -382,6 +388,74 @@ const STATUS = "git status --porcelain";
     `${beforePackagingThrow.join(" -> ")} / ${packagingThrew && packagingThrew.message}`
   );
 
+  // A throw is the only answer a half-done release ever gets, so "how far did it
+  // get" has to ride on the exception: the steps that completed, in order, and
+  // never the one that failed. Written as a three-step plan because the whole
+  // claim is about the boundary between step two and step one.
+  {
+    const steps = (...names) => ({ ok: true, steps: names.map((name) => ({ name, command: `cmd:${name}` })) });
+    const threeSteps = steps("step1", "step2", "step3");
+    // The packaging step goes through the other runner, and a build that fails is
+    // the likely one, so the same contract has to hold with `dist` in the middle
+    // — a plan whose second step is `dist` is the only way to get there.
+    for (const [label, plan, runner] of [
+      ["run", threeSteps, { run: (step) => { if (step.name === "step2") throw new Error("boom"); } }],
+      [
+        "runDist",
+        steps("step1", "dist", "step3"),
+        { run: () => {}, runDist: (step) => { if (step.name === "dist") throw new Error("boom"); } },
+      ],
+    ]) {
+      let threw = null;
+      try {
+        executeRelease(plan, runner);
+      } catch (err) {
+        threw = err;
+      }
+      check(
+        `a step that throws out of ${label} carries the steps that completed, and not the failed one`,
+        threw !== null && Array.isArray(threw.ran) && threw.ran.join(" -> ") === "step1",
+        JSON.stringify(threw && threw.ran)
+      );
+    }
+
+    // The list is the completed steps and nothing else: a caller that trusted it
+    // to name the failure would report step2 as done.
+    let partial = null;
+    try {
+      executeRelease(threeSteps, {
+        run: (step) => {
+          if (step.name === "step3") throw new Error("boom");
+        },
+      });
+    } catch (err) {
+      partial = err;
+    }
+    check(
+      "...so two completed steps are named, in order, when the third fails",
+      partial !== null && partial.ran.join(" -> ") === "step1 -> step2",
+      JSON.stringify(partial && partial.ran)
+    );
+
+    // A runner is free to throw something that is not an Error; that is still
+    // the caller's answer to report, not a second failure while recording it.
+    let rawThrew = null;
+    try {
+      executeRelease(threeSteps, {
+        run: () => {
+          throw "plain string failure";
+        },
+      });
+    } catch (err) {
+      rawThrew = err;
+    }
+    check(
+      "...and a runner that throws a non-Error is re-thrown exactly as it was",
+      rawThrew === "plain string failure",
+      JSON.stringify(rawThrew)
+    );
+  }
+
   // Refusals are answered as data, and an unreadable plan is not a pass either:
   // `null`/`undefined` must not read as "no steps to run, so nothing to worry
   // about".
@@ -566,8 +640,19 @@ const STATUS = "git status --porcelain";
         [SETUP]: null,
       },
     });
-    const answer = relocateDistOutput({ from: FROM, to: TO, fs: d.fs, path: posix });
-    check("a fallback with no previous build replaces nothing", answer.replaced === false, JSON.stringify(answer));
+    // Caught like the blocks around it: a rewrite that empties the fallback dir
+    // before renaming out of it throws here, and that must read as a failed check
+    // rather than stopping the suite before the real-disk block.
+    let answer = null;
+    let threw = null;
+    try {
+      answer = relocateDistOutput({ from: FROM, to: TO, fs: d.fs, path: posix });
+    } catch (err) {
+      threw = err;
+    }
+    check("a fallback with no previous build completes", threw === null, threw && threw.message);
+    if (!answer) answer = { moved: [], skipped: [], replaced: null };
+    check("...and replaces nothing", answer.replaced === false, JSON.stringify(answer));
     check(
       "...and does not remove an app dir that is not there",
       !d.ops.some((o) => o.op === "rm" && o.path === `${TO}/win-unpacked`),
@@ -838,6 +923,210 @@ const STATUS = "git status --porcelain";
         threw && threw.message
       );
     }
+  }
+}
+
+/* ---- the same move, on a real disk ----
+ * Everything above drives `relocateDistOutput` and friends through a fake `fs`.
+ * That proves the *order* of the calls and the shape of the answer; it does not
+ * prove the calls are the right ones, because a double accepts whatever it is
+ * handed — "the temp dir's app dir is renamed into `release/`" stayed a claim
+ * about names the double made up. The one path in the release chain that
+ * rearranges files on the real disk had never been run against the real disk by
+ * any check, so its first real run was going to be release day.
+ *
+ * Each check gets its own root under the OS temp dir and removes it in
+ * `finally`: a failed assertion must not leave a `release-0.1.14/` behind, both
+ * because the next run would find it and because the fallback dir is exactly
+ * what these functions look for.
+ */
+{
+  const SETUP = "open-code-review-desktop-0.1.14-setup.exe";
+  const LATEST = "latest.yml";
+
+  /** Make the parent directories, then write the file — the shape of a build. */
+  const put = (file, body) => {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, body);
+  };
+
+  /** A throwaway root, cleaned up whether the check passed or threw. */
+  const scratch = (fn) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-release-"));
+    try {
+      return fn(root);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  };
+
+  /* the ordinary fallback, with `fs`/`path` left at their defaults */
+  {
+    const seen = scratch((root) => {
+      const from = path.join(root, "release-0.1.14");
+      const to = path.join(root, "release");
+      put(path.join(from, "win-unpacked", "open-code-review-desktop.exe"), "this build's app");
+      put(path.join(from, SETUP), "this build's setup");
+      put(path.join(from, LATEST), "this build's feed");
+      put(path.join(from, "builder-debug.yml"), "describes the temp output dir");
+      put(path.join(to, "win-unpacked", "stale.exe"), "the previous release's app");
+      put(path.join(to, "open-code-review-desktop-0.1.13-setup.exe"), "the previous release's setup");
+      // No `fs`, no `path`: this is the call `tools/release.mjs` makes. Caught for
+      // the same reason the fake-disk block catches it — a rewrite that loses the
+      // order throws `EEXIST` here, and that has to read as a failed check with
+      // the platform's words rather than as a stack trace that stops the suite.
+      let landed = null;
+      let moveError = null;
+      try {
+        landed = relocateDistOutput({ from, to });
+      } catch (err) {
+        moveError = err;
+      }
+      return {
+        landed,
+        moveError,
+        appLanded: fs.existsSync(path.join(to, "win-unpacked", "open-code-review-desktop.exe")),
+        staleGone: !fs.existsSync(path.join(to, "win-unpacked", "stale.exe")),
+        setupLanded: fs.existsSync(path.join(to, SETUP)),
+        feedLanded: fs.existsSync(path.join(to, LATEST)),
+        previousKept: fs.existsSync(path.join(to, "open-code-review-desktop-0.1.13-setup.exe")),
+        debugShipped: fs.existsSync(path.join(to, "builder-debug.yml")),
+        fallbackGone: !fs.existsSync(from),
+      };
+    });
+
+    check(
+      "the fallback move lands the app dir in release/ on a real disk",
+      seen.moveError === null && seen.appLanded && seen.landed !== null && seen.landed.replaced === true,
+      `${seen.moveError && seen.moveError.message} / ${JSON.stringify([seen.appLanded, seen.landed && seen.landed.replaced])}`
+    );
+    check(
+      "...replacing the previous release's app dir instead of merging into it",
+      seen.staleGone,
+      JSON.stringify(seen.staleGone)
+    );
+    check(
+      "...and the artefacts land beside it, leaving the previous release's own alone",
+      seen.setupLanded && seen.feedLanded && seen.previousKept,
+      JSON.stringify([seen.setupLanded, seen.feedLanded, seen.previousKept])
+    );
+    check(
+      "...without shipping the temp output dir's builder-debug.yml",
+      !seen.debugShipped && seen.landed !== null && seen.landed.skipped.join(" | ") === "builder-debug.yml",
+      JSON.stringify([seen.debugShipped, seen.landed && seen.landed.skipped])
+    );
+    check(
+      "...and the fallback dir is deleted once everything worth keeping has left it",
+      seen.fallbackGone,
+      JSON.stringify(seen.fallbackGone)
+    );
+  }
+
+  /* the fallback path that is a file, not a directory */
+  {
+    // The `try { readdirSync } catch` in `clearStaleDistOutput` exists for this
+    // shape, and on a fake disk it is always reached through the double's own
+    // throw. Here it is the platform's: `readdirSync` on a file is `ENOTDIR`, and
+    // it must not become "cannot clear it".
+    const seen = scratch((root) => {
+      const dir = path.join(root, "release-0.1.14");
+      fs.writeFileSync(dir, "a stray file where the output dir should be");
+      let threw = null;
+      let cleared = null;
+      try {
+        cleared = clearStaleDistOutput({ dir });
+      } catch (err) {
+        threw = err;
+      }
+      return { threw, cleared, gone: !fs.existsSync(dir) };
+    });
+    check(
+      "a real file where the fallback dir should be is cleared, not fatal",
+      seen.threw === null && seen.gone,
+      `${seen.threw && seen.threw.message} / ${JSON.stringify(seen.cleared)}`
+    );
+    check(
+      "...and answers no entries to name, because a file has none",
+      seen.cleared !== null && seen.cleared.removed.length === 0,
+      JSON.stringify(seen.cleared)
+    );
+  }
+
+  /* the whole retry, on a real disk: clear, build, move */
+  {
+    // The piece the fake-disk retry check cannot prove is the one the release log
+    // claims: that the retried build really did start from an empty output dir
+    // and that its output, not the previous attempt's, is what release/ holds
+    // afterwards. The build is simulated by writing the files electron-builder
+    // would — into the dir the command it was handed names.
+    const seen = scratch((root) => {
+      put(path.join(root, fallbackOutputDir("0.1.14"), "win-unpacked", "stale.exe"), "the previous attempt's app");
+      put(path.join(root, fallbackOutputDir("0.1.14"), SETUP), "the previous attempt's setup");
+      put(path.join(root, "release", LATEST), "the previous release's feed");
+
+      const fallbackExistedAtBuild = [];
+      let answer = null;
+      let retryError = null;
+      try {
+        answer = retryDistIntoFallback({
+          version: "0.1.14",
+          root,
+          run: (cmd) => {
+            fallbackExistedAtBuild.push(fs.existsSync(path.join(root, fallbackOutputDir("0.1.14"))));
+            put(path.join(root, fallbackOutputDir("0.1.14"), "win-unpacked", "open-code-review-desktop.exe"), `built by ${cmd}`);
+            put(path.join(root, fallbackOutputDir("0.1.14"), SETUP), "this build's setup");
+            put(path.join(root, fallbackOutputDir("0.1.14"), "builder-debug.yml"), "describes the temp output dir");
+          },
+        });
+      } catch (err) {
+        retryError = err;
+      }
+      return {
+        answer,
+        retryError,
+        fallbackExistedAtBuild,
+        clearedEntries: answer ? [...answer.cleared.removed].sort() : [],
+        appLanded: fs.existsSync(path.join(root, "release", "win-unpacked", "open-code-review-desktop.exe")),
+        staleGone: !fs.existsSync(path.join(root, "release", "win-unpacked", "stale.exe")),
+        setupLanded: fs.existsSync(path.join(root, "release", SETUP)),
+        feedKept: fs.existsSync(path.join(root, "release", LATEST)),
+        debugShipped: fs.existsSync(path.join(root, "release", "builder-debug.yml")),
+        fallbackGone: !fs.existsSync(path.join(root, fallbackOutputDir("0.1.14"))),
+        root,
+      };
+    });
+
+    check(
+      "a same-version retry starts the build from a cleared fallback dir on a real disk",
+      seen.fallbackExistedAtBuild.length === 1 && seen.fallbackExistedAtBuild[0] === false,
+      JSON.stringify(seen.fallbackExistedAtBuild)
+    );
+    check(
+      "...having named the two stale entries it removed first",
+      seen.clearedEntries.join(" | ") === ["win-unpacked", SETUP].sort().join(" | "),
+      JSON.stringify(seen.clearedEntries)
+    );
+    check(
+      "...and this build's output, not the previous attempt's, is what release/ holds",
+      seen.retryError === null &&
+        seen.appLanded &&
+        seen.staleGone &&
+        seen.setupLanded &&
+        seen.feedKept &&
+        !seen.debugShipped,
+      `${seen.retryError && seen.retryError.message} / ${JSON.stringify({
+        appLanded: seen.appLanded,
+        staleGone: seen.staleGone,
+        setupLanded: seen.setupLanded,
+        feedKept: seen.feedKept,
+        debugShipped: seen.debugShipped,
+      })}`
+    );
+    check(
+      "...and the fallback dir is gone afterwards",
+      seen.fallbackGone,
+      JSON.stringify(seen.fallbackGone)
+    );
   }
 }
 

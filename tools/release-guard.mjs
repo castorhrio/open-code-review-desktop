@@ -180,6 +180,13 @@ export function planRelease({ version, capture } = {}) {
  * The answer names what ran (`ran: [...]`, in order) and, on a refused plan,
  * `{ ok: false, ran: [] }` — the refusal is the answer, not a third state the
  * caller has to remember.
+ *
+ * The same list rides along on the exception a failing runner throws
+ * (`err.ran`), because a throw is the only answer the caller ever sees for a
+ * half-done release: the steps that *completed*, in order, and never the one
+ * that failed. It is what "how far did it get" means after a failed packaging
+ * run, and keeping it out of the error would leave the release log — which is
+ * what a human reads at that moment — as the only record.
  */
 export function executeRelease(plan, deps = {}) {
   const run = typeof deps.run === "function" ? deps.run : () => {};
@@ -187,8 +194,22 @@ export function executeRelease(plan, deps = {}) {
   if (!plan || !plan.ok) return { ok: false, reason: (plan && plan.reason) || "refused", ran: [] };
   const ran = [];
   for (const step of plan.steps) {
-    if (step.name === "dist") runDist(step);
-    else run(step);
+    try {
+      if (step.name === "dist") runDist(step);
+      else run(step);
+    } catch (err) {
+      // `ran` is pushed *after* the step returns, so a failed step is not in it.
+      // A runner may throw a non-Error (`throw "..."`), and a frozen error keeps
+      // the platform's own words — neither is a reason to lose the throw itself.
+      if (err && typeof err === "object") {
+        try {
+          err.ran = ran;
+        } catch (_) {
+          /* a frozen error still carries its own message, which is the main thing */
+        }
+      }
+      throw err;
+    }
     ran.push(step.name);
   }
   return { ok: true, ran };
