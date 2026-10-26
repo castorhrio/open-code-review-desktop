@@ -21,6 +21,12 @@
 // throws when the command fails (that is `execSync`'s contract, and what
 // `tools/release.mjs` passes). Both checks read their answer out of *git's exit
 // status*, not out of its wording, so this file has no message to parse.
+//
+// The same split is what a *failed* release needs. Its runners throw instead of
+// exiting (`stepFailure`), this module decides what a throw means
+// (`releaseAbort`: the lines to print, the exit status, how far it got), and
+// `runRelease` is the one answer the script acts on — so the exit status is
+// decided in one place instead of inside whichever step happened to fail.
 
 /** The sentence a bad invocation prints, before a single step is planned. */
 export const RELEASE_USAGE = "usage: node tools/release.mjs <x.y.z>";
@@ -172,10 +178,13 @@ export function planRelease({ version, capture } = {}) {
  * output dir). `runDist` defaults to `run`, so a caller that has no fallback
  * does not have to spell one out.
  *
- * A runner that throws ends the sequence — nothing after a failed step runs, and
- * the throw is the caller's to turn into an exit. That is the same contract the
- * script's own runner has by exiting the process, kept as a throw here so the
- * double in the smoke can prove the later steps were never reached.
+ * A runner that throws ends the sequence: nothing after a failed step runs, and
+ * the throw is the caller's. Both of `tools/release.mjs`'s runners throw — a
+ * non-zero exit status becomes an `Error` carrying that status in `code` — and
+ * `runRelease` below is the single place that turns a throw into an answer. That
+ * is what makes the next paragraph reachable outside the smoke's doubles: the
+ * runners used to call `process.exit`, so on the real path the process was gone
+ * before anything could ride on the throw.
  *
  * The answer names what ran (`ran: [...]`, in order) and, on a refused plan,
  * `{ ok: false, ran: [] }` — the refusal is the answer, not a third state the
@@ -186,7 +195,9 @@ export function planRelease({ version, capture } = {}) {
  * half-done release: the steps that *completed*, in order, and never the one
  * that failed. It is what "how far did it get" means after a failed packaging
  * run, and keeping it out of the error would leave the release log — which is
- * what a human reads at that moment — as the only record.
+ * what a human reads at that moment — as the only record. The failing step's own
+ * name rides along beside it (`err.failed`), so the log can say *where* it
+ * stopped instead of leaving the reader to diff the plan against `ran`.
  */
 export function executeRelease(plan, deps = {}) {
   const run = typeof deps.run === "function" ? deps.run : () => {};
@@ -204,6 +215,7 @@ export function executeRelease(plan, deps = {}) {
       if (err && typeof err === "object") {
         try {
           err.ran = ran;
+          err.failed = step.name;
         } catch (_) {
           /* a frozen error still carries its own message, which is the main thing */
         }
@@ -213,4 +225,106 @@ export function executeRelease(plan, deps = {}) {
     ran.push(step.name);
   }
   return { ok: true, ran };
+}
+
+/**
+ * The error a runner throws for a command that exited non-zero.
+ *
+ * It is one function rather than a line inside `tools/release.mjs`'s runner for
+ * the same reason everything else here is: the *shape* of the throw is the
+ * contract `releaseAbort` reads (`code`, and a message naming the command), and a
+ * script that cannot be imported cannot be asked what shape it throws. `status`
+ * is `spawnSync`'s — a number, or `null` when the child was killed by a signal —
+ * so a killed command is reported as exited 1 rather than as `null` or as a
+ * sentence with a hole in it.
+ */
+export function stepFailure(cmd, status) {
+  const code = typeof status === "number" && Number.isInteger(status) && status > 0 ? status : 1;
+  return Object.assign(new Error(`\`${cmd}\` exited ${code}`), { code });
+}
+
+/** The exit status a failing runner said, when it said one. */
+function exitStatusOf(err) {
+  if (!err || typeof err !== "object") return 1;
+  // `code` is also where errno strings live (`ENOENT`), so only a positive
+  // integer counts as an exit status: an `Error` that fails a command and an
+  // `Error` that fails a syscall do not share a vocabulary.
+  for (const key of ["status", "exitCode", "code"]) {
+    const value = err[key];
+    if (typeof value === "number" && Number.isInteger(value) && value > 0) return value;
+  }
+  return 1;
+}
+
+/**
+ * What a half-done release has to say for itself: the lines to print, the exit
+ * status, and how far it got.
+ *
+ * This is the answer to the one question a failed release leaves behind — "what
+ * is on disk now?" — so it is a value rather than three `console.error` calls at
+ * the bottom of `tools/release.mjs`: the words are the contract, and a check can
+ * read them. The status comes from the failed step's own exit status when its
+ * runner carried one (a `spawnSync` runner does), and is `1` otherwise — never
+ * `0`, because a release that threw did not succeed.
+ *
+ * `ran` is copied out of the throw rather than returned by reference: the caller
+ * keeps it for its log, and a runner that threw a frozen error must not be the
+ * reason the list is missing.
+ */
+export function releaseAbort(err) {
+  const code = exitStatusOf(err);
+  const ran = err && typeof err === "object" && Array.isArray(err.ran) ? err.ran.slice() : [];
+  const failed = err && typeof err === "object" && typeof err.failed === "string" ? err.failed : "";
+  const said =
+    typeof err === "string"
+      ? err
+      : err && typeof err.message === "string" && err.message.trim()
+        ? err.message
+        : "the failing step gave no reason";
+  const where = failed ? `at step ${failed}` : "outside any step";
+  const progress = ran.length ? `after: ${ran.join(" -> ")}` : "with no step completed";
+  return {
+    code,
+    ran,
+    failed,
+    lines: [
+      `release aborted ${where} (${progress}): ${said}`,
+      // Two different states, and the human reading this log is the only one who
+      // can decide what to do about it: a completed step has already written to
+      // the tree (the bump writes two files, the commit lands), while nothing
+      // completed means the release stopped before it changed anything.
+      ran.length
+        ? `the steps above already ran: the tree is not the one it started from, nothing was pushed`
+        : `nothing completed, so the release did not get as far as changing the tree`,
+    ],
+  };
+}
+
+/**
+ * Run a plan and answer what happened, without ever throwing.
+ *
+ * `executeRelease` above is the primitive — it lets a failing runner's throw out,
+ * which is what makes the sequence stoppable. This is the shape a *script* needs:
+ * one answer it can act on (`ok`, `code`, `error`, `ran`), so the release's exit
+ * status is decided in one place instead of inside whichever runner happened to
+ * fail. `tools/release.mjs` prints `error` and exits `code`; that is all it does
+ * with a failure.
+ *
+ * A refused plan is answered with `code: 2`, the status the script already used
+ * for "the release was not started", so a refusal and a mid-release failure stay
+ * distinguishable in a shell that only sees `$?`.
+ */
+export function runRelease(plan, deps = {}) {
+  let answer;
+  try {
+    answer = executeRelease(plan, deps);
+  } catch (err) {
+    const abort = releaseAbort(err);
+    return { ok: false, reason: "failed", code: abort.code, ran: abort.ran, error: abort.lines.join("\n") };
+  }
+  if (!answer.ok) {
+    const said = plan && typeof plan.error === "string" && plan.error ? plan.error : `the plan was refused (${answer.reason})`;
+    return { ok: false, reason: answer.reason, code: 2, ran: [], error: `release aborted: ${said}` };
+  }
+  return answer;
 }

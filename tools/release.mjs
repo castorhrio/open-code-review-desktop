@@ -28,7 +28,7 @@ import { execSync, spawnSync } from "node:child_process";
 import path from "node:path";
 
 import { fallbackOutputDir, retryDistIntoFallback } from "./release-dist.mjs";
-import { executeRelease, parseVersion, planRelease } from "./release-guard.mjs";
+import { parseVersion, planRelease, runRelease, stepFailure } from "./release-guard.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 
@@ -45,13 +45,17 @@ const version = parsed.version;
 // in `release-guard.mjs`; what is left here is the part that can only happen on
 // this machine — spawning the commands and, for packaging, retrying into a fresh
 // output dir when electron-builder cannot rename into the locked one.
+//
+// A failed command is a *throw* carrying its exit status, not an exit here. The
+// throw is the only thing that carries "how far the release got" out of the
+// sequence — which steps were already bumped, committed and built — and
+// `runRelease` turns it into the one answer this file acts on, below. A runner
+// that exited instead would take that record with it, leaving the log to say
+// "`npm run audit` exited 1" and nothing about what it had already changed.
 const run = (cmd, opts = {}) => {
   console.log(`\n$ ${cmd}`);
   const r = spawnSync(cmd, { shell: true, cwd: ROOT, stdio: "inherit", ...opts });
-  if (r.status !== 0) {
-    console.error(`\nrelease aborted: \`${cmd}\` exited ${r.status}`);
-    process.exit(r.status ?? 1);
-  }
+  if (r.status !== 0) throw stepFailure(cmd, r.status);
 };
 const capture = (cmd) => execSync(cmd, { cwd: ROOT, encoding: "utf8" });
 
@@ -80,7 +84,8 @@ const runDist = (step) => {
   // and the move then meets names it cannot rename over. That sequence lives in
   // `release-dist.mjs` so `audit:release` can drive it against a fake disk and
   // against a real temp root; a failing retried build throws out of `run` (which
-  // exits), so nothing is moved for a build that produced nothing.
+  // the move never reaches), so nothing is moved for a build that produced
+  // nothing.
   const { cleared, landed } = retryDistIntoFallback({ version, root: ROOT, run });
   if (cleared.removed.length) console.log(`\ncleared ${cleared.removed.length} stale entr${cleared.removed.length === 1 ? "y" : "ies"} from ${cleared.dir}/`);
   console.log(
@@ -98,7 +103,16 @@ const runDist = (step) => {
 // The plan's steps carry a name and a command; the runners below take the
 // command, so the adapter is spelled out here rather than making `run` accept a
 // shape it does not otherwise know.
-executeRelease(plan, { run: (step) => run(step.command), runDist });
+//
+// `runRelease` never throws: a step that failed comes back as "which steps ran,
+// which one failed, and with what exit status", so the release's status is
+// decided in exactly one place — here — instead of inside whichever runner
+// happened to fail.
+const outcome = runRelease(plan, { run: (step) => run(step.command), runDist });
+if (!outcome.ok) {
+  console.error(`\n${outcome.error}`);
+  process.exit(outcome.code ?? 1);
+}
 
 console.log(`\nrelease ${version} packaged under release/`);
 console.log("remaining, both human acts: git push, then publish a GitHub Release if you want installed clients to update.");

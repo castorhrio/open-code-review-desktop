@@ -55,6 +55,21 @@ import path from "node:path";
  * locked build could not rename), and `builder-debug.yml` describes the *temp*
  * output dir, so copying it over the real one's would mislabel the build that
  * ships. Both are left behind and then deleted with the fallback dir.
+ *
+ * A DENYLIST, ON PURPOSE: this names what the *temp dir owns*, not what the
+ * release is known to contain. Everything else in that dir came out of the build
+ * this function exists to save, and the fallback dir is deleted at the end — so
+ * an entry nobody anticipated (`builder-effective-config.yaml` today, whatever
+ * electron-builder writes beside the installer tomorrow) has exactly two possible
+ * fates: moved into `release/` or destroyed unseen. An extra YAML beside the
+ * installers is cosmetic; a missing setup.exe is a release that has to be rebuilt
+ * and, if nobody notices, a GitHub Release with no artefact.
+ *
+ * So the unknown entry is *moved*, and `tools/release-guard-smoke.mjs` pins both
+ * halves of that: an unlisted artefact lands in `release/`, and this list is still
+ * exactly the two names above. Adding a third name therefore means deliberately
+ * deleting something on the next packaging run, which shows up as a red check
+ * instead of as a quiet edit here.
  */
 export const DIST_SKIP = ["win-unpacked", "builder-debug.yml"];
 

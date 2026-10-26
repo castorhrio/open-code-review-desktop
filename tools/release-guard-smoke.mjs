@@ -21,6 +21,16 @@
 // (`retryDistIntoFallback` — clear the stale output dir, retry the build into it,
 // move the result out), which is the path a same-version retry takes.
 //
+// And the answer a *failed* release gives: `stepFailure` (a non-zero status
+// becomes a throw carrying it), `err.failed` / `err.ran` (which step stopped it,
+// which ones completed) and `runRelease` (the lines and exit status the script
+// acts on). Those were the last part of the release that could only be described
+// — the runner exited, so the process never got to report how far it had got.
+//
+// The move of the fallback's output into `release/` is pinned from both sides:
+// what the skip list names stays behind, and what it has never heard of is moved
+// (the fallback dir is deleted at the end, so anything not moved is destroyed).
+//
 // The last block walks the same move against a *real* temp root
 // (`fs.mkdtempSync`): a fake disk proves the order of the calls, a real one
 // proves the calls are the right ones.
@@ -30,12 +40,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { clearStaleDistOutput, fallbackOutputDir, relocateDistOutput, retryDistIntoFallback } from "./release-dist.mjs";
+import { clearStaleDistOutput, DIST_SKIP, fallbackOutputDir, relocateDistOutput, retryDistIntoFallback } from "./release-dist.mjs";
 import {
   executeRelease,
   parseVersion,
+  releaseAbort,
   releasePrecheck,
   planRelease,
+  runRelease,
+  stepFailure,
   RELEASE_GUARD_MESSAGES,
   RELEASE_STEPS,
   RELEASE_USAGE,
@@ -470,6 +483,205 @@ const STATUS = "git status --porcelain";
   }
 }
 
+/* ---- a failed release is answered, not thrown at the process ----
+ * The previous round added `err.ran` so a failed release could say how far it got.
+ * On the real path that was a claim with nothing behind it: `tools/release.mjs`'s
+ * runner called `process.exit` on a non-zero status, so the process was gone
+ * before the list could ride on anything and only the smoke's doubles ever saw
+ * it. The runners throw now — carrying the failed command's exit status in
+ * `code` — and `runRelease` is the single place that turns the throw into what
+ * the script acts on. Both halves are values, so both are checked here.
+ */
+{
+  const steps = (...names) => ({ ok: true, steps: names.map((name) => ({ name, command: `cmd:${name}` })) });
+  const plan = steps("bump", "commit", "audit", "dist", "secret-scan");
+
+  // The real runner's shape: `spawnSync`'s non-zero status becomes an `Error`
+  // carrying that status, so the release's exit status is the failed command's.
+  const failsAt = (name, status) => ({
+    run: (step) => {
+      if (step.name === name) throw Object.assign(new Error(`\`cmd:${name}\` exited ${status}`), { code: status });
+    },
+    runDist: (step) => {
+      if (step.name === name) throw Object.assign(new Error(`\`cmd:${name}\` exited ${status}`), { code: status });
+    },
+  });
+
+  const outcome = runRelease(plan, failsAt("audit", 7));
+  check("a failed step is answered, not thrown out of the release", outcome.ok === false && outcome.reason === "failed", JSON.stringify(outcome));
+  check("...with the failing command's own exit status", outcome.code === 7, JSON.stringify(outcome.code));
+  check(
+    "...naming the step that failed and the ones that had completed",
+    /at step audit/.test(outcome.error || "") && /bump -> commit/.test(outcome.error || ""),
+    outcome.error
+  );
+  check("...keeping the runner's own sentence, which names the command", /cmd:audit` exited 7/.test(outcome.error || ""), outcome.error);
+  check(
+    "...and answering the completed steps, so a caller can log them",
+    outcome.ran.join(" -> ") === "bump -> commit",
+    JSON.stringify(outcome.ran)
+  );
+
+  // The runner's own throw, which is the only reason the list above is reachable
+  // on the real path: `tools/release.mjs` turns a non-zero status into this and
+  // `runRelease` reads it back. Both ends are values, so the pair can be walked —
+  // and a `spawnSync` result that was killed by a signal (`status: null`) has to
+  // land on 1, not on `NaN` or on a sentence with a hole in it.
+  {
+    const exited = stepFailure("npm run audit", 7);
+    check("a failed command's throw carries its exit status", exited && exited.code === 7, JSON.stringify(exited && exited.code));
+    check("...and names the command that failed", /npm run audit/.test(exited.message) && /exited 7/.test(exited.message), exited.message);
+    const killed = stepFailure("npm run dist:win", null);
+    check(
+      "a command killed by a signal is reported as exited 1, not as a hole in the sentence",
+      killed.code === 1 && /exited 1/.test(killed.message),
+      `${killed.code} / ${killed.message}`
+    );
+    const walked = runRelease(
+      { ok: true, steps: [{ name: "audit", command: "npm run audit" }] },
+      {
+        run: (step) => {
+          throw stepFailure(step.command, 4);
+        },
+        runDist: () => {},
+      }
+    );
+    check(
+      "...and the two ends agree: a runner's throw becomes that exit status",
+      walked.ok === false && walked.code === 4 && /npm run audit/.test(walked.error || ""),
+      JSON.stringify([walked.code, walked.error])
+    );
+  }
+
+  // The same for the other runner: packaging failing is the likely one, and the
+  // exit status has to survive that path too.
+  const packaging = runRelease(plan, failsAt("dist", 3));
+  check(
+    "a failed packaging step is answered the same way, with its status",
+    packaging.ok === false && packaging.code === 3 && packaging.ran.join(" -> ") === "bump -> commit -> audit",
+    JSON.stringify(packaging)
+  );
+  check(
+    "...so the key scan is not reported as having run over a build that failed",
+    !packaging.ran.includes("secret-scan"),
+    JSON.stringify(packaging.ran)
+  );
+
+  // A successful release is the same shape with `ok: true`, so the caller has one
+  // branch to read rather than two.
+  const finished = runRelease(plan, { run: () => {}, runDist: () => {} });
+  check(
+    "a release that finishes is answered ok, with every step",
+    finished.ok === true && finished.ran.join(" -> ") === RELEASE_STEPS.slice(1).join(" -> "),
+    JSON.stringify(finished)
+  );
+
+  // A runner that fails without an exit status still must not exit 0, and an
+  // error that carries an errno string in `code` (`ENOENT`) is not an exit status
+  // — turning it into one would report a status the command never had.
+  for (const [label, thrown, code] of [
+    ["a plain Error", new Error("boom"), 1],
+    ["a non-Error throw", "plain string failure", 1],
+    ["an Error with an errno string in code", Object.assign(new Error("spawn failed"), { code: "ENOENT" }), 1],
+    ["an Error with no message", new Error(""), 1],
+    ["an Error carrying status 9", Object.assign(new Error("exited 9"), { status: 9 }), 9],
+  ]) {
+    const answer = runRelease(plan, {
+      run: () => {
+        throw thrown;
+      },
+      runDist: () => {},
+    });
+    check(
+      `${label} still answers a non-zero status (${code})`,
+      answer.ok === false && answer.code === code,
+      JSON.stringify([answer.ok, answer.code])
+    );
+    check(
+      "...and never an empty error line",
+      typeof answer.error === "string" && answer.error.trim().length > 0 && /release aborted/.test(answer.error),
+      answer.error
+    );
+  }
+
+  // The lines themselves, because they are what a human reads at that moment.
+  {
+    const abort = releaseAbort(Object.assign(new Error("`npm run dist:win` exited 1"), { code: 1, ran: ["bump", "commit"], failed: "dist" }));
+    check("the abort sentence names the step, where it got to, and what it said", abort.lines[0].includes("at step dist") && abort.lines[0].includes("bump -> commit") && abort.lines[0].includes("exited 1"), abort.lines[0]);
+    check(
+      "...and the second line says the tree was already changed, rather than implying nothing happened",
+      /the steps above already ran/.test(abort.lines[1] || "") &&
+        /not the one it started from/.test(abort.lines[1] || "") &&
+        !/did not get as far/.test(abort.lines[1] || ""),
+      abort.lines[1]
+    );
+    check("...with the same list and status the answer carries", abort.code === 1 && abort.ran.join(" -> ") === "bump -> commit" && abort.failed === "dist", JSON.stringify([abort.code, abort.ran, abort.failed]));
+
+    const nothingRan = releaseAbort(new Error("git commit exploded"));
+    check(
+      "a failure before any step completed says so, instead of listing an empty progress",
+      /no step completed/.test(nothingRan.lines[0]) && /did not get as far as changing the tree/.test(nothingRan.lines[1] || "") && nothingRan.ran.length === 0,
+      JSON.stringify(nothingRan.lines)
+    );
+
+    // A frozen error cannot carry `ran`, so the list has to come from somewhere
+    // else rather than being silently lost on the floor.
+    const frozen = Object.freeze(new Error("frozen"));
+    const frozenAbort = releaseAbort(frozen);
+    check(
+      "an error that cannot be annotated is still reported, without inventing progress",
+      frozenAbort.code === 1 && frozenAbort.ran.length === 0 && /frozen/.test(frozenAbort.lines[0]),
+      JSON.stringify(frozenAbort)
+    );
+
+    // The list is copied, not handed out by reference: the caller keeps it for a
+    // log while `runRelease`'s answer has already been read.
+    const annotatable = Object.assign(new Error("boom"), { ran: ["bump"] });
+    const copied = releaseAbort(annotatable);
+    copied.ran.push("not a step");
+    check("the completed-step list in the answer is a copy", annotatable.ran.join(" ->") === "bump", JSON.stringify(annotatable.ran));
+  }
+
+  // A refused plan answers a status of its own, so a shell that only sees `$?`
+  // can tell "refused before anything ran" from "failed halfway".
+  {
+    const g = fakeGit({ [SYMBOLIC]: "throw" });
+    const refused = planRelease({ version: "0.1.14", capture: g.capture });
+    const answer = runRelease(refused, { run: () => check("a refused plan runs nothing", false), runDist: () => {} });
+    check(
+      "a refused plan is answered with the refusal status and no steps",
+      answer.ok === false && answer.code === 2 && answer.ran.length === 0,
+      JSON.stringify(answer)
+    );
+    check(
+      "...and carries the refusal's own sentence, not a generic one",
+      /git switch/.test(answer.error || ""),
+      answer.error
+    );
+  }
+
+  // `err.failed` is what the abort sentence is built from, so it has to be on the
+  // throw itself — not only in `releaseAbort`'s answer.
+  {
+    let threw = null;
+    try {
+      executeRelease(plan, {
+        run: (step) => {
+          if (step.name === "commit") throw new Error("commit failed");
+        },
+        runDist: () => {},
+      });
+    } catch (err) {
+      threw = err;
+    }
+    check(
+      "the throw names the failing step beside the completed ones",
+      threw !== null && threw.failed === "commit" && threw.ran.join(" -> ") === "bump",
+      JSON.stringify([threw && threw.failed, threw && threw.ran])
+    );
+  }
+}
+
 /* ---- the packaging fallback moves a build without losing it ----
  * `tools/release.mjs` retries packaging into `release-<version>/` when
  * electron-builder cannot rename into a locked `release/win-unpacked`, and then
@@ -628,6 +840,59 @@ const STATUS = "git status --porcelain";
       "...so it is gone and release/ holds the old and the new artefacts",
       !d.resolve(FROM).exists && Object.keys(d.lookup(TO)).length === 5,
       JSON.stringify(Object.keys(d.lookup(TO) || {}))
+    );
+  }
+
+  /* an entry the skip list has never heard of is moved, not deleted with the dir */
+  {
+    // `DIST_SKIP` is a denylist of what the *temp* output dir owns, so an entry
+    // it does not name has exactly two possible fates: moved into `release/`, or
+    // destroyed when the fallback dir is removed at the end of the move. This is
+    // the case that decides which — an artefact electron-builder writes today
+    // (`builder-effective-config.yaml`) but which was never added to the list.
+    // Without it, "the unknown file was silently left behind and then deleted"
+    // looks exactly like a green run.
+    const EFFECTIVE = "builder-effective-config.yaml";
+    const d = fakeDisk({
+      "release-0.1.14": {
+        "win-unpacked": { "open-code-review-desktop.exe": null },
+        "builder-debug.yml": null,
+        [EFFECTIVE]: null,
+        [SETUP]: null,
+      },
+      release: {},
+    });
+    let answer = null;
+    let threw = null;
+    try {
+      answer = relocateDistOutput({ from: FROM, to: TO, fs: d.fs, path: posix });
+    } catch (err) {
+      threw = err;
+    }
+    check("the fallback move completes with an unlisted artefact in the temp dir", threw === null, threw && threw.message);
+    if (!answer) answer = { moved: [], skipped: [], replaced: null };
+    check(
+      "an artefact the skip list has never heard of is moved into release/, not left to be deleted",
+      answer.moved.includes(EFFECTIVE),
+      answer.moved.join(" | ")
+    );
+    check(
+      "...and it is still in release/ after the fallback dir is gone",
+      d.lookup(`${TO}/${EFFECTIVE}`) !== undefined && !d.resolve(FROM).exists,
+      JSON.stringify({ inRelease: d.lookup(`${TO}/${EFFECTIVE}`), fallbackGone: !d.resolve(FROM).exists })
+    );
+    check(
+      "...while the two entries the temp dir owns are the only ones left behind",
+      answer.skipped.join(" | ") === "builder-debug.yml",
+      answer.skipped.join(" | ")
+    );
+    // The list itself, because the sentence above only holds while it stays this
+    // short: a third name added here starts deleting build output instead of
+    // shipping it, and that has to be a deliberate, visible edit.
+    check(
+      "the skip list is still exactly the temp output dir's own two entries",
+      DIST_SKIP.join(" | ") === "win-unpacked | builder-debug.yml",
+      DIST_SKIP.join(" | ")
     );
   }
 
@@ -943,6 +1208,7 @@ const STATUS = "git status --porcelain";
 {
   const SETUP = "open-code-review-desktop-0.1.14-setup.exe";
   const LATEST = "latest.yml";
+  const EFFECTIVE = "builder-effective-config.yaml";
 
   /** Make the parent directories, then write the file — the shape of a build. */
   const put = (file, body) => {
@@ -969,6 +1235,11 @@ const STATUS = "git status --porcelain";
       put(path.join(from, SETUP), "this build's setup");
       put(path.join(from, LATEST), "this build's feed");
       put(path.join(from, "builder-debug.yml"), "describes the temp output dir");
+      // Not in `DIST_SKIP`: whatever the build wrote beside the installers has to
+      // land in `release/`, because the fallback dir is deleted at the end of the
+      // move. Pinned on the real disk as well as on the fake one, since a name the
+      // fake table made up would prove nothing about the real `readdirSync`.
+      put(path.join(from, EFFECTIVE), "the merged config this build ran with");
       put(path.join(to, "win-unpacked", "stale.exe"), "the previous release's app");
       put(path.join(to, "open-code-review-desktop-0.1.13-setup.exe"), "the previous release's setup");
       // No `fs`, no `path`: this is the call `tools/release.mjs` makes. Caught for
@@ -991,6 +1262,7 @@ const STATUS = "git status --porcelain";
         feedLanded: fs.existsSync(path.join(to, LATEST)),
         previousKept: fs.existsSync(path.join(to, "open-code-review-desktop-0.1.13-setup.exe")),
         debugShipped: fs.existsSync(path.join(to, "builder-debug.yml")),
+        effectiveLanded: fs.existsSync(path.join(to, EFFECTIVE)),
         fallbackGone: !fs.existsSync(from),
       };
     });
@@ -1014,6 +1286,11 @@ const STATUS = "git status --porcelain";
       "...without shipping the temp output dir's builder-debug.yml",
       !seen.debugShipped && seen.landed !== null && seen.landed.skipped.join(" | ") === "builder-debug.yml",
       JSON.stringify([seen.debugShipped, seen.landed && seen.landed.skipped])
+    );
+    check(
+      "...with the artefact no skip rule knew about landing beside them, not deleted",
+      seen.effectiveLanded,
+      JSON.stringify(seen.effectiveLanded)
     );
     check(
       "...and the fallback dir is deleted once everything worth keeping has left it",
