@@ -1311,6 +1311,13 @@ check("and the exit says the evidence did not make it", outcomeMessage(slowExit)
       handlerSends.some((m) => m.channel === "run:progress" && m.payload.progress?.done === 1),
     JSON.stringify(handlerSends.map((m) => m.channel))
   );
+  check(
+    "the CLI's log line is filed under the id the CLI gave the run",
+    handlerSends.some(
+      (m) => m.channel === "run:log" && m.payload.id === "handler-run" && m.payload.line?.includes("login.go")
+    ),
+    JSON.stringify(handlerSends.filter((m) => m.channel === "run:log"))
+  );
 
   runs[0].onDone("handler-run", { sessionId: "handler-session", value: limitResult });
   // The record is queued behind the store's write, so wait for the exit rather
@@ -1429,8 +1436,9 @@ check("and the exit says the evidence did not make it", outcomeMessage(slowExit)
   check(
     "and the app injects the sink that forwards to the renderer's log",
     /const\s+runLog\s*=\s*\(line,\s*id\)\s*=>\s*send\(\s*["']run:log["']\s*,\s*\{\s*id\s*,\s*line\s*\}\s*\)/.test(mainSrc2) &&
-      /warn:\s*runLog\b/.test(mainSrc2),
-    "main.js does not wire warn to run:log"
+      /warn:\s*runLog\b/.test(mainSrc2) &&
+      /log:\s*runLog\b/.test(mainSrc2),
+    "main.js does not wire log/warn to run:log"
   );
 }
 
@@ -1635,13 +1643,16 @@ check("and the exit says the evidence did not make it", outcomeMessage(slowExit)
   const appHandler = makeRunHandler({
     ocr: {
       startRun(spec, onLog, onDone) {
-        // The CLI's own id, which is not the renderer's `spec.runId`.
+        // The CLI's own log line and its own id, which is not the renderer's
+        // `spec.runId`.
+        onLog("cli-run-id", "reading internal/service/auth/login.go");
         onDone("cli-run-id", { sessionId: "app-sink-session", value: limitResult });
         return { id: spec.runId };
       },
     },
     store: appStore,
     send: appSend,
+    log: appWarn,
     warn: appWarn,
   });
   appHandler({ repo, mode: "review", runId: "renderer-spec-id" });
@@ -1655,13 +1666,44 @@ check("and the exit says the evidence did not make it", outcomeMessage(slowExit)
   );
   check(
     "and it is filed under the id the CLI gave the run",
-    appLines.length === 1 && appLines[0].payload.id === "cli-run-id",
+    appLines.length === 2 && appLines.every((m) => m.payload.id === "cli-run-id"),
+    JSON.stringify(appLines)
+  );
+  check(
+    "the CLI's own line and the end-of-run line share one sink",
+    appLines.some((m) => m.payload.line?.includes("login.go")) &&
+      appLines.some((m) => m.payload.line === `[run-diagnostics] ${signalFailedMessage()}`),
     JSON.stringify(appLines)
   );
   check(
     "with no second copy under the renderer's spec id",
     !appLines.some((m) => m.payload.id === "renderer-spec-id"),
     JSON.stringify(appLines)
+  );
+
+  // And the sink is a collaborator, not a hard-coded channel: a caller that
+  // injects one sees the CLI's lines, and `send` sees no `run:log` at all.
+  const injectedLog = [];
+  const injectedSend = [];
+  const injectedLogHandler = makeRunHandler({
+    ocr: {
+      startRun(spec, onLog) {
+        onLog("cli-log-id", "through the injected sink");
+        return { id: spec.runId };
+      },
+    },
+    store: {},
+    send: (channel, payload) => injectedSend.push({ channel, payload }),
+    log: (line, id) => injectedLog.push({ line, id }),
+  });
+  injectedLogHandler({ repo, mode: "review", runId: "renderer-spec-id" });
+  check(
+    "the CLI's log lines go through the injected sink, not a hard-coded channel",
+    injectedLog.length === 1 &&
+      injectedLog[0].id === "cli-log-id" &&
+      injectedLog[0].line === "through the injected sink" &&
+      !injectedSend.some((m) => m.channel === "run:log"),
+    JSON.stringify({ injectedLog, injectedSend })
   );
 
   // The other sentence with no payload to ride on: the settle itself rejected,

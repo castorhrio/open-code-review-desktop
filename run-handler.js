@@ -34,6 +34,9 @@ const diagnostics = require("./run-diagnostics");
  * @param {Function} [options.outcomeMessage]
  * @param {Function} [options.reportOutcome]
  * @param {number} [options.timeoutMs]
+ * @param {Function} [options.log]   where the CLI's own log lines go, called as
+ *                                   (line, id) so they are filed under the run
+ *                                   that produced them (default: `run:log`)
  * @param {Function} [options.warn]  where the last-resort report goes, called as
  *                                   (line, id) so the caller can file the line
  *                                   under the run it belongs to (default: console.warn)
@@ -69,7 +72,14 @@ function makeRunHandler(options) {
   // itself on a line that reads like trouble. A caller that injects nothing
   // still gets the console fallback, and still through this one closure: none
   // of the three lines may drift back to a `console.warn` of its own.
+  //
+  // The CLI's own log lines take the same shape (`line`, `id`) and the same
+  // injectable point, so `main.js` can hand both sinks one function. Without
+  // that, half the run's log was filed by a hard-coded `send("run:log", …)` and
+  // the other half by the injected `warn` — two spellings of one destination,
+  // and no check could prove they stayed the same one.
   const warn = typeof opts.warn === "function" ? opts.warn : undefined;
+  const log = typeof opts.log === "function" ? opts.log : (line, id) => send("run:log", { id, line });
   const SETTLE_FAILED = opts.settleFailedOutcome || diagnostics.SETTLE_FAILED;
 
   return function runReview(spec) {
@@ -83,7 +93,7 @@ function makeRunHandler(options) {
     const exit = createRunExitDoor(send);
     return ocr.startRun(
       spec,
-      (id, line) => send("run:log", { id, line }),
+      (id, line) => log(line, id),
       (id, result) => {
         // The three end-of-run lines are filed under the id the CLI gave this
         // run — the same id `settleRunExit` puts on the exit payload — so a

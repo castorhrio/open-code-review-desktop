@@ -327,11 +327,14 @@ ipcMain.handle("review:preview", (_e, spec) => ocr.preview(spec));
 // payload carries — so the line is filed under the run it belongs to. The
 // alternative (a file under `userData`) would need a second way to read it;
 // stderr is not a place, since a packaged app has no terminal to read it from.
+// The CLI's own log lines (`log`) use that same function: one sink for the
+// whole run, rather than one injected half and one hard-coded half.
 const runLog = (line, id) => send("run:log", { id, line });
 const runReview = makeRunHandler({
   ocr,
   store: runDiagnostics,
   send,
+  log: runLog,
   warn: runLog,
 });
 ipcMain.handle("review:run", (_e, spec) => runReview(spec));
