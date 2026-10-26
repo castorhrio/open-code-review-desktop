@@ -761,15 +761,21 @@ const check = (name, ok, detail = "") => {
   // The order is the point, and it has to be read inside *this* registration:
   // `repo:pick` above it asks the dialog first, so an index over the whole file
   // would pass whichever order `repo:pickInside` used.
-  const pickInsideSrc = mainSrc.slice(
-    mainSrc.indexOf('ipcMain.handle("repo:pickInside"'),
-    mainSrc.indexOf('ipcMain.handle("repo:pickFile"')
-  );
+  const registrationAt = mainSrc.indexOf('ipcMain.handle("repo:pickInside"');
+  const pickInsideSrc = mainSrc.slice(registrationAt, mainSrc.indexOf('ipcMain.handle("repo:pickFile"'));
+  const lineAt = (index) =>
+    index === -1 ? "missing" : String(mainSrc.slice(0, registrationAt + index).split("\n").length);
+  const guardAt = pickInsideSrc.indexOf("repoIsPickable(repo)");
+  const dialogAt = pickInsideSrc.search(/dialog\.showOpenDialog\(/);
+  const dialogCalls = (pickInsideSrc.match(/dialog\.showOpenDialog\(/g) || []).length;
   check(
     "repo:pickInside asks whether the repo is pickable before it opens the dialog",
     /if \(!repoIsPickable\(repo\)\) return pickInsidePayload\(pickInsideAnswer\("", null\)\);/.test(pickInsideSrc) &&
-      pickInsideSrc.indexOf("repoIsPickable(repo)") < pickInsideSrc.indexOf("showOpenDialog"),
-    "a relative repo would otherwise open the dialog at the process's working directory and refuse a real subdirectory"
+      guardAt !== -1 &&
+      dialogAt !== -1 &&
+      guardAt < dialogAt &&
+      dialogCalls === 1,
+    `repoIsPickable at line ${lineAt(guardAt)}, dialog at line ${lineAt(dialogAt)}, dialog calls=${dialogCalls} — a relative repo would otherwise open the dialog at the process's working directory and refuse a real subdirectory`
   );
   // `pickInsidePayload`'s unknown-kind throw is only a dead path at the IPC
   // boundary while every answer it receives came from the decision. A hand-built

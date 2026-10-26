@@ -18,6 +18,42 @@ pin 块，这样它就不会某天被当成第二个权威源。
 
 ---
 
+## 上游状态（最近检查：2026-10-27，第 67 轮）
+
+第 67 轮复核：**两条通路一致，结论仍是「无新内容」**。
+`git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
+refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
+（与第 49–66 轮同一个 commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
+`dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`；`npm view @alibaba-group/open-code-review
+version dist-tags` 仍是 `1.13.3` / `latest: 1.13.3`。desktop 的 `^1.13.3` 无需改动，
+**无移植项**；本轮没有上游 API / CLI / 配置面的变化要移植。
+
+本轮不加新模块，改的是「第 66 轮新引入的判定还没有单测」这一处，以及两处只测了
+契约、没测平台语义的缺口：
+
+- **e2e 的「超时」与「读屏」判定搬进纯函数。** `tools/e2e-screen.cjs` 现在持有
+  `timeoutError`、`screenAfter(waiting, readScreen, { timeoutMs })` 与 `neverAppeared`，
+  `tools/e2e-flow.cjs` 只剩「等」和「读 `main`」两件 Electron 的事。新增
+  `npm run audit:e2e-screen`：用一个 resolve、一个带 `__timeout` 的 reject、一个不带
+  的 reject 钉住三态，并钉住「resolve 后不再读屏」「读屏抛错/拒绝仍保住超时判定」
+  「空屏幕不是超时」。两次读屏之间画面可能已变的已知近似写进了模块注释。
+- **`repoIsPickable` 补上 Windows 语义。** 判据仍是「非空 + `path.isAbsolute`」，但
+  现在可注入 `{ pathApi }`；`audit:path` 用 `path.win32` 断言 `C:\repo` / `\\server\share`
+  / `\\?\C:\Repo` 可开始，而 `C:repo`（盘符相对，指向 C 盘当前目录）不可开始——这是
+  对话框会开到用户没选的位置、并把真在仓库里的子目录判成越界的那一类输入。注入也
+  被反过来钉住：同一个 `C:\repo` 在 `path.posix` 下必须判否。
+- **`PickScanDirAnswer` 的「漏读空对象」从注释变成编译错误。**
+  `src/lib/__typecheck__/pick-scan-dir.ts` 用 `// @ts-expect-error` 钉住三件事：漏掉
+  `{}` 那支就不能把 `relPath` 当字符串、拒绝不能同时带 `relPath`、`relPath` 不能是
+  `null`；三个合法形状也各写一个正例。`npm run typecheck` 因此成为这条承诺的机械保证。
+- **`pickInsidePayload` 的 `default: throw` 在 IPC 边界定案：死路径，不测。**
+  `main.js` 的 `repo:pickInside` 只调用 `pickInsidePayload(pickInsideAnswer(...))`，
+  renderer 传不了 kind；这个 throw 针对的是「决定层加了 kind、翻译层没加」的漂移。
+  `path-guard.js` 的注释写明了这一点（若真被触达，Electron 会把异常变成
+  `ipcRenderer.invoke` 的 reject，而不是一个错的答案）；`audit:path` 新增一条源码
+  断言：`main.js` 里每一处 `pickInsidePayload(` 的参数都必须是 `pickInsideAnswer(...)`，
+  手搓答案字面量会让「死路径」不成立并立即变红。
+
 ## 上游状态（最近检查：2026-10-27，第 66 轮）
 
 第 66 轮复核：**两条通路一致，结论仍是「无新内容」**。

@@ -74,11 +74,28 @@ const check = (name, ok, detail = "") => {
 /* ---- rejected with the marker: the screen is read, the reason is a timeout ---- */
 {
   const waiting = Promise.reject(timeoutError("timed out waiting for the preview"));
-  const answer = await screenAfter(waiting, async () => "the form, no preview", { timeoutMs: 60000 });
+  let reads = 0;
+  // A distinctive string, so "the reported screen" cannot be confused with a
+  // later frame that happens to look the same.
+  const readBack = "the form, no preview [read at the deadline]";
+  const answer = await screenAfter(waiting, async () => {
+    reads += 1;
+    return readBack;
+  }, { timeoutMs: 60000 });
   check(
     "timed out: the screen is read and the verdict is a timeout",
-    answer.screen === "the form, no preview" && answer.timedOut === true && answer.timeoutMs === 60000,
+    answer.screen === readBack && answer.timedOut === true && answer.timeoutMs === 60000,
     JSON.stringify({ screen: answer.screen, timedOut: answer.timedOut, timeoutMs: answer.timeoutMs })
+  );
+  check(
+    "...and the screen is read exactly once, not once per branch",
+    reads === 1,
+    `reader called ${reads} time(s)`
+  );
+  check(
+    "...and the reported screen is that one read's value, unchanged",
+    answer.screen === readBack,
+    JSON.stringify({ reported: answer.screen, read: readBack })
   );
   check(
     "...and the original error is kept for the report",
@@ -130,16 +147,21 @@ const check = (name, ok, detail = "") => {
 
 /* ---- the sentence names both the subject and the budget ---- */
 {
-  const sentence = neverAppeared("the preview", 60000);
+  // Two named budgets rather than two literals: the assertion below is about the
+  // sentence naming whichever budget it was given, and a reader should not have
+  // to checksum digits in two call sites to agree that they differ.
+  const budgetA = 60000;
+  const budgetB = 20000;
+  const sentence = neverAppeared("the preview", budgetA);
   check(
     "neverAppeared names what was awaited and the budget it did not fit in",
-    sentence.includes("the preview") && sentence.includes("60000") && sentence.includes("not judged"),
+    sentence.includes("the preview") && sentence.includes(String(budgetA)) && sentence.includes("not judged"),
     sentence
   );
   check(
     "...and two different budgets produce two different sentences",
-    neverAppeared("the preview", 60000) !== neverAppeared("the preview", 20000),
-    JSON.stringify([neverAppeared("the preview", 60000), neverAppeared("the preview", 20000)])
+    neverAppeared("the preview", budgetA) !== neverAppeared("the preview", budgetB),
+    JSON.stringify([neverAppeared("the preview", budgetA), neverAppeared("the preview", budgetB)])
   );
 }
 

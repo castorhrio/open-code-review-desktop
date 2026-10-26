@@ -26,6 +26,11 @@ const {
   PICK_INSIDE_MESSAGES,
 } = require(path.join(ROOT, "path-guard.js"));
 const { timeoutError, screenAfter, neverAppeared } = require(path.join(ROOT, "tools", "e2e-screen.cjs"));
+const {
+  PICKER_STEP_NAMES,
+  PICKER_STUB_MISSING,
+  pickerCheck: pickerVerdict,
+} = require(path.join(ROOT, "tools", "e2e-picker.cjs"));
 const reportPath = process.argv[2];
 const results = [];
 const check = (name, ok, detail) => results.push({ name, ok: Boolean(ok), detail: detail || "" });
@@ -331,8 +336,6 @@ app.whenReady().then(async () => {
      * scan to the whole repository, so "the field did not change" is the
      * assertion that matters, not merely "nothing crashed".
      */
-    const STUB_MISSING =
-      "dialog.showOpenDialog is not writable in this Electron/sandbox combination, so this picker step did not run";
     const scanField = `(() => { const i = document.querySelector('main input[placeholder^="src/main/java"]'); return i ? i.value : null; })()`;
     const clickPickDir = `(() => { const b = [...document.querySelectorAll("main button")].find((x) => (x.textContent || "").trim() === "选目录"); if (b) b.click(); return Boolean(b); })()`;
     const readScreen = () =>
@@ -341,7 +344,7 @@ app.whenReady().then(async () => {
     check(
       "the OS dialog is stubbed, so the picker steps ask nobody",
       dialogIsStubbed,
-      dialogIsStubbed ? "" : STUB_MISSING
+      dialogIsStubbed ? "" : PICKER_STUB_MISSING
     );
 
     /* Every picker assertion below is registered whether or not the stub took.
@@ -354,9 +357,23 @@ app.whenReady().then(async () => {
      * `body` answers `{ ok, detail }` and may throw: a throw is reported against
      * the check that needed the step, which is also how the shared setup below
      * fails — once, under each assertion that depended on it, instead of as one
-     * anonymous red line. */
+     * anonymous red line.
+     *
+     * Whether a missing stub makes this row red is not decided here any more:
+     * `pickerVerdict` (tools/e2e-picker.cjs) answers one row per declared step,
+     * and its smoke test pins that a missing or unreadable stub still produces
+     * every name, red, with the marker. `pickerReported` is what makes deleting
+     * a call from this file a failure rather than a silently shorter report. */
+    const pickerReported = new Set();
     const pickerCheck = async (name, body) => {
-      if (!dialogIsStubbed) return check(name, false, STUB_MISSING);
+      let declared = null;
+      try {
+        declared = pickerVerdict(dialogIsStubbed, name);
+      } catch (err) {
+        return check(name, false, `this step is not declared in tools/e2e-picker.cjs: ${(err && err.message) || err}`);
+      }
+      pickerReported.add(name);
+      if (!declared.ok) return check(declared.name, false, declared.detail);
       let verdict = null;
       try {
         verdict = await body();
@@ -544,6 +561,16 @@ app.whenReady().then(async () => {
         }),
       };
     });
+
+    // The declared list is the contract; the calls above are the delivery. This
+    // check is what makes "delete a picker assertion" a red line instead of a
+    // report that is simply shorter — the same failure mode as the missing stub,
+    // one level up.
+    check(
+      "every picker step declared in tools/e2e-picker.cjs was reported",
+      PICKER_STEP_NAMES.every((name) => pickerReported.has(name)),
+      `unreported: ${PICKER_STEP_NAMES.filter((name) => !pickerReported.has(name)).join(" | ")}`
+    );
   } catch (err) {
     check("the end-to-end flow completed", false, String((err && err.message) || err));
   } finally {

@@ -12,41 +12,37 @@
 4. **不要**静默忽略上游 release：每轮把结论写进下面「当前状态」，并把上一轮的正文搬到
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。
 
-## 当前状态（第 67 轮，2026-10-27）
+## 当前状态（第 68 轮，2026-10-27）
 
-第 67 轮复核：**两条通路一致，结论仍是「无新内容」**。
+第 68 轮复核：**HEAD 未变，结论仍是「无新内容」；本轮 git 通路超时，由 GitHub API 作答。**
 `git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
-refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
-（与第 49–66 轮同一个 commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
-`dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`；`npm view @alibaba-group/open-code-review
-version dist-tags` 仍是 `1.13.3` / `latest: 1.13.3`。desktop 的 `^1.13.3` 无需改动，
-**无移植项**；本轮没有上游 API / CLI / 配置面的变化要移植。
+refs/tags/v1.13.3` 本轮超时（退出码 124），改走 GitHub API：
+`api.github.com/repos/alibaba/open-code-review/commits/main` 给出
+`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`（与第 49–67 轮同一个
+commit），`git/ref/tags/v1.13.3` 仍指向 annotated tag 对象
+`dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`，`releases/latest` 仍是 `v1.13.3`；
+`npm view @alibaba-group/open-code-review version dist-tags` 仍是 `1.13.3` /
+`latest: 1.13.3`。desktop 的 `^1.13.3` 无需改动，**无移植项**。
 
-本轮不加新模块，改的是「第 66 轮新引入的判定还没有单测」这一处，以及两处只测了
-契约、没测平台语义的缺口：
+本轮继续「把判定搬进可测纯函数」这条线，补的是第 66–67 轮留下的两处「只有人读注释
+才能保证」的契约：
 
-- **e2e 的「超时」与「读屏」判定搬进纯函数。** `tools/e2e-screen.cjs` 现在持有
-  `timeoutError`、`screenAfter(waiting, readScreen, { timeoutMs })` 与 `neverAppeared`，
-  `tools/e2e-flow.cjs` 只剩「等」和「读 `main`」两件 Electron 的事。新增
-  `npm run audit:e2e-screen`：用一个 resolve、一个带 `__timeout` 的 reject、一个不带
-  的 reject 钉住三态，并钉住「resolve 后不再读屏」「读屏抛错/拒绝仍保住超时判定」
-  「空屏幕不是超时」。两次读屏之间画面可能已变的已知近似写进了模块注释。
-- **`repoIsPickable` 补上 Windows 语义。** 判据仍是「非空 + `path.isAbsolute`」，但
-  现在可注入 `{ pathApi }`；`audit:path` 用 `path.win32` 断言 `C:\repo` / `\\server\share`
-  / `\\?\C:\Repo` 可开始，而 `C:repo`（盘符相对，指向 C 盘当前目录）不可开始——这是
-  对话框会开到用户没选的位置、并把真在仓库里的子目录判成越界的那一类输入。注入也
-  被反过来钉住：同一个 `C:\repo` 在 `path.posix` 下必须判否。
-- **`PickScanDirAnswer` 的「漏读空对象」从注释变成编译错误。**
-  `src/lib/__typecheck__/pick-scan-dir.ts` 用 `// @ts-expect-error` 钉住三件事：漏掉
-  `{}` 那支就不能把 `relPath` 当字符串、拒绝不能同时带 `relPath`、`relPath` 不能是
-  `null`；三个合法形状也各写一个正例。`npm run typecheck` 因此成为这条承诺的机械保证。
-- **`pickInsidePayload` 的 `default: throw` 在 IPC 边界定案：死路径，不测。**
-  `main.js` 的 `repo:pickInside` 只调用 `pickInsidePayload(pickInsideAnswer(...))`，
-  renderer 传不了 kind；这个 throw 针对的是「决定层加了 kind、翻译层没加」的漂移。
-  `path-guard.js` 的注释写明了这一点（若真被触达，Electron 会把异常变成
-  `ipcRenderer.invoke` 的 reject，而不是一个错的答案）；`audit:path` 新增一条源码
-  断言：`main.js` 里每一处 `pickInsidePayload(` 的参数都必须是 `pickInsideAnswer(...)`，
-  手搓答案字面量会让「死路径」不成立并立即变红。
+- **picker 的「打桩失败 → 逐条红」成为值。** 新增 `tools/e2e-picker.cjs`：
+  `PICKER_STEP_NAMES` 是 picker 断言的完整清单，`pickerChecks(dialogIsStubbed)` 为
+  每个步骤回答一行，`pickerCheck` 对未声明的步骤直接抛错（拼错名字不会静默删断言）。
+  `e2e-flow.cjs` 不再写 `if (!dialogIsStubbed) return check(...)` 的内联分支；步骤
+  是否红由模块决定，流程末尾还新增「声明的每一步都确实被报告」的检查——删掉一处
+  `pickerCheck` 调用会变红，而不是让报告悄悄变短。`tools/e2e-picker-smoke.mjs`
+  （`npm run audit:e2e-picker`，挂在 `audit:e2e-screen` 之后）钉住三态：`true` 逐条
+  绿、`false` 逐条红且 detail 含 `PICKER_STUB`、`undefined` 同样逐条红；并断言流程
+  仍在用这份清单。
+- **`screenAfter` 的「读屏恰好一次」被计数钉住。**
+  `tools/e2e-screen-smoke.mjs` 在 reject 分支加入 reader 调用计数与「报告的 screen
+  就是 reader 那次返回值」两条断言（此前只断言了 resolve 分支 0 次），并把
+  `neverAppeared` 的两个预算改成具名变量，不再靠人读两个字面量确认它们不同。
+- **`repo:pickInside` 的顺序断言点名行号。** `audit:path` 原有的「先
+  `repoIsPickable` 再 `dialog.showOpenDialog`」检查现在显式匹配带括号的调用，并要求
+  该 handler 内恰好一次对话框调用；失败时打印两个行号，而不是只给一个布尔值。
 
 
 ## 上游真变了怎么办（命令驱动，而不是「记得看一眼」）
@@ -117,7 +113,7 @@ pin 或 ls-remote 给出的 SHA 短于 40 位时一律判「跳过」并说明�
 没变**，所以每轮的结论仍要写进上面「当前状态」——跳过时至少留下 `[UPSTREAM-DEBT]` 与
 「核对通路账」里的一行欠账。
 
-**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 67 轮：`git ls-remote` 可达，`refs/heads/main` 与 pin 一致；tag 与 pin 指向同一 commit；npm release 仍是 `1.13.3`；通路：git）**
+**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 68 轮：`git ls-remote` 超时，GitHub API 可达，`refs/heads/main` 与 pin 一致；tag 与 release 由 API / npm 核对；通路：api）**
 
 ### 核对通路账
 
@@ -150,13 +146,15 @@ pin 或 ls-remote 给出的 SHA 短于 40 位时一律判「跳过」并说明�
 | 65 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；pickInside / providers / 三处反向断言收口 | — |
 | 66 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；e2e 的没跑≠通过、相对仓库先拒、kind 抛错 | — |
 | 67 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；e2e 判定纯函数、Windows 盘符相对、类型负例 | — |
+| 68 | 2026-10-27 | api | `375f64c` / `v1.13.3`，无新内容；git 超时、API 作答；npm `1.13.3`；picker 判定纯函数、读屏计数、顺序断言点名行号 | — |
 
 「最近一次对照」只写**那一项最近被人工重新核对**的轮次。该列没有列出本轮，表示本轮
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
 对应行并把轮次与日期改成本轮。
 
-**第 46–66 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
-npm 通路可达，第 56 轮 git 超时但 API 可达，第 63–64 轮本文件无通路记录），所以下表四行的
+**第 46–67 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
+npm 通路可达，第 56 轮 git 超时但 API 可达，第 63–64 轮本文件无通路记录，第 68 轮 git
+超时但 API 可达），所以下表四行的
 「最近一次对照」停在第 45 轮是
 **没有理由重看**，不是忘了看：
 它记录的是「最后一次有人逐行读上游源码」的轮次，而不是「最后一次确认上游没变」的轮次。
