@@ -3114,6 +3114,49 @@ await shoot(page, "99-settings-savedkey-ipc-fail", {
   },
 });
 
+// The same settings page during the window where the lookup has not answered
+// yet (?savedkey=loading never resolves). Every fixture used to answer
+// immediately, so this state had never been rendered — and the sentence it fell
+// through to was "该服务还没有 Key", the one answer the form is not entitled to
+// give while the question is still open. It has to say it is still asking.
+//
+// The banner about the CLI's built-in service table is the other half of the
+// same table: it is read from the config view until the lookup answers, so on a
+// machine where that read failed the banner is already up while the Key
+// sentence is still pending. Both must read "not known yet" — never "the table
+// is unreadable" next to "your Key is fine", and never "unreadable" next to a
+// confident "no Key".
+await shoot(page, "99-settings-savedkey-loading", {
+  query: "?savedkey=loading",
+  after: nav("设置"),
+  expect: async (page) => {
+    const text = await page.locator("main").innerText();
+    const out = [];
+    if (!/正在确认是否已有可用的 Key/.test(text)) out.push("a pending lookup is not shown as pending");
+    if (/该服务还没有 Key/.test(text)) out.push("the form claims there is no Key while the lookup that decides that is still running");
+    if (/留空表示保持不变/.test(text)) out.push("the form promises the saved Key will be reused before anything has checked");
+    if (/无法读取内置服务名单/.test(text))
+      out.push("the banner says the service table is unreadable although this config view could read it");
+    return out;
+  },
+});
+
+await shoot(page, "99-settings-savedkey-loading-table-unreadable", {
+  query: "?savedkey=loading&preset=unavailable",
+  after: nav("设置"),
+  expect: async (page) => {
+    const text = await page.locator("main").innerText();
+    const out = [];
+    if (!/无法读取内置服务名单/.test(text))
+      out.push("the config view could not read the service table, but the banner about it is missing");
+    if (!/正在确认是否已有可用的 Key/.test(text)) out.push("a pending lookup is not shown as pending");
+    if (/该服务还没有 Key/.test(text))
+      out.push("the Key field answers 'no Key' next to a banner saying the table could not be read");
+    if (/留空表示保持不变/.test(text)) out.push("the form promises the saved Key will be reused while both answers are missing");
+    return out;
+  },
+});
+
 await browser.close();
 server.close();
 

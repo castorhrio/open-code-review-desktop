@@ -127,10 +127,19 @@ check(
 // service, forever. The six causes the Key wording distinguishes never reached
 // the screen, and nothing here noticed.
 //
-// So the shape is checked in two ways: the number of parameters each side
-// declares, and the values a caller passes — which must arrive at the main
-// process under the names the interface gave them, not nested one level deeper
-// under some other key.
+// So the shape is checked in three ways: the number of parameters each side
+// declares; the values a caller passes — which must arrive at the main process
+// under the names the interface gave them, not nested one level deeper under
+// some other key; and in the other direction, that nothing arrives under a name
+// the interface never declared (the main process reads the names it knows and
+// silently ignores the rest, so a renamed field can sit there unread).
+//
+// The first version of this only looked at the *first* parameter, and only when
+// its type was written inline — which covered `savedKey` and little else. Every
+// other method passed because the markers were checked for presence anywhere in
+// the payload, so `{ repo: ref, ref: repo }` was indistinguishable from correct:
+// both values did arrive. Every parameter of every method is now probed by name,
+// and swapping two of them fails the check.
 const splitTopLevel = (text, separators = [",", ";"]) => {
   const parts = [];
   let depth = 0;
@@ -195,64 +204,131 @@ const objectTypeKeys = (typeText) => {
     .filter((key) => /^[A-Za-z_$][\w$]*$/.test(key));
 };
 
+// One parameter of one method: the name the interface gives it, and — when the
+// type is written inline — the keys that name promises.
+const parseParam = (text) => {
+  const colon = text.indexOf(":");
+  const name = (colon < 0 ? text : text.slice(0, colon)).replace(/\?$/, "").trim();
+  const typeText = colon < 0 ? "" : text.slice(colon + 1).trim();
+  return { name, typeText, keys: objectTypeKeys(typeText) };
+};
+
+// Where a value sits inside what the main process received, as a key path.
+const collectPaths = (value, path, into) => {
+  if (typeof value === "string") {
+    if (!into.has(value)) into.set(value, []);
+    into.get(value).push(path);
+    return;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return;
+  for (const [key, inner] of Object.entries(value)) collectPaths(inner, [...path, key], into);
+};
+
+const getPath = (value, path) => path.reduce((acc, key) => (acc && typeof acc === "object" ? acc[key] : undefined), value);
+
+// The key paths a value is allowed to arrive at. The interface names the
+// parameter; a preload may forward the object flat (`invoke("file:read", req)`)
+// or wrapped under the parameter's own name (`invoke("config:test", { form })`),
+// and both are honest. Anything else — a different name, one level deeper under
+// some other key — is the drift this check exists for.
+const allowedPaths = (param, paramCount) => {
+  if (param.keys.length) {
+    const named = param.keys.map((key) => [param.name, key]);
+    return paramCount === 1 ? [...named, ...param.keys.map((key) => [key])] : named;
+  }
+  const paths = [[param.name]];
+  if (paramCount === 1) paths.push([]);
+  return paths;
+};
+
+const markerFor = (method, param, key) => (key ? `probe:${method}:${param.name}.${key}` : `probe:${method}:${param.name}`);
+
 const arityMismatches = [];
 const shapeMismatches = [];
-for (const name of declared) {
-  const wanted = interfaceParams(bridgeBody[1], name);
-  const actual = preloadParams(preloadSrc, name);
-  if (!wanted || !actual) continue;
-  if (wanted.length !== actual.length)
-    arityMismatches.push(`${name}: the interface declares ${wanted.length}, the preload takes ${actual.length}`);
-  if (!wanted.length) continue;
+const extraKeyMismatches = [];
+const describePath = (path) => (path.length ? `\`${path.join(".")}\`` : "the argument itself");
 
-  // The probe: an object with one marker per key when the interface promises an
-  // object, positional markers otherwise.
-  const paramName = wanted[0].split(":")[0].replace(/\?$/, "").trim();
-  const typeText = wanted[0].includes(":") ? wanted[0].slice(wanted[0].indexOf(":") + 1) : "";
-  const keys = objectTypeKeys(typeText);
-  let args = [];
-  let markers = [];
-  if (keys.length) {
-    const probe = {};
-    for (const key of keys) probe[key] = `probe:${name}:${key}`;
-    markers = Object.values(probe);
-    args = [probe];
-  } else {
-    markers = wanted.map((_, i) => `probe:${name}:${i}`);
-    args = [...markers];
-  }
+for (const name of declared) {
+  const wantedList = interfaceParams(bridgeBody[1], name);
+  const actual = preloadParams(preloadSrc, name);
+  if (!wantedList || !actual) continue;
+  if (wantedList.length !== actual.length)
+    arityMismatches.push(`${name}: the interface declares ${wantedList.length}, the preload takes ${actual.length}`);
+  if (!wantedList.length) continue;
+
+  const params = wantedList.map(parseParam);
+  // The probe: one marker per interface parameter, and per key of every inline
+  // object type — so a value that lands under the wrong name, or a key the
+  // preload invents or drops, shows up as a marker that never arrives where the
+  // interface said it would.
+  const probeArgs = params.map((param) =>
+    param.keys.length
+      ? Object.fromEntries(param.keys.map((key) => [key, markerFor(name, param, key)]))
+      : markerFor(name, param, "")
+  );
 
   invoked.length = 0;
   try {
-    exposed[name](...args);
+    exposed[name](...probeArgs);
   } catch (err) {
     shapeMismatches.push(`${name}: calling it with the interface's shape threw ${err && err.message}`);
     continue;
   }
   // A method that only listens sends nothing; its shape is not a request.
   if (!invoked.length) continue;
-  const payload = invoked[0].args[0];
-  const top = [];
-  const wrapped = {};
-  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
-    for (const [key, value] of Object.entries(payload)) {
-      top.push(value);
-      wrapped[key] = value;
+  const sent = invoked[0].args;
+
+  // Several positional arguments: the interface's names do not cross the bridge
+  // at all, so position is the contract.
+  if (sent.length > 1) {
+    if (sent.length !== params.length) {
+      shapeMismatches.push(`${name}: the caller passes ${params.length} argument(s), the main process receives ${sent.length}`);
+      continue;
     }
-  } else {
-    top.push(payload);
+    params.forEach((param, i) => {
+      if (JSON.stringify(sent[i]) !== JSON.stringify(probeArgs[i]))
+        shapeMismatches.push(`${name}: the value passed for \`${param.name}\` does not arrive in position ${i + 1}`);
+    });
+    continue;
   }
-  // The markers have to arrive as they were sent: at the top level, or inside
-  // the one object the interface named (that is how a preload may wrap a
-  // request: `invoke("config:test", { form })`).
-  const inner = wrapped[paramName];
-  const innerValues = inner && typeof inner === "object" ? Object.values(inner) : [];
-  const missing = markers.filter((marker) => !top.includes(marker) && !innerValues.includes(marker));
-  if (missing.length)
-    shapeMismatches.push(
-      `${name}: the main process receives ${JSON.stringify(payload)} — ${missing.length} of the values the caller sent never arrive under the interface's names`
-    );
+
+  const payload = sent[0];
+  const paths = new Map();
+  collectPaths(payload, [], paths);
+
+  for (const param of params) {
+    const expected = param.keys.length ? param.keys.map((key) => markerFor(name, param, key)) : [markerFor(name, param, "")];
+    const allowed = allowedPaths(param, params.length);
+    expected.forEach((marker, i) => {
+      const found = paths.get(marker) || [];
+      if (found.some((path) => allowed.some((want) => want.join(".") === path.join(".")))) return;
+      const wanted = describePath(allowed[i] || allowed[0]);
+      if (!found.length)
+        shapeMismatches.push(`${name}: the value passed for \`${param.name}\` never reaches the main process (expected at ${wanted})`);
+      else
+        shapeMismatches.push(`${name}: the value passed for \`${param.name}\` arrives at ${found.map(describePath).join(", ")} instead of ${wanted}`);
+    });
+  }
+
+  // Keys the preload adds beyond what the interface promises are drift in the
+  // other direction: the main process reads the names it knows and silently
+  // ignores the rest, so a renamed field can sit there unread.
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    const sentKeys = Object.keys(payload);
+    const expectedKeys =
+      params.length === 1
+        ? params[0].keys.length && !params[0].keys.includes(sentKeys[0])
+          ? [params[0].name]
+          : params[0].keys.length
+            ? params[0].keys
+            : [params[0].name]
+        : params.map((param) => param.name);
+    const extra = sentKeys.filter((key) => !expectedKeys.includes(key));
+    if (extra.length)
+      extraKeyMismatches.push(`${name}: the main process receives ${extra.join(", ")}, which the interface does not declare`);
+  }
 }
+
 check(
   "every method takes the number of arguments the interface declares",
   arityMismatches.length === 0,
@@ -262,6 +338,11 @@ check(
   "and the values a caller sends reach the main process under the interface's names",
   shapeMismatches.length === 0,
   shapeMismatches.join(" | ")
+);
+check(
+  "and nothing arrives under a key the interface does not declare",
+  extraKeyMismatches.length === 0,
+  extraKeyMismatches.join(" | ")
 );
 
 // A channel name is a string on both sides, so a typo is a call that never

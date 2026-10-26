@@ -840,6 +840,18 @@ window.api = (() => {
     // It used to count as ready, so the top bar was green and 开始审查 ran until
     // the CLI failed. Keep the llm fallback empty: a real config in this state
     // has no second credential hidden behind the provider.
+    // ?preset=unavailable is the state where the CLI's built-in service table
+    // could not be read, so the config view itself says the readiness verdict is
+    // optimistic. Paired with ?savedkey=loading it is the window this round is
+    // about: two answers about the same table are in flight, and the banner and
+    // the Key sentence must both say "not known yet" rather than one of them
+    // guessing.
+    if (q.get("preset") === "unavailable")
+      return {
+        ...D.CONFIG,
+        presetRegistry: "unavailable",
+        presetRegistryError: "ocr llm providers 执行失败：exit status 1",
+      };
     if (q.get("nokey") === "1")
       return {
         ...D.CONFIG,
@@ -1065,6 +1077,14 @@ window.api = (() => {
     // those were what the renderer fell back to, and the first one is a promise
     // nothing has checked.
     if (reason === "ipc-fail") throw new Error("config:savedKey did not answer");
+    // ?savedkey=loading is the lookup that has not answered *yet* — the window
+    // between pressing 设置 and the main process replying. It used to be
+    // unrenderable here because every fixture answered immediately, so the form
+    // fell through to the sentence meant for "there is no Key" and told the user
+    // to type one before the question had even been asked. Never resolving is
+    // the honest model of "still waiting": the fixture must not answer late and
+    // let the shot pass on a state it never actually rendered.
+    if (reason === "loading") return await new Promise(() => {});
     const hints = ${JSON.stringify(SAVED_KEY_HINTS)};
     return {
       ok: true,
