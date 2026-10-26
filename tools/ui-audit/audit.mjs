@@ -1,6 +1,8 @@
 // Visual audit harness. Renders the real UI bundle against a stubbed IPC bridge
 // so layout can be inspected without launching Electron or touching the desktop.
-// Run with `npm run audit:ui` after `npm run build`.
+// Run with `npm run audit:ui`, which assumes `out/` is already built (`npm run
+// audit` builds once and hands that bundle to all four harnesses; on its own,
+// `npm run build` first — `requireBuilt()` refuses a bundle older than `src/`).
 import fs from "node:fs";
 import path from "node:path";
 import { SHOTS, BRIDGE, STORAGE, serve, OTHER_REPO_PATH, SOLO_REPO_PATH, BASE_REPO_PATH } from "./fixtures.mjs";

@@ -1,5 +1,7 @@
 // Runs tools/electron-guards.cjs in a real Electron process and reports the
-// result. `npm run audit:guards`.
+// result. `npm run audit:guards`, which assumes `out/` is already built (`npm run
+// audit` builds once for all four harnesses; on its own, `npm run build` first —
+// `requireBuilt()` refuses a bundle older than `src/`).
 //
 // Electron writes its findings to a JSON file rather than stdout: on Windows a
 // GUI-subsystem binary does not reliably inherit the parent console, so piping

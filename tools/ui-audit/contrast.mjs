@@ -1,7 +1,10 @@
 // WCAG contrast audit. Walks every rendered text node in all six view states, in both
 // themes, resolves the effective background behind it, and reports pairs below
 // the AA thresholds. Rendered images are hard to judge by eye, so this reports
-// ratios instead of opinions. Run with `npm run audit:contrast` after a build.
+// ratios instead of opinions. Run with `npm run audit:contrast`, which assumes
+// `out/` is already built — `npm run audit` builds once for all four harnesses.
+// On its own, `npm run build` first: `requireBuilt()` refuses a bundle older
+// than `src/`.
 import { BRIDGE, STORAGE, serve } from "./fixtures.mjs";
 import { loadPlaywright, CHANNEL, describeChannel, requireBuilt } from "./playwright.mjs";
 

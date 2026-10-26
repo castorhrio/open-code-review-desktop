@@ -71,13 +71,52 @@ export function describeChannel() {
     : `bundled/${CHANNEL}`;
 }
 
+// Newest mtime under a directory, so a build can be compared with the sources it
+// claims to be built from.
+function newestMtime(dir) {
+  let newest = 0;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      newest = Math.max(newest, newestMtime(full));
+    } else {
+      newest = Math.max(newest, fs.statSync(full).mtimeMs);
+    }
+  }
+  return newest;
+}
+
 // Guard against a silently empty page: every harness should assert it actually
 // rendered something before reporting success.
+//
+// It also refuses a bundle older than the sources. `npm run audit` now builds
+// once and hands that build to four harnesses instead of rebuilding in each of
+// them, so the failure mode the old prefixes ruled out by construction is now
+// this check's job: a UI audit run against the previous edit's bundle reports
+// the layout of code that no longer exists, and reports it green. The build
+// writes `out/index.html`, so its mtime is the fact to compare.
 export function requireBuilt() {
-  const index = path.resolve(import.meta.dirname, "../../out/index.html");
+  const root = path.resolve(import.meta.dirname, "../..");
+  const index = path.join(root, "out/index.html");
   if (!fs.existsSync(index)) {
-    console.error(`No build found at ${index}. Run \`npm run build\` first.`);
+    console.error(`No build found at ${index}. Run \`npm run build\` first (\`npm run audit\` builds once for all of them).`);
     process.exit(2);
+  }
+  const src = path.join(root, "src");
+  if (fs.existsSync(src)) {
+    const builtAt = fs.statSync(index).mtimeMs;
+    const sourceAt = newestMtime(src);
+    if (sourceAt > builtAt) {
+      console.error(
+        [
+          `out/ is older than src/ — this harness would audit the previous build and report it green.`,
+          `  build: ${new Date(builtAt).toISOString()}`,
+          `  src:   ${new Date(sourceAt).toISOString()}`,
+          "Run `npm run build` first, or `npm run audit`, which builds once for every harness.",
+        ].join("\n")
+      );
+      process.exit(2);
+    }
   }
   return index;
 }
