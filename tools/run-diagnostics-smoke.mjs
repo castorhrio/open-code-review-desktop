@@ -29,6 +29,7 @@ const {
   outcomeMessage,
   outcomeLogMessage,
   signalFailedMessage,
+  settleFailedMessage,
   OUTCOME_MESSAGES,
   LATE_OUTCOME_MESSAGES,
   reportOutcome,
@@ -36,6 +37,7 @@ const {
   settleRunExit,
   createRunExitDoor,
   SIGNAL_FAILED,
+  SETTLE_FAILED,
   flushNow,
 } = require("../run-diagnostics.js");
 const { makeRunHandler } = require("../run-handler.js");
@@ -1299,6 +1301,86 @@ check("and the exit says the evidence did not make it", outcomeMessage(slowExit)
   );
 }
 
+/* ---- the settle that never finishes ----
+ * `settleRunExit` is written not to reject (the record's failure, the report's
+ * failure and a throwing signal are all caught inside it). The handler answered
+ * its promise with `.catch(() => {})`, which is the shape that looks like care
+ * and is really silence: the rejection counts as handled, and the one thing the
+ * promise exists for — the renderer hearing the run ended — can be gone with no
+ * line anywhere. A spinner that never stops leaves nothing to read afterwards,
+ * so a check has to fail when the news is dropped.
+ *
+ * `settleRunExit` is injected here precisely because the real one does not
+ * reject: the failure being checked is "the end of the run did not happen at
+ * all", which only a collaborator that breaks can produce.
+ */
+{
+  const settleFailReasons = [];
+  const settleFailLog = [];
+  const unhandled = [];
+  const onUnhandled = (err) => unhandled.push(err);
+  process.on("unhandledRejection", onUnhandled);
+  const failingHandler = makeRunHandler({
+    ocr: {
+      startRun(spec, onLog, onDone) {
+        onDone("settle-fail-run", { sessionId: "settle-fail-session", value: limitResult });
+        return { id: spec.runId };
+      },
+    },
+    store: createStore(path.join(dir, "settle-fail", "run-diagnostics.json")),
+    send: () => {},
+    settleRunExit: () => Promise.reject(new Error("the store was wired to nothing")),
+    reportOutcome: (outcome, warn, options) => {
+      settleFailReasons.push(outcome);
+      return reportOutcome(outcome, warn, options);
+    },
+    warn: (line) => settleFailLog.push(line),
+  });
+  failingHandler({ repo, mode: "review", runId: "settle-fail-run" });
+  await new Promise((r) => setTimeout(r, 80));
+  process.off("unhandledRejection", onUnhandled);
+
+  check(
+    "a settle that rejects is reported, not swallowed",
+    settleFailReasons.length === 1 && settleFailReasons[0]?.reason === SETTLE_FAILED.reason,
+    `${settleFailReasons.length} outcomes: ${JSON.stringify(settleFailReasons.map((o) => o && o.reason))}`
+  );
+  check(
+    "with the one wording that says the exit itself may be missing",
+    settleFailLog.includes(`[run-diagnostics] ${settleFailedMessage()}`),
+    JSON.stringify(settleFailLog)
+  );
+  check(
+    "and the raw error, so a rejected settle can be debugged",
+    settleFailLog.some((line) => line.includes("the store was wired to nothing")),
+    JSON.stringify(settleFailLog)
+  );
+  check("the rejection is handled, not left to the runtime", unhandled.length === 0, unhandled.map(String).join(" | "));
+}
+
+/* The three end-of-run outcomes tell three different stories, and swapping any
+ * two of them would send the reader to look at the wrong thing: `signal-failed`
+ * means the evidence is on disk and only the push failed; `settle-failed` means
+ * the end of the run was not carried out at all; the store outcomes are about
+ * the file. Only the last group answers a question about the store, so
+ * `outcomeMessage` must stay silent for the other two. */
+const settleMessage = settleFailedMessage();
+check(
+  "a settle that never finished is not answered as a store outcome",
+  outcomeMessage(SETTLE_FAILED) === "",
+  outcomeMessage(SETTLE_FAILED)
+);
+check(
+  "and the one log path still says it",
+  outcomeLogMessage(SETTLE_FAILED) === settleMessage,
+  outcomeLogMessage(SETTLE_FAILED)
+);
+check(
+  "it is not phrased as the failed-push line, which is a milder story",
+  settleMessage !== signalFailedMessage(),
+  `${signalFailedMessage()} | ${settleMessage}`
+);
+
 // The one outcome that really loses the evidence has to reach the app as
 // something it can show: the log drawer opens itself on a line that reads like
 // trouble, and a stderr line nobody opens is not the same as saying it.
@@ -1350,6 +1432,7 @@ check(
 const DRAWER = {
   "io-error": "trouble",
   "signal-failed": "trouble",
+  "settle-failed": "trouble",
   timeout: "quiet",
   "max-rounds": "quiet",
   "drain-failed": "quiet",
@@ -1373,10 +1456,11 @@ for (const [table, messages] of Object.entries({ OUTCOME_MESSAGES, LATE_OUTCOME_
 // for it), so it is checked by name — and it is the line this contract was
 // written for: it used to end on 「运行中」, which matched nothing.
 check("「signal-failed」 reads like trouble to the log drawer", opensDrawer(signalFailedMessage()), signalFailedMessage());
+check("「settle-failed」 reads like trouble to the log drawer", opensDrawer(settleFailedMessage()), settleFailedMessage());
 // And no stale declarations: everything classified above still has to be a
 // reason one of the tables answers, or the classification outlives it wording.
 for (const reason of Object.keys(DRAWER)) {
-  if (reason === SIGNAL_FAILED.reason) continue;
+  if (reason === SIGNAL_FAILED.reason || reason === SETTLE_FAILED.reason) continue;
   check(
     `the drawer classification has no stale 「${reason}」`,
     reason in OUTCOME_MESSAGES && reason in LATE_OUTCOME_MESSAGES,

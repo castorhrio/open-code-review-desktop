@@ -98,6 +98,26 @@ const IO_ERROR = { ok: false, reason: "io-error" };
 const SIGNAL_FAILED = { ok: false, reason: "signal-failed" };
 
 /**
+ * The settle did not finish at all.
+ *
+ * `settleRunExit` is written so it does not reject: the record's failure is
+ * caught, the report's failure is caught, and a throwing signal is caught and
+ * reported as `signal-failed`. So a rejection here means something *outside*
+ * that promise broke — a store that is not a store, a `payload` builder that
+ * throws before the door gets its word, an injected collaborator that was wired
+ * wrong — and it used to be answered with `.catch(() => {})` in the handler.
+ * A `.catch` that returns nothing is a rejected promise declared handled: the
+ * one thing the promise exists for (the renderer hearing that the run ended)
+ * could go missing with no line anywhere, and a spinner that never stops leaves
+ * no trace to read afterwards.
+ *
+ * It gets its own reason rather than reusing `signal-failed`: that one means
+ * "the evidence is on disk, only the push failed", which is a different (and
+ * milder) story than "the end of the run was not carried out".
+ */
+const SETTLE_FAILED = { ok: false, reason: "settle-failed" };
+
+/**
  * How the two waits ended, in the same shape as a record outcome.
  *
  * `drain()` used to return nothing and stop silently after its round limit: a
@@ -152,6 +172,17 @@ const OUTCOME_MESSAGES = {
  */
 const SIGNAL_FAILED_MESSAGE = "本次运行已经结束，但结束信号推送失败，界面可能仍显示运行中";
 const signalFailedMessage = () => SIGNAL_FAILED_MESSAGE;
+/**
+ * The wording for the settle that never finished.
+ *
+ * 「可能」 is deliberate: the settle can reject before or after the door spoke,
+ * so a line claiming the screen definitely never heard would be wrong half the
+ * time, and the log is the only place left to be accurate. It still has to read
+ * like trouble (`TROUBLE_LINE` in `src/lib/format.ts`), or the one line about a
+ * run whose exit may be lost stays behind a closed drawer.
+ */
+const SETTLE_FAILED_MESSAGE = "本次运行收尾失败，退出信号可能没有发出，界面可能仍显示运行中";
+const settleFailedMessage = () => SETTLE_FAILED_MESSAGE;
 const LATE_OUTCOME_MESSAGES = {
   "io-error": "上限证据在运行结束后写盘失败，重开会话后将看不到这条提示",
   timeout: "上限证据最后仍然没写完；重开会话后可能看不到这条提示",
@@ -178,6 +209,7 @@ function outcomeLogMessage(outcome, options) {
   const store = outcomeMessage(outcome, options);
   if (store) return store;
   if (outcome && outcome.reason === SIGNAL_FAILED.reason) return signalFailedMessage();
+  if (outcome && outcome.reason === SETTLE_FAILED.reason) return settleFailedMessage();
   return "";
 }
 
@@ -1043,6 +1075,7 @@ module.exports = {
   outcomeMessage,
   outcomeLogMessage,
   signalFailedMessage,
+  settleFailedMessage,
   // Exported so the renderer's drawer rule (`TROUBLE_LINE` in
   // `src/lib/format.ts`) can be checked against *every* wording in both tables
   // rather than against the ones a check happens to remember. A new outcome
@@ -1054,6 +1087,7 @@ module.exports = {
   settleRunExit,
   createRunExitDoor,
   SIGNAL_FAILED,
+  SETTLE_FAILED,
   flushNow,
   flushBeforeQuit,
 };

@@ -34,6 +34,8 @@ const diagnostics = require("./run-diagnostics");
  * @param {Function} [options.outcomeMessage]
  * @param {Function} [options.reportOutcome]
  * @param {number} [options.timeoutMs]
+ * @param {Function} [options.warn]  where the last-resort report goes (default: console.warn)
+ * @param {object} [options.settleFailedOutcome] the outcome to report when the settle rejects
  */
 function makeRunHandler(options) {
   const opts = options || {};
@@ -45,6 +47,11 @@ function makeRunHandler(options) {
   const outcomeMessage = opts.outcomeMessage || diagnostics.outcomeMessage;
   const reportOutcome = opts.reportOutcome || diagnostics.reportOutcome;
   const timeoutMs = opts.timeoutMs == null ? diagnostics.WRITE_TIMEOUT_MS : opts.timeoutMs;
+  // Only the last-resort reports below use it; the per-outcome ones ride along
+  // with `settleRunExit` (`onLate`) or with the exit payload, which is where the
+  // wording has to come from anyway.
+  const warn = typeof opts.warn === "function" ? opts.warn : undefined;
+  const SETTLE_FAILED = opts.settleFailedOutcome || diagnostics.SETTLE_FAILED;
 
   return function runReview(spec) {
     // One run, one exit. The door is made here — inside the handler that starts
@@ -116,7 +123,37 @@ function makeRunHandler(options) {
             result,
             diagnostics: { ...outcome, message: outcomeMessage(outcome) },
           }),
-        }).catch(() => {});
+        }).catch((err) => {
+          // `settleRunExit` is written not to reject: it catches the record's
+          // failure, the report's failure, and a throwing signal (that one is
+          // `signal-failed`). So a rejection here is "the end of the run did not
+          // happen at all", and it used to be answered with `.catch(() => {})`
+          // — a rejected promise declared handled, and the one thing this
+          // promise is for (the renderer hearing the run ended) gone with no
+          // line anywhere. A spinner that never stops leaves nothing to read
+          // afterwards, so say it.
+          //
+          // The outcome goes through `reportOutcome` like every other one, so
+          // this failure is worded and routed from the same place as the rest
+          // (`settle-failed`), and it is the loud kind: the drawer opens itself.
+          // The raw error is logged too, on its own line: the outcome line says
+          // the screen may not have heard, not what broke, and without it a
+          // rejected settle is undebuggable. Neither report may throw — this is
+          // already the last resort, and a throw here would hand the runtime a
+          // rejection nobody is left to handle.
+          const log = warn || console.warn;
+          const say = (fn) => {
+            try {
+              fn();
+            } catch (_) {}
+          };
+          say(() => reportOutcome(SETTLE_FAILED, warn));
+          say(() =>
+            log(
+              `[run-diagnostics] ${spec && spec.runId ? `${spec.runId}: ` : ""}settle 抛出的原始错误: ${(err && err.message) || err}`
+            )
+          );
+        });
       },
       (id, progress) => send("run:progress", { id, progress })
     );
