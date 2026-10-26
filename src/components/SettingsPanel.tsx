@@ -5,7 +5,7 @@ import { api } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { cn } from "@/lib/cn";
 import { LANGUAGES } from "@/lib/spec";
-import type { ProviderEntry } from "@/lib/types";
+import type { DiagnosticsStoreStats, ProviderEntry } from "@/lib/types";
 import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Switch } from "@/components/ui/form";
@@ -38,6 +38,13 @@ export function SettingsPanel() {
   // the answer itself (reason + wording + tone), not re-derived in the renderer
   // — the wording is written where the reasons are, so the two cannot drift.
   const [savedKey, setSavedKey] = useState<Awaited<ReturnType<typeof api.savedKey>> | null>(null);
+  // The truncation-evidence store's occupancy, read once per visit: the cap is
+  // one budget for every repository, and a busy repository rotates a quiet
+  // one's records out — after which those sessions reopen looking clean. That
+  // is a fact about the profile, not about the session in front of the user, so
+  // it belongs here where the rest of the on-disk state is stated. `"failed"`
+  // is its own state: a read that could not run is not "0 records".
+  const [evidence, setEvidence] = useState<DiagnosticsStoreStats | "failed" | null>(null);
   // Whether that answer came back at all, and if it did not, *why not*. Four
   // states, not two: "the main process has not answered yet" and "the main
   // process could not answer" are both "we do not know", and neither may be
@@ -132,6 +139,17 @@ export function SettingsPanel() {
   // the object the interface promises, so the main process used to receive the
   // name as an object and answer "no Key saved" for every service. The bridge
   // contract check now holds that shape (see `tools/bridge-contract.mjs`).
+  useEffect(() => {
+    let live = true;
+    api
+      .diagnosticsStats()
+      .then((res) => live && setEvidence(res))
+      .catch(() => live && setEvidence("failed"));
+    return () => {
+      live = false;
+    };
+  }, []);
+
   useEffect(() => {
     if (!config || !name) {
       setSavedKey(null);
@@ -532,6 +550,33 @@ export function SettingsPanel() {
           <p className="mt-2 text-meta text-faint">
             卸载本程序不会删除该文件（里面是你的 API Key）。会话记录保存在同一目录的 sessions/ 下，由「历史」页管理。
           </p>
+        </Card>
+
+        <Card title="上限证据" hint="被上限截断的运行留下的证据">
+          <dl className="grid grid-cols-[minmax(0,1fr)] gap-2">
+            <InfoRow
+              label="保留上限"
+              value={evidence === null ? "读取中…" : evidence === "failed" ? "—" : `最近 ${evidence.limit} 条`}
+            />
+            <InfoRow
+              label="当前占用"
+              value={
+                evidence === null
+                  ? "读取中…"
+                  : evidence === "failed"
+                    ? "读取失败，重开本页可再试一次"
+                    : `${evidence.entries} / ${evidence.limit} 条 · ${evidence.repos} 个仓库`
+              }
+            />
+          </dl>
+          <p className="mt-2 text-meta text-faint">
+            上限由所有仓库共用一个：热门仓库的运行会把更早的记录轮换掉，被轮换的会话重开时不再显示上限提示，看起来和一次干净通过一样。
+          </p>
+          {typeof evidence === "object" && evidence !== null && !evidence.settled && (
+            <p className="mt-2 text-meta text-warn">
+              刚结束的运行可能还在写盘，上面的数字可能少一条；下次打开本页会重新读取。
+            </p>
+          )}
         </Card>
 
         <Section

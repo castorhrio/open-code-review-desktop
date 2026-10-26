@@ -968,6 +968,15 @@ window.api = (() => {
       };
     return { ok: true, value: null };
   },
+  // The evidence store's cap. `limit` is deliberately *not* the product's real
+  // 200: it is whatever this stub answers, so a settings page that printed its
+  // own copy of the number instead of the one it was given fails the assertion
+  // in `audit.mjs` (which requires "37 / 137"). ?evidence=unsettled is the
+  // answer a read gives when the wait for in-flight writes gave up.
+  diagnosticsStats: async () => {
+    if (q.get("evidence") === "unsettled") return { limit: 137, entries: 37, repos: 4, settled: false };
+    return { limit: 137, entries: 37, repos: 4, settled: true };
+  },
   sessionComments: async () => {
     if (q.get("clean") === "1") return { ok: true, value: [] };
     // ?many=1 is a full-repo scan's payload: a real 148-file session in the

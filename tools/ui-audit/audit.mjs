@@ -1032,6 +1032,42 @@ const expectScanRows = async (page) => {
 };
 
 /**
+ * The truncation-evidence store's cap is one budget shared by every repository,
+ * so a quiet repository's records can be rotated out by a busy one's runs — and
+ * those sessions then reopen as if they had never been truncated. Nothing in
+ * the app said that, and the number lived only in `run-diagnostics.js`. The
+ * settings page now prints the cap and the occupancy it was *given*: the stub
+ * answers 137, not the product's 200, so a page that hard-codes the number
+ * fails here instead of looking right forever.
+ */
+const expectEvidenceQuota = async (page) => {
+  const text = await page.locator("main").innerText();
+  const out = [];
+  if (!/上限证据/.test(text)) out.push("the settings page does not mention the truncation-evidence store");
+  if (!/最近 137 条/.test(text))
+    out.push("the cap shown is not the one the main process answered (hard-coded?)");
+  if (!/37 \/ 137 条 · 4 个仓库/.test(text))
+    out.push("the occupancy line does not report records/limit/repositories from the main process");
+  if (!/共用一个/.test(text) || !/轮换/.test(text))
+    out.push("nothing tells the user the cap is global, so a rotated-out session looks unexplained");
+  return out;
+};
+
+/**
+ * The same card when the read could not wait for writes still in flight: the
+ * count may be missing the run that just finished, and saying so is the whole
+ * point of the flag. A page that printed the number regardless would be right
+ * most of the time and silently wrong exactly when someone is watching a run
+ * land.
+ */
+const expectEvidenceUnsettled = async (page) => {
+  const out = await expectEvidenceQuota(page);
+  const text = await page.locator("main").innerText();
+  if (!/可能少一条/.test(text)) out.push("an unsettled count is presented as current");
+  return out;
+};
+
+/**
  * The preview is a core flow, and it had no assertion at all — which is how it
  * came to be screenshotted for months against a fixture whose normal payload had
  * no file list at all (`files: undefined`). Every shot showed "进入审查 0 / 共 8"
@@ -1191,6 +1227,7 @@ await shoot(page, "06-history", {
 });
 await shoot(page, "07-settings-top", { after: nav("设置"), expect: expectScrollAffordance });
 await shoot(page, "08-settings-bottom", {
+  expect: all(expectScrollAffordance, expectEvidenceQuota),
   after: async (page) => {
     await nav("设置")(page);
     await page.waitForTimeout(400);
@@ -1201,7 +1238,22 @@ await shoot(page, "08-settings-bottom", {
       if (el) el.scrollTop = el.scrollHeight;
     });
   },
-  expect: expectScrollAffordance,
+});
+// The evidence card with a read that gave up waiting for in-flight writes.
+await shoot(page, "100-settings-evidence-unsettled", {
+  query: "?evidence=unsettled",
+  after: async (page) => {
+    await nav("设置")(page);
+    await page.waitForTimeout(400);
+    await page.evaluate(() => {
+      const el = [...document.querySelectorAll("main *")].find(
+        (n) => n.scrollHeight > n.clientHeight + 4 && /auto|scroll/.test(getComputedStyle(n).overflowY)
+      );
+      const target = [...document.querySelectorAll("main h3")].find((h) => h.textContent.trim() === "上限证据");
+      if (target && el) el.scrollTop = target.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop - 24;
+    });
+  },
+  expect: expectEvidenceUnsettled,
 });
 await shoot(page, "09-results-findings", {
   after: async (page) => {

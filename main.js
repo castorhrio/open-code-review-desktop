@@ -382,6 +382,14 @@ ipcMain.handle("session:diagnostics", async (_e, req) => ({
   value: await runDiagnostics.readSettled(req.repo, req.sessionId),
 }));
 
+// The truncation-evidence store's cap, in the terms the settings page states
+// it: how many records it keeps (one budget for every repository), how much of
+// it this profile is using and how many repositories that is. The read waits
+// for the writes still in flight, and answers `settled: false` when that wait
+// gave up rather than a count that silently omits the run that just finished —
+// the page says so instead of presenting a stale number as current.
+ipcMain.handle("diagnostics:stats", () => runDiagnostics.stats());
+
 ipcMain.handle("session:export", async (_e, req) => {
   const save = await dialog.showSaveDialog(mainWindow, {
     title: "导出会话报告",

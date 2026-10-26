@@ -47,6 +47,39 @@ const MAX_ENTRIES = 200;
 const LIMIT_WARNING = "review_limit_reached";
 
 /**
+ * What the file holds, in the terms the settings page has to state.
+ *
+ * The cap is a fact about *this profile*, not about a session: one budget is
+ * shared by every repository, so a busy repository's runs push a quiet one's
+ * records out — and the quiet repository's sessions then reopen as `null`,
+ * which is the same answer a clean run gives (see `MAX_ENTRIES`). Nothing in
+ * the app could say that before: the number lived only in this file, and the
+ * only person who could learn it was someone reading the source. The settings
+ * page now prints `limit`, `entries` and `repos` from this answer, so the
+ * number has one owner and the sentence cannot drift from the code.
+ *
+ * `settled` is the honesty flag. `stats` waits for the writes still in flight
+ * before it counts, but that wait is bounded like every other one here; when it
+ * gives up, the count is what was on disk *before* those writes landed, and a
+ * screen that presented it as current would understate the occupancy by exactly
+ * the run that just finished. So the wait's own outcome is part of the answer
+ * rather than something the caller has to remember to pass along.
+ */
+function evidenceSummary(entries, outcome) {
+  const list = Array.isArray(entries) ? entries : [];
+  const repos = new Set();
+  for (const e of list) {
+    if (e && typeof e.repo === "string" && e.repo) repos.add(e.repo);
+  }
+  return {
+    limit: MAX_ENTRIES,
+    entries: list.length,
+    repos: repos.size,
+    settled: Boolean(outcome && outcome.ok === true && outcome.reason === "drained"),
+  };
+}
+
+/**
  * How long any one wait around a write may take.
  *
  * The store's file lives in the profile directory, which can be a network
@@ -807,6 +840,23 @@ function createStore(file, options = {}) {
     return drainBounded(() => drain(), timeoutMs).then(() => read(repo, sessionId));
   }
 
+  /**
+   * How full the file is — the answer the settings page shows.
+   *
+   * It waits for queued writes first, for the same reason `readSettled` does:
+   * the run that just ended may still be landing, and "3 / 200" while the
+   * fourth is mid-rename is not wrong by much but is wrong in the direction
+   * that matters (the user is being told about the cap because they are close
+   * to it). The wait is the same bounded one, and when it gives up the answer
+   * says so (`settled: false`) instead of pretending the count is current.
+   *
+   * Nothing here writes, creates the file or probes the volume: a profile that
+   * has never recorded a truncated run answers `{ entries: 0, repos: 0 }`.
+   */
+  function stats(timeoutMs = WRITE_TIMEOUT_MS) {
+    return drainBounded(() => drain(), timeoutMs).then((outcome) => evidenceSummary(readAll(), outcome));
+  }
+
   /** Queued like `record`, so a delete cannot race a write for the same file. */
   function remove(repo, sessionId) {
     return serialize(async () => {
@@ -819,7 +869,7 @@ function createStore(file, options = {}) {
     });
   }
 
-  return { record, read, readSettled, remove, drain };
+  return { record, read, readSettled, remove, drain, stats };
 }
 
 /**
@@ -1143,6 +1193,7 @@ module.exports = {
   createCaseDetector,
   resolveCaseInsensitive,
   MAX_ENTRIES,
+  evidenceSummary,
   LIMIT_WARNING,
   WRITE_TIMEOUT_MS,
   MAX_DRAIN_ROUNDS,

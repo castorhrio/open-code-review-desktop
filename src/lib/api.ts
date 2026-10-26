@@ -1,6 +1,7 @@
 import type {
   AppInfo,
   ConfigView,
+  DiagnosticsStoreStats,
   ExitPayload,
   Finding,
   Ok,
@@ -140,6 +141,10 @@ export interface Bridge {
   sessionComments(repo: string, sessionId: string): Promise<Ok<Finding[]>>;
   /** Truncation facts the CLI does not persist with the session. */
   sessionDiagnostics(repo: string, sessionId: string): Promise<Ok<SessionDiagnostics | null>>;
+  /** How full the truncation-evidence store is — its cap, the records in use
+   *  and how many repositories those belong to. Called per settings visit:
+   *  every finished run can change all three. */
+  diagnosticsStats(): Promise<DiagnosticsStoreStats>;
   exportSession(repo: string, sessionId: string): Promise<{ ok: boolean; file?: string; opened?: boolean; canceled?: boolean; error?: string }>;
   deleteSession(repo: string, sessionId: string): Promise<{ ok: boolean; error?: string }>;
   rulesCheck(repo: string, path: string, rule: string): Promise<Ok<string>>;

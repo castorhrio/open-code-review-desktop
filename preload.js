@@ -42,6 +42,11 @@ contextBridge.exposeInMainWorld("api", {
   listSessions: (repo, limit) => ipcRenderer.invoke("session:list", { repo, limit }),
   sessionComments: (repo, sessionId) => ipcRenderer.invoke("session:comments", { repo, sessionId }),
   sessionDiagnostics: (repo, sessionId) => ipcRenderer.invoke("session:diagnostics", { repo, sessionId }),
+  // How full the truncation-evidence store is: its cap, the records in use and
+  // how many repositories those records belong to. Settings asks once per visit
+  // — the numbers move whenever a run finishes, so a value read at startup
+  // would be stale exactly when the user looks at it.
+  diagnosticsStats: () => ipcRenderer.invoke("diagnostics:stats"),
   exportSession: (repo, sessionId) => ipcRenderer.invoke("session:export", { repo, sessionId }),
   deleteSession: (repo, sessionId) => ipcRenderer.invoke("session:delete", { repo, sessionId }),
 

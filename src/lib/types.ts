@@ -211,6 +211,23 @@ export interface SessionDiagnostics {
   budget_exceeded?: boolean;
 }
 
+/**
+ * How much of the truncation-evidence store is in use.
+ *
+ * `limit` is one budget shared by every repository — a busy repository's runs
+ * rotate a quiet one's records out, and those sessions then reopen looking
+ * clean (see `MAX_ENTRIES` in `run-diagnostics.js`). `settled` is false when
+ * the read could not wait for the writes still in flight, i.e. the count may be
+ * missing the run that just finished; the settings page says so rather than
+ * presenting it as current.
+ */
+export interface DiagnosticsStoreStats {
+  limit: number;
+  entries: number;
+  repos: number;
+  settled: boolean;
+}
+
 /** session.Summary from `ocr session list --json` (prints `null` when empty). */
 export interface SessionSummary {
   session_id: string;

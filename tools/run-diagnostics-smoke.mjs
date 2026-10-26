@@ -21,6 +21,7 @@ const {
   createCaseDetector,
   resolveCaseInsensitive,
   MAX_ENTRIES,
+  evidenceSummary,
   LIMIT_WARNING,
   WRITE_TIMEOUT_MS,
   MAX_DRAIN_ROUNDS,
@@ -667,6 +668,90 @@ check(
   capRaw.entries[0]?.session_id === "cap-001" &&
     capRaw.entries[capRaw.entries.length - 1]?.session_id === `cap-${String(MAX_ENTRIES).padStart(3, "0")}`,
   `${capRaw.entries[0]?.session_id} .. ${capRaw.entries[capRaw.entries.length - 1]?.session_id}`
+);
+
+/* ---- the cap has to be visible to the person it costs ----
+ * The number lived only in this file: a rotated-out session reopens as `null`
+ * exactly like a clean one, so nothing in the app could explain why an old
+ * session stopped warning. The settings page now prints the cap and the
+ * occupancy, and what it prints has to be this store's own answer — otherwise
+ * the sentence and the code drift apart with no check between them.
+ */
+const quotaFile = path.join(dir, "quota", "run-diagnostics.json");
+const quotaStore = createStore(quotaFile);
+const unused = await quotaStore.stats();
+check(
+  "a profile that never recorded a run answers zero without creating the file",
+  unused.entries === 0 && unused.repos === 0 && !fs.existsSync(quotaFile),
+  JSON.stringify(unused)
+);
+check("and states this store's own cap, not a second copy of it", unused.limit === MAX_ENTRIES, String(unused.limit));
+check("and says it settled, because there was nothing to wait for", unused.settled === true, JSON.stringify(unused));
+const quotaQuiet = "/home/x/work/quiet-repo";
+const quotaBusy = "/home/x/work/busy-repo";
+await quotaStore.record(quotaQuiet, "q-1", limitResult);
+await quotaStore.record(quotaQuiet, "q-2", limitResult);
+await quotaStore.record(quotaBusy, "b-1", limitResult);
+const used = await quotaStore.stats();
+check(
+  "the occupancy counts records and the repositories they belong to",
+  used.entries === 3 && used.repos === 2,
+  JSON.stringify(used)
+);
+// A read that answers before a write lands understates the occupancy by exactly
+// the run that just finished — the one the user is looking at the page about.
+const inFlight = quotaStore.record(quotaBusy, "b-2", limitResult);
+const during = await quotaStore.stats();
+await inFlight;
+check(
+  "a read waits for the write still in flight instead of counting without it",
+  during.entries === 4 && during.settled === true,
+  JSON.stringify(during)
+);
+
+// The story the sentence tells: one budget, so the busy repository pushes the
+// quiet one's records out. The quiet repository then has no records left at all
+// and disappears from the repo count — which is what "被轮换的会话不再显示上限
+// 提示" costs, stated as a number.
+const squeezeFile = path.join(dir, "squeeze", "run-diagnostics.json");
+const squeezeStore = createStore(squeezeFile);
+for (let i = 0; i < MAX_ENTRIES; i++) await squeezeStore.record(quotaQuiet, `sq-${String(i).padStart(3, "0")}`, limitResult);
+const quietBefore = await squeezeStore.stats();
+check("a quiet repository alone fills the file", quietBefore.entries === MAX_ENTRIES && quietBefore.repos === 1, JSON.stringify(quietBefore));
+for (let i = 0; i < MAX_ENTRIES; i++) await squeezeStore.record(quotaBusy, `sb-${String(i).padStart(3, "0")}`, limitResult);
+const squeezed = await squeezeStore.stats();
+check(
+  "a busy repository rotates the quiet one's records out of a shared cap",
+  squeezed.entries === MAX_ENTRIES && squeezed.repos === 1,
+  JSON.stringify(squeezed)
+);
+check(
+  "so the quiet repository's newest session now reopens as clean",
+  squeezeStore.read(quotaQuiet, `sq-${String(MAX_ENTRIES - 1).padStart(3, "0")}`) === null
+);
+// The honest flag itself, without needing a disk that never answers: the wait's
+// outcome decides it, and a wait that gave up must not be presented as current.
+check(
+  "a settled wait is reported as settled",
+  evidenceSummary([], { ok: true, reason: "drained" }).settled === true
+);
+for (const outcome of [{ ok: false, reason: "timeout" }, { ok: false, reason: "max-rounds" }, { ok: false, reason: "drain-failed" }]) {
+  check(
+    `a ${outcome.reason} wait is reported as unsettled rather than as a current count`,
+    evidenceSummary([{ repo: "a", session_id: "s" }], outcome).settled === false
+  );
+}
+check(
+  "a summary of nothing is zero, not NaN",
+  JSON.stringify(evidenceSummary(undefined, { ok: true, reason: "drained" })) ===
+    JSON.stringify({ limit: MAX_ENTRIES, entries: 0, repos: 0, settled: true })
+);
+fs.writeFileSync(quotaFile, "{ not json", "utf8");
+const corruptStats = await quotaStore.stats();
+check(
+  "a corrupt file answers zero instead of throwing at the settings page",
+  corruptStats.entries === 0 && corruptStats.repos === 0 && corruptStats.settled === true,
+  JSON.stringify(corruptStats)
 );
 
 /* ---- a rotation has to be said out loud ----
