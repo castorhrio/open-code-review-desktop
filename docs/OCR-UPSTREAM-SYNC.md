@@ -12,6 +12,24 @@
 4. **不要**静默忽略上游 release：每轮把结论追加到下面「上游状态」，哪怕结论是
    「无新内容」。
 
+## 上游状态（最近检查：2026-10-27，第 54 轮）
+
+第 54 轮复核：**GitHub 本轮不可达**。`git ls-remote
+https://github.com/alibaba/open-code-review.git refs/heads/main` 与 `refs/tags/v1.13.3`
+两次都 120s 超时（`timeout` 返回 124，与第 47–48、52 轮同因），所以「上游有没有新
+commit」这一项本轮**没有核对**——这是网络欠账，不是「查过了没变」。可达的一条通路是
+npm registry：`npm view @alibaba-group/open-code-review version dist-tags` = `1.13.3` /
+`latest: 1.13.3`，与 desktop 的 `^1.13.3` 一致，故**无新 release**。网络恢复后仍需补一次
+`git fetch upstream --tags` + `git log HEAD..upstream/main`。
+
+本轮改动全部在 CLI 二进制的**解析来源**这一层（第 53 轮新引入的表面），与上游 CLI 参数、
+输出解析、配置读写都无关：`tools/service-smoke.mjs` 把三条搜索逐条钉住（每棵临时树只放
+该条搜索要找的东西，`ocr-service.js` 拷进树里跑子进程），并补上三条全失败时的答案
+（`{ path: null, source: null }`、`binaryPath()` 为 `null`、miss 不被缓存）；
+`SettingsPanel.tsx` 的「可执行文件来源」行不再把「没找到」画成破折号；
+`tools/ui-audit` 加了三张 shot（global / 全 null / 未知来源名）。`audit:service` 全绿。
+**无移植项。**
+
 ## 上游状态（最近检查：2026-10-27，第 53 轮）
 
 第 53 轮复核：`git ls-remote https://github.com/alibaba/open-code-review.git
@@ -99,10 +117,11 @@ desktop 的 `^1.13.3` 无需改动。第 47–48 轮欠的 `git fetch upstream -
 `audit:service` / `audit:config` / `audit:git` 仍是先变红的那一道，本轮这三条全绿。
 本轮的改动（发版 fallback 的搬移函数）与上游 CLI 无关。
 
-**自最近一次有内容变更（`v1.13.3` / `375f64c`）以来，第 27–48 轮复核均无新内容。**
-第 27–46 轮每轮都核对了 `git fetch upstream --tags` 以及 GitHub API 的 commits / tags /
-releases 三处，三处一致：顶端仍是 `375f64c`，最新仍是 `v1.13.3`；第 47–48 轮只有 npm
-registry 一条通路可达（见上）。
+**自最近一次有内容变更（`v1.13.3` / `375f64c`）以来，第 27–54 轮复核均无新内容。**
+第 27–46、49–51 轮每轮都核对了 `git fetch upstream --tags`（或 `git ls-remote`）以及
+GitHub API 的 commits / tags / releases，三处一致：顶端仍是 `375f64c`，最新仍是
+`v1.13.3`；第 47–48、52–54 轮只有 npm registry 一条通路可达（见上），那几轮的
+「上游 commit 未核对」是网络欠账，**不等于**上游变了。
 desktop 的 CLI flag、输出解析、配置暴露点都无需改动。（`git fetch` 期间只有本仓同名的
 `v0.1.x` 发布 tag 因已存在被拒，与上游无关。）
 
@@ -130,6 +149,13 @@ npm run audit:git       # `git show` 的分类与按 ref 读文件
 「最近一次对照」只写**那一项最近被人工重新核对**的轮次。该列没有列出本轮，表示本轮
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
 对应行并把轮次与日期改成本轮。
+
+**第 46–54 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`，其中第 47–48、52–54 轮只有
+npm 通路可达），所以下表四行的「最近一次对照」停在第 45 轮是**没有理由重看**，不是忘了看：
+它记录的是「最后一次有人逐行读上游源码」的轮次，而不是「最后一次确认上游没变」的轮次。
+换言之：**停在第 45 轮 = 未重看，不等于欠账**；欠账只有一种——`375f64c` 前进之后没人
+重读对应源码。第 50 轮那行（内置服务表为空是否合法）是榜样的写法：它记的是被重读的
+具体行号与 tag，而不是一个「已复核」的戳。
 
 | 对照点 | 上游文件 | 人工看什么 | 最近一次对照（轮次 / 日期） |
 | --- | --- | --- | --- |

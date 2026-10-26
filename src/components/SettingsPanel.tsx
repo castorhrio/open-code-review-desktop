@@ -5,7 +5,7 @@ import { api } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { cn } from "@/lib/cn";
 import { LANGUAGES } from "@/lib/spec";
-import type { DiagnosticsStoreStats, Ok, ProviderEntry } from "@/lib/types";
+import type { AppInfo, DiagnosticsStoreStats, Ok, ProviderEntry } from "@/lib/types";
 import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Switch } from "@/components/ui/form";
@@ -25,6 +25,22 @@ const BINARY_SOURCE_LABEL: Record<string, string> = {
   local: "随程序安装的本地包",
   global: "全局 npm 安装",
 };
+
+// The row that states the level has four answers, and they are not
+// interchangeable — a dash in all four is what it used to be:
+//   - `INFO` not read yet (null before the first pull): the neutral dash,
+//     because nothing has been asked;
+//   - a source this build knows: its name, which is the point of the row;
+//   - a source it does not: printed as itself, so a fourth search added to
+//     `binaryResolution` shows up here instead of disappearing behind a dash;
+//   - no source and no binary — the answer when all three searches missed, i.e.
+//     a broken install. It has to say so: a dash there reads exactly like "this
+//     build does not report it", which is the shape a missing CLI hides behind.
+function binarySourceText(info: AppInfo | null | undefined) {
+  if (!info) return "—";
+  if (info.binarySource) return BINARY_SOURCE_LABEL[info.binarySource] || info.binarySource;
+  return info.binary ? "来源未知" : "未找到内置 CLI";
+}
 
 export function SettingsPanel() {
   const { config, providers, saveConfig, unsetProvider, testLlm, info, update, checkUpdate, installUpdate, setUpdateEnabled, openReleases, llmTest, reloadConfig } = useStore();
@@ -766,7 +782,7 @@ export function SettingsPanel() {
             <InfoRow label="程序版本" value={`v${info?.appVersion ?? ""}`} />
             <InfoRow label="ocr CLI" value={info?.version ? `v${info.version}` : "未找到可执行文件"} />
             <InfoRow label="可执行文件" value={info?.binary || "—"} mono />
-            <InfoRow label="可执行文件来源" value={(info?.binarySource && BINARY_SOURCE_LABEL[info.binarySource]) || "—"} />
+            <InfoRow label="可执行文件来源" value={binarySourceText(info)} />
             <InfoRow label="安装目录" value={info?.installDir || "（免安装版运行在临时目录）"} mono />
             <InfoRow label="配置目录" value={info?.configPath || "—"} mono />
           </dl>

@@ -1255,6 +1255,82 @@ await shoot(page, "100-settings-evidence-unsettled", {
   },
   expect: expectEvidenceUnsettled,
 });
+
+/* ---- the row that names where the CLI came from, in its three other answers ----
+ * The settings page has said "CLI 自带平台包 / 随程序安装的本地包 / 全局 npm 安装"
+ * since the three searches were split out, and only the local one was ever on
+ * screen. Shots 101-103 (fixtures.mjs) are the other answers, and they are three
+ * different assertions rather than one repeated three times:
+ *   - 101 `?binsrc=global`: the label map still names a real source, and the
+ *     path is shown beside it. This was already right — it is the regression
+ *     half, and it stays green on the old code on purpose;
+ *   - 102 `?binnone=1`: both fields null. This rendered as a dash (the old
+ *     expression was `(source && LABEL[source]) || "—"`), i.e. the same
+ *     character as a field this build does not report at all, so "the search
+ *     found nothing" was indistinguishable from "nothing was asked";
+ *   - 103 `?binsrc=sidecar`: a source with no label, which has to print the
+ *     name. Also a dash before, and the one shape that keeps a future fourth
+ *     search from disappearing behind the fallback.
+ * 102 and 103 both fail against the old expression; that was checked by
+ * restoring it and re-running this filter, not assumed.
+ */
+const aboutRow = (page, label) =>
+  page.evaluate((wanted) => {
+    const dt = [...document.querySelectorAll("main dt")].find((n) => n.textContent.trim() === wanted);
+    const dd = dt && dt.nextElementSibling;
+    return dd ? dd.textContent.trim() : null;
+  }, label);
+const scrollToAbout = async (page) => {
+  await nav("设置")(page);
+  await page.waitForTimeout(400);
+  await page.evaluate(() => {
+    const el = [...document.querySelectorAll("main *")].find(
+      (n) => n.scrollHeight > n.clientHeight + 4 && /auto|scroll/.test(getComputedStyle(n).overflowY)
+    );
+    const target = [...document.querySelectorAll("main h3")].find((h) => h.textContent.trim() === "关于与卸载");
+    if (target && el)
+      el.scrollTop = target.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop - 16;
+  });
+};
+await shoot(page, "101-settings-binary-global", {
+  query: "?binsrc=global",
+  after: scrollToAbout,
+  expect: async (page) => {
+    const out = [];
+    const source = await aboutRow(page, "可执行文件来源");
+    if (source !== "全局 npm 安装") out.push(`a global install is not named in the source row: ${JSON.stringify(source)}`);
+    const bin = await aboutRow(page, "可执行文件");
+    if (!bin || !/node_modules/.test(bin)) out.push(`the binary path is not shown beside it: ${JSON.stringify(bin)}`);
+    return out;
+  },
+});
+await shoot(page, "102-settings-binary-missing", {
+  query: "?binnone=1",
+  after: scrollToAbout,
+  expect: async (page) => {
+    const out = [];
+    const source = await aboutRow(page, "可执行文件来源");
+    if (source === "—" || !source) out.push(`the source row is a dash, which reads as an unreported field: ${JSON.stringify(source)}`);
+    else if (source !== "未找到内置 CLI") out.push(`a missing CLI is not what the row says: ${JSON.stringify(source)}`);
+    const cli = await aboutRow(page, "ocr CLI");
+    if (!/未找到可执行文件/.test(cli || "")) out.push(`the CLI row still claims a version: ${JSON.stringify(cli)}`);
+    return out;
+  },
+});
+await shoot(page, "103-settings-binary-unknown-source", {
+  query: "?binsrc=sidecar",
+  after: scrollToAbout,
+  expect: async (page) => {
+    const out = [];
+    const source = await aboutRow(page, "可执行文件来源");
+    if (source === "—" || !source)
+      out.push(`a source with no label fell back to a dash instead of printing its name: ${JSON.stringify(source)}`);
+    else if (source !== "sidecar") out.push(`the row renamed the source it was handed: ${JSON.stringify(source)}`);
+    const bin = await aboutRow(page, "可执行文件");
+    if (!/sidecar/.test(bin || "")) out.push(`the binary path is not shown beside it: ${JSON.stringify(bin)}`);
+    return out;
+  },
+});
 await shoot(page, "09-results-findings", {
   after: async (page) => {
     await openFindings(page);

@@ -44,6 +44,196 @@ check(
   JSON.stringify(svc.binaryResolution())
 );
 
+/* ---- which of the three searches answered, and what the answer is when none does ----
+ * The two checks above pin the shape of the answer *on this machine*, where the
+ * CLI is installed: a path, and one of three source names. That says nothing
+ * about the three searches one at a time, and nothing at all about the answer
+ * when none of them finds anything — the one shape a user with a broken install
+ * is actually looking at, and the one shape with no assertion behind it.
+ *
+ * So each search is driven alone, on a throwaway tree that holds only what that
+ * search looks for. `ocr-service.js` is copied into the tree and required from
+ * there, so its module-level cache starts empty and `__dirname` is the tree
+ * (which is what the second search reads); `fs.existsSync` is then narrowed to
+ * the tree, because otherwise a global npm install on the machine running this
+ * would decide which branch answers and the check would be about that machine
+ * instead of about the order. All of it runs in a child process, so neither the
+ * narrowed `existsSync` nor the copied module can leak into the checks below.
+ *
+ * The source names are compared against **literals**, never against the exported
+ * constants: a constant compared with itself stays green when it is misspelt,
+ * and a misspelt constant is what turns `app:info` and the run log into a value
+ * nobody can read.
+ */
+const PLATFORM_PACKAGE = `@alibaba-group/ocr-${process.platform}-${process.arch}`;
+// Mirrors `BINARY_FILENAME` / `PLATFORM_PACKAGES` in ocr-service.js. If either
+// moves, the two searches below stop finding the trees planted for them and the
+// rows go red — the signal wanted, since the trees exist to imitate exactly what
+// the service looks for.
+const BINARY_FILE = process.platform === "win32" ? "opencodereview.exe" : "opencodereview";
+
+// The child answers the three things a caller reads: the resolution, the same
+// question asked a second time (a cache that remembered a miss as a hit, or
+// re-answered differently, shows up here), and the path-only view. `mode` is how
+// the machine is blinded to everything outside the tree under test.
+const RESOLVE_CHILD = `
+const fs = require("fs");
+const target = process.argv[1];
+const mode = process.argv[2];
+const root = process.argv[3];
+const realExists = fs.existsSync;
+if (mode === "only-tree") fs.existsSync = (p) => String(p).startsWith(root) && realExists(p);
+if (mode === "hide-all") fs.existsSync = () => false;
+const svc = require(target);
+const first = svc.binaryResolution();
+const again = svc.binaryResolution();
+process.stdout.write(
+  JSON.stringify({
+    first,
+    again,
+    path: svc.binaryPath(),
+    constants: [svc.BINARY_SOURCE_PACKAGE, svc.BINARY_SOURCE_LOCAL, svc.BINARY_SOURCE_GLOBAL],
+  })
+);
+`;
+
+const resolveIn = (root, mode, env) =>
+  new Promise((resolve, reject) => {
+    // Async spawn for the same reason as `git` below: spawnSync is refused with
+    // EBUSY in a sandboxed environment.
+    const child = spawn(process.execPath, ["-e", RESOLVE_CHILD, path.join(root, "service.cjs"), mode, root], {
+      cwd: root,
+      env: env || process.env,
+      windowsHide: true,
+    });
+    let out = "";
+    let err = "";
+    child.stdout.on("data", (d) => (out += d));
+    child.stderr.on("data", (d) => (err += d));
+    child.on("error", reject);
+    child.on("close", (code) => {
+      try {
+        resolve(JSON.parse(out));
+      } catch (_) {
+        reject(new Error(`binary resolution child failed (${code}): ${err || out}`));
+      }
+    });
+  });
+
+const resolveTree = (label) => {
+  const tree = fs.mkdtempSync(path.join(os.tmpdir(), `ocr-binary-${label}-`));
+  fs.copyFileSync(path.join(ROOT, "ocr-service.js"), path.join(tree, "service.cjs"));
+  return tree;
+};
+const plantBinary = (file) => {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, "");
+  return file;
+};
+
+check(
+  "the three source names are exactly package / local / global",
+  svc.BINARY_SOURCE_PACKAGE === "package" &&
+    svc.BINARY_SOURCE_LOCAL === "local" &&
+    svc.BINARY_SOURCE_GLOBAL === "global",
+  [svc.BINARY_SOURCE_PACKAGE, svc.BINARY_SOURCE_LOCAL, svc.BINARY_SOURCE_GLOBAL].join(",")
+);
+
+// 1) The CLI resolves its own platform package.
+{
+  const tree = resolveTree("package");
+  const bin = plantBinary(path.join(tree, "shipped", BINARY_FILE));
+  const pkg = path.join(tree, "node_modules", "@alibaba-group", "open-code-review");
+  fs.mkdirSync(path.join(pkg, "scripts"), { recursive: true });
+  fs.writeFileSync(
+    path.join(pkg, "package.json"),
+    JSON.stringify({ name: "@alibaba-group/open-code-review", version: "0.0.0" })
+  );
+  // The stub is the only thing the resolver reads out of the package, and the
+  // path it answers with sits *outside* node_modules on purpose: the level
+  // reported has to come from what the resolver said, not from the shape of a
+  // path we planted where the third search looks.
+  fs.writeFileSync(
+    path.join(pkg, "scripts", "platform.js"),
+    "exports.resolveNativeBinary = () => ({ path: " + JSON.stringify(bin) + " });\n"
+  );
+  const answer = await resolveIn(tree, "only-tree");
+  check(
+    "the CLI's own resolver is the first search, and the level it reports is `package`",
+    answer.first.source === "package" && answer.first.path === bin && answer.path === bin,
+    JSON.stringify(answer.first)
+  );
+  check(
+    "...and asking again answers the same thing, not a second-guess",
+    JSON.stringify(answer.again) === JSON.stringify(answer.first),
+    JSON.stringify(answer.again)
+  );
+  fs.rmSync(tree, { recursive: true, force: true });
+}
+
+// 2) The platform package beside the app. The package the first search requires
+// is absent from this tree and nothing is planted in a global root, so this is
+// the only search that can answer.
+{
+  const tree = resolveTree("local");
+  const bin = plantBinary(path.join(tree, "node_modules", PLATFORM_PACKAGE, "bin", BINARY_FILE));
+  const answer = await resolveIn(tree, "only-tree");
+  check(
+    "with no resolver to ask, the package beside the app answers as `local`",
+    answer.first.source === "local" && answer.first.path === bin && answer.path === bin,
+    JSON.stringify(answer.first)
+  );
+  fs.rmSync(tree, { recursive: true, force: true });
+}
+
+// 3) A global npm install. The home directory is moved into the tree, so the
+// search reads a global root that exists: `~/.npm-global/lib/node_modules` is
+// one of the four roots and is the same path on every platform.
+{
+  const tree = resolveTree("global");
+  const home = path.join(tree, "home");
+  const bin = plantBinary(
+    path.join(home, ".npm-global", "lib", "node_modules", PLATFORM_PACKAGE, "bin", BINARY_FILE)
+  );
+  const answer = await resolveIn(tree, "only-tree", {
+    ...process.env,
+    HOME: home,
+    USERPROFILE: home,
+    APPDATA: path.join(home, "appdata"),
+  });
+  check(
+    "a copy under a global npm root answers as `global`",
+    answer.first.source === "global" && answer.first.path === bin && answer.path === bin,
+    JSON.stringify(answer.first)
+  );
+  fs.rmSync(tree, { recursive: true, force: true });
+}
+
+// 4) None of the three finds anything. This is what `app:info` prints and the run
+// log records when the install is broken, and it has to be `{ path: null, source:
+// null }` — not an empty object, not a guess, and not a source with no path
+// beside it (which reads as "found, somewhere").
+{
+  const tree = resolveTree("none");
+  const answer = await resolveIn(tree, "hide-all");
+  check(
+    "nothing found is reported as a null path and a null source, not as a partial answer",
+    answer.first.path === null && answer.first.source === null,
+    JSON.stringify(answer.first)
+  );
+  check(
+    "and the path-only view is null too, so no caller spawns an empty program name",
+    answer.path === null,
+    JSON.stringify(answer.path)
+  );
+  check(
+    "a miss is not cached as an answer: asking again still searches and still says none",
+    answer.again.path === null && answer.again.source === null,
+    JSON.stringify(answer.again)
+  );
+  fs.rmSync(tree, { recursive: true, force: true });
+}
+
 /* ---- a throwaway git repo with a branch, so every mode has something ---- */
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-service-"));
 // Async spawn, not spawnSync: in a sandboxed environment spawnSync is refused

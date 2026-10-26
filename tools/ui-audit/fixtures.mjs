@@ -814,7 +814,48 @@ window.api = (() => {
     }
   };
   return {
-  info: async () => (D.INFO),
+  // Three answers the 可执行文件来源 row has to word itself for beyond the
+  // common local one, all used by shots 101-103 in audit.mjs:
+  //   - ?binnone=1  path: null and source: null, the answer a broken install
+  //                 produces. Rendered as a dash before this round, i.e. exactly
+  //                 like a field this build does not report at all;
+  //   - ?binsrc=global  a copy found in a global npm install: a real source the
+  //                 label map already names, so its row is regression cover for
+  //                 the map rather than for the null shape;
+  //   - ?binsrc=sidecar  a source name this build has no label for. main.js
+  //                 cannot produce it today (AppInfo narrows the field to the
+  //                 three constants), so it stands in for the day a fourth
+  //                 search is added to binaryResolution: the row has to print
+  //                 the name it was handed instead of falling back to a dash.
+  info: async () => {
+    if (q.get("binnone") === "1")
+      // A null binary is why there is no version string either: the ocr version
+      // never ran, so the row above has to say the CLI is missing rather than
+      // print an empty version.
+      return { ...D.INFO, binary: null, binarySource: null, version: "" };
+    if (q.get("binsrc") === "sidecar")
+      return {
+        ...D.INFO,
+        binary: "C:/Program Files/Open Code Review/sidecar/opencodereview.exe",
+        binarySource: "sidecar",
+      };
+    if (q.get("binsrc") === "global")
+      // A per-user global install on Windows, the first of the global roots in
+      // ocr-service.js (APPDATA npm node_modules), so the path this shot
+      // shows is one the search can really produce.
+      // Forward slashes on purpose: this file is one JSON blob inside a
+      // template literal, so a Windows path with backslashes reaches the
+      // stubbed bridge as an escape sequence (\x64 in "win32-x64" has bitten
+      // before). The row renders the string it is given; the search, not the
+      // separator, is what this shot is about.
+      return {
+        ...D.INFO,
+        binary:
+          "C:/Users/x/AppData/Roaming/npm/node_modules/@alibaba-group/ocr-win32-x64/bin/opencodereview.exe",
+        binarySource: "global",
+      };
+    return D.INFO;
+  },
   providers: async () => ({ ok: true, value: [
     { name: "deepseek", protocol: "openai", url: "https://api.deepseek.com/v1" },
     { name: "anthropic", protocol: "anthropic", url: "https://api.anthropic.com" },
