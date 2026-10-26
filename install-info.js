@@ -122,10 +122,15 @@ function createInstall({
     try {
       return { error: await shell.openPath(target) };
     } catch (err) {
-      const said = err && (err.message || String(err));
+      // Only a non-empty string is a reason. `String(err)` used to be the
+      // fallback, which turned an empty message into "Error" and a message-less
+      // object into "[object Object]" — words the shell never said. Those read
+      // like a cause while saying nothing, so they fall through to the same
+      // sentence a silent rejection gets.
+      const said = typeof err === "string" ? err : err && typeof err.message === "string" ? err.message : "";
       // A rejection with nothing to say must not read as "" (which means
       // "opened"): the whole point of the answer is that truthy means failed.
-      return { error: said || "打开失败：系统没有给出原因" };
+      return { error: said.trim() ? said : "打开失败：系统没有给出原因" };
     }
   }
 

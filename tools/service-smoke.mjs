@@ -1518,17 +1518,25 @@ check(
 );
 // The config's own `provider` outranks the registry's spelling — and here both
 // exist, so the two rules disagree about which entry answers (`DeepSeek` vs
-// `deepseek`). Asserting the reason is the only way to see which one won.
+// `deepseek`). The rule alone tells which branch ran; the entry identity is
+// asserted too, because "active wins" only means something when the two
+// candidates carry different values. Swap the two branches and this returns
+// `sk-lower` with rule `registry`; keep the rule and return the wrong entry and
+// only the key assertion catches it.
+const activeVsRegistry = {
+  provider: "DeepSeek",
+  providers: { deepseek: { api_key: "sk-lower" }, DeepSeek: { api_key: "sk-upper" } },
+};
+const activeWins = svc.entryByName(activeVsRegistry, "DEEPSEEK");
 check(
   "the entry the config's provider names outranks the registry's spelling",
-  ruleFor(
-    { provider: "DeepSeek", providers: { deepseek: { api_key: "sk-lower" }, DeepSeek: { api_key: "sk-upper" } } },
-    "DEEPSEEK"
-  ) === svc.MATCH_ACTIVE,
-  ruleFor(
-    { provider: "DeepSeek", providers: { deepseek: { api_key: "sk-lower" }, DeepSeek: { api_key: "sk-upper" } } },
-    "DEEPSEEK"
-  )
+  Boolean(activeWins) && activeWins.rule === svc.MATCH_ACTIVE,
+  activeWins ? activeWins.rule : "no entry at all"
+);
+check(
+  "and it is the active entry, not the one wearing the registry's spelling",
+  Boolean(activeWins) && activeWins.entry.api_key === "sk-upper",
+  activeWins ? activeWins.entry.api_key : "no entry at all"
 );
 // And when `provider` names a spelling no entry has, the registry's spelling is
 // what answers — not the first entry in the file, which is listed first on

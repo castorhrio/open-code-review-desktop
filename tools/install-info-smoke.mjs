@@ -41,6 +41,9 @@ const settle = async (promise) => {
   }
 };
 
+/** The one sentence a rejection with nothing readable in it must turn into. */
+const NO_REASON = "打开失败：系统没有给出原因";
+
 const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ocr-install-info-")));
 // An install root the way NSIS leaves it: the app's own files plus the
 // uninstaller it names after the product.
@@ -366,7 +369,7 @@ for (const platform of ["darwin", "linux"]) {
   const res = await settle(tools.openDir(installed));
   check(
     "a reasonless rejection is still a failure with a sentence",
-    res.ok === false && res.error === "打开失败：系统没有给出原因",
+    res.ok === false && res.error === NO_REASON,
     JSON.stringify(res)
   );
 }
@@ -382,12 +385,17 @@ for (const platform of ["darwin", "linux"]) {
   for (const [what, thrown] of [
     ["null", null],
     ["an Error with an empty message", new Error("")],
+    ["an Error whose message is only whitespace", new Error("   ")],
+    ["an object with no message", { code: "EPERM" }],
   ]) {
     const shell = makeShell("", thrown);
     const tools = make({ packaged: true, resources: path.join(installed, "resources"), shell });
     const target = path.join(installed, "resources", "not-yet", "config.json");
     const ancestor = path.join(installed, "resources");
-    const said = (res) => res.ok === false && typeof res.error === "string" && res.error.length > 0;
+    // Exact sentence, not merely non-empty: `String(err)` would turn the two
+    // Error shapes into "Error" and the object into "[object Object]" — truthy
+    // answers that name no cause at all.
+    const said = (res) => res.ok === false && res.error === NO_REASON;
 
     const reveal = await settle(tools.revealPath(target));
     check(`a rejection of ${what} is still a refusal on the ancestor reveal`, said(reveal), JSON.stringify(reveal));
@@ -409,6 +417,21 @@ for (const platform of ["darwin", "linux"]) {
       JSON.stringify(file)
     );
   }
+}
+
+{
+  // A rejected string is the one non-Error shape that *is* a readable reason, so
+  // it must pass through as written. Only `String(err)` would have preserved it
+  // before; accepting nothing but `err.message` would silently replace it with
+  // the fallback sentence.
+  const shell = makeShell("", "policy denied by hook");
+  const tools = make({ packaged: true, resources: path.join(installed, "resources"), shell });
+  const res = await settle(tools.openDir(installed));
+  check(
+    "a string rejection keeps the sentence it was thrown with",
+    res.ok === false && res.error === "policy denied by hook",
+    JSON.stringify(res)
+  );
 }
 
 {
