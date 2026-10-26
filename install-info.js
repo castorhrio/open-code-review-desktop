@@ -29,7 +29,9 @@ const path = require("path");
  *   equals the path itself, and *which* paths those are is the platform's
  *   separator rules: `\\server\share` (a UNC share root) and `C:\` are their
  *   own parents on win32, nothing but `/` is on posix. Injecting the function is
- *   how `tools/install-info-smoke.mjs` walks a UNC share on a Linux runner.
+ *   how `tools/install-info-smoke.mjs` walks a UNC share on a Linux runner —
+ *   and it pins the posix root the same way, so neither half of the rule is
+ *   only a sentence in a comment.
  */
 function createInstall({
   app,
@@ -172,6 +174,11 @@ function createInstall({
   // share that exists is what gets opened, one that does not is a refusal — are
   // pinned in `tools/install-info-smoke.mjs` with `path.win32.dirname` injected,
   // which is why `dirname` is a seam and not a direct `path.dirname` call.
+  //
+  // The posix half of the same rule is `/`, and it is the level the ordinary
+  // runner walks to: a missing path under the root stops there and opens the
+  // root, and a root that is not there is a refusal as well. Pinned the same
+  // way, with `path.posix.dirname` injected.
   async function revealPath(target) {
     if (!target) return { ok: false, error: "没有可显示的路径" };
     let existing = target;

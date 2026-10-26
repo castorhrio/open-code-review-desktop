@@ -331,11 +331,28 @@ for (const platform of ["darwin", "linux"]) {
 }
 
 {
+  // The same shape on the host's own rules: nothing along the whole path
+  // exists, so the walk has to climb to the root and stop there. The counter
+  // throws if it does not — a walk that failed to stop would otherwise hang
+  // this audit instead of failing it, and every check after this one would
+  // never run. That is the same reason the walk itself has to terminate: a
+  // settings page waiting on a filesystem question that never ends is a page
+  // that never answers.
+  let asked = 0;
   const shell = makeShell();
-  const tools = make({ packaged: true, resources: path.join(installed, "resources"), shell, exists: () => false });
+  const tools = make({
+    packaged: true,
+    resources: path.join(installed, "resources"),
+    shell,
+    exists: () => {
+      if (++asked > 32) throw new Error("the ancestor walk did not stop at the root");
+      return false;
+    },
+  });
   const target = path.join(tmp, "nowhere", "deeper", "config.json");
-  const res = await tools.revealPath(target);
+  const res = await settle(tools.revealPath(target));
   check("nothing existing at all is an error, not a crash", res.ok === false && res.error === `路径不存在：${target}`, JSON.stringify(res));
+  check("and the walk stopped at the root instead of circling", asked <= 12, `${asked} filesystem question(s)`);
   check("and the shell is left alone", shell.calls.open.length === 0 && shell.calls.reveal.length === 0);
 }
 
@@ -352,10 +369,97 @@ for (const platform of ["darwin", "linux"]) {
 // The ancestor walk stops when the parent equals the path itself, and *which*
 // paths those are is the platform's separator rules: on win32 both `C:\` and a
 // UNC share root (`\\server\share`) are their own parents, while posix has only
-// `/`. The module therefore takes `dirname` as a seam, and these three checks
-// inject `path.win32.dirname` so the Windows-only half is exercised on whatever
-// runner the audit happens to use — otherwise "it stops instead of walking
-// forever" is a sentence in a comment that no fixture can turn red.
+// `/`. The module therefore takes `dirname` as a seam, and the checks below
+// inject `path.win32.dirname` / `path.posix.dirname` so *both* halves are
+// exercised on whatever runner the audit happens to use — otherwise "it stops
+// instead of walking forever" is a sentence in a comment that no fixture can
+// turn red.
+//
+// The posix half comes first, because it is the one an ordinary posix runner
+// sees: `/` is the only path that is its own parent there, so a missing path
+// under it has to stop *at* the root and open the root, and a root that is not
+// there has to end the walk with a refusal rather than a hang.
+{
+  // The target as it is: the path exists, so it is revealed in its folder and
+  // the walk never runs at all. This is the pair's first half — the same target
+  // below is missing, and then it is opened instead. The two answers have to
+  // be told apart, because "reveal the file" and "open the folder that holds
+  // it" are different acts with different paths.
+  const posix = path.posix;
+  const shell = makeShell();
+  const tools = make({
+    packaged: true,
+    resources: path.join(installed, "resources"),
+    shell,
+    platform: "linux",
+    dirname: posix.dirname,
+    exists: (p) => p === "/a/b",
+  });
+  const res = await tools.revealPath("/a/b");
+  check(
+    "an existing posix path is revealed in its folder",
+    res.ok === true && res.action === "reveal" && res.path === "/a/b",
+    JSON.stringify(res)
+  );
+  check("showItemInFolder got the exact path", shell.calls.reveal.length === 1 && shell.calls.reveal[0] === "/a/b", JSON.stringify(shell.calls.reveal));
+  check("and nothing was opened", shell.calls.open.length === 0, JSON.stringify(shell.calls.open));
+}
+
+{
+  // The same target when it is missing: the walk climbs until the parent is
+  // the path itself, and on posix that level is `/` — the root is what gets
+  // opened, not the directory that was asked about. Climbing past it is not an
+  // option (there is nothing above `/`), and stopping below it would open a
+  // directory that does not exist.
+  const posix = path.posix;
+  const target = "/a/b/config.json";
+  const shell = makeShell();
+  const tools = make({
+    packaged: true,
+    resources: path.join(installed, "resources"),
+    shell,
+    platform: "linux",
+    dirname: posix.dirname,
+    exists: (p) => p === "/",
+  });
+  const res = await tools.revealPath(target);
+  check(
+    "a missing posix path falls back to the root, the only self-parent on posix",
+    res.ok === true && res.action === "open-parent" && res.path === "/" && res.missing === target,
+    JSON.stringify(res)
+  );
+  check("the root is what gets opened", shell.calls.open.length === 1 && shell.calls.open[0] === "/", JSON.stringify(shell.calls.open));
+  check("and the missing file is not revealed in a folder", shell.calls.reveal.length === 0, JSON.stringify(shell.calls.reveal));
+}
+
+{
+  // The other half of the same fact: when even the root is not there, the walk
+  // must stop *at* it instead of asking the filesystem forever. `dirname("/")`
+  // is `"/"`, so the parent equals the path — that is the branch that ends the
+  // walk with an empty `existing`, and the refusal it produces is the ordinary
+  // 「路径不存在」 rather than a hang. The counter throws if the walk does not
+  // stop, so a walk that failed to terminate takes the run down here instead
+  // of hanging the settings page for the user.
+  const posix = path.posix;
+  let asked = 0;
+  const shell = makeShell();
+  const tools = make({
+    packaged: true,
+    resources: path.join(installed, "resources"),
+    shell,
+    platform: "linux",
+    dirname: posix.dirname,
+    exists: () => {
+      if (++asked > 32) throw new Error("the ancestor walk did not stop at the posix root");
+      return false;
+    },
+  });
+  const res = await settle(tools.revealPath("/"));
+  check("a posix root that is not there is 「路径不存在」", res.ok === false && res.error === "路径不存在：/", JSON.stringify(res));
+  check("and the walk stopped at the posix root instead of circling", asked <= 4, `${asked} filesystem question(s)`);
+  check("the shell is left alone when the root is not there either", shell.calls.open.length === 0 && shell.calls.reveal.length === 0);
+}
+
 {
   // A reviewed file on a network share that *is* mounted: the walk has to stop
   // on the share root and open that, not keep climbing past the share into
