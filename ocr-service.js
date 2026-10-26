@@ -146,6 +146,13 @@ const mapSection = (section) =>
 // What decided which entry answers. Three of the four rules answer a question
 // `ocr` itself asks; the last one (`order`) answers one it never asks, so the
 // caller is told which rule it got instead of only which entry.
+//
+// The four are *ordered by if/else*, so "the rules are mutually exclusive" is a
+// property of this function's shape and not of anything a caller can see. Both
+// the constants and `entryByName` are therefore exported: the smoke checks ask
+// which rule answered for each shape, so moving one `if` below another (the
+// registry rule below file order, say) makes an assertion red instead of
+// silently handing the settings page a Key from the wrong entry.
 const MATCH_EXACT = "exact"; // the file spells the name this way
 const MATCH_ACTIVE = "active"; // the config's own `provider` names this entry
 const MATCH_REGISTRY = "registry"; // the registry's spelling, from `ocr llm providers`
@@ -1412,6 +1419,11 @@ module.exports = {
   binaryPath,
   CONFIG_PATH,
   readConfigView,
+  entryByName,
+  MATCH_EXACT,
+  MATCH_ACTIVE,
+  MATCH_REGISTRY,
+  MATCH_ORDER,
   parseProviderTable,
   parseProviderNames,
   providerTable,

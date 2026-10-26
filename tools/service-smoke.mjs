@@ -1331,6 +1331,106 @@ check(
   savedKey({ provider: "corp-gateway", providers: { DeepSeek: { api_key: "sk-upper" } } }, "DEEPSEEK") ===
     ""
 );
+/* Which rule answered, not just which Key came back.
+ *
+ * The four rules live in one if/else chain, so their precedence *is* the
+ * semantics: exact over the config's own `provider`, `provider` over the
+ * registry's spelling, the registry over file order. Every check above pins the
+ * Key that comes out, and none of them would notice one rule being moved below
+ * another when both happen to name the same entry — the chain would answer with
+ * a different *reason* and the same Secret. So the reason is asserted here, for
+ * each shape, with the entries listed so that file order (the wrong answer)
+ * comes first.
+ *
+ * `order` is the only rule whose answer `ocr` never opens, and it is also the
+ * only one that can be reached *after* a spelling that does match exists — that
+ * is exactly the shape a reordered chain would produce, so it is the check that
+ * matters most.
+ */
+const ruleFor = (config, name) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-match-rule-"));
+  const file = path.join(dir, "config.json");
+  fs.writeFileSync(file, JSON.stringify(config));
+  const raw = JSON.parse(fs.readFileSync(file, "utf8"));
+  fs.rmSync(dir, { recursive: true, force: true });
+  const found = svc.entryByName(raw, name);
+  return found ? found.rule : null;
+};
+check(
+  "the four rules are four distinct answers",
+  new Set([svc.MATCH_EXACT, svc.MATCH_ACTIVE, svc.MATCH_REGISTRY, svc.MATCH_ORDER]).size === 4,
+  [svc.MATCH_EXACT, svc.MATCH_ACTIVE, svc.MATCH_REGISTRY, svc.MATCH_ORDER].join(",")
+);
+// Exact before anything else, across sections: the file already spells the name
+// this way, so no other rule gets a say — even when `provider` names an entry.
+check(
+  "an entry spelled exactly wins, and no other rule gets to answer",
+  ruleFor(
+    {
+      provider: "deepseek",
+      providers: { deepseek: { api_key: "sk-builtin" } },
+      custom_providers: { DeepSeek: { api_key: "sk-custom" } },
+    },
+    "DeepSeek"
+  ) === svc.MATCH_EXACT,
+  ruleFor(
+    {
+      provider: "deepseek",
+      providers: { deepseek: { api_key: "sk-builtin" } },
+      custom_providers: { DeepSeek: { api_key: "sk-custom" } },
+    },
+    "DeepSeek"
+  )
+);
+// The config's own `provider` outranks the registry's spelling — and here both
+// exist, so the two rules disagree about which entry answers (`DeepSeek` vs
+// `deepseek`). Asserting the reason is the only way to see which one won.
+check(
+  "the entry the config's provider names outranks the registry's spelling",
+  ruleFor(
+    { provider: "DeepSeek", providers: { deepseek: { api_key: "sk-lower" }, DeepSeek: { api_key: "sk-upper" } } },
+    "DEEPSEEK"
+  ) === svc.MATCH_ACTIVE,
+  ruleFor(
+    { provider: "DeepSeek", providers: { deepseek: { api_key: "sk-lower" }, DeepSeek: { api_key: "sk-upper" } } },
+    "DEEPSEEK"
+  )
+);
+// And when `provider` names a spelling no entry has, the registry's spelling is
+// what answers — not the first entry in the file, which is listed first on
+// purpose so that a reordered chain answers `order` here instead.
+const thirdSpellingRule = ruleFor(
+  {
+    provider: "DEEPSEEK",
+    providers: {
+      DeepSEEK: { api_key: "sk-first" },
+      DeepSeek: { api_key: "sk-second" },
+      deepseek: { api_key: "sk-third" },
+    },
+  },
+  "DEEPSEEK"
+);
+check(
+  "with the provider naming no entry, the registry's spelling answers — not file order",
+  thirdSpellingRule === svc.MATCH_REGISTRY,
+  thirdSpellingRule
+);
+// File order is the last resort, and it is reported as such rather than dressed
+// up as an answer: the entry is still returned (the settings page lists it), but
+// `rule` says the position decided it, which is what withholds the Key.
+const orderOnly = ruleFor(
+  { provider: "corp-gateway", providers: { DeepSEEK: { api_key: "sk-first" }, DeepSeek: { api_key: "sk-second" } } },
+  "deepseek"
+);
+check("file order reports itself instead of pretending to answer", orderOnly === svc.MATCH_ORDER, orderOnly);
+// A name nothing is called has no entry and no rule — the settings page asks
+// this for a form that was never saved.
+check(
+  "a name no entry has answers with no entry at all",
+  ruleFor({ providers: { deepseek: { api_key: "sk-lower" } } }, "corp-gateway") === null &&
+    ruleFor({ providers: { deepseek: { api_key: "sk-lower" } } }, "") === null
+);
+
 check(
   "a custom name is not folded, because the CLI looks it up exactly",
   savedKey(
@@ -1450,6 +1550,83 @@ check(
 );
 svc.resetPresetCache();
 fs.rmSync(presetDir, { recursive: true, force: true });
+
+/* ---- six causes, six sentences ----
+ * The reason codes existed so the settings page could stop saying one sentence
+ * for every way a Key fails to arrive ("该服务还没有已保存的 Key", including when
+ * the built-in table could not be read — whose fix is a button, not a Key). That
+ * fix is only worth anything if each cause really does arrive with its own
+ * sentence, and until now nothing asserted it: both wording functions could
+ * collapse back to a single sentence and every check above would still pass,
+ * because they only ever looked at `reason` and the value.
+ *
+ * So: every `KEY_WITHHELD_*` is asked for a sentence, and the sentences are
+ * compared to each other. The tone is asserted per cause as well — `warn` means
+ * "something you can fix stands in the way", and a cause that moves to `muted`
+ * (or the other way round) changes what the field looks like without changing a
+ * single character of the text. `no-entry` / `no-key` are the one deliberate
+ * pair: nothing is saved either way, and the fix is the same sentence.
+ */
+const withheldReasons = [
+  svc.KEY_WITHHELD_CONFIG,
+  svc.KEY_WITHHELD_NO_ENTRY,
+  svc.KEY_WITHHELD_ORDER,
+  svc.KEY_WITHHELD_URL,
+  svc.KEY_WITHHELD_EMPTY,
+  svc.KEY_WITHHELD_TABLE,
+];
+const hintFor = (reason) => svc.savedKeyFieldHint(reason);
+const testFor = (reason) => svc.savedKeyTestMessage({ reason });
+check(
+  "every way a Key is withheld has a sentence of its own",
+  withheldReasons.every((reason) => hintFor(reason).text) &&
+    new Set(withheldReasons.map((reason) => hintFor(reason).text)).size === withheldReasons.length - 1,
+  JSON.stringify(Object.fromEntries(withheldReasons.map((r) => [r, hintFor(r).text.slice(0, 12)])))
+);
+// The one shared pair, said out loud: `no-entry` and `no-key` are both "nothing
+// is saved here", so both say the same thing — and it is neither of the others'.
+check(
+  "unsaved and unread-config are not dressed up as the same cause",
+  hintFor(svc.KEY_WITHHELD_NO_ENTRY).text === hintFor(svc.KEY_WITHHELD_EMPTY).text &&
+    hintFor(svc.KEY_WITHHELD_NO_ENTRY).text !== hintFor(svc.KEY_WITHHELD_CONFIG).text,
+  `${hintFor(svc.KEY_WITHHELD_NO_ENTRY).text.slice(0, 16)} | ${hintFor(svc.KEY_WITHHELD_CONFIG).text.slice(0, 16)}`
+);
+check(
+  "the same holds for the sentence a failed test shows",
+  new Set(withheldReasons.map((reason) => testFor(reason))).size === withheldReasons.length - 1,
+  JSON.stringify(Object.fromEntries(withheldReasons.map((r) => [r, testFor(r).slice(0, 12)])))
+);
+// Tone per cause: the three the user can act on in place are warnings, the two
+// "nothing saved yet" states are not (a first save is not a fault), and an
+// unreadable config is not a fault of this service either.
+const TONES = {
+  [svc.KEY_WITHHELD_TABLE]: "warn",
+  [svc.KEY_WITHHELD_URL]: "warn",
+  [svc.KEY_WITHHELD_ORDER]: "warn",
+  [svc.KEY_WITHHELD_CONFIG]: "muted",
+  [svc.KEY_WITHHELD_NO_ENTRY]: "muted",
+  [svc.KEY_WITHHELD_EMPTY]: "muted",
+};
+for (const [reason, want] of Object.entries(TONES)) {
+  check(`「${reason}」 is a ${want} answer`, hintFor(reason).tone === want, `${hintFor(reason).tone} vs ${want}`);
+}
+check(
+  "a reusable Key says so, and says nothing is wrong",
+  hintFor("").tone === "ok" && /留空/.test(hintFor("").text),
+  `${hintFor("").tone} | ${hintFor("").text}`
+);
+// The two causes whose fix is *in the app* have to name that fix: "press 刷新"
+// for a read that failed, "put the endpoint back" for a Key that belongs
+// elsewhere. A sentence that only states the problem sends the user to retype a
+// Key that was never the issue.
+check(
+  "the causes with an in-app fix name it",
+  /刷新/.test(hintFor(svc.KEY_WITHHELD_TABLE).text) &&
+    /刷新/.test(testFor(svc.KEY_WITHHELD_TABLE)) &&
+    /端点/.test(hintFor(svc.KEY_WITHHELD_URL).text) &&
+    /端点/.test(testFor(svc.KEY_WITHHELD_URL)),
+  `${hintFor(svc.KEY_WITHHELD_TABLE).text.slice(0, 20)} | ${hintFor(svc.KEY_WITHHELD_URL).text.slice(0, 20)}`
+);
 
 /* ---- one list, one answer ----
  * `ready` and `missing` used to be separate expressions, so they could disagree:
