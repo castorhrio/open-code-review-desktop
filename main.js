@@ -13,6 +13,7 @@ const { installNavigationGuards } = require("./security");
 const updater = require("./update-service");
 const { createAppStore, reportOutcome, flushNow, flushBeforeQuit } = require("./run-diagnostics");
 const { makeRunHandler } = require("./run-handler");
+const { makeConfigHandlers } = require("./config-handler");
 
 const DOCS_URL = "https://open-codereview.ai/docs";
 
@@ -363,168 +364,18 @@ ipcMain.handle("file:openUrl", (_e, url) => {
 
 /* ---------------- ipc: config ---------------- */
 
-/* The readiness view needs one fact this file can only get asynchronously: the
- * CLI's own list of built-in services. `readConfigView` is a synchronous read of
- * the config file, so the list is fetched once (ocr-service caches it) and handed
- * in — the view stays a pure function of the file plus that list, and a
- * hand-edited `providers` entry is judged by the CLI's rule instead of by "the
- * section happens to have this key".
- *
- * `refresh` is only true when the user pressed 刷新: a failed read is remembered
- * for a short window so the settings page cannot spawn a doomed process on every
- * re-render, which would make that button the one thing that does *not* retry.
- */
-const configView = async (refresh = false) =>
-  ocr.readConfigView({ presetList: await ocr.presetRegistry({ refresh }) });
-
-ipcMain.handle("config:read", (_e, opts) => configView(Boolean(opts && opts.refresh)));
-
-// "May I leave the Key field blank for what the form is pointed at, and if not,
-// why not?" — the one question the settings page needs answered *before* it asks
-// the user anything. The Key itself never crosses this boundary (see
-// `savedKeyLookup`); the renderer only gets the reason and the sentence built
-// from it, so a wording that distinguishes six causes can be asserted without
-// launching Electron.
-//
-// The lookup happens in the main process because it consults the CLI's own table
-// (`ocr llm providers`), which the renderer does not hold: the form's Base URL
-// for a built-in service is prefilled from that table, so asking here keeps the
-// answer and the field it is about on the same source.
-//
-// The answer also carries the two facts the renderer used to have to work out
-// for itself, and got wrong: `endpoint` is the host the service resolves to (the
-// same `serviceEndpoint` the config view uses, so the endpoint the Key is
-// compared against and the endpoint on screen are one host), and `tableOk` says
-// whether the built-in table could be read at all — so the banner about that
-// table and the sentence under the Key field come from one answer.
-ipcMain.handle("config:savedKey", async (_e, req) => {
-  const form = req || {};
-  const found = await ocr.savedKeyLookupByName(form.name, form.url);
-  return {
-    ok: true,
-    available: Boolean(found.key),
-    reason: found.reason,
-    hint: ocr.savedKeyFieldHint(found.reason),
-    endpoint: found.endpoint,
-    tableOk: found.tableOk,
-  };
-});
-
-ipcMain.handle("config:save", async (_e, form) => {
-  const pairs = [];
-  const name = (form.provider || "").trim();
-  if (!name) return { ok: false, error: "未选择 provider", steps: [] };
-
-  if (form.isCustom) {
-    if (form.url) pairs.push([`providers.${name}.url`, form.url]);
-    if (form.protocol) pairs.push([`providers.${name}.protocol`, form.protocol]);
-  }
-  if (form.apiKey) pairs.push([`providers.${name}.api_key`, form.apiKey]);
-  if (form.model) pairs.push([`providers.${name}.model`, form.model]);
-  // Saving an entry must not silently switch the active service; the caller
-  // asks for that explicitly.
-  if (form.setActive !== false) pairs.push(["provider", name]);
-  if (form.model && form.setActive !== false) pairs.push(["model", form.model]);
-  if (form.effort) pairs.push(["effort", form.effort]);
-  if (form.language) pairs.push(["language", form.language]);
-  if (form.maxTokens) pairs.push(["max_tokens", form.maxTokens]);
-
-  const steps = await ocr.setConfig(pairs);
-  const failed = steps.find((s) => !s.ok);
-  return failed
-    ? { ok: false, error: `${failed.key}: ${ocr.withHint(failed.message)}`, steps }
-    : { ok: true, steps, config: await configView() };
-});
-
-// Built-in provider entries cannot be removed (`config unset` rejects them), so
-// clearing their key and model is the equivalent of un-configuring them.
-ipcMain.handle("config:removeEntry", async (_e, req) => {
-  const name = (req.name || "").trim();
-  if (!name) return { ok: false, error: "未指定服务名" };
-  const isCustom = Boolean((await configView()).customProviders[name]);
-  if (isCustom) return ocr.unsetConfig(`custom_providers.${name}`);
-  const steps = await ocr.setConfig([
-    [`providers.${name}.api_key`, ""],
-    [`providers.${name}.model`, ""],
-  ]);
-  const failed = steps.find((s) => !s.ok);
-  return failed
-    ? { ok: false, error: `${failed.key}: ${ocr.withHint(failed.message)}`, steps }
-    : { ok: true, cleared: true, message: `已清空 ${name} 的 Key 与模型（内置服务无法删除，仅能解除配置）`, config: await configView() };
-});
-
-ipcMain.handle("config:use", async (_e, req) => {
-  const pairs = [["provider", req.name]];
-  if (req.model) pairs.push(["model", req.model]);
-  const steps = await ocr.setConfig(pairs);
-  const failed = steps.find((s) => !s.ok);
-  return failed
-    ? { ok: false, error: `${failed.key}: ${ocr.withHint(failed.message)}`, steps }
-    : { ok: true, config: await configView() };
-});
-
-ipcMain.handle("config:unset", (_e, key) => ocr.unsetConfig(key));
-
-// `ocr llm test` reads only the saved config, so "test what I just typed" runs
-// the CLI against an empty temp HOME with OCR_LLM_* set: the config in the real
-// HOME would otherwise win and the test would prove nothing about the form.
-ipcMain.handle("config:test", async (_e, req) => {
-  const form = req && req.form;
-  if (form) {
-    const missing = [
-      ["url", "Base URL"],
-      ["protocol", "协议"],
-      ["model", "模型名"],
-    ]
-      .filter(([key]) => !String(form[key] || "").trim())
-      .map(([, label]) => label);
-    // A saved Key is only reused for the endpoint it belongs to. A built-in
-    // service is usually configured with a Key and no URL — the CLI fills the
-    // endpoint in from its own table — so "which host does this Key belong to"
-    // has to consult that table (see `savedKeyLookupByName`); asking `savedKeyFor`
-    // alone treated the empty URL as a wildcard.
-    //
-    // The lookup also answers *why* it withheld, and that is what the message is
-    // worded from: a built-in service table that could not be read leaves the
-    // form's Base URL empty too, so without the reason this branch said "还缺
-    // Base URL" — pointing the user at their own typing when the fix was one
-    // press of 刷新.
-    const typed = String(form.apiKey || "").trim();
-    const saved = typed ? { key: typed, reason: "" } : await ocr.savedKeyLookupByName(form.name, form.url);
-    const apiKey = saved.key;
-    if (missing.length || !apiKey) {
-      return {
-        ok: false,
-        via: "form",
-        output: ocr.savedKeyTestMessage({ missing, reason: saved.reason }),
-      };
-    }
-    let home = "";
-    try {
-      home = fs.mkdtempSync(path.join(app.getPath("temp"), "ocr-llmtest-"));
-      const res = await ocr.exec(
-        ["llm", "test", "--color", "never"],
-        undefined,
-        ocr.llmTestEnv({ ...form, apiKey }, home)
-      );
-      return {
-        ok: res.code === 0,
-        via: "form",
-        output: ocr.withHint(res.code === 0 ? (res.stdout + res.stderr).trim() : ocr.failureText(res)),
-      };
-    } catch (err) {
-      return { ok: false, via: "form", output: `测试没有跑起来：${err.message}` };
-    } finally {
-      if (home) fs.rmSync(home, { recursive: true, force: true });
-    }
-  }
-  const res = await ocr.exec(["llm", "test", "--color", "never"]);
-  return {
-    ok: res.code === 0,
-    via: "saved",
-    output: ocr.withHint(res.code === 0 ? (res.stdout + res.stderr).trim() : ocr.failureText(res)),
-  };
-});
+// The handler bodies live in `config-handler.js` for the same reason the run
+// handler does: what a save writes and which withheld-Key reason it passes back
+// are behaviours, and a behaviour can only be checked by calling it. This file
+// only wires them to channels.
+const config = makeConfigHandlers({ ocr, tempRoot: app.getPath("temp") });
+ipcMain.handle("config:read", config.read);
+ipcMain.handle("config:savedKey", config.savedKey);
+ipcMain.handle("config:save", config.save);
+ipcMain.handle("config:removeEntry", config.removeEntry);
+ipcMain.handle("config:use", config.use);
+ipcMain.handle("config:unset", config.unset);
+ipcMain.handle("config:test", config.test);
 
 /* ---------------- ipc: sessions & rules ---------------- */
 

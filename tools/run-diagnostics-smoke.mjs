@@ -1386,6 +1386,7 @@ check("and the exit says the evidence did not make it", outcomeMessage(slowExit)
 {
   const settleFailReasons = [];
   const settleFailLog = [];
+  const settleFailSends = [];
   const unhandled = [];
   const onUnhandled = (err) => unhandled.push(err);
   process.on("unhandledRejection", onUnhandled);
@@ -1397,7 +1398,7 @@ check("and the exit says the evidence did not make it", outcomeMessage(slowExit)
       },
     },
     store: createStore(path.join(dir, "settle-fail", "run-diagnostics.json")),
-    send: () => {},
+    send: (channel) => settleFailSends.push(channel),
     settleRunExit: () => Promise.reject(new Error("the store was wired to nothing")),
     reportOutcome: (outcome, warn, options) => {
       settleFailReasons.push(outcome);
@@ -1423,6 +1424,11 @@ check("and the exit says the evidence did not make it", outcomeMessage(slowExit)
     "and the raw error, so a rejected settle can be debugged",
     settleFailLog.some((line) => line.includes("the store was wired to nothing")),
     JSON.stringify(settleFailLog)
+  );
+  check(
+    "the exit was never sent, because the settle that owns the door rejected",
+    !settleFailSends.includes(createRunExitDoor(() => {}).channel),
+    JSON.stringify(settleFailSends)
   );
   check("the rejection is handled, not left to the runtime", unhandled.length === 0, unhandled.map(String).join(" | "));
 }
