@@ -845,12 +845,23 @@ const RUN_EXIT_CHANNEL = "run:exit";
 const OPEN_EXIT_DOOR = Symbol("run-exit.open");
 
 /**
- * The one door out of a finished run.
+ * The one door out of a *run*.
  *
  * A door is closed when it is made, so sending through it before `settleRunExit`
  * opens it is refused rather than delivered. And it opens at most once: a run
- * that ended says so once, because a second exit signal would tell the
- * renderer the run ended twice.
+ * that ended says so once, because a second exit signal would tell the renderer
+ * the run ended twice.
+ *
+ * "At most once" is per *door*, so the door has to be per *run* — that is the
+ * caller's side of this contract, and it used to be nobody's: `settleRunExit`
+ * made a fresh door on every call, so the `sent` guard below could never fire.
+ * A second `settleRunExit` for the same run (a service that reported its
+ * outcome twice, a retry added later) would have sent a second exit and told
+ * the renderer the run had ended twice. So whoever starts a run makes one door
+ * (`main.js`, in the handler that starts the CLI) and hands it to
+ * `settleRunExit`, which is still the only thing that can open it and the only
+ * thing that sends. `tools/run-diagnostics-smoke.mjs` holds one door across two
+ * settles and asserts the second one says nothing.
  *
  * The channel name lives in this closure, so the sender never has to know it.
  */
@@ -904,7 +915,8 @@ function createRunExitDoor(send) {
  * The exit channel itself is not the caller's business: `settleRunExit` sends
  * it through a door it opens itself, so "the renderer was told the run is over"
  * and "the evidence had already landed" are the same statement. The caller
- * gives a `send` and a `payload`; it does not get to say when.
+ * gives a door (`exit`, made where the run was started), a `payload`, and — for
+ * callers that have no run of their own — a `send`; it does not get to say when.
  */
 async function settleRunExit(options) {
   const opts = options || {};
@@ -925,8 +937,18 @@ async function settleRunExit(options) {
     // chain said so with a `finally`, and a run that ends without an exit is a
     // spinner that never stops.
   }
-  if (typeof opts.send !== "function") return outcome;
-  const door = createRunExitDoor(opts.send);
+  // The door belongs to the run, not to this call: a caller that started the run
+  // hands over the one door it made there, so a second settle for the same run
+  // meets a door that has already said its one word. A caller with no run of its
+  // own (`send` only) still gets a door here, because losing the exit is the
+  // worse mistake — a run that ends without an exit is a spinner that never
+  // stops.
+  const door = opts.exit || (typeof opts.send === "function" ? createRunExitDoor(opts.send) : null);
+  if (!door) return outcome;
+  // Already said. Nothing to report: a repeat is not news, and reporting it as
+  // `signal-failed` would put a line about the screen in the log for a screen
+  // that was told correctly the first time.
+  if (door.hasSent()) return outcome;
   door[OPEN_EXIT_DOOR]();
   try {
     door.signal(typeof opts.payload === "function" ? opts.payload(outcome) : outcome);

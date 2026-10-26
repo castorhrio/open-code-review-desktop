@@ -1089,6 +1089,69 @@ check("and the exit says the evidence did not make it", outcomeMessage(slowExit)
   );
 }
 
+/* ---- one run, one door ----
+ * The door refuses a second send, but that guard could never fire while the door
+ * was made *inside* `settleRunExit`: every call built its own, so "a run that
+ * ended says so once" was a comment about a flag nothing could reach. A second
+ * settle for the same run is not a corner case to be argued about — the CLI's
+ * `finish()` already guards one outcome per run, so the guard that matters is
+ * the one that does not depend on that staying true.
+ *
+ * Now the caller that starts a run makes the door (`main.js` does, in the
+ * handler that starts the CLI) and `settleRunExit` opens and uses *that* one, so
+ * the second settle finds a door that has spoken. The assertions below hold one
+ * door across two settles — the shape main.js produces for one run — and check
+ * that the second one is silent rather than a second "the run ended".
+ */
+{
+  const oneDoorStore = createStore(path.join(dir, "one-door", "run-diagnostics.json"));
+  const oneDoorSends = [];
+  const oneDoorLog = [];
+  const runDoor = createRunExitDoor((channel, payload) => oneDoorSends.push({ channel, payload }));
+  const oneRunOptions = {
+    store: oneDoorStore,
+    repo,
+    sessionId: "one-door",
+    result: limitResult,
+    timeoutMs: 2000,
+    warn: (line) => oneDoorLog.push(line),
+    exit: runDoor,
+    payload: (outcome) => ({ outcome }),
+  };
+  const firstSettle = await settleRunExit(oneRunOptions);
+  const secondSettle = await settleRunExit(oneRunOptions);
+  check(
+    "a run's door says the run ended once, not once per settle",
+    oneDoorSends.length === 1,
+    `${oneDoorSends.length} exit signals`
+  );
+  check("with the channel the renderer listens on", oneDoorSends[0]?.channel === runDoor.channel, `${oneDoorSends[0]?.channel}`);
+  // The repeat is not news: reporting it as `signal-failed` would put "the
+  // screen may not have heard" in the log for a screen that heard the first one.
+  check("and the repeat says nothing in the log", oneDoorLog.length === 0, JSON.stringify(oneDoorLog));
+  check(
+    "the second settle still answers with what the record did",
+    firstSettle?.reason === "written" && secondSettle?.reason === "written",
+    `${firstSettle?.reason} / ${secondSettle?.reason}`
+  );
+  check("the door knows it has spoken", runDoor.isOpen() === true && runDoor.hasSent() === true);
+
+  // The per-run door is only real if the main process makes exactly one, inside
+  // the handler that starts the run, and hands it over. Read out of `main.js`
+  // rather than described here: a second door, or a settle that drops `exit`,
+  // would quietly go back to one door per call.
+  const runHandlerAt = mainSrc.indexOf('ipcMain.handle("review:run"');
+  const runHandler = runHandlerAt === -1 ? "" : mainSrc.slice(runHandlerAt);
+  const doors = [...mainSrc.matchAll(/createRunExitDoor\s*\(/g)].length;
+  check("the main process makes exactly one door", doors === 1, `${doors} doors`);
+  check(
+    "and makes it in the handler that starts the run",
+    runHandlerAt !== -1 && /const exit = createRunExitDoor\(send\)/.test(runHandler),
+    runHandlerAt === -1 ? "no review:run handler" : "the door is made elsewhere"
+  );
+  check("and hands that door to settleRunExit", /\bexit,/.test(runHandler), "settleRunExit is called without `exit`");
+}
+
 // The one outcome that really loses the evidence has to reach the app as
 // something it can show: the log drawer opens itself on a line that reads like
 // trouble, and a stderr line nobody opens is not the same as saying it.

@@ -17,6 +17,7 @@ const {
   outcomeMessage,
   reportOutcome,
   settleRunExit,
+  createRunExitDoor,
   flushNow,
   flushBeforeQuit,
 } = require("./run-diagnostics");
@@ -321,6 +322,14 @@ ipcMain.handle("repo:resolveRef", (_e, req) => git.resolveRef(req.repo, req.ref)
 ipcMain.handle("review:preview", (_e, spec) => ocr.preview(spec));
 
 ipcMain.handle("review:run", (_e, spec) => {
+  // One run, one exit. The door is made here — inside the handler that starts
+  // this run — and handed to `settleRunExit`, which is still the only thing that
+  // can open it (the opening symbol is private to run-diagnostics) and the only
+  // thing that sends. Being per run rather than per call is what makes the
+  // door's "says so once" guard real: a second settle for this run meets a door
+  // that has already spoken, and stays quiet instead of telling the renderer
+  // the run ended twice. This file still cannot name the channel.
+  const exit = createRunExitDoor(send);
   return ocr.startRun(
     spec,
     (id, line) => send("run:log", { id, line }),
@@ -373,6 +382,7 @@ ipcMain.handle("review:run", (_e, spec) => {
         result: result.value || null,
         timeoutMs: WRITE_TIMEOUT_MS,
         onLate: (late) => reportOutcome(late, undefined, { late: true }),
+        exit,
         send,
         payload: (outcome) => ({
           id,
