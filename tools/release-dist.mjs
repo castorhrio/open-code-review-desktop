@@ -29,6 +29,14 @@
 // The answer names what happened (`moved`, `skipped`, `replaced`) so the release
 // log can say it, and so a caller cannot mistake "it returned" for "everything
 // landed".
+//
+// `retryDistIntoFallback` is the same path one level up: clear the stale fallback
+// dir, build into it, move the result out. It lives here for the same reason —
+// the *order* is the whole content of the path, and the order used to be three
+// statements inside `tools/release.mjs`, which no check can import. A same-version
+// retry is what made this urgent: `release-0.1.14/` still holds the previous
+// attempt's setup.exe, electron-builder builds on top of it, and the move then
+// finds names it cannot rename over.
 import fs from "node:fs";
 import path from "node:path";
 
@@ -90,4 +98,83 @@ export function relocateDistOutput({ from, to, fs: fsApi = fs, path: pathApi = p
   fsApi.rmSync(from, { recursive: true, force: true });
 
   return { moved, skipped, replaced, from, to };
+}
+
+/**
+ * The fallback output dir a retried build uses, relative to the repo root.
+ *
+ * Named once: `tools/release.mjs` logs it, `electron-builder` is told to build
+ * into it, and `relocateDistOutput` is told to empty it, so the three cannot
+ * disagree about which directory this attempt owns.
+ */
+export function fallbackOutputDir(version) {
+  return `release-${version}`;
+}
+
+/**
+ * Remove a previous attempt's fallback output dir, so this attempt builds into
+ * an empty one.
+ *
+ * WHY THIS IS NOT OPTIONAL
+ * A same-version retry is the normal case (the first attempt is the one that hit
+ * the locked rename). Whatever it left in `release-<version>/` — a whole
+ * `win-unpacked`, a setup.exe with the very name this build will produce — makes
+ * electron-builder build on top of a previous run, and the move afterwards then
+ * fails on a name it cannot rename over. Clearing first turns "one attempt, one
+ * output dir" from a hope into a step.
+ *
+ * Answers the entries that went, so the release log can say how much was stale
+ * rather than only that it did something. A path that is missing is a no-op;
+ * `force` covers the case where it is already gone by the time `rm` runs.
+ */
+export function clearStaleDistOutput({ dir, fs: fsApi = fs } = {}) {
+  if (!dir) throw new Error("clearStaleDistOutput needs a `dir`");
+  if (!fsApi.existsSync(dir)) return { dir, removed: [] };
+  let removed = [];
+  // A stale path that is a file rather than a directory still has to go, and
+  // `readdirSync` is the only call here that cares which it is. Failing to read
+  // its entries must not become failing to clear it.
+  try {
+    removed = fsApi.readdirSync(dir);
+  } catch (_) {
+    removed = [];
+  }
+  fsApi.rmSync(dir, { recursive: true, force: true });
+  return { dir, removed };
+}
+
+/**
+ * The whole fallback: clear the stale dir, retry the build into it, move the
+ * result into `release/`.
+ *
+ * `run` is injected (it spawns `electron-builder` and, in `tools/release.mjs`,
+ * exits the process when the command fails), and so are `fs`/`path`, so
+ * `tools/release-guard-smoke.mjs` can assert the three facts that make this path
+ * safe: the dir is cleared *before* the build starts, nothing is moved when the
+ * build throws, and the move is handed exactly the dirs this attempt owns.
+ *
+ * A build that fails is not caught here: the caller's runner has already decided
+ * what a failed command means (exit, in the release script), and catching it
+ * would turn a failed retry into a silent "nothing to move".
+ */
+export function retryDistIntoFallback({
+  version,
+  root,
+  run,
+  relocate = relocateDistOutput,
+  fs: fsApi = fs,
+  path: pathApi = path,
+} = {}) {
+  if (!version) throw new Error("retryDistIntoFallback needs the release version");
+  if (!root) throw new Error("retryDistIntoFallback needs the repo root");
+  if (typeof run !== "function") throw new Error("retryDistIntoFallback needs a `run` command runner");
+
+  const dir = fallbackOutputDir(version);
+  const from = pathApi.join(root, dir);
+  const to = pathApi.join(root, "release");
+  const cleared = clearStaleDistOutput({ dir: from, fs: fsApi });
+  const command = `npx electron-builder --win -c.directories.output=${dir}`;
+  run(command);
+  const landed = relocate({ from, to, fs: fsApi, path: pathApi });
+  return { dir, command, cleared, landed };
 }

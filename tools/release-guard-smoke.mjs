@@ -15,11 +15,25 @@
 //     `git switch main` makes the whole release unreachable.
 //   - a dirty tree ships someone else's half-finished work.
 //
+// It also covers the two ends of the release that used to be unreachable because
+// they lived in `release.mjs`: the version argument (`parseVersion`, refused
+// before a single step is planned) and the packaging fallback's sequence
+// (`retryDistIntoFallback` — clear the stale output dir, retry the build into it,
+// move the result out), which is the path a same-version retry takes.
+//
 // Run with `npm run audit:release`.
 import path from "node:path";
 
-import { relocateDistOutput } from "./release-dist.mjs";
-import { executeRelease, releasePrecheck, planRelease, RELEASE_GUARD_MESSAGES, RELEASE_STEPS } from "./release-guard.mjs";
+import { clearStaleDistOutput, fallbackOutputDir, relocateDistOutput, retryDistIntoFallback } from "./release-dist.mjs";
+import {
+  executeRelease,
+  parseVersion,
+  releasePrecheck,
+  planRelease,
+  RELEASE_GUARD_MESSAGES,
+  RELEASE_STEPS,
+  RELEASE_USAGE,
+} from "./release-guard.mjs";
 
 const failures = [];
 const check = (name, ok, detail = "") => {
@@ -49,6 +63,56 @@ function fakeGit(answers) {
 
 const SYMBOLIC = "git symbolic-ref --short HEAD";
 const STATUS = "git status --porcelain";
+
+/* ---- the version argument is refused before a single step is planned ----
+ * It used to be a regex test and a `process.exit(2)` at the top of
+ * `release.mjs`, which is the one part of the release no check could reach:
+ * importing the script starts packaging. The version decides the commit message,
+ * the output dir and every artefact's name, so a bad one is refused with a
+ * sentence here rather than by `npm version` three steps later.
+ */
+{
+  const good = parseVersion(["0.1.14"]);
+  check("a version argument plans a release", good.ok === true && good.version === "0.1.14", JSON.stringify(good));
+  check("...and carries no error line", good.error === undefined, JSON.stringify(good));
+  check(
+    "...and surrounding whitespace is not a reason to refuse",
+    JSON.stringify(parseVersion([" 0.1.14\n"])) === JSON.stringify(good),
+    JSON.stringify(parseVersion([" 0.1.14\n"]))
+  );
+
+  for (const argv of [[], ["  "], [undefined]]) {
+    const answer = parseVersion(argv);
+    check(
+      `no version (${JSON.stringify(argv)}) is refused as missing`,
+      answer.ok === false && answer.reason === "missing",
+      JSON.stringify(answer)
+    );
+    check(
+      "...with the usage sentence and nothing else to guess at",
+      answer.error === `${RELEASE_USAGE} — no version given`,
+      answer.error
+    );
+  }
+
+  // `v0.1.14` is what the tag and the GitHub release are called, so it is the
+  // mistake people actually make — and `npm version v0.1.14` would create a
+  // `v`-prefixed tag while the output dir stayed `release-0.1.14`.
+  for (const bad of ["1.2", "0.1", "0.1.14-beta", "0.1.14.1", "latest", "v0.1.14", "../0.1.14"]) {
+    const answer = parseVersion([bad]);
+    check(`"${bad}" is refused`, answer.ok === false && answer.reason === "invalid", JSON.stringify(answer));
+    check(
+      `...with the usage sentence quoting what was given`,
+      typeof answer.error === "string" && answer.error.startsWith(RELEASE_USAGE) && answer.error.includes(bad),
+      answer.error
+    );
+  }
+  check(
+    "a v-prefixed version says to drop the v, because that is the mistake it is",
+    /drop the leading "v": 0\.1\.14/.test(parseVersion(["v0.1.14"]).error || ""),
+    parseVersion(["v0.1.14"]).error
+  );
+}
 
 /* ---- a detached HEAD is refused, before anything is written ---- */
 {
@@ -293,6 +357,31 @@ const STATUS = "git status --porcelain";
     `${beforeThrow.join(" -> ")} / ${threw && threw.message}`
   );
 
+  // The same contract for the other runner. Packaging is the one step that goes
+  // through `runDist`, so "a failed step ends the release" has to hold there too
+  // — otherwise the two runners would have different failure semantics and only
+  // the easier one would be proven. What must not happen after a failed build is
+  // the key scan: it would scan the packages the previous release left in
+  // `release/` and report them as this one's.
+  const beforePackagingThrow = [];
+  let packagingThrew = null;
+  try {
+    executeRelease(plan, {
+      run: (step) => beforePackagingThrow.push(step.name),
+      runDist: (step) => {
+        beforePackagingThrow.push(step.name);
+        throw new Error("electron-builder exited 1");
+      },
+    });
+  } catch (err) {
+    packagingThrew = err;
+  }
+  check(
+    "packaging that fails stops the release before the key scan",
+    packagingThrew !== null && beforePackagingThrow.join(" -> ") === "bump -> commit -> audit -> dist",
+    `${beforePackagingThrow.join(" -> ")} / ${packagingThrew && packagingThrew.message}`
+  );
+
   // Refusals are answered as data, and an unreadable plan is not a pass either:
   // `null`/`undefined` must not read as "no steps to run, so nothing to worry
   // about".
@@ -515,6 +604,33 @@ const STATUS = "git status --porcelain";
     check("...before anything on the disk is touched", d.ops.length === 0, JSON.stringify(d.ops));
   }
 
+  /* a fallback dir that exists but holds nothing is refused, not reported as a move */
+  {
+    // The stale dir a same-version retry leaves behind is cleared *before* the
+    // build, so an empty one means the retried build produced no app dir at all.
+    // Answering `moved: []` and deleting it would let the caller log
+    // "relocated 1 into release/" (`moved.length + 1`) for a build that produced
+    // nothing — a green line for a failed packaging run, which is the exact
+    // failure mode this whole guard exists to prevent.
+    const d = fakeDisk({ "release-0.1.14": {}, release: {} });
+    let threw = null;
+    try {
+      relocateDistOutput({ from: FROM, to: TO, fs: d.fs, path: posix });
+    } catch (err) {
+      threw = err;
+    }
+    check(
+      "an empty fallback dir is refused rather than reported as a move of nothing",
+      threw !== null && /nothing to relocate/.test(threw.message),
+      threw && threw.message
+    );
+    check(
+      "...and the empty dir is left where it is, so the retry has somewhere to build",
+      d.resolve(FROM).exists && d.ops.length === 0,
+      JSON.stringify(d.ops)
+    );
+  }
+
   /* relocating a directory onto itself would delete the build */
   {
     const d = fakeDisk({ "release-0.1.14": { "win-unpacked": { "a.exe": null } } });
@@ -552,6 +668,176 @@ const STATUS = "git status --porcelain";
       d.resolve(FROM).exists && !d.ops.some((o) => o.op === "rm" && o.path === FROM),
       JSON.stringify(d.ops)
     );
+  }
+
+  /* clearing the stale dir: gone is a no-op, anything else is removed */
+  {
+    const absent = fakeDisk({ release: {} });
+    const nothing = clearStaleDistOutput({ dir: FROM, fs: absent.fs });
+    check(
+      "clearing a fallback dir that is not there does nothing at all",
+      nothing.removed.length === 0 && absent.ops.length === 0,
+      JSON.stringify([nothing, absent.ops])
+    );
+
+    // The empty leftover is the case that reads as harmless and is not: an
+    // existing dir with no entries still makes the retried build's output sit on
+    // top of a previous attempt's.
+    const empty = fakeDisk({ "release-0.1.14": {} });
+    const clearedEmpty = clearStaleDistOutput({ dir: FROM, fs: empty.fs });
+    check(
+      "an empty leftover fallback dir is removed too, with no entries to name",
+      clearedEmpty.removed.length === 0 && !empty.resolve(FROM).exists,
+      JSON.stringify([clearedEmpty, empty.ops])
+    );
+
+    // A path that is a file rather than a directory still has to go, and its
+    // entries cannot be read — that must not become "cannot clear it".
+    const file = fakeDisk({ "release-0.1.14": null });
+    let threw = null;
+    let clearedFile = null;
+    try {
+      clearedFile = clearStaleDistOutput({ dir: FROM, fs: file.fs });
+    } catch (err) {
+      threw = err;
+    }
+    check(
+      "a fallback path that is a file is still cleared, without its entries",
+      threw === null && clearedFile !== null && clearedFile.removed.length === 0 && !file.resolve(FROM).exists,
+      `${threw && threw.message} / ${JSON.stringify(clearedFile)}`
+    );
+
+    let noDir = null;
+    try {
+      clearStaleDistOutput({});
+    } catch (err) {
+      noDir = err;
+    }
+    check("clearing without a dir is refused", noDir !== null && /needs a `dir`/.test(noDir.message), noDir && noDir.message);
+  }
+
+  /* the retry sequence: clear the stale dir, build into it, move the result out
+   * A same-version retry is the normal case here — the first attempt is the one
+   * that hit the locked rename. What it left in `release-0.1.14/` (a whole
+   * `win-unpacked`, a setup.exe with the very name the new build produces) used
+   * to be built on top of, and the move then met names it could not rename over.
+   * The three facts that make the sequence safe are asserted here rather than
+   * read out of `tools/release.mjs`, which no check can import.
+   */
+  {
+    const d = fakeDisk({
+      "release-0.1.14": { "win-unpacked": { "stale.exe": null }, [SETUP]: null },
+      release: { [LATEST]: null },
+    });
+    const built = [];
+    let asked = null;
+    const answer = retryDistIntoFallback({
+      version: "0.1.14",
+      root: "/",
+      run: (cmd) => {
+        // The build must start from an empty output dir. Asserted from inside the
+        // runner, because "cleared at some point" is not the property that
+        // matters — "cleared before the build" is.
+        check(
+          "the stale fallback dir is gone before the retried build starts",
+          !d.resolve(FROM).exists,
+          JSON.stringify(d.ops)
+        );
+        built.push(cmd);
+      },
+      relocate: (args) => {
+        asked = args;
+        return { moved: [SETUP], skipped: [], replaced: false, from: args.from, to: args.to };
+      },
+      fs: d.fs,
+      path: posix,
+    });
+
+    check(
+      "the retry clears exactly the stale entries and says how many",
+      answer.cleared.removed.join(" | ") === ["win-unpacked", SETUP].join(" | "),
+      JSON.stringify(answer.cleared)
+    );
+    check(
+      "...then builds into the same dir it cleared, named once",
+      built.length === 1 &&
+        answer.dir === fallbackOutputDir("0.1.14") &&
+        built[0] === "npx electron-builder --win -c.directories.output=release-0.1.14",
+      JSON.stringify(built)
+    );
+    check(
+      "...and hands the move this attempt's two dirs, and nothing else",
+      asked !== null && asked.from === FROM && asked.to === TO,
+      JSON.stringify(asked && { from: asked.from, to: asked.to })
+    );
+    check(
+      "...and reports what the move did",
+      answer.landed.moved.join(" | ") === SETUP,
+      JSON.stringify(answer.landed)
+    );
+    check(
+      "...without touching the real release/ itself",
+      !d.ops.some((o) => o.op === "rm" && o.path === TO),
+      JSON.stringify(d.ops)
+    );
+  }
+
+  /* a retried build that fails moves nothing, and does not pretend otherwise */
+  {
+    const d = fakeDisk({ "release-0.1.14": { [SETUP]: null }, release: {} });
+    let threw = null;
+    let relocated = false;
+    try {
+      retryDistIntoFallback({
+        version: "0.1.14",
+        root: "/",
+        // What `tools/release.mjs` passes: its runner exits the process on a
+        // failed command, which from here is a throw.
+        run: () => {
+          throw new Error("electron-builder exited 1");
+        },
+        relocate: () => {
+          relocated = true;
+          return { moved: [], skipped: [], replaced: false };
+        },
+        fs: d.fs,
+        path: posix,
+      });
+    } catch (err) {
+      threw = err;
+    }
+    check(
+      "a retried build that fails ends the release with the build's error",
+      threw !== null && /electron-builder exited 1/.test(threw.message),
+      threw && threw.message
+    );
+    check("...and nothing is moved out of a dir the build never filled", relocated === false);
+    check(
+      "...so release/ keeps exactly what it had",
+      Object.keys(d.lookup(TO)).length === 0 && !d.ops.some((o) => o.op === "rename"),
+      JSON.stringify(d.ops)
+    );
+  }
+
+  /* the sequence is not runnable without its parts */
+  {
+    for (const [label, deps] of [
+      ["no version", { root: "/", run: () => {} }],
+      ["no repo root", { version: "0.1.14", run: () => {} }],
+      ["no build runner", { version: "0.1.14", root: "/" }],
+    ]) {
+      let threw = null;
+      try {
+        retryDistIntoFallback(deps);
+      } catch (err) {
+        threw = err;
+      }
+      check(
+        `a retry with ${label} is refused instead of building into somewhere unexpected`,
+        threw !== null && /retryDistIntoFallback needs/.test(threw.message),
+        threw && threw.message
+      );
+    }
   }
 }
 

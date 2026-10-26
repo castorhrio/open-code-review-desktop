@@ -22,6 +22,41 @@
 // `tools/release.mjs` passes). Both checks read their answer out of *git's exit
 // status*, not out of its wording, so this file has no message to parse.
 
+/** The sentence a bad invocation prints, before a single step is planned. */
+export const RELEASE_USAGE = "usage: node tools/release.mjs <x.y.z>";
+
+/** Exactly what `npm version` and the release tag expect — no `v`, no suffix. */
+const VERSION_SHAPE = /^\d+\.\d+\.\d+$/;
+
+/**
+ * The version argument, checked where it can be checked.
+ *
+ * This used to be two lines at the top of `tools/release.mjs` — a regex test and
+ * a `process.exit(2)` — which meant the only input the release script accepts was
+ * the one thing about it no check could reach: importing the script starts
+ * packaging. The version decides the commit message, the output dir and the
+ * artefacts' names, so a bad one is worth refusing with a sentence rather than
+ * with whatever `npm version` makes of it three steps later.
+ *
+ * `argv` is `process.argv.slice(2)`, i.e. the arguments after the script name.
+ * Answers `{ ok: true, version }` or `{ ok: false, reason, error }` where the
+ * error is the line to print — the usage sentence plus what was wrong with what
+ * was given. A leading `v` is worth its own hint: `v0.1.14` is what a git tag and
+ * a GitHub release are called, so it is the mistake people actually make, and
+ * `npm version v0.1.14` would happily create a `v`-prefixed tag that the release
+ * output dir does not use.
+ */
+export function parseVersion(argv = []) {
+  const args = Array.isArray(argv) ? argv : [argv];
+  const raw = typeof args[0] === "string" ? args[0].trim() : "";
+  if (!raw) return { ok: false, reason: "missing", error: `${RELEASE_USAGE} — no version given` };
+  if (!VERSION_SHAPE.test(raw)) {
+    const hint = /^v\d+\.\d+\.\d+$/.test(raw) ? ` (drop the leading "v": ${raw.slice(1)})` : "";
+    return { ok: false, reason: "invalid", error: `${RELEASE_USAGE} — "${raw}" is not x.y.z${hint}` };
+  }
+  return { ok: true, reason: "ready", version: raw };
+}
+
 /** The refusal for a HEAD that is not on a branch. */
 const DETACHED =
   "HEAD is detached, so there is no branch for the release commit to land on — " +

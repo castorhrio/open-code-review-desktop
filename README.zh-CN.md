@@ -107,7 +107,7 @@ preload.js               contextBridge 接口
 
 ## 发版
 
-`node tools/release.mjs <x.y.z>` 会升版本、提交 `chore(release): <x.y.z>`、跑完整门禁、打 Windows 安装包，并对 `release/` 重跑密钥扫描；若 electron-builder 撞上 `win-unpacked.tmp` 被锁的重命名失败，它会自动改到新输出目录构建，再把产物移回 `release/`。它停在两件属于人的动作之前：推送提交，以及发布 GitHub Release（自动更新源读的是 releases/latest）。
+`node tools/release.mjs <x.y.z>` 会升版本、提交 `chore(release): <x.y.z>`、跑完整门禁、打 Windows 安装包，并对 `release/` 重跑密钥扫描；若 electron-builder 撞上 `win-unpacked.tmp` 被锁的重命名失败，它会先清空 `release-<version>/`、改到该目录重新构建，再把产物移回 `release/`（所以同版本重跑是重试，而不是在上一次的产物上再叠一层）。版本号写错（缺参数、`1.2`、`v0.1.14`）会在做任何事之前被拒绝。它停在两件属于人的动作之前：推送提交，以及发布 GitHub Release（自动更新源读的是 releases/latest）。
 
 ## 已知限制
 

@@ -12,12 +12,20 @@
 4. **不要**静默忽略上游 release：每轮把结论追加到下面「上游状态」，哪怕结论是
    「无新内容」。
 
-## 上游状态（最近检查：2026-10-26，第 47 轮）
+## 上游状态（最近检查：2026-10-27，第 48 轮）
 
 - 顶端 commit：`375f64c`（2026-10-20，
   `fix(tool): report an empty code_comment batch instead of success (#1773)`）
 - 最新 tag / release：`v1.13.3`（2026-10-22 发布）
 - desktop 依赖：`@alibaba-group/open-code-review` `^1.13.3`
+
+第 48 轮复核方式与结论：github.com 仍不可达（`git ls-remote` 30s 超时，
+`timeout` 返回 124），沿用 npm registry 作为发布信号——
+`npm view @alibaba-group/open-code-review version dist-tags` 仍是 `1.13.3` /
+`latest: 1.13.3`，与 desktop 的 `^1.13.3` 一致，故**无新 release**；上游 commit
+仍无法直接核对（第 47 轮同因）。本轮改动（发版链的版本参数校验、重试前清空
+`release-<version>/`）与上游 CLI 无关，`audit:service` / `audit:config` / `audit:git`
+本轮全绿。网络恢复后仍需补一次 `git fetch upstream --tags` + `git log HEAD..upstream/main`。
 
 第 47 轮复核方式与结论：`git ls-remote` 对 github.com 本轮不可达
 （`GnuTLS recv error (-110)` / 超时，机器出网受限），改用 npm registry 作为上游发布的
@@ -28,9 +36,9 @@
 `audit:service` / `audit:config` / `audit:git` 仍是先变红的那一道，本轮这三条全绿。
 本轮的改动（发版 fallback 的搬移函数）与上游 CLI 无关。
 
-**自最近一次有内容变更（`v1.13.3` / `375f64c`）以来，第 27–47 轮复核均无新内容。**
+**自最近一次有内容变更（`v1.13.3` / `375f64c`）以来，第 27–48 轮复核均无新内容。**
 第 27–46 轮每轮都核对了 `git fetch upstream --tags` 以及 GitHub API 的 commits / tags /
-releases 三处，三处一致：顶端仍是 `375f64c`，最新仍是 `v1.13.3`；第 47 轮只有 npm
+releases 三处，三处一致：顶端仍是 `375f64c`，最新仍是 `v1.13.3`；第 47–48 轮只有 npm
 registry 一条通路可达（见上）。
 desktop 的 CLI flag、输出解析、配置暴露点都无需改动。（`git fetch` 期间只有本仓同名的
 `v0.1.x` 发布 tag 因已存在被拒，与上游无关。）
