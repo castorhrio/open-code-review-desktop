@@ -24,6 +24,12 @@ const path = require("path");
  *   Read lazily: `installInfo()` is called long after this module loads.
  * @param {(p: string) => boolean} [deps.exists]
  * @param {(p: string) => string[]} [deps.readdir]
+ * @param {(p: string) => string} [deps.dirname] `path.dirname` by default.
+ *   Declared separately because the ancestor walk below stops when the parent
+ *   equals the path itself, and *which* paths those are is the platform's
+ *   separator rules: `\\server\share` (a UNC share root) and `C:\` are their
+ *   own parents on win32, nothing but `/` is on posix. Injecting the function is
+ *   how `tools/install-info-smoke.mjs` walks a UNC share on a Linux runner.
  */
 function createInstall({
   app,
@@ -33,6 +39,7 @@ function createInstall({
   resourcesPath = () => process.resourcesPath,
   exists = fs.existsSync,
   readdir = fs.readdirSync,
+  dirname = path.dirname,
 }) {
   const isWindows = () => platform === "win32";
 
@@ -145,14 +152,19 @@ function createInstall({
   // refused or threw. So this function is async and returns that sentence as
   // `error` — reporting `ok: true` without reading it would tell a user their
   // file manager opened when nothing happened. shell.showItemInFolder() (the
-  // exact-path case) returns nothing, so there is nothing to read there; and a
-  // UNC target (`\\server\share`) ends the walk when the parent equals the path
-  // itself, which has not been exercised on a real share.
+  // exact-path case) returns nothing, so there is nothing to read there.
+  //
+  // A UNC target (`\\server\share\...`) ends the same way, one level higher than a
+  // drive: `\\server\share` is its own parent on win32, so a share that is not
+  // there is 「路径不存在」 instead of a walk that never stops. Both halves — a
+  // share that exists is what gets opened, one that does not is a refusal — are
+  // pinned in `tools/install-info-smoke.mjs` with `path.win32.dirname` injected,
+  // which is why `dirname` is a seam and not a direct `path.dirname` call.
   async function revealPath(target) {
     if (!target) return { ok: false, error: "没有可显示的路径" };
     let existing = target;
     while (existing && !exists(existing)) {
-      const parent = path.dirname(existing);
+      const parent = dirname(existing);
       if (parent === existing) {
         existing = "";
         break;

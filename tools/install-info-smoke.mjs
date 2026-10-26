@@ -102,6 +102,7 @@ const make = ({
   shell = makeShell(),
   exists = fs.existsSync,
   readdir = fs.readdirSync,
+  dirname = path.dirname,
 }) =>
   createInstall({
     app: makeApp({ packaged, resources }),
@@ -111,6 +112,7 @@ const make = ({
     resourcesPath: () => resources,
     exists,
     readdir,
+    dirname,
   });
 
 /* ---------------- shape 1: installed ---------------- */
@@ -324,6 +326,117 @@ for (const platform of ["darwin", "linux"]) {
   const res = await tools.revealPath("");
   check("an empty path is refused before the filesystem is asked", res.ok === false && res.error === "没有可显示的路径");
   check("the shell is left alone for an empty path", shell.calls.open.length === 0 && shell.calls.reveal.length === 0);
+}
+
+/* ---------------- reveal: separator rules, not just the local disk ---------------- */
+
+// The ancestor walk stops when the parent equals the path itself, and *which*
+// paths those are is the platform's separator rules: on win32 both `C:\` and a
+// UNC share root (`\\server\share`) are their own parents, while posix has only
+// `/`. The module therefore takes `dirname` as a seam, and these three checks
+// inject `path.win32.dirname` so the Windows-only half is exercised on whatever
+// runner the audit happens to use — otherwise "it stops instead of walking
+// forever" is a sentence in a comment that no fixture can turn red.
+{
+  // A reviewed file on a network share that *is* mounted: the walk has to stop
+  // on the share root and open that, not keep climbing past the share into
+  // `\\server` (which is not a directory anything can open).
+  const win = path.win32;
+  const share = "\\\\fileserver\\reviews";
+  const target = win.join(share, "nightly", "ocr.yaml");
+  // `path.win32.dirname` answers a share root as `\\\\server\\share\\` — with the
+  // trailing separator, because that spelling is its own parent. That is the
+  // level the walk stops on, and both spellings name the same thing to
+  // `shell.openPath`, so the stub accepts either and the check pins the walked
+  // one.
+  const shareRoot = win.dirname(win.join(share, "nightly"));
+  const shell = makeShell();
+  const tools = make({
+    packaged: true,
+    resources: path.join(installed, "resources"),
+    shell,
+    platform: "win32",
+    dirname: win.dirname,
+    exists: (p) => p === share || p === shareRoot,
+  });
+  const res = await tools.revealPath(target);
+  check(
+    "a UNC target falls back to the existing share root",
+    res.ok === true && res.action === "open-parent" && res.path === shareRoot && res.missing === target,
+    JSON.stringify(res)
+  );
+  check("the share root is what gets opened, not the server", shell.calls.open.length === 1 && shell.calls.open[0] === shareRoot, JSON.stringify(shell.calls.open));
+  check("and the missing file is not revealed in a folder", shell.calls.reveal.length === 0);
+  check("the server above the share is never opened", !shell.calls.open.some((p) => p === "\\\\fileserver" || p === "\\\\fileserver\\"), JSON.stringify(shell.calls.open));
+}
+
+{
+  // Nothing on the share exists — a workbook opened from a laptop that is off
+  // the network. The walk must end at the share root (its own parent) and say so,
+  // rather than climbing `\\server` → `\` → itself with a filesystem call each
+  // time. The stub counts and throws, so a walk that fails to stop takes the
+  // run down here instead of hanging the settings page for the user.
+  const win = path.win32;
+  const share = "\\\\fileserver\\reviews";
+  const deep = win.join(share, ...["a", "b", "c", "d", "e", "f", "g", "h"].map((d) => d), "ocr.yaml");
+  let asked = 0;
+  const shell = makeShell();
+  const tools = make({
+    packaged: true,
+    resources: path.join(installed, "resources"),
+    shell,
+    platform: "win32",
+    dirname: win.dirname,
+    exists: () => {
+      if (++asked > 32) throw new Error("the ancestor walk did not stop at the share root");
+      return false;
+    },
+  });
+  const res = await settle(tools.revealPath(deep));
+  check("a UNC path nothing exists for is 「路径不存在」", res.ok === false && res.error === `路径不存在：${deep}`, JSON.stringify(res));
+  check(
+    "and the walk stopped at the share root instead of circling",
+    asked <= 12,
+    `${asked} filesystem question(s) for ${deep.split("\\").length - 1} level(s): a share root is its own parent`
+  );
+  check("the shell is left alone when nothing on the share exists", shell.calls.open.length === 0 && shell.calls.reveal.length === 0);
+}
+
+{
+  // The same walk on a local drive: `C:\` is its own parent on win32, so a deep
+  // missing path under it ends there too. This is the ordinary 「配置文件还没写
+  // 过，且配置目录也不存在」 shape, one platform's version of the posix check
+  // further up.
+  const win = path.win32;
+  const target = "C:\\Users\\me\\AppData\\Roaming\\ocr\\nested\\config.json";
+  let asked = 0;
+  const shell = makeShell();
+  const tools = make({
+    packaged: true,
+    resources: path.join(installed, "resources"),
+    shell,
+    platform: "win32",
+    dirname: win.dirname,
+    exists: () => {
+      if (++asked > 32) throw new Error("the ancestor walk did not stop at the drive root");
+      return false;
+    },
+  });
+  const res = await settle(tools.revealPath(target));
+  check("a deep missing path on a drive is 「路径不存在」", res.ok === false && res.error === `路径不存在：${target}`, JSON.stringify(res));
+  check("and it stopped at the drive root", asked <= 10, `${asked} filesystem question(s)`);
+  check("a refusal carries no action or path to read", !("action" in res) && !("path" in res), JSON.stringify(res));
+}
+
+{
+  // Without the seam the module must still walk with the host's own rules —
+  // `dirname` defaults to `path.dirname`, so `main.js` needs no change and the
+  // checks above are the only place Windows rules are supplied.
+  const shell = makeShell();
+  const tools = make({ packaged: true, resources: path.join(installed, "resources"), shell, platform: "win32" });
+  const target = path.join(installed, "Open Code Review.exe");
+  const res = await tools.revealPath(target);
+  check("the default dirname is the host's own", res.ok === true && res.action === "reveal" && res.path === target, JSON.stringify(res));
 }
 
 /* ---------------- one shape for 「打开一个目录」 ---------------- */
