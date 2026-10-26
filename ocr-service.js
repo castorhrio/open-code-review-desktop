@@ -143,12 +143,20 @@ const mapSection = (section) =>
  * An exact match always wins over a case variant, in either section — the
  * spelling the config already uses is the one the user meant.
  */
+// What decided which entry answers. Three of the four rules answer a question
+// `ocr` itself asks; the last one (`order`) answers one it never asks, so the
+// caller is told which rule it got instead of only which entry.
+const MATCH_EXACT = "exact"; // the file spells the name this way
+const MATCH_ACTIVE = "active"; // the config's own `provider` names this entry
+const MATCH_REGISTRY = "registry"; // the registry's spelling, from `ocr llm providers`
+const MATCH_ORDER = "order"; // file order — a guess, not an answer
+
 function entryByName(raw, name) {
   if (!name) return null;
   const providers = raw.providers || {};
   const custom = raw.custom_providers || {};
   const exact = providers[name] || custom[name];
-  if (exact) return exact;
+  if (exact) return { entry: exact, rule: MATCH_EXACT };
   // Only the built-in section folds case, because only it is resolved through
   // the registry. Two entries whose names differ only by case (`DeepSeek` and
   // `deepseek`) are two different entries to everything below, so which one is
@@ -177,17 +185,22 @@ function entryByName(raw, name) {
   // `deepseek` matches no map key, so `cfg.Providers["DEEPSEEK"]` misses and the
   // run fails with "provider DEEPSEEK is set but not configured in providers
   // section" — nothing opens, so there is no entry a Key could be reused from
-  // *and* no entry this answer can contradict. The middle rule still answers,
+  // *and* no entry this answer can contradict. The registry rule still answers,
   // with the registry's spelling, because that is the name the settings page is
-  // editing (the form holds what `ocr llm providers` printed); `matches[0]` is
-  // reached only in the narrower shape above, where even the registry's spelling
-  // is absent and file order is all that is left. `tools/service-smoke.mjs`
-  // pins both shapes so neither can become the other by accident.
-  const chosen =
-    matches.find(([key]) => key === active) ||
-    matches.find(([key]) => key === wanted) ||
-    matches[0];
-  return chosen[1];
+  // editing (the form holds what `ocr llm providers` printed).
+  //
+  // File order (`MATCH_ORDER`) is left only for the narrower shape above, where
+  // even the registry's spelling is absent, and it is *not* an answer the app may
+  // act on: the entry is returned for display, and `savedKeyFor` withholds its
+  // Key (see there). `tools/service-smoke.mjs` pins all three shapes so none can
+  // become another by accident.
+  if (matches.some(([key]) => key === active)) {
+    return { entry: matches.find(([key]) => key === active)[1], rule: MATCH_ACTIVE };
+  }
+  if (matches.some(([key]) => key === wanted)) {
+    return { entry: matches.find(([key]) => key === wanted)[1], rule: MATCH_REGISTRY };
+  }
+  return { entry: matches[0][1], rule: MATCH_ORDER };
 }
 
 // The Key never travels to the renderer: the settings page asks "may I reuse
@@ -204,8 +217,21 @@ function savedKeyFor(name, url, configPath = CONFIG_PATH, presetUrl = "") {
   } catch (_) {
     return "";
   }
-  const entry = entryByName(raw, name);
-  if (!entry) return "";
+  const found = entryByName(raw, name);
+  if (!found) return "";
+  // `order` answers a question `ocr` never asks, and that is why the answer
+  // stops here. This is the shape where no spelling in the file is the one the
+  // config's `provider` names *and* the file never spells the name the registry
+  // way either, so the entry was picked by position in the file. A run on such a
+  // config never opens that entry: `cfg.Providers[cfg.Provider]` misses and the
+  // CLI refuses the whole config ("provider %q is set but not configured in
+  // providers section"). There is therefore no Key to reuse, and handing one out
+  // would fill the settings form with a secret from an entry nothing opens —
+  // the same reason a custom provider's Key is matched exactly rather than
+  // folded. The entry stays visible in `view.providers` (that is what the
+  // section is for); it just does not travel through here.
+  if (found.rule === MATCH_ORDER) return "";
+  const entry = found.entry;
   const strip = (value) => String(value || "").trim().replace(/\/+$/, "");
   const saved = strip(entry.url);
   const target = strip(url);

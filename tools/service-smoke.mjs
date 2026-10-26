@@ -1155,13 +1155,18 @@ check(
 );
 
 /* ---- the saved Key is found by the name the CLI would use ----
- * `ocr` resolves a built-in name through its own registry, which is case
- * insensitive (`llm.LookupProvider`), so `DeepSeek` in the file and `deepseek`
- * from the form are the same service. `savedKeyFor` matched the name as a raw
- * string, so it missed a Key the CLI was already using and the settings page
- * said "还没有已保存的 Key" for a config that `ocr review` runs fine on. A custom
- * name is a plain map key upstream, so it keeps the exact-string rule: answering
- * for another spelling would hand out a Key for an entry the CLI never opens.
+ * Two questions live here and they are not the same one:
+ *   - "is this name a built-in service?" — answered by the registry, which folds
+ *     case (`llm.LookupProvider`);
+ *   - "which entry does the CLI open?" — answered by a plain map read,
+ *     `cfg.Providers[cfg.Provider]` (or `CustomProviders[...]`), which does not.
+ * So the entry is looked up under the spelling the config itself uses: an exact
+ * match, then the variant the config's own `provider` names, then the registry's
+ * spelling (the name `ocr llm providers` prints, which is what a form filled
+ * from that table holds). Anything further is file order, and file order is not
+ * an answer: it is withheld (see the checks below). A custom name is a plain map
+ * key upstream too, so it stays exact throughout — answering for another
+ * spelling would hand out a Key for an entry the CLI never opens.
  */
 const savedKey = (config, name, url = "", presetUrl = "") => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-saved-key-"));
@@ -1173,9 +1178,22 @@ const savedKey = (config, name, url = "", presetUrl = "") => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 };
+/* A form spelling that no entry in the file has is *not* answered — the registry
+ * folds case for "is this name built in", but the entry lookup is a plain map
+ * read, which a real CLI confirms:
+ *
+ *   $ ocr review --provider deepseek        # config has providers.DeepSeek
+ *   Error: resolve LLM endpoint: ... provider "deepseek" is set but not
+ *          configured in providers section
+ *
+ * So there is no Key to reuse here: the run desktop would start is refused
+ * before it opens any entry. This used to be the headline example of the
+ * case-folding fix and it was wrong — it named a config the CLI rejects. What
+ * case folding is actually for is the next two checks, where the config's own
+ * `provider` points at the entry. */
 check(
-  "a saved Key is reused when the config spells the built-in name differently",
-  savedKey({ providers: { DeepSeek: { api_key: "sk-upper" } } }, "deepseek") === "sk-upper"
+  "a form spelling no entry has is not answered, because the run is refused",
+  savedKey({ providers: { DeepSeek: { api_key: "sk-upper" } } }, "deepseek") === ""
 );
 check(
   "and the other way round, because the registry folds case",
@@ -1257,18 +1275,21 @@ check(
   thirdSpelling("DEEPSEEK", "DEEPSEEK") === "sk-third",
   thirdSpelling("DEEPSEEK", "DEEPSEEK")
 );
-/* And only when the file never spells the name the registry way is `matches[0]`
+/* And only when the file never spells the name the registry way is file order
  * left: here both entries are variants of `deepseek` and neither *is* it, so the
- * question has no right answer and file order is what remains. Pinned because it
- * is a guess, not because it is good — it is reachable only for a config `ocr`
- * rejects, and if this ever answers for a config the CLI runs, the ordering
- * needs a real rule instead. */
+ * question has no right answer. That rule is a guess about an entry `ocr` never
+ * opens (the config's `provider` names none of these spellings, so
+ * `cfg.Providers[cfg.Provider]` misses and the whole config is refused), so the
+ * lookup may still *find* the entry for display but must not hand its Key back:
+ * a Key that travels to the settings form is a Key the form will test and save
+ * for a service nothing runs. Withheld is the answer here, and the two rules
+ * above are what "answered" looks like. */
 check(
-  "and file order answers only when no spelling matches at all",
+  "file order answers only when no spelling matches at all — and then withholds the Key",
   savedKey(
     { provider: "corp-gateway", providers: { DeepSEEK: { api_key: "sk-first" }, DeepSeek: { api_key: "sk-second" } } },
     "deepseek"
-  ) === "sk-first"
+  ) === ""
 );
 // The question the settings page asks is not always spelled the way the file is:
 // the form holds the name the user picked, while the config's `provider` decides
@@ -1290,11 +1311,13 @@ check(
 );
 // The last fallback is only reached when `provider` names none of these variants
 // and the file does not spell the name the registry way either — here only one
-// variant exists, so there is nothing left to choose between.
+// variant exists, so the entry can be *found*; it just cannot be answered for.
+// Same reason as the check above: `--provider DEEPSEEK` on this file is refused,
+// so the Key belongs to an entry no run opens.
 check(
-  "a lone variant is answered even when no provider points at it",
+  "a lone variant is found but its Key is withheld when no provider points at it",
   savedKey({ provider: "corp-gateway", providers: { DeepSeek: { api_key: "sk-upper" } } }, "DEEPSEEK") ===
-    "sk-upper"
+    ""
 );
 check(
   "a custom name is not folded, because the CLI looks it up exactly",
@@ -1307,7 +1330,12 @@ check(
 check(
   "a saved Key is still withheld from an endpoint it does not belong to",
   savedKey(
-    { providers: { deepseek: { url: "https://api.deepseek.com", api_key: "sk-deep" } } },
+    {
+      // `provider` names the entry, so the match is a real one and the URL is
+      // the only thing standing between the form and the Key.
+      provider: "deepseek",
+      providers: { deepseek: { url: "https://api.deepseek.com", api_key: "sk-deep" } },
+    },
     "DeepSeek",
     "https://elsewhere.example/v1"
   ) === ""
