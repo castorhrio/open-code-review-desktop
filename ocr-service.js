@@ -165,6 +165,12 @@ function entryByName(raw, name) {
   const matches = Object.entries(providers).filter(([key]) => key.toLowerCase() === wanted);
   if (!matches.length) return null;
   const active = String(raw.provider || "");
+  // The last fallback is a last resort, not a second opinion: it only answers
+  // when the config's `provider` is not one of these spellings at all (empty, or
+  // another service than the one asked about) *and* the file never spells the
+  // name the way the registry does — e.g. only `DeepSeek` exists while the form
+  // asks about `DEEPSEEK`. Then there is exactly one entry the question can be
+  // about, and no ordering left to get wrong.
   const chosen =
     matches.find(([key]) => key === active) ||
     matches.find(([key]) => key === wanted) ||
@@ -179,7 +185,7 @@ function entryByName(raw, name) {
 //
 // `configPath` is a parameter so the smoke checks can point this at a throwaway
 // file instead of the user's own `~/.opencodereview/config.json`.
-function savedKeyFor(name, url, configPath = CONFIG_PATH) {
+function savedKeyFor(name, url, configPath = CONFIG_PATH, presetUrl = "") {
   let raw = {};
   try {
     raw = JSON.parse(fs.readFileSync(configPath, "utf8"));
@@ -188,10 +194,41 @@ function savedKeyFor(name, url, configPath = CONFIG_PATH) {
   }
   const entry = entryByName(raw, name);
   if (!entry) return "";
-  const saved = String(entry.url || "").trim().replace(/\/+$/, "");
-  const target = String(url || "").trim().replace(/\/+$/, "");
-  if (saved && saved !== target) return "";
+  const strip = (value) => String(value || "").trim().replace(/\/+$/, "");
+  const saved = strip(entry.url);
+  const target = strip(url);
+  // Which host the Key belongs to is *not* only the entry's own `url`: a
+  // built-in service is normally configured with a Key and a model and no URL at
+  // all (this app writes exactly that shape), and the endpoint then comes from
+  // the CLI's own table — `url = preset.BaseURL`, overridden by `entry.URL`
+  // (internal/llm/resolver.go, tryProviderConfig, v1.13.3). Without that second
+  // source, an empty `entry.url` made the comparison vacuous and every URL the
+  // form offered was handed the Key, which is the one thing this function exists
+  // to prevent. A custom provider has no table to fall back to (upstream requires
+  // its `url` for every protocol that names an endpoint), so nothing is known
+  // there and nothing is handed out.
+  const home = saved || strip(presetUrl);
+  // No target at all is the "may I reuse what is saved?" question, not a test
+  // against a host, so there is nothing to compare and nothing to leak.
+  if (target && home !== target) return "";
   return String(entry.api_key || entry.auth_token || "");
+}
+
+/**
+ * `savedKeyFor` with the endpoint the CLI would fill in for a built-in service.
+ *
+ * The settings page knows the table already (`providers`), but the question is
+ * asked in the main process, so the lookup happens here, against the same cached
+ * `providerTable()`. A registry that could not be read leaves `presetUrl` empty,
+ * which withholds the Key rather than sending it to a host it may not belong to:
+ * the user can always type the Key again, a Key sent to the wrong host cannot be
+ * taken back.
+ */
+async function savedKeyForName(name, url, configPath = CONFIG_PATH, options = {}) {
+  const table = await providerTable(options);
+  const wanted = String(name || "").toLowerCase();
+  const row = table.ok ? table.rows.find((item) => String(item.name).toLowerCase() === wanted) : null;
+  return savedKeyFor(name, url, configPath, row ? row.url : "");
 }
 
 // Endpoint and credential are different questions. A URL in the config or in
@@ -1224,6 +1261,7 @@ module.exports = {
   exec,
   llmTestEnv,
   savedKeyFor,
+  savedKeyForName,
   preview,
   startRun,
   cancelRun,

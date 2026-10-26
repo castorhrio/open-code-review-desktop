@@ -1163,12 +1163,12 @@ check(
  * name is a plain map key upstream, so it keeps the exact-string rule: answering
  * for another spelling would hand out a Key for an entry the CLI never opens.
  */
-const savedKey = (config, name, url = "") => {
+const savedKey = (config, name, url = "", presetUrl = "") => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-saved-key-"));
   const file = path.join(dir, "config.json");
   fs.writeFileSync(file, JSON.stringify(config));
   try {
-    return svc.savedKeyFor(name, url, file);
+    return svc.savedKeyFor(name, url, file, presetUrl);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -1226,6 +1226,32 @@ check(
   savedKey({ providers: { DeepSeek: { api_key: "sk-upper" }, deepseek: { api_key: "sk-lower" } } }, "DEEPSEEK") ===
     "sk-lower"
 );
+// The question the settings page asks is not always spelled the way the file is:
+// the form holds the name the user picked, while the config's `provider` decides
+// which entry a run opens. The two are read separately, and the rule between them
+// is "exact first": a form holding `deepseek` is the form for the `deepseek`
+// entry (that is the Key the user is editing and about to test), even when a run
+// right now would open `DeepSeek`. Both spellings are the same built-in service,
+// so nothing but which saved Key is reused depends on this — the provider decides
+// only when the form's spelling is in the file *at all* (the two checks above).
+check(
+  "an exact entry wins over the variant the config's provider names",
+  twoVariants("DeepSeek", "deepseek") === "sk-lower",
+  twoVariants("DeepSeek", "deepseek")
+);
+check(
+  "and the other way round, whichever spelling the form holds",
+  twoVariants("deepseek", "DeepSeek") === "sk-upper",
+  twoVariants("deepseek", "DeepSeek")
+);
+// The last fallback is only reached when `provider` names none of these variants
+// and the file does not spell the name the registry way either — here only one
+// variant exists, so there is nothing left to choose between.
+check(
+  "a lone variant is answered even when no provider points at it",
+  savedKey({ provider: "corp-gateway", providers: { DeepSeek: { api_key: "sk-upper" } } }, "DEEPSEEK") ===
+    "sk-upper"
+);
 check(
   "a custom name is not folded, because the CLI looks it up exactly",
   savedKey(
@@ -1242,6 +1268,88 @@ check(
     "https://elsewhere.example/v1"
   ) === ""
 );
+
+/* A built-in service configured the way this app configures it — a Key and a
+ * model, no `url` — has an endpoint all the same: the CLI's own table supplies it
+ * (`tryProviderConfig`: `url = preset.BaseURL` unless `entry.URL` overrides,
+ * internal/llm/resolver.go, v1.13.3). So "the entry has no URL" is not "the Key
+ * belongs everywhere", and reading an empty `saved` as a wildcard handed the Key
+ * to whatever host the test-connection form offered. The two assertions below are
+ * the pair that settles it: the built-in endpoint still reuses the Key, any other
+ * endpoint does not.
+ */
+const presetKey = { providers: { deepseek: { api_key: "sk-deep" } } };
+const DEEPSEEK_URL = "https://api.deepseek.com";
+check(
+  "a Key saved without a URL is reused for the endpoint the CLI fills in",
+  savedKey(presetKey, "DeepSeek", `${DEEPSEEK_URL}/`, DEEPSEEK_URL) === "sk-deep",
+  savedKey(presetKey, "DeepSeek", `${DEEPSEEK_URL}/`, DEEPSEEK_URL)
+);
+check(
+  "and is withheld from any other endpoint, even though the entry has no URL",
+  savedKey(presetKey, "DeepSeek", "https://elsewhere.example/v1", DEEPSEEK_URL) === "",
+  savedKey(presetKey, "DeepSeek", "https://elsewhere.example/v1", DEEPSEEK_URL)
+);
+// A custom provider has no table to fall back to — upstream requires its `url`
+// for every protocol that names an endpoint — so an entry without one names no
+// host at all, and no host may be given its Key.
+check(
+  "an entry with no URL and no built-in endpoint has no host to hand the Key to",
+  savedKey({ custom_providers: { "corp-gateway": { api_key: "sk-custom" } } }, "corp-gateway", gateway.url) === "",
+  savedKey({ custom_providers: { "corp-gateway": { api_key: "sk-custom" } } }, "corp-gateway", gateway.url)
+);
+// The table is the only source of that endpoint, and an unreadable table must
+// withhold rather than guess: retyping a Key is recoverable, sending it to the
+// wrong host is not.
+check(
+  "an unreadable registry withholds the Key instead of guessing where it goes",
+  savedKey(presetKey, "DeepSeek", "https://elsewhere.example/v1") === "",
+  savedKey(presetKey, "DeepSeek", "https://elsewhere.example/v1")
+);
+// `savedKeyForName` is the version the main process calls: it reads the
+// built-in endpoint out of the same cached table the settings page lists. The
+// injected `runner` stands in for the binary, and the cache is cleared between
+// cases so each one sees its own table — otherwise the first success would be
+// reused for the failing read and the check would pass for the wrong reason.
+const presetDir = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-saved-key-name-"));
+const presetFile = path.join(presetDir, "config.json");
+fs.writeFileSync(presetFile, JSON.stringify(presetKey));
+const presetRunner = () => ({
+  code: 0,
+  stdout: [
+    "NAME      PROTOCOL  BASE URL",
+    "--------  --------  --------",
+    `deepseek  openai    ${DEEPSEEK_URL}`,
+    "",
+  ].join("\n"),
+  stderr: "",
+});
+svc.resetPresetCache();
+const viaTable = await svc.savedKeyForName("DeepSeek", DEEPSEEK_URL, presetFile, { runner: presetRunner });
+check(
+  "savedKeyForName reads the built-in endpoint from the CLI table",
+  viaTable === "sk-deep",
+  viaTable
+);
+const viaOtherHost = await svc.savedKeyForName("DeepSeek", "https://elsewhere.example/v1", presetFile, {
+  runner: presetRunner,
+});
+check(
+  "and still withholds that Key from another endpoint",
+  viaOtherHost === "",
+  viaOtherHost
+);
+svc.resetPresetCache();
+const viaBrokenTable = await svc.savedKeyForName("DeepSeek", DEEPSEEK_URL, presetFile, {
+  runner: () => ({ code: 1, stdout: "", stderr: "ocr: not found" }),
+});
+check(
+  "a table that cannot be read withholds the Key instead of guessing",
+  viaBrokenTable === "",
+  viaBrokenTable
+);
+svc.resetPresetCache();
+fs.rmSync(presetDir, { recursive: true, force: true });
 
 /* ---- one list, one answer ----
  * `ready` and `missing` used to be separate expressions, so they could disagree:

@@ -505,7 +505,13 @@ ipcMain.handle("config:test", async (_e, req) => {
     ]
       .filter(([key]) => !String(form[key] || "").trim())
       .map(([, label]) => label);
-    const apiKey = String(form.apiKey || "").trim() || ocr.savedKeyFor(form.name, form.url);
+    // A saved Key is only reused for the endpoint it belongs to. A built-in
+    // service is usually configured with a Key and no URL — the CLI fills the
+    // endpoint in from its own table — so "which host does this Key belong to"
+    // has to consult that table (see `savedKeyForName`); asking `savedKeyFor`
+    // alone treated the empty URL as a wildcard.
+    const apiKey =
+      String(form.apiKey || "").trim() || (await ocr.savedKeyForName(form.name, form.url));
     if (missing.length || !apiKey) {
       const parts = missing.length ? `还缺 ${missing.join("、")}` : "该服务还没有已保存的 Key，请把 Key 填进来";
       return {
