@@ -202,6 +202,57 @@ function harness(overrides = {}) {
   );
 }
 
+/* ---- a plan that throws: answer the page, touch nothing ----
+ * `install.uninstallPlan()` reads the filesystem to find the install root, so it
+ * can throw — a root that is not there any more, a listing that fails. `main.js`
+ * hands this handler straight to `ipcMain.handle`, so a throw here does not
+ * become a sentence on the settings page: it becomes a rejected `invoke`, and
+ * the page's `catch` has nothing to show but a guess of its own. The failure is
+ * the same news as the plan's own refusals ("I cannot say what to spawn"), so it
+ * has to arrive in the same shape, with the platform's words kept.
+ */
+{
+  const h = harness({
+    install: {
+      uninstallPlan: () => {
+        throw new Error("ELOOP: too many symbolic links encountered");
+      },
+    },
+  });
+  const answer = await h.handler();
+  check(
+    "a plan that throws is answered, not a rejected invoke",
+    answer && answer.ok === false,
+    JSON.stringify(answer)
+  );
+  check("with the error the platform gave", /ELOOP/.test(answer.error || ""), answer.error);
+  check(
+    "and nothing is flushed, spawned or scheduled on the way",
+    h.order.length === 0 && h.spawnCalls.length === 0 && h.scheduled.length === 0,
+    h.order.join(" -> ")
+  );
+  check("so the app stays usable to read the sentence", h.state.quitCalls === 0, `${h.state.quitCalls} quits`);
+}
+
+/* ---- a plan that answers nothing: same news, same shape ---- */
+{
+  // Not a throw but the other way to have no plan: a factory wired to something
+  // that returns nothing. `plan.ok` would have raised a TypeError on this path,
+  // which is the same rejected `invoke` one step later.
+  const h = harness({ install: { uninstallPlan: () => undefined } });
+  const answer = await h.handler();
+  check(
+    "a plan that answers nothing is still an answer for the page",
+    answer && answer.ok === false && /读取卸载信息失败/.test(answer.error || ""),
+    JSON.stringify(answer)
+  );
+  check(
+    "and it spawns nothing either",
+    h.order.length === 0 && h.spawnCalls.length === 0 && h.scheduled.length === 0,
+    h.order.join(" -> ")
+  );
+}
+
 /* ---- a spawn that throws: do not quit ---- */
 {
   const h = harness({ spawnThrows: true });

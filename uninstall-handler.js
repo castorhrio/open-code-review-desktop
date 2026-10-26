@@ -65,6 +65,15 @@ const UNINSTALL_QUIT_DELAY_MS = 400;
  * A spawn that throws is the opposite case: nothing was started, so the quit is
  * *not* scheduled and the failure is answered instead. Quitting there would leave
  * the app gone, the uninstaller never run, and no page left to say so.
+ *
+ * The plan itself can throw, and that is the one failure that used to escape:
+ * `uninstallPlan()` reads the filesystem to find the install root, and `main.js`
+ * hands this handler straight to `ipcMain.handle` — so a throw there became a
+ * rejected `invoke` in the renderer, where the settings page's `catch` has
+ * nothing to show but a guess of its own. The failure is folded into the same
+ * `{ ok: false, error }` shape the plan's own refusals use, and nothing is
+ * flushed, spawned or scheduled: there is nothing to act on, and the app has to
+ * stay usable to read the sentence.
  */
 function makeUninstallHandler(options) {
   const opts = options || {};
@@ -80,7 +89,18 @@ function makeUninstallHandler(options) {
   const quitDelayMs = Number.isFinite(opts.quitDelayMs) ? opts.quitDelayMs : UNINSTALL_QUIT_DELAY_MS;
 
   return async function uninstall() {
-    const plan = install.uninstallPlan();
+    // The plan decides whether there is anything to spawn at all, so it runs
+    // before everything else — including before the flush, which is only worth
+    // doing if an uninstaller is about to start.
+    let plan;
+    try {
+      plan = install.uninstallPlan();
+    } catch (err) {
+      return { ok: false, error: planFailure(err) };
+    }
+    // A plan that answers nothing is the same news as one that threw: nothing
+    // can be spawned and the page must not be handed a rejection.
+    if (!plan) return { ok: false, error: planFailure() };
     if (!plan.ok) return plan;
     await flush(store, warn);
     try {
@@ -94,6 +114,19 @@ function makeUninstallHandler(options) {
     schedule(() => quit(), quitDelayMs);
     return { ok: true };
   };
+}
+
+/**
+ * The sentence for a plan that could not be read at all.
+ *
+ * The platform's own words are appended rather than replaced: `ELOOP` and
+ * `EACCES` send the user to two different places, and the page has nothing else
+ * to show. The prefix is this file's, because the handler is the one that knows
+ * the failure happened while *reading* the plan.
+ */
+function planFailure(err) {
+  const reason = (err && err.message) || (typeof err === "string" ? err : "");
+  return reason ? `读取卸载信息失败：${reason}` : "读取卸载信息失败";
 }
 
 module.exports = { makeUninstallHandler, UNINSTALL_QUIT_DELAY_MS };

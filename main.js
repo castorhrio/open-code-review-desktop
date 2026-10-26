@@ -21,19 +21,10 @@ const DOCS_URL = "https://open-codereview.ai/docs";
 
 let mainWindow = null;
 
+// Where the window's size and position are remembered between launches: one
+// small JSON file in the profile directory, read on launch and written on close.
 const boundsFile = () => path.join(app.getPath("userData"), "window-bounds.json");
-// The store keys every entry by the folder it belongs to, and whether two
-// spellings of one folder are the same folder is a property of the *volume*
-// that folder is on — not of the OS: a macOS volume can be formatted
-// case-sensitive, and a Linux one can be mounted case-insensitively. The
-// platform's default is a guess, so the volume is asked instead.
-//
-// The question is asked of the repository's own path, because that is the path
-// the key is about: the profile directory's volume would answer a different
-// question (and on macOS it usually gives the wrong one — the system disk is
-// case-insensitive even when the drive the work sits on is not). Nothing is
-// written to ask it, and a volume that cannot answer falls back to the
-// platform's default.
+
 const runDiagnostics = createAppStore(path.join(app.getPath("userData"), "run-diagnostics.json"));
 
 function readBounds() {
@@ -140,6 +131,15 @@ function buildMenu() {
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
+
+/* ---------------- ipc ----------------
+ *
+ * Where the body of an `ipcMain.handle` lives: if it is one call to one
+ * collaborator, it stays here. If what it promises is an *order* (flush then
+ * spawn then reply then quit), a *gate* (only one run at a time) or a *retry*,
+ * it goes to a `*-handler.js`, because a behaviour can only be checked by
+ * calling it — and a registration cannot.
+ */
 
 /* ---------------- ipc: app ---------------- */
 

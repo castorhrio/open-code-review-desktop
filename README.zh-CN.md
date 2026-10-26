@@ -87,7 +87,14 @@ npm run dist     # 打 Windows 安装包到 release/
 
 ```
 src/                     React 19 + TypeScript + Tailwind v4 + Radix UI（Vite 构建到 out/）
-main.js                  Electron 主进程、IPC、窗口状态
+main.js                  Electron 主进程：窗口状态与 IPC 注册
+run-handler.js           `review:run`——一次运行一个出口：运行门、日志去向
+config-handler.js        `config:*`——保存写了什么、Key 为什么被扣下
+uninstall-handler.js     `app:uninstall`——顺序：冲刷、启动卸载器、回答、退出
+run-diagnostics.js       CLI 不持久化的上限证据：按会话记录、上限、退出前冲刷
+install-info.js          这份副本装在哪，以及路径不存在时 reveal/open 怎么答
+update-service.js        自动更新状态与启动检查
+security.js              渲染进程的导航 / 开窗策略
 ocr-service.js           封装契约：按模式的 flag 白名单、输出解析、会话
 git-service.js           仓库信息、ref 解析、读取指定 ref 下的文件
 preload.js               contextBridge 接口

@@ -84,9 +84,11 @@ export function runFrames() {
  * shot could not fire, and never had. A real run of minutes produces hundreds of
  * tool calls, so the state that matters was the one the fixture could not reach.
  *
- * ?longrun=1 replays the same transcript four times with a distinct file per
- * pass — 92 frames, ~60 rows — which is what the list looks like a few minutes
- * in. The log drawer gets the same replay, so the two surfaces stay consistent.
+ * ?longrun=1 replays the same transcript LONG_RUN_PASSES times with a distinct
+ * file per pass — `RUN_TRANSCRIPT.length * LONG_RUN_PASSES` frames (100 with the
+ * transcript as it stands), ~60 rows — which is what the list looks like a few
+ * minutes in. The log drawer gets the same replay, so the two surfaces stay
+ * consistent.
  * The replay also runs faster (40ms/frame), because this shot is about the
  * feed's layout when full, not about how long a run takes.
  */
@@ -106,9 +108,17 @@ export function longRunMilestones() {
   return longTranscript().map((line) => ocr.feedProgressLine(p, line)).filter(Boolean);
 }
 
+/**
+ * How many passes `?longrun=1` makes over the transcript. Named because the
+ * comment above quotes the frame count it produces: a literal `4` here and a
+ * literal frame count there would be two copies of one fact, and the comment is
+ * the copy that goes stale silently (it said 92 for a 100-frame replay).
+ */
+const LONG_RUN_PASSES = 4;
+
 function longTranscript() {
   const out = [];
-  for (let pass = 1; pass <= 4; pass++) {
+  for (let pass = 1; pass <= LONG_RUN_PASSES; pass++) {
     for (const line of RUN_TRANSCRIPT) {
       out.push(
         line
@@ -968,15 +978,15 @@ window.api = (() => {
       };
     return { ok: true, value: null };
   },
-  // The evidence store's cap. `limit` is deliberately *not* the product's real
+  // The evidence store's cap. \`limit\` is deliberately *not* the product's real
   // 200: it is whatever this stub answers, so a settings page that printed its
   // own copy of the number instead of the one it was given fails the assertion
-  // in `audit.mjs` (which requires "37 / 137"). ?evidence=unsettled is the
+  // in \`audit.mjs\` (which requires "37 / 137"). ?evidence=unsettled is the
   // answer a read gives when the wait for in-flight writes gave up.
   diagnosticsStats: async () => {
-    // The answer is an `Ok` (see `statsReport` in `run-diagnostics.js`): the
+    // The answer is an \`Ok\` (see \`statsReport\` in \`run-diagnostics.js\`): the
     // page has to be able to tell "no records" from "could not read". A failed
-    // read is stubbed by `?evidence=failed`.
+    // read is stubbed by \`?evidence=failed\`.
     if (q.get("evidence") === "failed")
       return { ok: false, error: "读取上限证据占用失败：EACCES: permission denied" };
     if (q.get("evidence") === "unsettled") return { ok: true, value: { limit: 137, entries: 37, repos: 4, settled: false } };

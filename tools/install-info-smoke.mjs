@@ -880,30 +880,52 @@ for (const platform of ["darwin", "linux"]) {
       (s) => !main.includes(s)
     )
   );
-  check("main.js still routes 打开安装目录 and 卸载 through the module", /install\.installDirPlan\(\)/.test(main) && /install\.uninstallPlan\(\)/.test(main));
-  // A refusal is only worth anything if it reaches the screen: the handler must
+  // The two buttons ask the module questions, and 卸载's body is no longer in
+  // this file: the order it is made of (flush, spawn, reply, quit) moved to
+  // `uninstall-handler.js` in the round that made it callable. So the directory
+  // plan is still asked here, the uninstall plan is asked in the handler
+  // `main.js` registers — and not a second time here, which is the "helpful"
+  // edit that would put the body back where nothing can call it.
+  const uninstallSrc = fs.readFileSync(path.join(ROOT, "uninstall-handler.js"), "utf8");
+  const asksHere = /install\.installDirPlan\(\)/.test(main);
+  const asksThere = /install\.uninstallPlan\(\)/.test(uninstallSrc);
+  const asksTwice = /install\.uninstallPlan\(\)/.test(main);
+  const routed = asksHere && asksThere && !asksTwice;
+  check(
+    "main.js still routes 打开安装目录 and 卸载 through the module",
+    routed,
+    routed ? "" : `main.js asks the directory plan: ${asksHere}, the handler asks the uninstall plan: ${asksThere}, main.js asks it too: ${asksTwice}`
+  );
+  // A refusal is only worth anything if it reaches the screen: each handler must
   // return the plan's own `error`, not a rewording of it and not `undefined`.
   const handlerBody = (name) => {
     const hit = main.match(new RegExp(`ipcMain\\.handle\\(\\s*"${name}"[\\s\\S]*?\\n\\}\\);`));
     return hit ? hit[0] : "";
   };
   const openInstallDir = handlerBody("app:openInstallDir");
-  const uninstall = handlerBody("app:uninstall");
   check("app:openInstallDir hands the refusal through unchanged", /if \(!plan\.ok\) return plan;/.test(openInstallDir));
-  check("app:uninstall hands the refusal through unchanged", /if \(!plan\.ok\) return plan;/.test(uninstall));
+  check("app:uninstall hands the refusal through unchanged", /if \(!plan\.ok\) return plan;/.test(uninstallSrc));
   // The refusal is only unchanged if the handler returns the plan itself: a
-  // hand-built `{ ok: false, error }` is the shape this round removed, and it is
-  // what a "helpful" edit puts back. So neither handler may build one, and the
-  // open-directory answer must come from the module.
+  // hand-built `{ ok: false, error }` is the shape an earlier round removed, and
+  // it is what a "helpful" edit puts back. The directory handler may build none.
+  // The uninstall handler may build only the failures about its own two acts —
+  // reading the plan, and starting the exe — each of which names which act
+  // failed, because install-info cannot know about either.
   check("app:openInstallDir does not build its own failure shape", !/\{\s*ok:\s*false/.test(openInstallDir));
   check("app:openInstallDir opens through the module", /return install\.openDir\(plan\.dir\);/.test(openInstallDir));
-  // 卸载 has one failure of its own that is not a refusal: the uninstaller would
-  // not launch. That one is allowed to be built here — it is about an exe, not
-  // about a directory — but it must stay the only one, so the plan's refusal
-  // cannot quietly get rewrapped on the way out.
-  const uninstallFailures = [...uninstall.matchAll(/\{\s*ok:\s*false,\s*error:/g)].map((m) => m[0]);
-  check("app:uninstall builds exactly one failure of its own", uninstallFailures.length === 1, String(uninstallFailures.length));
-  check("and it is the uninstaller that would not launch", /启动卸载程序失败/.test(uninstall));
+  const builtThere = [...uninstallSrc.matchAll(/return \{\s*ok:\s*false,\s*error:\s*([^}]*)\}/g)].map((m) => m[1].trim());
+  const onlyOwnActs = builtThere.length === 3 && builtThere.every((expr) => /planFailure|启动卸载程序失败/.test(expr));
+  check(
+    "every failure 卸载 builds is one of its own two named acts",
+    onlyOwnActs,
+    onlyOwnActs ? "" : JSON.stringify(builtThere)
+  );
+  const exeSaid = /启动卸载程序失败/.test(uninstallSrc);
+  check(
+    "and the one about the exe says the uninstaller would not launch",
+    exeSaid && !/启动卸载程序失败/.test(main),
+    exeSaid ? "" : "uninstall-handler.js no longer says 启动卸载程序失败"
+  );
   check("install-info.js answers the open-directory failure shape", /async function openDir\(\s*target\s*\)/.test(fs.readFileSync(path.join(ROOT, "install-info.js"), "utf8")));
   check("file:reveal returns what the module answered", /ipcMain\.handle\(\s*"file:reveal",\s*\(_e, absPath\)\s*=>\s*install\.revealPath\(absPath\)\s*\)/.test(main));
   // `file:open` used to hand the renderer the raw string from `shell.openPath()`,

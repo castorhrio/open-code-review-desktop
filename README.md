@@ -98,7 +98,13 @@ npm run dist:linux       # Linux AppImage + deb (build on Linux/WSL)
 src/                     React 19 + TypeScript + Tailwind v4 + Radix UI (built by Vite into out/)
 src/components/ui/       Primitives: button, form, overlay, and layout.tsx — the layout/design spec
 src/styles.css           Design tokens: surfaces, ink ramp, 4-step type ramp, layout measures
-main.js                  Electron main process, IPC handlers, window state
+main.js                  Electron main process: window state and the IPC registrations
+run-handler.js           `review:run` — one run, one exit; the run's gate and its log sink
+config-handler.js        `config:*` — what a save writes, and why a Key is withheld
+uninstall-handler.js     `app:uninstall` — the order: flush, spawn, reply, quit
+run-diagnostics.js       Truncation evidence the CLI does not persist: per-session records, the cap, the flush on quit
+install-info.js          Where this copy is installed, and what reveal/open do when it is not there
+update-service.js        Auto-update state and the launch check
 security.js              Navigation / window-creation policy for the renderer
 ocr-service.js           The wrapper contract: flag whitelist per mode, output parsing, sessions
 git-service.js           Repository metadata, ref resolution, reading a file at a given ref
@@ -226,7 +232,8 @@ Run these before and after any layout, token, or main-process change. Several re
 
 ## Known limitations
 
-- Git must be on `PATH`. Windows packages are built and verified on Windows x64; macOS dmg builds must run on macOS and Linux AppImage/deb builds on Linux (or WSL/Docker), because each target needs its own host tooling.- **Auto-update applies to the NSIS setup build only.** The portable exe re-extracts to a temp dir each run and has no install root to replace, so it links to the releases page instead. macOS/Linux builds are unsigned against a generic update feed, so treat in-app updates as Windows-installed-build-only for now.
+- Git must be on `PATH`. Windows packages are built and verified on Windows x64; macOS dmg builds must run on macOS and Linux AppImage/deb builds on Linux (or WSL/Docker), because each target needs its own host tooling.
+- **Auto-update applies to the NSIS setup build only.** The portable exe re-extracts to a temp dir each run and has no install root to replace, so it links to the releases page instead. macOS/Linux builds are unsigned against a generic update feed, so treat in-app updates as Windows-installed-build-only for now.
 - Releases must ship `latest.yml` (plus `latest-mac.yml` / `latest-linux.yml` for those platforms) and the `*-setup.exe.blockmap` next to the binaries; without them the updater cannot see a version at all.
 - Installers are **unsigned**, so SmartScreen (Windows) and Gatekeeper (macOS) will warn on first launch.
 - The CLI exposes no model catalogue, so the model name is still typed by hand — a rejected name makes the vendor turn its accepted names into clickable buttons (see [alibaba/open-code-review#1694](https://github.com/alibaba/open-code-review/issues/1694)).

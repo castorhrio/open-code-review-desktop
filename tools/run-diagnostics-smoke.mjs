@@ -42,6 +42,7 @@ const {
   flushNow,
   flushAndReport,
   flushBeforeQuit,
+  statsReport,
 } = require("../run-diagnostics.js");
 const { makeRunHandler } = require("../run-handler.js");
 
@@ -752,6 +753,75 @@ check(
   "a corrupt file answers zero instead of throwing at the settings page",
   corruptStats.entries === 0 && corruptStats.repos === 0 && corruptStats.settled === true,
   JSON.stringify(corruptStats)
+);
+
+/* ---- the honest flag, through the door the settings page uses ----
+ * Everything above calls `stats()` directly; the renderer never does. It goes
+ * through `statsReport` — the `diagnostics:stats` body — and the promise the
+ * page is shown is made there: an `Ok`, plus `settled: false` when the wait for
+ * in-flight writes gave up. `SettingsPanel.tsx` prints "上面的数字可能少一条"
+ * exactly when that flag is false; without this check that sentence rests on
+ * reading the source, because a stale count and a current one are the same
+ * object.
+ */
+const reportFile = path.join(dir, "report", "run-diagnostics.json");
+const reportStore = createStore(reportFile);
+await reportStore.record(repo, "report-before", limitResult);
+const settledReport = await statsReport(reportStore, 500);
+check(
+  "the settings page gets an Ok for a store it can read",
+  settledReport.ok === true && settledReport.value.settled === true && settledReport.value.entries === 1,
+  JSON.stringify(settledReport)
+);
+
+// A write the disk never answers. The write is queued *through the store*, so
+// the queue really is busy; only the filesystem's `writeFile` is replaced. The
+// wait then gives up at the bound — which is the one case the page must not
+// present as a current count.
+const reportRealWriteFile = fsp.writeFile;
+fsp.writeFile = () => new Promise(() => {});
+let stuckReport;
+try {
+  reportStore.record(repo, "report-in-flight", limitResult);
+  stuckReport = await statsReport(reportStore, 60);
+} finally {
+  fsp.writeFile = reportRealWriteFile;
+}
+check(
+  "a wait that gave up is still an answer, and says it settled nothing",
+  stuckReport.ok === true && stuckReport.value.settled === false,
+  JSON.stringify(stuckReport)
+);
+check(
+  "and the count it carries is the disk's old value, not the run it could not wait for",
+  stuckReport.value.entries === settledReport.value.entries,
+  `${JSON.stringify(stuckReport.value)} vs ${JSON.stringify(settledReport.value)}`
+);
+// The flag only earns its keep if the page reads it: the sentence exists for
+// `settled:false` and for nothing else.
+const settingsSrc = fs.readFileSync(path.join(ROOT, "src", "components", "SettingsPanel.tsx"), "utf8");
+const readsFlag = /evidence\.value\.settled/.test(settingsSrc) && /可能少一条/.test(settingsSrc);
+check(
+  "and the settings page renders its warning off that flag",
+  readsFlag,
+  readsFlag ? "" : "SettingsPanel.tsx no longer reads value.settled"
+);
+
+// The other side of the same door: `stats()` is written not to reject, so a
+// throw here means the store was wired to nothing — and a rejected `invoke` has
+// nothing to show but the page's own guess. It becomes a sentence instead.
+const brokenReport = await statsReport(
+  {
+    stats: () => {
+      throw new Error("the store is not a store");
+    },
+  },
+  100
+);
+check(
+  "a stats that throws becomes a sentence, not a rejected invoke",
+  brokenReport.ok === false && /读取上限证据占用失败：the store is not a store/.test(brokenReport.error || ""),
+  JSON.stringify(brokenReport)
 );
 
 /* ---- a rotation has to be said out loud ----
