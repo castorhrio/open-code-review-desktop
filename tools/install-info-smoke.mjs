@@ -28,6 +28,19 @@ const check = (name, ok, detail = "") => {
  *  checks below read it as text, and an allowed plan has none. */
 const refusal = (plan) => (plan && plan.ok === false ? plan.error || "" : "");
 
+/** The ANSWER a call gives, with a rejection turned into a value. Three checks
+ *  below are about a shell that throws: without this, a module that lacks the
+ *  guard would take the process down at the first of them and the ~40 checks
+ *  after it would never run — one red, then silent. A rejection is reported as
+ *  `{ threw }`, which is not the shape any of them accept, so it fails. */
+const settle = async (promise) => {
+  try {
+    return await promise;
+  } catch (err) {
+    return { threw: (err && (err.message || String(err))) || "threw" };
+  }
+};
+
 const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "ocr-install-info-")));
 // An install root the way NSIS leaves it: the app's own files plus the
 // uninstaller it names after the product.
@@ -45,14 +58,22 @@ fs.writeFileSync(path.join(bare, "Open Code Review.exe"), "");
  * `shell` that records the calls instead of opening a file manager.
  * `openError` is what `shell.openPath` resolves to — Electron's contract is that
  * a failure comes back as a non-empty string, not as a rejection.
+ *
+ * `openThrows` is the shell that rejects anyway. That is not the contract, but it
+ * is not this module's contract either, and an unhandled rejection here reaches
+ * the renderer as a thrown `await` — the one failure shape that says nothing.
+ * `true` means "reject with no reason at all", which is the one case a message
+ * cannot be read off the error.
  */
-const makeShell = (openError = "") => {
+const makeShell = (openError = "", openThrows = null) => {
   const calls = { reveal: [], open: [] };
   return {
     calls,
     showItemInFolder: (p) => calls.reveal.push(p),
     openPath: async (p) => {
       calls.open.push(p);
+      if (openThrows === true) return Promise.reject();
+      if (openThrows) throw openThrows;
       return openError;
     },
   };
@@ -254,6 +275,26 @@ for (const platform of ["darwin", "linux"]) {
 }
 
 {
+  // The shell rejecting instead of resolving to a sentence. Not the contract, but
+  // an unhandled one would take the whole answer with it: the IPC handler
+  // rejects, the renderer's `await` throws, and the toast that should have named
+  // the folder never runs — the same "looks like it worked" shape, one step
+  // worse. A throw must therefore land in the same `{ ok: false }` shape.
+  const shell = makeShell("", new Error("shell.openPath is not a function"));
+  const tools = make({ packaged: true, resources: path.join(installed, "resources"), shell });
+  const target = path.join(installed, "resources", "not-yet", "config.json");
+  const ancestor = path.join(installed, "resources");
+  const res = await settle(tools.revealPath(target));
+  check(
+    "a shell that throws is reported instead of rejecting the caller",
+    res.ok === false && res.error === "shell.openPath is not a function",
+    JSON.stringify(res)
+  );
+  check("and it still says what was missing and what was tried", res.action === "open-parent" && res.path === ancestor && res.missing === target);
+  check("the ancestor really was the thing attempted", shell.calls.open.length === 1 && shell.calls.open[0] === ancestor);
+}
+
+{
   // showItemInFolder returns nothing at all, so a shell whose openPath would
   // fail must not turn the exact-path reveal into a refusal.
   const shell = makeShell("never used here");
@@ -304,6 +345,31 @@ for (const platform of ["darwin", "linux"]) {
 }
 
 {
+  // Same for 「打开安装目录」: a throw has to come back as the directory failure
+  // shape, not as a rejected promise.
+  const shell = makeShell("", new Error("EPERM: openPath denied"));
+  const tools = make({ packaged: true, resources: path.join(installed, "resources"), shell });
+  const res = await settle(tools.openDir(installed));
+  check("a shell that throws on a directory is reported, not thrown", res.ok === false && res.error === "EPERM: openPath denied", JSON.stringify(res));
+  check("with the directory action still named", res.action === "open-dir" && res.path === installed, JSON.stringify(res));
+}
+
+{
+  // A rejection with nothing in it must not be mistaken for success: the success
+  // case is the empty string, so an empty answer gets a sentence of its own
+  // instead of passing for "". A guard written as `String(err)` alone would say
+  // "undefined" here; one written as `catch (_) {}` would say nothing at all.
+  const shell = makeShell("", true);
+  const tools = make({ packaged: true, resources: path.join(installed, "resources"), shell });
+  const res = await settle(tools.openDir(installed));
+  check(
+    "a reasonless rejection is still a failure with a sentence",
+    res.ok === false && res.error === "打开失败：系统没有给出原因",
+    JSON.stringify(res)
+  );
+}
+
+{
   const shell = makeShell();
   const tools = make({ packaged: true, resources: path.join(installed, "resources"), shell });
   const res = await tools.openDir("");
@@ -343,6 +409,19 @@ for (const platform of ["darwin", "linux"]) {
     res.reason === "open-failed",
     JSON.stringify(res)
   );
+}
+
+{
+  // And the third reader: 「用系统默认程序打开」 must keep its `open-failed`
+  // reason when the shell throws, because the file *is* there — only the opener
+  // failed — and the renderer shows different advice for the two.
+  const shell = makeShell("", new Error("spawn failed"));
+  const tools = make({ packaged: true, resources: path.join(installed, "resources"), shell });
+  const target = path.join(installed, "Open Code Review.exe");
+  const res = await settle(tools.openFile(target));
+  check("a shell that throws on a file is reported, not thrown", res.ok === false && res.error === "spawn failed", JSON.stringify(res));
+  check("and it is called an opener failure, not a missing file", res.reason === "open-failed", JSON.stringify(res));
+  check("with the file action and path still named", res.action === "open-file" && res.path === target, JSON.stringify(res));
 }
 
 {

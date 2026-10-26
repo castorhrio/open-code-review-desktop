@@ -108,15 +108,36 @@ function createInstall({
     return { ok: true, target, info };
   }
 
+  /* The one place `shell.openPath()` is called. Electron's contract today is
+   * that it resolves to an error string ("" when it worked) and never rejects;
+   * that is an implementation detail of the shell module, not a promise of this
+   * one. If it ever rejects — a sandboxed shell, a build with the opener stubbed
+   * out, a policy hook in between — every caller below would throw out of an IPC
+   * handler, the renderer's `await` would throw with it, and the toast that was
+   * supposed to explain the failure would never run. That is exactly the
+   * "silently looks like success" shape reading the answer was meant to end, so
+   * a throw is turned into the same non-empty sentence a refusal inside the
+   * shell would have resolved to. */
+  async function openPathAnswer(target) {
+    try {
+      return { error: await shell.openPath(target) };
+    } catch (err) {
+      const said = err && (err.message || String(err));
+      // A rejection with nothing to say must not read as "" (which means
+      // "opened"): the whole point of the answer is that truthy means failed.
+      return { error: said || "打开失败：系统没有给出原因" };
+    }
+  }
+
   // shell.showItemInFolder() does nothing at all when the path does not exist —
   // and the CLI config is absent until the first save, which is exactly when a
   // newcomer clicks this. Fall back to the nearest existing ancestor. The walk
   // stops when the parent repeats (the filesystem root), so a path nothing on
   // the volume exists for is reported instead of walked forever.
   //
-  // The fallback opens the ancestor with shell.openPath(), which does *not*
-  // reject when it cannot open it: it resolves to an error string, and an empty
-  // string means it worked. So this function is async and returns that string as
+  // The fallback opens the ancestor through `openPathAnswer()` above, which
+  // answers with the shell's own sentence ("" when it worked) whether the shell
+  // refused or threw. So this function is async and returns that sentence as
   // `error` — reporting `ok: true` without reading it would tell a user their
   // file manager opened when nothing happened. shell.showItemInFolder() (the
   // exact-path case) returns nothing, so there is nothing to read there; and a
@@ -138,7 +159,7 @@ function createInstall({
       shell.showItemInFolder(target);
       return { ok: true, action: "reveal", path: target };
     }
-    const error = await shell.openPath(existing);
+    const { error } = await openPathAnswer(existing);
     if (error) return { ok: false, error, action: "open-parent", path: existing, missing: target };
     return { ok: true, action: "open-parent", path: existing, missing: target };
   }
@@ -151,7 +172,7 @@ function createInstall({
   // error string is read rather than ignored, for the same reason as above.
   async function openDir(target) {
     if (!target) return { ok: false, error: "没有可打开的目录", action: OPEN_DIR, path: "" };
-    const error = await shell.openPath(target);
+    const { error } = await openPathAnswer(target);
     return error
       ? { ok: false, error, action: OPEN_DIR, path: target }
       : { ok: true, action: OPEN_DIR, path: target };
@@ -180,7 +201,7 @@ function createInstall({
     if (!target) return { ok: false, error: "没有可打开的文件", reason: "no-file", action: OPEN_FILE, path: "" };
     if (!exists(target))
       return { ok: false, error: `文件不存在：${target}`, reason: "missing", action: OPEN_FILE, path: target };
-    const error = await shell.openPath(target);
+    const { error } = await openPathAnswer(target);
     return error
       ? { ok: false, error, reason: "open-failed", action: OPEN_FILE, path: target }
       : { ok: true, action: OPEN_FILE, path: target };
