@@ -12,17 +12,17 @@
 4. **不要**静默忽略上游 release：每轮把结论追加到下面「上游状态」，哪怕结论是
    「无新内容」。
 
-## 上游状态（最近检查：2026-10-26，第 30 轮）
+## 上游状态（最近检查：2026-10-26，第 33 轮）
 
 - 顶端 commit：`375f64c`（2026-10-20，
   `fix(tool): report an empty code_comment batch instead of success (#1773)`）
 - 最新 tag / release：`v1.13.3`（2026-10-22 发布）
 - desktop 依赖：`@alibaba-group/open-code-review` `^1.13.3`
 
-**自最近一次有内容变更（`v1.13.3` / `375f64c`）以来，第 27–30 轮复核均无新内容。**
+**自最近一次有内容变更（`v1.13.3` / `375f64c`）以来，第 27–33 轮复核均无新内容。**
 每轮都核对了 `git fetch upstream --tags` 以及 GitHub API 的 commits / tags /
-releases 三处，三处一致：顶端仍是 `375f64c`，最新仍是 `v1.13.3`。desktop 的
-CLI flag、输出解析、配置暴露点都无需改动。（`git fetch` 期间只有本仓同名的
+releases 三处，三处一致：顶端仍是 `375f64c`，最新仍是 `v1.13.3`（第 33 轮复核同）。
+desktop 的 CLI flag、输出解析、配置暴露点都无需改动。（`git fetch` 期间只有本仓同名的
 `v0.1.x` 发布 tag 因已存在被拒，与上游无关。）
 
 逐轮复核表格与第 2–26 轮的评估正文由私有 control 仓承载（本产品仓库只留这一份

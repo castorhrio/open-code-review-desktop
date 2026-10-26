@@ -258,6 +258,12 @@ const MATCH_RULES = Object.freeze([
  * means no rule answered at all — no entry in either section is spelled like
  * this name, in any case — which is not the same as `MATCH_ORDER`, where an
  * entry exists but no run opens it.
+ *
+ * An answer is `{ rule, namesEntry, entry }`. `namesEntry` is the structural
+ * half: `false` says "this rule named no entry", which is true of `order` alone
+ * and is why `entry` is `null` there rather than the candidate it picked. Both
+ * order shapes (one candidate and two) are pinned in `tools/service-smoke.mjs`,
+ * including that reading `.entry.api_key` off such an answer throws.
  */
 function entryByName(raw, name) {
   if (!name) return null;
@@ -283,7 +289,14 @@ function entryByName(raw, name) {
   for (const rule of MATCH_RULES) {
     const hit = rule.test(context);
     if (!hit) continue;
-    return { rule: rule.rule, entry: rule.namesEntry === false ? null : hit };
+    // The flag travels with the answer, not only with the rule that produced it:
+    // a caller holding an answer should not have to compare `rule` against a
+    // constant to know whether there is an entry to act on, and the smoke checks
+    // ask the answer itself. `entry` stays `null` — never `undefined` — on
+    // purpose, so a caller that reads it anyway fails loudly (`.api_key` on
+    // `null` throws) instead of carrying an `undefined` along as if it were data.
+    const namesEntry = rule.namesEntry !== false;
+    return { rule: rule.rule, namesEntry, entry: namesEntry ? hit : null };
   }
   return null;
 }

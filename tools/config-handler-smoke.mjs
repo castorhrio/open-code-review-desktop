@@ -599,6 +599,76 @@ check(
   check("with the sentence `save` hands back unchanged", refused.saidVerbatim, res.error);
 }
 
+/* ---- a registry that knows the name is custom reads only custom_providers ----
+ * The mirror of the check above, and the only direction that was not pinned:
+ * here the registry *has* answered and it does not know `my.Gateway`, so the CLI
+ * resolves the name to `custom_providers` (`tryProviderConfig` → `LookupProvider`:
+ * a built-in name reads `providers`, every other name reads `custom_providers`).
+ * `providers` is then the section neither the save nor a run will read, so an
+ * entry sitting there is dead weight even when it spells the name exactly.
+ *
+ * Both entries are present on purpose. `providers` holds the *exact* spelling,
+ * which is what an implementation that scanned both sections for an exact key
+ * would take as "no clash" — letting the save split the custom entry that the
+ * run actually opens. The custom entry is spelled differently, so the refusal
+ * has exactly one entry to name and the assertion says which section it is in.
+ */
+{
+  const stub = makeStub({
+    providers: { "my.Gateway": { api_key: "sk-dead" } },
+    customProviders: { "my.gateway": { api_key: "sk-live" } },
+  });
+  const h = make(stub);
+  const res = await h.save(null, { provider: "my.Gateway", isCustom: true, apiKey: "sk-new", setActive: true });
+  check("a custom name whose only real collision is in custom_providers is refused", res.ok === false, JSON.stringify(res));
+  check("and nothing was written to the CLI", stub.calls.length === 0 && stub.setPairs.length === 0, `${stub.calls.length} calls`);
+  const refused = refusalOf(res, stub, "my.Gateway", answeredPresets(["deepseek"]));
+  check(
+    "naming only the custom_providers entry, not the exact-spelled one in providers",
+    entriesAre(refused, [{ name: "my.gateway", section: "custom_providers" }]),
+    JSON.stringify(refused.entries)
+  );
+  check("which is the sentence `save` hands back unchanged", refused.saidVerbatim, res.error);
+  check(
+    "and neither entry is touched",
+    stub.state.providers["my.Gateway"]?.api_key === "sk-dead" &&
+      stub.state.custom_providers["my.gateway"]?.api_key === "sk-live" &&
+      stub.state.provider === "",
+    JSON.stringify(stub.state)
+  );
+}
+
+/* ...and the same section reading is what lets a save through: with the registry
+ * naming `my.Gateway` a custom service, a same-spelled entry in `providers` must
+ * not block it. Without this direction the function could check `providers`
+ * instead of `custom_providers` for a custom name and only the refusal check
+ * above would notice — it would refuse there and refuse here too, which looks
+ * like caution rather than the wrong section.
+ */
+{
+  const stub = makeStub({
+    providers: { "my.gateway": { api_key: "sk-dead" } },
+    customProviders: { "my.Gateway": {} },
+  });
+  const h = make(stub);
+  const res = await h.save(null, {
+    provider: "my.Gateway",
+    isCustom: true,
+    url: "https://gw.example/v1",
+    protocol: "openai",
+    apiKey: "sk-live",
+    setActive: true,
+  });
+  check("an entry in the section the CLI will not read does not block a custom save", res.ok === true, res.error);
+  check(
+    "and the save writes the custom entry, leaving the providers one alone",
+    stub.state.custom_providers["my.Gateway"]?.api_key === "sk-live" &&
+      stub.state.custom_providers["my.Gateway"]?.url === "https://gw.example/v1" &&
+      stub.state.providers["my.gateway"]?.api_key === "sk-dead",
+    JSON.stringify(stub.state)
+  );
+}
+
 /* ---- the refusal says *where* every same-spelled entry lives ----
  * The two sections live in different places of `config.json`, so a refusal that
  * names only the spelling leaves the user to grep the whole file for it. The

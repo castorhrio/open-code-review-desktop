@@ -1614,6 +1614,14 @@ for (const row of MATCH_TABLE) {
       (row.key === null ? Boolean(answered) && answered.entry === null : Boolean(answered) && answered.entry.api_key === row.key),
     `${rulesThatAnswer(row.config, row.name).join(",")} / ${JSON.stringify(answered && answered.entry)}`
   );
+  // The answer says whether it names an entry, in a field of its own — so a
+  // caller does not have to know that `order` is the odd one out, and a row
+  // whose entry and flag disagree goes red here instead of at the Key.
+  check(
+    `${row.rule}: the answer says whether it names an entry`,
+    Boolean(answered) && answered.namesEntry === (row.key !== null),
+    answered ? `${answered.rule} namesEntry=${answered.namesEntry}` : "no answer at all"
+  );
 }
 
 /* Two shapes the file-order rule must *not* answer, pinned next to the row that
@@ -1642,6 +1650,29 @@ check(
     orderForward.entry === null &&
     orderReversed.entry === null,
   `${orderForward?.rule} / ${JSON.stringify(orderForward?.entry)} | ${orderReversed?.rule} / ${JSON.stringify(orderReversed?.entry)}`
+);
+/* Reading `entry` off an order answer has to fail loudly, not read as data: the
+ * answer is `{ rule, namesEntry, entry: null }`, so `.entry.api_key` throws
+ * rather than handing out `undefined` or a candidate's Key. This is the
+ * "fail loudly" promise the comment in `ocr-service.js` makes, pinned as a
+ * fixture — a later change that put the first match back into `entry` (with
+ * `namesEntry: false` still set) turns both checks red, because the read stops
+ * throwing *and* the flag no longer matches the data.
+ */
+const readEntryOf = (answer) => {
+  try {
+    return `read ${JSON.stringify(answer.entry.api_key)}`;
+  } catch (err) {
+    return "throws";
+  }
+};
+check(
+  "an order answer says so with a flag, and reading its entry throws",
+  orderForward?.namesEntry === false &&
+    orderReversed?.namesEntry === false &&
+    readEntryOf(orderForward) === "throws" &&
+    readEntryOf(orderReversed) === "throws",
+  `${orderForward?.namesEntry} / ${orderReversed?.namesEntry} / ${readEntryOf(orderForward)}`
 );
 // Exact before anything else, across sections: the file already spells the name
 // this way, so no other rule gets a say — even when `provider` names an entry.
@@ -1865,6 +1896,15 @@ check(
   "and this one carries no entry either, single candidate or not",
   singleFound && singleFound.entry === null,
   singleFound ? JSON.stringify(singleFound.entry) : "no answer at all"
+);
+// Same two halves for the single-candidate shape: one candidate is still a
+// guess, so the flag says "no entry named" and the read throws. Asserting only
+// `entry === null` would stay green for an answer that named its candidate in a
+// second field (or in `namesEntry: true` and a non-null entry).
+check(
+  "and the single-candidate answer says the same thing, and refuses to be read",
+  singleFound?.namesEntry === false && readEntryOf(singleFound) === "throws",
+  `${singleFound?.namesEntry} / ${readEntryOf(singleFound)}`
 );
 const singleAnswer = savedKeyResult(SINGLE_ORDER_SHAPE, "DEEPSEEK", "", "", { tableUnavailable: false });
 check(
