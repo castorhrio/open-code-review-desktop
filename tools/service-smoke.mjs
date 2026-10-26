@@ -1628,7 +1628,44 @@ check(
   svc.savedKeyFor("deepseek", "", orderFile, "") === "",
   svc.savedKeyFor("deepseek", "", orderFile, "")
 );
-fs.rmSync(orderDir, { recursive: true, force: true });
+/* The same rule in the shape a config actually leaves behind: one built-in
+ * entry and no `provider` field at all.
+ *
+ * `ORDER_SHAPE` above has two entries and a `provider` naming neither, which is
+ * the shape that needs an ordering decision at all. This one has a single
+ * candidate, so an implementation that keyed "file order" off "more than one
+ * match" — or off "`provider` names another service" — would answer here with
+ * an entry the Key comes out of, while every check above stayed green.
+ *
+ * The rule is still `order`, and the reason still withholds the Key: with
+ * `provider` empty the CLI looks up `cfg.Providers[""]`, misses, and refuses the
+ * whole config, so no run opens this entry and there is nothing to reuse. The
+ * two halves are asserted together because they are two independent decisions —
+ * `entryByName` reporting `order` and `withholdReasonFor` turning that into
+ * "the Key stays home" — and only the pair tells the settings page the truth.
+ */
+const SINGLE_ORDER_SHAPE = { providers: { DeepSeek: { url: DEEPSEEK_URL, api_key: "sk-only" } } };
+const singleFound = svc.entryByName(SINGLE_ORDER_SHAPE, "DEEPSEEK");
+check(
+  "one entry and no provider field is file order, not an exact match",
+  Boolean(singleFound) && singleFound.rule === svc.MATCH_ORDER,
+  singleFound ? singleFound.rule : "no entry at all"
+);
+const singleAnswer = savedKeyResult(SINGLE_ORDER_SHAPE, "DEEPSEEK", "", "", { tableUnavailable: false });
+check(
+  "and that one entry's Key is withheld for the reason that says so",
+  singleAnswer.key === "" && singleAnswer.reason === svc.KEY_WITHHELD_ORDER,
+  `${singleAnswer.reason} | ${singleAnswer.key}`
+);
+const singleDir = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-order-one-"));
+const singleFile = path.join(singleDir, "config.json");
+fs.writeFileSync(singleFile, JSON.stringify(SINGLE_ORDER_SHAPE));
+check(
+  "and the caller that only wants the value gets nothing for it either",
+  svc.savedKeyFor("DEEPSEEK", "", singleFile, "") === "",
+  svc.savedKeyFor("DEEPSEEK", "", singleFile, "")
+);
+fs.rmSync(singleDir, { recursive: true, force: true });
 // And the mapping itself: one rule withholds, the three that answer a question
 // the CLI asks do not.
 check(

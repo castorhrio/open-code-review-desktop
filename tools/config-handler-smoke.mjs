@@ -55,13 +55,29 @@ const refusalOf = (res, stub, name, presetList) => {
   const clash = spellingClash(stub.ocr.readConfigView(), name, presetList);
   const answer = clash ? spellingClashMessage(clash, name) : null;
   return {
-    count: answer ? answer.entries.length : 0,
     entries: answer ? answer.entries : [],
-    spellings: answer ? answer.entries.map((entry) => entry.name).join(",") : "",
-    sections: answer ? answer.entries.map((entry) => entry.section).join(",") : "",
     saidVerbatim: Boolean(answer) && res.error === answer.message,
   };
 };
+
+/**
+ * Does the refusal name exactly these entries — in this order, each with its own
+ * spelling *and* section?
+ *
+ * The entries are compared as pairs, not as two joined strings. Joined strings
+ * pinned the same facts only by accident: `spellings` and `sections` could drift
+ * apart independently (a swap of which spelling sits in which section left the
+ * two comma lists looking plausible), and the pair is the thing the user acts
+ * on. Comparing the pair keeps the *wording* of the refusal out of the check
+ * while leaving the decision in: a rewrite of the sentence changes nothing here,
+ * a refusal that names the wrong entry or the wrong section goes red.
+ */
+const entriesAre = (refused, expected) =>
+  refused.entries.length === expected.length &&
+  expected.every(
+    (entry, index) =>
+      refused.entries[index].name === entry.name && refused.entries[index].section === entry.section
+  );
 
 /**
  * A stubbed `ocr` that records what the handler asks it to do.
@@ -504,8 +520,8 @@ check(
   const refused = refusalOf(res, stub, "DeepSeek", answeredPresets(["deepseek"]));
   check(
     "and the refusal names that one entry, with its own spelling and section",
-    refused.count === 1 && refused.spellings === "deepseek" && refused.sections === "providers",
-    JSON.stringify(refused)
+    entriesAre(refused, [{ name: "deepseek", section: "providers" }]),
+    JSON.stringify(refused.entries)
   );
   check("which is the sentence `save` hands back unchanged", refused.saidVerbatim, res.error);
   check(
@@ -544,8 +560,8 @@ check(
   const refused = refusalOf(res, stub, "my.Gateway", answeredPresets(["deepseek"]));
   check(
     "and the clash is that one entry, from the custom section",
-    refused.count === 1 && refused.spellings === "my.gateway" && refused.sections === "custom_providers",
-    JSON.stringify(refused)
+    entriesAre(refused, [{ name: "my.gateway", section: "custom_providers" }]),
+    JSON.stringify(refused.entries)
   );
   check("with the sentence `save` hands back unchanged", refused.saidVerbatim, res.error);
 }
@@ -585,10 +601,11 @@ check(
   const refused = refusalOf(res, stub, "DeepSeek", SILENT_PRESETS);
   check(
     "and it names both entries, each with its own spelling and section",
-    refused.count === 2 &&
-      refused.spellings === "deepseek,DEEPSEEK" &&
-      refused.sections === "providers,custom_providers",
-    JSON.stringify(refused)
+    entriesAre(refused, [
+      { name: "deepseek", section: "providers" },
+      { name: "DEEPSEEK", section: "custom_providers" },
+    ]),
+    JSON.stringify(refused.entries)
   );
   check("with the sentence `save` hands back unchanged", refused.saidVerbatim, res.error);
   check(
@@ -641,8 +658,8 @@ check(
   const refused = refusalOf(res, stub, "DeepSeek", SILENT_PRESETS);
   check(
     "only the section that really holds an entry is named",
-    refused.count === 1 && refused.sections === "custom_providers" && refused.spellings === "deepseek",
-    JSON.stringify(refused)
+    entriesAre(refused, [{ name: "deepseek", section: "custom_providers" }]),
+    JSON.stringify(refused.entries)
   );
   check(
     "and a single entry still gets the single-entry advice",
@@ -682,8 +699,8 @@ check(
   const refused = refusalOf(res, stub, "DeepSeek", HOLLOW_PRESETS);
   check(
     "the refusal names the entry in the providers section",
-    refused.count === 1 && refused.spellings === "deepseek" && refused.sections === "providers",
-    JSON.stringify(refused)
+    entriesAre(refused, [{ name: "deepseek", section: "providers" }]),
+    JSON.stringify(refused.entries)
   );
   check("and the old Key is still the only one", stub.state.providers.deepseek?.api_key === "sk-old" && !stub.state.providers.DeepSeek, JSON.stringify(stub.state));
 }
@@ -711,8 +728,8 @@ check(
   const refused = refusalOf(res, stub, "DeepSeek", HOLLOW_PRESETS);
   check(
     "and that refusal points at custom_providers, and only at it",
-    refused.count === 1 && refused.sections === "custom_providers" && refused.spellings === "deepseek",
-    JSON.stringify(refused)
+    entriesAre(refused, [{ name: "deepseek", section: "custom_providers" }]),
+    JSON.stringify(refused.entries)
   );
   check("nothing was written for it either", stub.calls.length === 0 && stub.setPairs.length === 0, `${stub.calls.length} calls`);
 }
@@ -733,10 +750,11 @@ check(
   const refused = refusalOf(res, stub, "DeepSeek", HOLLOW_PRESETS);
   check(
     "naming each entry with its own spelling and section",
-    refused.count === 2 &&
-      refused.spellings === "deepseek,DEEPSEEK" &&
-      refused.sections === "providers,custom_providers",
-    JSON.stringify(refused)
+    entriesAre(refused, [
+      { name: "deepseek", section: "providers" },
+      { name: "DEEPSEEK", section: "custom_providers" },
+    ]),
+    JSON.stringify(refused.entries)
   );
   check("with the two-entry advice, not a single spelling", !res.error.includes("请改用已有的拼写") && res.error.includes("改掉或删掉"), res.error);
   check(
@@ -809,6 +827,42 @@ check(
     "an exact key is not a clash at all",
     spellingClash({ providers: { DeepSeek: {} }, customProviders: { deepseek: {} } }, "DeepSeek", silent) === null,
     JSON.stringify(spellingClash({ providers: { DeepSeek: {} }, customProviders: { deepseek: {} } }, "DeepSeek", silent))
+  );
+
+  /* ...and the exact scan runs over *every* section before the first variant is
+   * collected, so "the spelling the file already uses wins" cannot depend on
+   * which section holds it.
+   *
+   * The check above puts the exact key in `providers`, the first section
+   * checked, so an implementation that looked for an exact key only in
+   * `providers` and then collected variants from both would stay green there.
+   * Here the exact key sits in the *second* section and the same-spelled
+   * variant in the first: the answer is still "no clash", because the form
+   * named the spelling the file already uses. Order of the two checks inside
+   * `spellingClash` (all exacts, then all variants) is what makes that true, and
+   * that is what this pins.
+   */
+  const exactInSecond = { providers: { deepseek: {} }, customProviders: { DeepSeek: {} } };
+  const exactSecondAnswer = spellingClash(exactInSecond, "DeepSeek", silent);
+  check(
+    "an exact key in the second section is not a clash either",
+    exactSecondAnswer === null,
+    JSON.stringify(exactSecondAnswer)
+  );
+  /* The other side of the same shape: when the registry says the name is
+   * built-in, only `providers` is read — that is the section the save writes and
+   * the one the CLI opens — so the exact key in `custom_providers` neither
+   * rescues the save nor joins the answer. The variant in `providers` is the
+   * collision, alone.
+   */
+  const answeredSecondAnswer = spellingClash(exactInSecond, "DeepSeek", answered);
+  check(
+    "while a built-in name still collides with the providers entry, exact key or not",
+    answeredSecondAnswer !== null &&
+      answeredSecondAnswer.name === "deepseek" &&
+      answeredSecondAnswer.section === "providers" &&
+      answeredSecondAnswer.others.length === 0,
+    JSON.stringify(answeredSecondAnswer)
   );
 
   // A registry that answered with an empty list is not "every name is custom":

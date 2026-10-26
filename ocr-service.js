@@ -187,6 +187,14 @@ function entryByName(raw, name) {
   // asks about `DEEPSEEK`. Then there is exactly one entry the question can be
   // about, and no ordering left to get wrong.
   //
+  // It is still reported as `order`, not as an answer, and the Key is still
+  // withheld: a single candidate says which entry the *user* means, not which
+  // entry `ocr` opens — with `provider` empty or naming something else, the CLI's
+  // `cfg.Providers[cfg.Provider]` read misses and the config is refused, so no
+  // run reads this entry. The rule describes the lookup, and the lookup is a
+  // guess whatever the number of candidates. Both shapes (one entry, two
+  // entries) are pinned in `tools/service-smoke.mjs`.
+  //
   // A third spelling can also arrive, and it is worth saying what `ocr` does
   // with such a file: `provider: "DEEPSEEK"` with entries named `DeepSeek` and
   // `deepseek` matches no map key, so `cfg.Providers["DEEPSEEK"]` misses and the
