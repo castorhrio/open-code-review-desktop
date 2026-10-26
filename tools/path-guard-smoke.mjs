@@ -31,7 +31,9 @@ const {
   relativeInside,
   pickInsideAnswer,
   pickInsidePayload,
+  pickFileOptions,
   PICK_INSIDE_MESSAGES,
+  PICK_FILE_DEFAULTS,
 } = require(path.join(ROOT, "path-guard.js"));
 const gitSvc = require(path.join(ROOT, "git-service.js"));
 
@@ -500,6 +502,94 @@ const check = (name, ok, detail = "") => {
   );
 }
 
+/* ---- the file picker's options are a value too ----
+ * `repo:pickFile` was the last picker whose defaults were written inline in
+ * `main.js`, so "what does a picker with no options open as?" could only be
+ * answered by reading a registration. The three edges below are the ones that
+ * produce an unusable dialog rather than an ugly one, and none of them would
+ * ever be noticed by hand: an empty filter list (nothing selectable), an entry
+ * the OS rejects (a throw from inside a click handler), an extension written
+ * with a dot (a filter that matches nothing).
+ */
+{
+  const fallback = pickFileOptions(undefined);
+  check(
+    "pickFile: no options is the 所有文件 picker, spelled once",
+    JSON.stringify(fallback) ===
+      JSON.stringify({
+        title: PICK_FILE_DEFAULTS.title,
+        buttonLabel: PICK_FILE_DEFAULTS.buttonLabel,
+        filters: [{ name: "所有文件", extensions: ["*"] }],
+      }),
+    JSON.stringify(fallback)
+  );
+  check(
+    "pickFile: null, a string and `{}` all answer the same fallback",
+    [null, "nope", 42, {}].every((asked) => JSON.stringify(pickFileOptions(asked)) === JSON.stringify(fallback)),
+    JSON.stringify([null, "nope", 42, {}].map((asked) => pickFileOptions(asked).title))
+  );
+
+  const asked = pickFileOptions({
+    title: "选择规则文件",
+    filters: [{ name: "rule JSON", extensions: ["json"] }],
+  });
+  check(
+    "pickFile: the caller's title and filters are what the dialog opens with",
+    asked.title === "选择规则文件" &&
+      JSON.stringify(asked.filters) === JSON.stringify([{ name: "rule JSON", extensions: ["json"] }]) &&
+      asked.buttonLabel === PICK_FILE_DEFAULTS.buttonLabel,
+    JSON.stringify(asked)
+  );
+
+  const empty = pickFileOptions({ filters: [] });
+  check(
+    "pickFile: an empty filter list falls back instead of passing through",
+    JSON.stringify(empty.filters) === JSON.stringify([{ name: "所有文件", extensions: ["*"] }]) &&
+      empty.title === PICK_FILE_DEFAULTS.title,
+    "an empty list is a picker in which no file can be selected: " + JSON.stringify(empty)
+  );
+
+  const partly = pickFileOptions({
+    filters: [
+      { name: "md", extensions: [".md", " .txt"] },
+      { name: "", extensions: ["json"] },
+      { extensions: ["go"] },
+      null,
+      "json",
+      { name: "no extensions", extensions: [] },
+    ],
+  });
+  check(
+    "pickFile: entries the dialog cannot honour are dropped, and the rest is normalised",
+    JSON.stringify(partly.filters) === JSON.stringify([{ name: "md", extensions: ["md", "txt"] }]),
+    JSON.stringify(partly.filters)
+  );
+  check(
+    "pickFile: a list of only-unusable entries is the fallback, not whatever survived",
+    JSON.stringify(pickFileOptions({ filters: [null, { name: "x" }, { extensions: ["y"] }] }).filters) ===
+      JSON.stringify([{ name: "所有文件", extensions: ["*"] }]),
+    JSON.stringify(pickFileOptions({ filters: [null, { name: "x" }, { extensions: ["y"] }] }).filters)
+  );
+  check(
+    "pickFile: an empty or blank title is the default title, not an empty caption",
+    ["", "   "].every((title) => pickFileOptions({ title }).title === PICK_FILE_DEFAULTS.title),
+    JSON.stringify(["", "   "].map((title) => pickFileOptions({ title }).title))
+  );
+
+  // A shared literal handed to two callers is one mutation away from changing
+  // the default for everyone, so each call answers a fresh copy.
+  const first = pickFileOptions(undefined);
+  first.filters[0].extensions.push("exe");
+  first.title = "hijacked";
+  const second = pickFileOptions(undefined);
+  check(
+    "pickFile: each call is a fresh copy, so one caller cannot rewrite the default",
+    JSON.stringify(second.filters) === JSON.stringify([{ name: "所有文件", extensions: ["*"] }]) &&
+      second.title === PICK_FILE_DEFAULTS.title,
+    JSON.stringify(second)
+  );
+}
+
 /* ---- the call sites use the shared rule, not their own spelling ---- */
 {
   const mainSrc = fs.readFileSync(path.join(ROOT, "main.js"), "utf8");
@@ -511,6 +601,13 @@ const check = (name, ok, detail = "") => {
       !/relativeInside\(repo/.test(mainSrc) &&
       !/path\.relative\(root, picked\)/.test(mainSrc),
     "main.js"
+  );
+  check(
+    "repo:pickFile takes its options from path-guard, not from an inline || chain",
+    /pickFileOptions\(opts\)/.test(mainSrc) &&
+      !/所有文件/.test(mainSrc) &&
+      !/buttonLabel: "选择此文件"/.test(mainSrc),
+    "the defaults and their wording live in path-guard.js"
   );
   check(
     "...and neither picker sentence is spelled in the registration",

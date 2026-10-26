@@ -353,7 +353,16 @@ export function ReviewPanel() {
                             variant="default"
                             onClick={async () => {
                               const res = await api.pickScanDir(repo);
+                              // The picker answers three things and only one of
+                              // them is a path: `{ relPath }` (inside), `{ error }`
+                              // (refused: outside the repo, or no repo yet) and
+                              // `{}` (cancelled). A refusal used to be dropped
+                              // here — `relPath` was undefined, nothing else was
+                              // read — so the dialog closed, 扫描路径 kept its old
+                              // value and the button looked broken. 取消 stays
+                              // silent; a refusal is said out loud.
                               if (res.relPath !== undefined) patchForm({ scanPath: res.relPath });
+                              else if (res.error) toast.warning(res.error);
                             }}
                             disabled={!repo}
                           >

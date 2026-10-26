@@ -52,7 +52,16 @@ export interface Bridge {
   openInstallDir(): Promise<{ ok: boolean; error?: string; action?: string; path?: string }>;
   uninstall(): Promise<{ ok: boolean; error?: string }>;
   pickRepo(): Promise<string>;
+  /** 选目录 answers one of three shapes, and exactly one key is ever present:
+   *  `{ relPath }` for a directory inside the repo (`""` = the repo itself),
+   *  `{ error }` for a refusal (outside the repo, or no repo chosen yet) and
+   *  `{}` for a cancelled dialog. An empty `relPath` is 留空 (the whole repo), so
+   *  a refusal must not be readable as "the whole repo" — hence the split, and
+   *  hence the renderer reads `error` rather than only `relPath`. */
   pickScanDir(repo: string): Promise<{ relPath?: string; error?: string }>;
+  /** Cancelled answers `""`. Every option but `properties` is optional, and the
+   *  defaults (title, button label, 所有文件 filter) come from
+   *  `pickFileOptions` in `path-guard.js`. */
   pickFile(opts: { title?: string; filters?: { name: string; extensions: string[] }[] }): Promise<string>;
   inspect(repo: string): Promise<RepoInfo>;
   resolveRef(repo: string, ref: string): Promise<{ ok: boolean; sha?: string; error?: string }>;

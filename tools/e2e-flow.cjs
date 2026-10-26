@@ -18,12 +18,49 @@ const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
 const { spawn } = require("node:child_process");
-const { app, BrowserWindow } = require("electron");
+const { app, BrowserWindow, dialog } = require("electron");
 
 const ROOT = path.resolve(__dirname, "..");
+const {
+  pickFileOptions,
+  PICK_INSIDE_MESSAGES,
+} = require(path.join(ROOT, "path-guard.js"));
 const reportPath = process.argv[2];
 const results = [];
 const check = (name, ok, detail) => results.push({ name, ok: Boolean(ok), detail: detail || "" });
+
+/* ---- the OS pickers are answered here, not by a human ----
+ * Both `repo:*` pickers exist to ask the operating system one question and
+ * translate the answer. `audit:path` pins the translation as a pure function and
+ * `audit:service` pins what the answer is made of, but nothing pinned the seam
+ * between them and the screen: `pickScanDir` in `preload.js` hands the renderer
+ * `{ relPath }` / `{ error }` / `{}`, and the review page has to read each one
+ * differently — fill 扫描路径, say the refusal out loud, or say nothing.
+ *
+ * So the dialog itself is replaced for this run and the answers are queued. The
+ * patch is an own property on the same `dialog` object `main.js` destructured,
+ * so the registration calls the stub without knowing it. A real dialog here
+ * would be a modal window nobody can click, which is why the checks below are
+ * skipped rather than attempted if the patch did not take.
+ */
+const PICKER_STUB = "ocr-e2e-stub";
+const pickerAnswers = [];
+const pickerQuestions = [];
+const realShowOpenDialog = dialog.showOpenDialog;
+try {
+  const stub = async (_win, options) => {
+    pickerQuestions.push(options || {});
+    return pickerAnswers.length ? pickerAnswers.shift() : { canceled: true, filePaths: [] };
+  };
+  stub[PICKER_STUB] = true;
+  dialog.showOpenDialog = stub;
+} catch {
+  /* reported below as a failed check, not a crash */
+}
+const dialogIsStubbed = Boolean(dialog.showOpenDialog && dialog.showOpenDialog[PICKER_STUB]);
+const restoreDialog = () => {
+  if (dialogIsStubbed && realShowOpenDialog) dialog.showOpenDialog = realShowOpenDialog;
+};
 
 const finish = () => {
   fs.writeFileSync(reportPath, JSON.stringify({ results }, null, 2));
@@ -223,11 +260,140 @@ app.whenReady().then(async () => {
       true
     );
     check("the range scope names two different refs", new Set(fields).size >= 2, `the scope fields hold ${JSON.stringify(fields)}`);
+
+    /* ---- 5. the sub-directory picker, end to end ----
+     * `repo:pickInside` is the one handler whose entire body is "ask the dialog,
+     * then translate the answer". The translation is pinned by `audit:path`; what
+     * was never proven is that the registration calls it, that the payload's key
+     * is the key `pickScanDir` returns, and that the renderer does the right
+     * thing with each of the three answers. A refusal read as 留空 would widen a
+     * scan to the whole repository, so "the field did not change" is the
+     * assertion that matters, not merely "nothing crashed".
+     */
+    check(
+      "the OS dialog is stubbed, so the picker steps ask nobody",
+      dialogIsStubbed,
+      dialogIsStubbed ? "" : "dialog.showOpenDialog could not be replaced, so the picker wiring is untested in this run"
+    );
+    if (dialogIsStubbed) {
+      const scanField = `(() => { const i = document.querySelector('main input[placeholder^="src/main/java"]'); return i ? i.value : null; })()`;
+      const clickPickDir = `(() => { const b = [...document.querySelectorAll("main button")].find((x) => (x.textContent || "").trim() === "选目录"); if (b) b.click(); return Boolean(b); })()`;
+
+      // A scan target that exists, so the preview after the pick has something
+      // real to look at: the assertion is about the picker, and a directory that
+      // does not exist would fail for an unrelated reason.
+      const pkgDir = path.join(repoPath, "pkg", "inner");
+      fs.mkdirSync(pkgDir, { recursive: true });
+      fs.writeFileSync(path.join(pkgDir, "c.go"), "package inner\n");
+
+      const switched = await window.webContents.executeJavaScript(
+        `(() => { const b = [...document.querySelectorAll("main button")].find((x) => (x.textContent || "").includes("全量扫描")); if (b) b.click(); return Boolean(b); })()`,
+        true
+      );
+      const fieldAppeared = await waitFor(window, `Boolean(${scanField} !== null)`, { label: "扫描路径 to appear in scan mode" })
+        .then(() => true)
+        .catch(() => false);
+      check("全量扫描 shows the 扫描路径 field the picker fills", switched && fieldAppeared, `clicked=${switched} field=${fieldAppeared}`);
+
+      // (a) a directory inside the repo: the field takes the repo-relative path,
+      //     spelled with forward slashes whatever the host separator is.
+      const askedBefore = pickerQuestions.length;
+      pickerAnswers.push({ canceled: false, filePaths: [pkgDir] });
+      await window.webContents.executeJavaScript(clickPickDir, true);
+      const filled = await waitFor(window, `(() => { const v = ${scanField}; return v === "pkg/inner" ? v : null; })()`, {
+        label: "扫描路径 to read pkg/inner",
+        timeout: 20000,
+      }).catch(() => null);
+      check(
+        "repo:pickInside hands the renderer a repo-relative path",
+        filled === "pkg/inner",
+        filled === "pkg/inner"
+          ? ""
+          : `扫描路径 reads ${JSON.stringify(filled)} — the payload's relPath never reached pickScanDir`
+      );
+      const question = pickerQuestions.slice(askedBefore);
+      check(
+        "...and the dialog was asked for a directory, starting at the repo",
+        question.length === 1 &&
+          Array.isArray(question[0].properties) &&
+          question[0].properties.includes("openDirectory") &&
+          question[0].defaultPath === repoPath,
+        JSON.stringify(question.map((q) => ({ properties: q.properties, defaultPath: q.defaultPath })))
+      );
+
+      // (b) cancelled: the empty payload. Nothing is written and nothing is said.
+      pickerAnswers.push({ canceled: true, filePaths: [] });
+      await window.webContents.executeJavaScript(clickPickDir, true);
+      await sleep(1200);
+      const afterCancel = await window.webContents.executeJavaScript(scanField, true);
+      const saidOnCancel = await window.webContents.executeJavaScript(`document.body.innerText`, true);
+      check(
+        "a cancelled pick leaves 扫描路径 alone and says nothing",
+        afterCancel === "pkg/inner" && !saidOnCancel.includes(PICK_INSIDE_MESSAGES.outside),
+        `field=${JSON.stringify(afterCancel)} refusalShown=${saidOnCancel.includes(PICK_INSIDE_MESSAGES.outside)}`
+      );
+
+      // (c) a directory outside the repo: the guard's refusal, on screen, and the
+      //     field untouched — the shape that must never read as 留空.
+      const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-e2e-outside-"));
+      pickerAnswers.push({ canceled: false, filePaths: [outsideDir] });
+      await window.webContents.executeJavaScript(clickPickDir, true);
+      const said = await waitFor(window, `(() => { const t = document.body.innerText; return t.includes(${JSON.stringify(PICK_INSIDE_MESSAGES.outside)}) ? t : null; })()`, {
+        label: "the refusal for a pick outside the repo",
+        timeout: 20000,
+      }).catch(() => "");
+      const afterOutside = await window.webContents.executeJavaScript(scanField, true);
+      check(
+        "a pick outside the repo is refused on screen, not silently dropped",
+        said.includes(PICK_INSIDE_MESSAGES.outside),
+        said.includes(PICK_INSIDE_MESSAGES.outside)
+          ? ""
+          : `the renderer showed no ${PICK_INSIDE_MESSAGES.outside} — pickScanDir's error was read by nobody`
+      );
+      check(
+        "...and 扫描路径 is not widened to the whole repo by the refusal",
+        afterOutside === "pkg/inner",
+        afterOutside === "pkg/inner"
+          ? ""
+          : `扫描路径 reads ${JSON.stringify(afterOutside)}; an empty one would mean 整个仓库`
+      );
+      repo.extraDirs = [outsideDir];
+    }
+
+    /* ---- 6. the file picker's options, end to end ----
+     * `repo:pickFile` answers a path and nothing else, so the only thing that can
+     * be checked through the surface is what it *asked* — which is exactly the
+     * decision that used to live inline in the registration. No options at all
+     * must still be a picker in which a file can be selected.
+     */
+    check(
+      "the OS dialog is stubbed for the file picker too",
+      dialogIsStubbed,
+      dialogIsStubbed ? "" : "dialog.showOpenDialog could not be replaced, so the file picker is untested in this run"
+    );
+    if (dialogIsStubbed) {
+      const askedBefore = pickerQuestions.length;
+      const answer = await window.webContents.executeJavaScript(`window.api.pickFile({})`, true);
+      const question = pickerQuestions.slice(askedBefore);
+      const expected = pickFileOptions({});
+      check(
+        "repo:pickFile with no options opens the all-files picker",
+        answer === "" &&
+          question.length === 1 &&
+          question[0].title === expected.title &&
+          question[0].buttonLabel === expected.buttonLabel &&
+          JSON.stringify(question[0].filters) === JSON.stringify(expected.filters) &&
+          Array.isArray(question[0].properties) &&
+          question[0].properties.includes("openFile"),
+        JSON.stringify({ answer, asked: question.map((q) => ({ title: q.title, filters: q.filters, properties: q.properties })) })
+      );
+    }
   } catch (err) {
     check("the end-to-end flow completed", false, String((err && err.message) || err));
   } finally {
+    restoreDialog();
     if (repo) {
-      for (const dir of [repo.dir, repo.remote]) {
+      for (const dir of [repo.dir, repo.remote, ...(repo.extraDirs || [])]) {
         try {
           fs.rmSync(dir, { recursive: true, force: true });
         } catch {

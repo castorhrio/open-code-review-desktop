@@ -174,10 +174,81 @@ function pickInsidePayload(answer) {
   return { error: answer.error };
 }
 
+/* ---------------- the other picker's options ---------------- */
+
+// `repo:pickFile` is the only picker whose *options* carried a decision, and it
+// carried them inline in `main.js`:
+//
+//   title:   (opts && opts.title) || "选择文件"
+//   filters: (opts && opts.filters) || [{ name: "所有文件", extensions: ["*"] }]
+//
+// which meant the answer to "what does a picker with no options open as?" could
+// only be read out of a registration. Three of that answer's edges are the
+// reason it is a value here, and each of them is a picker the user cannot use:
+//
+//  - **`filters: []` is not "no filters".** `showOpenDialog` given an empty list
+//    shows a picker with no file-type entry, and on Windows one that lists
+//    nothing at all — a dialog in which the file the user came to pick cannot be
+//    selected. A renderer that builds its list from a variable can hand over an
+//    empty array, so empty means 所有文件 instead of being passed through.
+//  - **An entry the dialog cannot honour makes the picker throw** from inside a
+//    click handler, where nobody is looking. Entries without a name or without
+//    any extension are dropped; if nothing survives, the fallback applies.
+//  - **Electron documents extensions without the dot** (`md`, not `.md`), so a
+//    dot-prefixed name is normalised once here rather than becoming a filter
+//    that looks right and matches nothing. `*` stays `*`.
+//
+// The returned object is what `main.js` spreads into `showOpenDialog`, minus
+// `properties` (which is "a file", not a decision). It is a fresh copy on every
+// call: a shared frozen literal handed to two callers is one mutation away from
+// changing the default for everyone.
+const PICK_FILE_DEFAULTS = Object.freeze({
+  title: "选择文件",
+  buttonLabel: "选择此文件",
+  filter: Object.freeze({ name: "所有文件", extensions: Object.freeze(["*"]) }),
+});
+
+const extensionsOf = (value) => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((extension) => typeof extension === "string")
+    .map((extension) => extension.trim().replace(/^\.+/, ""))
+    .filter((extension) => extension !== "");
+};
+
+const filterOf = (entry) => {
+  if (!entry || typeof entry !== "object") return null;
+  const name = typeof entry.name === "string" ? entry.name.trim() : "";
+  const extensions = extensionsOf(entry.extensions);
+  if (name === "" || extensions.length === 0) return null;
+  return { name, extensions };
+};
+
+const defaultFilter = () => ({
+  name: PICK_FILE_DEFAULTS.filter.name,
+  extensions: [...PICK_FILE_DEFAULTS.filter.extensions],
+});
+
+function pickFileOptions(opts) {
+  const asked = opts && typeof opts === "object" ? opts : {};
+  const title =
+    typeof asked.title === "string" && asked.title.trim() !== ""
+      ? asked.title.trim()
+      : PICK_FILE_DEFAULTS.title;
+  const filters = Array.isArray(asked.filters) ? asked.filters.map(filterOf).filter(Boolean) : [];
+  return {
+    title,
+    buttonLabel: PICK_FILE_DEFAULTS.buttonLabel,
+    filters: filters.length ? filters : [defaultFilter()],
+  };
+}
+
 module.exports = {
   isInside,
   relativeInside,
   pickInsideAnswer,
   pickInsidePayload,
+  pickFileOptions,
   PICK_INSIDE_MESSAGES,
+  PICK_FILE_DEFAULTS,
 };

@@ -16,7 +16,7 @@ const { makeRunHandler } = require("./run-handler");
 const { makeUninstallHandler } = require("./uninstall-handler");
 const { makeConfigHandlers } = require("./config-handler");
 const { createInstall } = require("./install-info");
-const { pickInsideAnswer, pickInsidePayload } = require("./path-guard");
+const { pickInsideAnswer, pickInsidePayload, pickFileOptions } = require("./path-guard");
 const { providersAnswer } = require("./provider-handler");
 const { formatAppInfo } = require("./app-info");
 
@@ -243,12 +243,14 @@ ipcMain.handle("repo:pickInside", async (_e, repo) => {
   return pickInsidePayload(pickInsideAnswer(repo, picked));
 });
 
+// The picker's options are a value in `path-guard.js`: an empty filter list is a
+// dialog in which nothing can be selected, and an entry the OS rejects throws
+// from inside a click handler. This registration asks the dialog and answers the
+// path (or ""), and spells no default of its own.
 ipcMain.handle("repo:pickFile", async (_e, opts) => {
   const result = await dialog.showOpenDialog(mainWindow, {
-    title: (opts && opts.title) || "选择文件",
-    buttonLabel: "选择此文件",
+    ...pickFileOptions(opts),
     properties: ["openFile"],
-    filters: (opts && opts.filters) || [{ name: "所有文件", extensions: ["*"] }],
   });
   if (result.canceled || !result.filePaths.length) return "";
   return result.filePaths[0];
