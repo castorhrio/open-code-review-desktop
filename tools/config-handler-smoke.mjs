@@ -281,6 +281,11 @@ check(
     res.error
   );
   check(
+    "and says which section the old entry is in",
+    res.error.includes("providers 段") && !res.error.includes("custom_providers"),
+    res.error
+  );
+  check(
     "the existing entry keeps the Key it had",
     stub.state.providers.deepseek?.api_key === "sk-old" && stub.state.providers.DeepSeek === undefined,
     JSON.stringify(stub.state.providers)
@@ -312,6 +317,52 @@ check(
     "the custom section is still checked by its own spelling",
     res.ok === false && stub.calls.length === 0 && res.error.includes("my.gateway"),
     JSON.stringify(res)
+  );
+  check(
+    "and a custom name's clash is reported in the custom section",
+    res.error.includes("custom_providers 段"),
+    res.error
+  );
+}
+
+/* ---- the refusal says *where* the old entry lives, and which one it picked ----
+ * The two sections live in different places of `config.json`, so a refusal that
+ * names only the spelling leaves the user to grep the whole file for it. The
+ * message therefore names the section too.
+ *
+ * With the registry silent both sections are checked, and the order they are
+ * checked in is the only tie-break there is: the first section holding a
+ * same-spelled entry is the one that gets named. The two entries below are
+ * spelled differently on purpose (`deepseek` vs `DEEPSEEK`) so the message
+ * says *which* one was picked — with the same spelling in both sections, the
+ * name in the message would not tell the two apart and the assertion would
+ * pass either way.
+ */
+{
+  const stub = makeStub({
+    providers: { deepseek: { api_key: "sk-old" } },
+    customProviders: { DEEPSEEK: { api_key: "sk-other" } },
+    presetRegistry: async () => ({ ok: false, names: [], rows: [], matched: 0, error: "registry unavailable" }),
+  });
+  const h = make(stub);
+  const res = await h.save(null, { provider: "DeepSeek", isCustom: false, apiKey: "sk-new", setActive: true });
+  check("a save is refused when both sections hold a same-spelled entry", res.ok === false, JSON.stringify(res));
+  check(
+    "the refusal names the entry from the section that is checked first",
+    res.error.includes("deepseek") && !res.error.includes("DEEPSEEK"),
+    res.error
+  );
+  check(
+    "and it names that section, not the other one",
+    res.error.includes("providers 段") && !res.error.includes("custom_providers"),
+    res.error
+  );
+  check(
+    "and neither entry is touched",
+    stub.state.providers.deepseek?.api_key === "sk-old" &&
+      stub.state.custom_providers.DEEPSEEK?.api_key === "sk-other" &&
+      stub.state.provider === "",
+    JSON.stringify(stub.state)
   );
 }
 

@@ -6,7 +6,7 @@
 
 ---
 
-## 上游状态（最近检查：2026-10-26，第 14 轮复核）
+## 上游状态（最近检查：2026-10-26，第 15 轮复核）
 
 上游 `alibaba/open-code-review` 自 desktop 锁定的 `v1.13.0` 之后发布了
 **3 个补丁版本**：`v1.13.1` / `v1.13.2` / `v1.13.3`（共 18 个 commit）。
@@ -30,8 +30,9 @@
 | 12 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（GitHub API 三核对：commits / tags / releases） |
 | 13 | 2026-10-26 | — | — | 未留下复核记录（该轮只补了 `run-handler.js` 的正文，没有查上游） |
 | 14 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（GitHub API 三核对：commits / tags / releases） |
+| 15 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（GitHub API 三核对：commits / tags / releases） |
 
-结论：已记录的复核（第 2–12、14 轮）都没有需要移植的新功能 / 修复 / 破坏性变更，
+结论：已记录的复核（第 2–12、14、15 轮）都没有需要移植的新功能 / 修复 / 破坏性变更，
 desktop 的封装（CLI flag、输出解析、配置暴露点）无需改动；第 13 轮没有留下复核记录。
 若某轮顶端 commit 仍为 `375f64c`，本表不新增行。
 
@@ -58,6 +59,11 @@ release。desktop 的封装面不动。
 （2026-10-22 发布）。**没有新提交，没有新 tag，没有新 release**，封装面不动。
 第 13 轮只把 `run-handler.js` 的补记写进正文，没有留下上游复核记录；本轮按规则
 补查，结果与第 12 轮一致。
+
+第 15 轮同样是 API 三核对，结论与前几轮一致：`commits?sha=main` 顶端仍是 `375f64c`
+（2026-10-20，提交信息 `fix(tool): report an empty code_comment batch instead of
+success (#1773)`），`tags` 仍是 `v1.13.3` / `v1.13.2` / `v1.13.1`，`releases` 最新
+仍是 `v1.13.3`。**没有新提交，没有新 tag，没有新 release**，desktop 的封装面不动。
 
 只是拉 tag 时会看到几条 `would clobber existing tag`（本仓也用 `v0.1.x` 编号，
 与上游 tag 撞名）：那是本地 remote 的 tag 同步提示，不影响 `upstream/main` 的
@@ -833,6 +839,84 @@ B 是 A 的祖先时是空的——**审 0 个文件，却报成一次干净的�
 本轮没有代码改动——若下一轮要把两者并成同一个答案，那是一次产品措辞决定，不是
 修 bug。
 
+## 本轮 desktop 侧加固（与上游无关，第 15 轮）
+
+上游本轮无新提交（顶端仍是 `375f64c` / `v1.13.3`，见上面第 15 轮复核），不移植。
+本轮做一件事：**把「拼写冲突时错报哪一段」从约定变成事实**，另把简报里剩下的两条
+复核结论记下来。
+
+### P0 — 拼写冲突的拒绝，要说清旧条目在哪一段
+
+`config-handler.js` 的 `spellingClash` 找出同名不同拼写的旧条目后，错误信息只说
+**名字**：
+
+> 配置里已有 deepseek，与表单里的 DeepSeek 只差大小写；…请改用已有的拼写 deepseek。
+
+但两段的条目住在 `config.json` 的不同地方：`providers` 段是内置服务的条目，
+`custom_providers` 段是自定义条目。用户拿到这句话，只能自己把整个配置文件翻一遍
+才知道去哪儿改——而「去哪儿改」正是这句话要回答的问题。
+
+- **改动**（`config-handler.js`）：`spellingClash` 的答案从「一个名字」变成
+  「名字 + 它在哪一段」，错误信息里说成「配置里已有 deepseek（在 providers 段）」。
+  段的名称用的是**配置文件里的键**（`providers` / `custom_providers`），因为那才是
+  用户要翻的地方；设置页与 store 里本来也用这两个名字（`ocr config unset
+  custom_providers.<name>`）。
+  「同名不同拼写」与「拒绝在写入之前」这两条行为一个字没改。
+- **顺带钉住一个只有顺序能回答的问题**：注册表失联时两段都查，**先查到的那段**
+  才是被点名的那段。先 `providers` 后 `custom_providers` 是现在的顺序，理由是
+  `providers` 段存的是内置服务的条目，而内置服务名是注册表认得的那一类——注册表
+  失联时它只是最可能的那一类，所以顺序是「更可能」而不是「一定」。这条顺序以前
+  只写在注释里。
+
+**验证**（`tools/config-handler-smoke.mjs`，+6 条）：
+
+- 内置名撞内置名（`providers.deepseek` vs 表单 `DeepSeek`）→ 拒绝信息说
+  `providers 段`，且不提 `custom_providers`；
+- 自定义名撞自定义名（`custom_providers.my.gateway` vs 表单 `my.Gateway`）→ 拒绝
+  信息说 `custom_providers 段`；
+- **注册表失联 + 两段各有一个同拼写条目** → 报的是先查的那段（`providers` 侧），
+  另一段的条目名**不出现在**信息里，两个条目都没被动过（Key 还在、`provider` 没被
+  指过去）。
+
+  这一条里两段的条目**故意拼得不一样**（`deepseek` 与 `DEEPSEEK`）：两段写成同一个
+  拼法时，信息里出现的名字是哪一个都一样，断言会两边都过——那就没有钉住任何东西。
+  简报的验收条件里也写了这一句（"若结果相同则说明断言写得不够严，需改成检查 section
+  来源"）。
+
+**实测**：改动前后各跑一次 `npm run audit:config`，全绿；把 `spellingClash` 里的两段
+顺序反过来 → 上面第 3 组的两条断言变红（信息改为报 `DEEPSEEK` / `custom_providers
+段`）。
+
+### P0 — 简报的 P0-1 复核：`MATCH_ORDER → order-guess → 界面文案` 已有会红的断言
+
+简报担心这条链「本轮没被 `service-smoke.mjs` 触及」，可能会静默退化。**已复核，
+不需要补**：`tools/service-smoke.mjs` 里有 7 条断言守着它（`only the order rule
+withholds a Key`、`the Key of an entry no run opens is withheld, for the reason that
+says so`、`the answer stops before the endpoint…` 等），它们逐条断言
+`entryByName` 返回的规则是 `MATCH_ORDER`、`withholdReasonFor(MATCH_ORDER)` 是
+`order-guess`、Key 被扣下、端点不报、只要值的调用方也拿不到，以及 `order-guess`
+那句话与其余五种原因逐条不同。
+
+**实测**：把 `ocr-service.js` 的 `withholdReasonFor` 改成「`MATCH_ORDER` 分支返回
+`""`」→ 上面的 7 条断言全部变红。也就是说这条链不是靠约定维持的。
+
+### 已知取舍 — `MAX_ENTRIES` 轮换后，旧会话与干净会话**答得一样**
+
+这是 README 那句「a truncated run never looks like a clean one」的**已记录例外**，
+写在这里是为了别让人把它当 bug 又修一遍：
+
+- 上限证据按「仓库 + 会话」存，全局最多 `MAX_ENTRIES`（200）条。写第 201 条时，
+  最旧的一条被挤掉。
+- 被挤掉的那条会话**重开时答 `null`**——与「这条会话本来就干净」完全一样，
+  **界面上无法区分**。
+- 只有**触发轮换的那一次运行**的日志里会出现一行（`trimmed` 计数，第 14 轮的
+  `f52ac61`）。之后没有任何地方会再提这件事。
+- 为什么接受：另一种做法是文件无限增长（它在 profile 目录里，每次运行都要整份读
+  再整份写）。被挤掉的是最旧的记录，而用户最可能重开的正是最新的那些。
+- 以后要改的话（例如给 `read` 加 `rotated: true`，或加 `wasTrimmed(repo, sessionId)`），
+  必须同时改第 14 轮钉住「两者答案相同」的那条断言，并且接到界面上——否则一个
+  200 次运行之后的用户重开早期会话，仍会看到「干净」。
+
 ## 待移植 / 待验证
 
 ### 已完成 — `manifest.run_failure` 的中文映射与展示
@@ -910,8 +994,9 @@ desktop 的「工具调用 N（失败 M）」直接读 CLI 的 `tool_calls.failu
 必须扣下 Key」「两个通道只读一次表」「查不到答案不许替它编」这三条钉成断言，第 12 轮
 把「`classifyRef` 的四种答案」「运行出口只有一扇门」「服务列表也只读一次表」这三条
 钉成断言，第 14 轮把「`reportOutcome` 自抛不得带走调用方」与「`MAX_ENTRIES` 轮换后
-的静默」钉住；剩下的按优先级排在这里，下一轮挑。标注「**未动**」的条目是最近一轮
-看过、确认仍然成立但没有改的——不是新发现。
+的静默」钉住，第 15 轮把「拼写冲突时说的是哪一段」钉住并复核了「`MATCH_ORDER`
+必须扣 Key」那条链；剩下的按优先级排在这里，下一轮挑。标注「**未动**」的条目是
+最近一轮看过、确认仍然成立但没有改的——不是新发现。
 
 - **P2**：README 的 Status 段落里有**一次实测值**（`1200 findings` / `405ms` /
   `8s ceiling`）。实测数字会腐，腐了之后没有任何测试会红。README 承诺的应该是**能力**
@@ -922,6 +1007,18 @@ desktop 的「工具调用 N（失败 M）」直接读 CLI 的 `tool_calls.failu
   `audit:e2e` 每个脚本前面都各带一次 `npm run build`，一次完整 audit 要 build 五次。
   合并成一次（让 `audit` 脚本先 build 一次，后面的检查都假设 `out/` 存在）能省掉
   四次构建。文件 `package.json`。——**未动**。
+- **P1**：`git-service.js` 的 `inspect` 用 `ranked.slice(0, REF_LIMIT)`（40）截断，
+  **被截掉的 ref 在 `relations` 里没有条目**。`REF_LIMIT` 的注释说「named bases
+  first」，但没有断言钉住「`upstream` / `main` / `master` 一定在前 40 名内」——
+  仓库有 60 个分支时 `main` 可能被截掉，界面就会把两个可比分支说成不可比。
+  文件 `git-service.js` / `tools/git-service-smoke.mjs`。——**未动**（第 15 轮简报
+  提出，本轮只做了拼写冲突那一件）。
+- **P1**：`config-handler.js` 的 `save` 先写 `providers.<name>.<field>`，**后**写
+  `provider`。这个顺序依赖上游「写字段不必先选中服务」的行为；上游若改成要求先
+  `config set provider <name>` 才能写条目，desktop 会半途失败——`steps` 里有
+  `ok:false` 能被 `failed` 抓到，但错误信息指向字段名（`providers.X.api_key: …`），
+  而不是「请先选服务」。这个顺序是有意的还是只是碰巧能用，没有断言钉住。
+  文件 `config-handler.js` / `tools/config-handler-smoke.mjs`。——**未动**。
 
 - **P1**：`entryByName` 的「精确命中优先」与上游的「按名字选段」在**同名跨段**时
   不一致。`tryProviderConfig` 先查注册表决定读 `providers` 还是 `custom_providers`，

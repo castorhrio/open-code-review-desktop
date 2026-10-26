@@ -62,6 +62,11 @@ function makeConfigHandlers(options) {
    *
    * An exact key wins over any variant — if both spellings exist, the form is
    * pointing at the one it named.
+   *
+   * The answer carries the **section** the entry was found in, not just its
+   * name: the two live in different places of `config.json`, and the fix is a
+   * hand edit of that file (or a save under the existing spelling). A refusal
+   * that names only the spelling leaves the user to grep the whole file for it.
    */
   const spellingClash = (view, name, presetList) => {
     // Which section the CLI opens is decided by the *name* (`tryProviderConfig`:
@@ -70,23 +75,27 @@ function makeConfigHandlers(options) {
     // same-spelled entry in the other one is dead weight either way.
     const known = Boolean(presetList && presetList.ok && Array.isArray(presetList.names));
     const isPreset = known && presetList.names.some((knownName) => String(knownName).toLowerCase() === name.toLowerCase());
+    // The section names are the ones the config file uses, because that is
+    // where the user has to look. The order is the order the sections are
+    // checked in, and with the registry silent it is also the tie-break: the
+    // first section holding a same-spelled entry is the one that gets named.
     const sections = known
-      ? [isPreset ? view && view.providers : view && view.customProviders]
+      ? [[isPreset ? "providers" : "custom_providers", isPreset ? view && view.providers : view && view.customProviders]]
       // The registry did not answer: check both. Refusing a save we might not
       // have needed to refuse is deliberate — without the registry the desktop
       // cannot tell which section the CLI will read, so it cannot know the entry
       // it leaves behind is harmless. A rejected save costs a retry; a split
       // entry costs a Key the run silently never reads.
-      : [view && view.providers, view && view.customProviders];
-    for (const section of sections) {
-      for (const key of Object.keys(section || {})) if (key === name) return "";
+      : [["providers", view && view.providers], ["custom_providers", view && view.customProviders]];
+    for (const [, section] of sections) {
+      for (const key of Object.keys(section || {})) if (key === name) return null;
     }
-    for (const section of sections) {
+    for (const [sectionName, section] of sections) {
       for (const key of Object.keys(section || {})) {
-        if (key.toLowerCase() === name.toLowerCase()) return key;
+        if (key.toLowerCase() === name.toLowerCase()) return { name: key, section: sectionName };
       }
     }
-    return "";
+    return null;
   };
 
   const save = async (_e, form) => {
@@ -99,7 +108,7 @@ function makeConfigHandlers(options) {
     if (clash) {
       return {
         ok: false,
-        error: `配置里已有 ${clash}，与表单里的 ${name} 只差大小写；CLI 按 provider 字段的原始拼写读条目，这样保存会把同一个服务分成两条，旧条目里的 Key 不会再被读到。请改用已有的拼写 ${clash}。`,
+        error: `配置里已有 ${clash.name}（在 ${clash.section} 段），与表单里的 ${name} 只差大小写；CLI 按 provider 字段的原始拼写读条目，这样保存会把同一个服务分成两条，旧条目里的 Key 不会再被读到。请改用已有的拼写 ${clash.name}。`,
         steps: [],
       };
     }
