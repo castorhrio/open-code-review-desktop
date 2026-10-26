@@ -7,8 +7,24 @@
 ## 规则（调度每轮写码前由 prompt 强制提醒）
 1. **定期检查**：每轮至少看一次上游默认分支新 commit，以及 Releases/tags。
 2. **评估**：新功能 / API / CLI / 配置 / 破坏性变更对 desktop 封装的影响。
-3. **移植**：可安全合并的 → 写入本仓并测通；不能立刻做的 → 记入 `docs/next-iteration.md` P0/P1。
-4. **不要**静默忽略上游 release；至少在 next-iteration 里留一条「上游状态」。
+3. **移植**：可安全合并的 → 写入本仓并测通；不能立刻做的 → 记入私有 control 仓的
+   下一轮简报。本仓库**不再维护** `next-iteration.md` 之类的工作流文档。
+4. **不要**静默忽略上游 release：每轮把结论追加到下面「上游状态」，哪怕结论是
+   「无新内容」。
+
+## 上游状态（最近检查：2026-10-26，第 27 轮）
+
+- 顶端 commit：`375f64c`（2026-10-20，
+  `fix(tool): report an empty code_comment batch instead of success (#1773)`）
+- 最新 tag / release：`v1.13.3`（2026-10-22 发布）
+- desktop 依赖：`@alibaba-group/open-code-review` `^1.13.3`
+
+**第 27 轮结论：无新内容。** `git fetch upstream --tags` 成功，GitHub API 的
+commits / tags / releases 三处核对与上一轮一致；desktop 的 CLI flag、输出解析、
+配置暴露点都无需改动。
+
+逐轮复核表格与第 2–26 轮的评估正文由私有 control 仓承载（本产品仓库只留这一份
+上游状态摘要，避免再出现「表和十几轮正文挤在一处」的漂移）。
 
 ## 建议命令（agent 在 `/opt/open-code-review-desktop`）
 ```bash
