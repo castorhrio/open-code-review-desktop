@@ -145,33 +145,99 @@ function relativeInside(
 // `no-repo` is not a pick outcome: the dialog is not opened at all when the app
 // has no repository yet. It is here anyway so `main.js` has one place to send
 // every branch and neither message is spelled in the registration.
-const PICK_INSIDE_MESSAGES = Object.freeze({
-  "no-repo": "请先选择仓库",
-  outside: "所选目录不在该仓库内",
+const PICK_INSIDE_KINDS = Object.freeze({
+  noRepo: "no-repo",
+  cancelled: "cancelled",
+  outside: "outside",
+  inside: "inside",
 });
 
+// The kinds are named once, in the object above, because `pickInsideAnswer`
+// decides one and `pickInsidePayload` switches on it — and the two used to spell
+// the four strings separately. A typo in either half did not fail: the answer
+// came out `{ error: undefined }`, which the renderer reads as "cancelled" (see
+// `pickScanDir`), so the 选目录 button looked like it did nothing while the code
+// said it had answered. One object makes a misspelt kind a `TypeError` the moment
+// the module loads, and `tools/path-guard-smoke.mjs` pins both halves against it.
+const PICK_INSIDE_MESSAGES = Object.freeze({
+  [PICK_INSIDE_KINDS.noRepo]: "请先选择仓库",
+  [PICK_INSIDE_KINDS.outside]: "所选目录不在该仓库内",
+});
+
+// "Is this a repository the picker can start in?" — non-empty and absolute.
+//
+// A relative path cannot come from the folder dialog; it comes from a renderer
+// bug (a stale `last-repo` in `localStorage`, a wrong variable), and it matters
+// because two things then go wrong at once: `showOpenDialog` would open at the
+// process's working directory rather than the user's repo, and `relativeInside`
+// would compare a relative root against an absolute pick, so a directory *inside*
+// the repo would be refused as 所选目录不在该仓库内. Both are silent product
+// behaviour, so the question is asked before the dialog — `main.js` asks it to
+// decide whether to open the dialog at all, and `pickInsideAnswer` asks it again
+// for direct callers — and `tools/path-guard-smoke.mjs` pins that order.
+//
+// `path.isAbsolute` is used as the platform's answer on purpose: this is "did the
+// renderer hand over a path the OS would open as-is", not a second path rule.
+const repoIsPickable = (repo) => usable(repo) && path.isAbsolute(repo);
+
 function pickInsideAnswer(repo, picked, { relativeInside: relative } = {}) {
-  if (!usable(repo)) return { kind: "no-repo", error: PICK_INSIDE_MESSAGES["no-repo"] };
+  if (!repoIsPickable(repo)) {
+    return { kind: PICK_INSIDE_KINDS.noRepo, error: PICK_INSIDE_MESSAGES[PICK_INSIDE_KINDS.noRepo] };
+  }
   // A cancelled dialog hands over no path (or an empty one), which is not the
   // same as the repo itself: `""` is the inside answer, and answering `{}` here
   // keeps 留空 from being confused with "the user changed their mind".
-  if (!usable(picked)) return { kind: "cancelled" };
+  if (!usable(picked)) return { kind: PICK_INSIDE_KINDS.cancelled };
   const relPath = (relative || relativeInside)(repo, picked);
   // Reuse the refusal `relativeInside` already documents, rather than re-asking
   // `isInside`: one comparison, one answer, and the injection point above is
   // what proves this function does not re-derive the path itself.
-  if (relPath === null) return { kind: "outside", error: PICK_INSIDE_MESSAGES.outside };
-  return { kind: "inside", relPath };
+  if (relPath === null) {
+    return { kind: PICK_INSIDE_KINDS.outside, error: PICK_INSIDE_MESSAGES[PICK_INSIDE_KINDS.outside] };
+  }
+  return { kind: PICK_INSIDE_KINDS.inside, relPath };
 }
 
 // The IPC shape, kept separate from the decision so the renderer-facing keys are
 // pinned as a value. `inside` is the only kind that carries `relPath`; the two
 // refusals are the only kinds that carry `error`; a cancelled pick carries
 // neither. That mapping is the contract `tools/path-guard-smoke.mjs` reads.
+//
+// The `default` branch throws instead of falling through to `{ error }`. An
+// unknown kind is a programming error — a kind added to the decision and not to
+// this switch — and the fall-through used to turn it into `{ error: undefined }`,
+// i.e. an answer the renderer reads as "cancelled": a future kind would ship as a
+// silent no-op. A pure function can afford to be loud; `tools/path-guard-smoke.mjs`
+// pins the throw (and that it names the kind) so the loudness cannot be softened
+// back into a fall-through by accident.
 function pickInsidePayload(answer) {
-  if (answer.kind === "cancelled") return {};
-  if (answer.kind === "inside") return { relPath: answer.relPath };
-  return { error: answer.error };
+  switch (answer && answer.kind) {
+    case PICK_INSIDE_KINDS.cancelled:
+      return {};
+    case PICK_INSIDE_KINDS.inside:
+      // Same reasoning one step smaller: `{ kind: "inside" }` without a string
+      // relPath would reach the renderer as `{ relPath: undefined }`, which its
+      // if-chain reads as a cancel. The decision above never produces that, so
+      // meeting it here means the pair has drifted apart.
+      if (typeof answer.relPath !== "string") {
+        throw new TypeError(
+          `pickInsidePayload: an inside answer needs a relPath string, got ${JSON.stringify(answer.relPath)}`
+        );
+      }
+      return { relPath: answer.relPath };
+    case PICK_INSIDE_KINDS.outside:
+    case PICK_INSIDE_KINDS.noRepo:
+      if (typeof answer.error !== "string" || answer.error === "") {
+        throw new TypeError(
+          `pickInsidePayload: a ${answer.kind} answer needs an error string, got ${JSON.stringify(answer.error)}`
+        );
+      }
+      return { error: answer.error };
+    default:
+      throw new TypeError(
+        `pickInsidePayload: unknown pick kind ${JSON.stringify(answer && answer.kind)}`
+      );
+  }
 }
 
 /* ---------------- the other picker's options ---------------- */
@@ -208,12 +274,18 @@ const PICK_FILE_DEFAULTS = Object.freeze({
   filter: Object.freeze({ name: "所有文件", extensions: Object.freeze(["*"]) }),
 });
 
+// Normalised once, then deduplicated: `["md", ".md", " md "]` is one entry, and a
+// list repeated by a renderer building it from a variable is the same filter the
+// dialog would have been given twice. Exact duplicates only — `MD` and `md` are
+// two entries on a case-sensitive filesystem, and folding them would be a rule
+// about the user's file names, not about the dialog.
 const extensionsOf = (value) => {
   if (!Array.isArray(value)) return [];
-  return value
+  const extensions = value
     .filter((extension) => typeof extension === "string")
     .map((extension) => extension.trim().replace(/^\.+/, ""))
     .filter((extension) => extension !== "");
+  return [...new Set(extensions)];
 };
 
 const filterOf = (entry) => {
@@ -246,9 +318,11 @@ function pickFileOptions(opts) {
 module.exports = {
   isInside,
   relativeInside,
+  repoIsPickable,
   pickInsideAnswer,
   pickInsidePayload,
   pickFileOptions,
+  PICK_INSIDE_KINDS,
   PICK_INSIDE_MESSAGES,
   PICK_FILE_DEFAULTS,
 };

@@ -354,15 +354,25 @@ export function ReviewPanel() {
                             onClick={async () => {
                               const res = await api.pickScanDir(repo);
                               // The picker answers three things and only one of
-                              // them is a path: `{ relPath }` (inside), `{ error }`
-                              // (refused: outside the repo, or no repo yet) and
-                              // `{}` (cancelled). A refusal used to be dropped
-                              // here — `relPath` was undefined, nothing else was
-                              // read — so the dialog closed, 扫描路径 kept its old
-                              // value and the button looked broken. 取消 stays
-                              // silent; a refusal is said out loud.
-                              if (res.relPath !== undefined) patchForm({ scanPath: res.relPath });
-                              else if (res.error) toast.warning(res.error);
+                              // them is a path (`PickScanDirAnswer` in lib/api.ts):
+                              // `{ error }` (refused: outside the repo, or no
+                              // usable repo yet), `{ relPath }` (inside; `""` is
+                              // 留空), `{}` (cancelled). A refusal used to be
+                              // dropped here — `relPath` was undefined, nothing
+                              // else was read — so the dialog closed, 扫描路径 kept
+                              // its old value and the button looked broken. 取消
+                              // stays silent; a refusal is said out loud.
+                              //
+                              // The order is `pickInsidePayload`'s: refusals first,
+                              // then the one shape that carries a path, and the
+                              // empty object last as "the user changed their mind".
+                              // Reading `relPath` first would make the three
+                              // shapes look like two.
+                              if (res.error) toast.warning(res.error);
+                              else if (res.relPath !== undefined) patchForm({ scanPath: res.relPath });
+                              else {
+                                /* cancelled: no path, no sentence, no change */
+                              }
                             }}
                             disabled={!repo}
                           >

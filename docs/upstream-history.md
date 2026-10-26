@@ -18,6 +18,33 @@ pin 块，这样它就不会某天被当成第二个权威源。
 
 ---
 
+## 上游状态（最近检查：2026-10-27，第 65 轮）
+
+第 65 轮复核：**三条通路一致，结论仍是「无新内容」**。
+`git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
+refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
+（与第 49–64 轮同一个 commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
+`dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`；`npm view @alibaba-group/open-code-review
+version dist-tags` 仍是 `1.13.3` / `latest: 1.13.3`。desktop 的 `^1.13.3` 无需改动，
+**无移植项**。（第 63–64 轮没有更新本文件的核对账；本轮不替它们补写通路，只在账里记下
+「无记录」。）
+
+本轮继续把 IPC 层的翻译收进可测纯函数，并补反向断言：
+
+- `path-guard.js` 新增 `pickInsideAnswer` / `pickInsidePayload`：`repo:pickInside` 的
+  `{}` / `{ error }` / `{ relPath }` 三种答案不再由 `main.js` 的 `if` 链拼出。取消、
+  越界、仓库内各是一种 `kind`，两条错误文案也只在这里；`main.js` 只剩 dialog 与一次
+  `pickInsidePayload(pickInsideAnswer(...))`。`tools/path-guard-smoke.mjs` 逐种钉住
+  kind、键集，以及「注入的 `relativeInside` 说什么就是什么」。
+- `provider-handler.js` 把「rows 元素必须是对象」写成**拒绝**而不是透传：设置页对每个
+  元素读 `p.name`，一个 `null` 会把它变成崩溃而不是横幅，所以整次读取按「读不到」回答。
+  `tools/provider-handler-smoke.mjs` 用 `[null, "x", { name }]` 与数组元素钉住这条契约。
+- `tools/config-handler-smoke.mjs` 补 `{ ok: false }` 最小静默表 + 两段各一条不同拼写的
+  夹具，断言 `others.length === 1`，且 `section` 分别是 `providers` 与 `custom_providers`。
+- `tools/app-info-smoke.mjs` 钉住 `readVersion` 只剥 `open-code-review`（`ocr 1.13.3`
+  保留前缀）；`tools/install-info-smoke.mjs` 在三种形态下断言 `installInfo()` 的键集
+  恰好六项，与 `app-info-smoke` 末尾的 `expected` 互相钉住。
+
 ## 上游状态（最近检查：2026-10-27，第 62 轮）
 
 第 62 轮复核：**两条通路一致，结论仍是「无新内容」**。

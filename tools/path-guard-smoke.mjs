@@ -29,9 +29,11 @@ const require = createRequire(path.join(ROOT, "package.json"));
 const {
   isInside,
   relativeInside,
+  repoIsPickable,
   pickInsideAnswer,
   pickInsidePayload,
   pickFileOptions,
+  PICK_INSIDE_KINDS,
   PICK_INSIDE_MESSAGES,
   PICK_FILE_DEFAULTS,
 } = require(path.join(ROOT, "path-guard.js"));
@@ -502,6 +504,112 @@ const check = (name, ok, detail = "") => {
   );
 }
 
+/* ---- the kinds are one object, and an unknown one is loud ----
+ * `pickInsideAnswer` decides a kind and `pickInsidePayload` switches on it, and
+ * the two used to spell the four strings independently. The failure that hid
+ * there was not a crash: a kind that reached the payload's `else` came out as
+ * `{ error: undefined }`, which the renderer reads as "cancelled" — a new kind
+ * would have shipped as a button that does nothing. The checks below pin the
+ * object as the single declaration, each answer's kind against it, and the throw
+ * that replaces the fall-through, so "loud" cannot be softened back by accident.
+ */
+{
+  const produced = [
+    pickInsideAnswer("", null).kind,
+    pickInsideAnswer("/repo", null).kind,
+    pickInsideAnswer("/repo", "/elsewhere").kind,
+    pickInsideAnswer("/repo", "/repo/src").kind,
+  ];
+  const declared = Object.values(PICK_INSIDE_KINDS);
+  check(
+    "pick: the kind set is declared once and matches the four answers exactly",
+    Object.isFrozen(PICK_INSIDE_KINDS) &&
+      new Set(declared).size === declared.length &&
+      JSON.stringify([...declared].sort()) === JSON.stringify([...produced].sort()),
+    JSON.stringify({ declared, produced })
+  );
+
+  // The answers the decision can produce, translated. Every payload key must hold
+  // a real string: `{ relPath: undefined }` would read as a cancel on the renderer
+  // side, and that is the shape the throw below exists to prevent.
+  const answers = [
+    pickInsideAnswer("", null),
+    pickInsideAnswer("/repo", null),
+    pickInsideAnswer("/repo", "/elsewhere"),
+    pickInsideAnswer("/repo", "/repo/src"),
+  ];
+  check(
+    "payload: every answer the decision produces translates to keys with real values",
+    answers.every((answer) => {
+      const payload = pickInsidePayload(answer);
+      return Object.values(payload).every((value) => typeof value === "string" && value !== "");
+    }),
+    JSON.stringify(answers.map((answer) => [answer.kind, pickInsidePayload(answer)]))
+  );
+
+  const thrown = (fn) => {
+    try {
+      fn();
+      return null;
+    } catch (err) {
+      return err;
+    }
+  };
+  const unknown = thrown(() => pickInsidePayload({ kind: "future" }));
+  check(
+    "payload: an unknown kind throws, naming the kind, instead of answering `{ error: undefined }`",
+    unknown instanceof TypeError && unknown.message.includes("future"),
+    unknown ? unknown.message : "it returned a payload — a future kind would read as a cancelled pick"
+  );
+  check(
+    "payload: no answer at all throws too, rather than passing as cancelled",
+    thrown(() => pickInsidePayload(undefined)) instanceof TypeError &&
+      thrown(() => pickInsidePayload(null)) instanceof TypeError &&
+      thrown(() => pickInsidePayload({})) instanceof TypeError,
+    "undefined / null / `{}` are all answers with no kind"
+  );
+  check(
+    "payload: an inside answer without a relPath string throws",
+    thrown(() => pickInsidePayload({ kind: PICK_INSIDE_KINDS.inside })) instanceof TypeError &&
+      thrown(() => pickInsidePayload({ kind: PICK_INSIDE_KINDS.inside, relPath: 42 })) instanceof TypeError,
+    "`{ relPath: undefined }` would reach the renderer as a cancelled pick"
+  );
+  check(
+    "payload: a refusal without a sentence throws",
+    thrown(() => pickInsidePayload({ kind: PICK_INSIDE_KINDS.outside })) instanceof TypeError &&
+      thrown(() => pickInsidePayload({ kind: PICK_INSIDE_KINDS.noRepo, error: "" })) instanceof TypeError,
+    "an empty or missing error is a refusal the page cannot say out loud"
+  );
+}
+
+/* ---- the picker's start directory must be absolute ----
+ * `repo:pickInside` is handed a path the renderer remembered (`last-repo` in
+ * localStorage). A relative one is a renderer bug, and it produced two silent
+ * behaviours at once: `showOpenDialog` opened at the process's working directory
+ * rather than the repo, and `relativeInside` compared a relative root against an
+ * absolute pick, so a directory that really is inside the repo was refused as
+ * 所选目录不在该仓库内. So the question is asked *before* the dialog, and the one
+ * answer "there is no usable repo" is reused instead of a new sentence.
+ */
+{
+  const table = ["/repo", "repo", "", "  ", null, undefined, 42].map((value) => [value, repoIsPickable(value)]);
+  check(
+    "pick: only a non-empty absolute path is a pickable repository",
+    repoIsPickable("/repo") === true &&
+      table.filter(([, pickable]) => pickable).length === 1,
+    JSON.stringify(table)
+  );
+  const forbidden = () => {
+    throw new Error("must not be called");
+  };
+  const relative = pickInsideAnswer("relative/repo", "/repo/src", { relativeInside: forbidden });
+  check(
+    "pick: a relative repo is the no-repo answer, and never reaches relativeInside",
+    relative.kind === PICK_INSIDE_KINDS.noRepo && relative.error === PICK_INSIDE_MESSAGES["no-repo"],
+    JSON.stringify(relative)
+  );
+}
+
 /* ---- the file picker's options are a value too ----
  * `repo:pickFile` was the last picker whose defaults were written inline in
  * `main.js`, so "what does a picker with no options open as?" could only be
@@ -564,6 +672,12 @@ const check = (name, ok, detail = "") => {
     JSON.stringify(partly.filters) === JSON.stringify([{ name: "md", extensions: ["md", "txt"] }]),
     JSON.stringify(partly.filters)
   );
+  const repeated = pickFileOptions({ filters: [{ name: "md", extensions: ["md", ".md", " md ", "txt", ""] }] });
+  check(
+    "pickFile: an extension repeated in three spellings is one entry, and the rest is kept",
+    JSON.stringify(repeated.filters) === JSON.stringify([{ name: "md", extensions: ["md", "txt"] }]),
+    JSON.stringify(repeated.filters)
+  );
   check(
     "pickFile: a list of only-unusable entries is the fallback, not whatever survived",
     JSON.stringify(pickFileOptions({ filters: [null, { name: "x" }, { extensions: ["y"] }] }).filters) ===
@@ -608,6 +722,19 @@ const check = (name, ok, detail = "") => {
       !/所有文件/.test(mainSrc) &&
       !/buttonLabel: "选择此文件"/.test(mainSrc),
     "the defaults and their wording live in path-guard.js"
+  );
+  // The order is the point, and it has to be read inside *this* registration:
+  // `repo:pick` above it asks the dialog first, so an index over the whole file
+  // would pass whichever order `repo:pickInside` used.
+  const pickInsideSrc = mainSrc.slice(
+    mainSrc.indexOf('ipcMain.handle("repo:pickInside"'),
+    mainSrc.indexOf('ipcMain.handle("repo:pickFile"')
+  );
+  check(
+    "repo:pickInside asks whether the repo is pickable before it opens the dialog",
+    /if \(!repoIsPickable\(repo\)\) return pickInsidePayload\(pickInsideAnswer\("", null\)\);/.test(pickInsideSrc) &&
+      pickInsideSrc.indexOf("repoIsPickable(repo)") < pickInsideSrc.indexOf("showOpenDialog"),
+    "a relative repo would otherwise open the dialog at the process's working directory and refuse a real subdirectory"
   );
   check(
     "...and neither picker sentence is spelled in the registration",

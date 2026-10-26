@@ -16,7 +16,7 @@ const { makeRunHandler } = require("./run-handler");
 const { makeUninstallHandler } = require("./uninstall-handler");
 const { makeConfigHandlers } = require("./config-handler");
 const { createInstall } = require("./install-info");
-const { pickInsideAnswer, pickInsidePayload, pickFileOptions } = require("./path-guard");
+const { repoIsPickable, pickInsideAnswer, pickInsidePayload, pickFileOptions } = require("./path-guard");
 const { providersAnswer } = require("./provider-handler");
 const { formatAppInfo } = require("./app-info");
 
@@ -231,8 +231,12 @@ ipcMain.handle("repo:pickInside", async (_e, repo) => {
   // The three answers the picker can give are decided in `path-guard.js`; this
   // registration only asks the dialog and hands the result to that translation.
   // `no-repo` is the same request with the dialog skipped, because there is
-  // nothing to default the dialog's start directory to.
-  if (!repo) return pickInsidePayload(pickInsideAnswer(repo, null));
+  // nothing to default the dialog's start directory to. A relative path is that
+  // same request: it can only be a renderer bug, and asking the dialog with it
+  // would open at the process's working directory and then refuse a directory
+  // that really is inside the repo (see `repoIsPickable`). The question is asked
+  // here, before the dialog, so neither of those can reach the screen.
+  if (!repoIsPickable(repo)) return pickInsidePayload(pickInsideAnswer("", null));
   const result = await dialog.showOpenDialog(mainWindow, {
     title: "选择要扫描的子目录（可留空表示整个仓库）",
     buttonLabel: "使用此目录",

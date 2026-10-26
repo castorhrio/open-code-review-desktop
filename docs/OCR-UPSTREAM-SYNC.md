@@ -12,32 +12,39 @@
 4. **不要**静默忽略上游 release：每轮把结论写进下面「当前状态」，并把上一轮的正文搬到
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。
 
-## 当前状态（第 65 轮，2026-10-27）
+## 当前状态（第 66 轮，2026-10-27）
 
-第 65 轮复核：**三条通路一致，结论仍是「无新内容」**。
+第 66 轮复核：**两条通路一致，结论仍是「无新内容」**。
 `git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
 refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
-（与第 49–64 轮同一个 commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
+（与第 49–65 轮同一个 commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
 `dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`；`npm view @alibaba-group/open-code-review
 version dist-tags` 仍是 `1.13.3` / `latest: 1.13.3`。desktop 的 `^1.13.3` 无需改动，
-**无移植项**。（第 63–64 轮没有更新本文件的核对账；本轮不替它们补写通路，只在账里记下
-「无记录」。）
+**无移植项**；本轮没有上游 API / CLI / 配置面的变化要移植。
 
-本轮继续把 IPC 层的翻译收进可测纯函数，并补反向断言：
+本轮不加新模块，改的是「已有断言更难被绕过」，三处：
 
-- `path-guard.js` 新增 `pickInsideAnswer` / `pickInsidePayload`：`repo:pickInside` 的
-  `{}` / `{ error }` / `{ relPath }` 三种答案不再由 `main.js` 的 `if` 链拼出。取消、
-  越界、仓库内各是一种 `kind`，两条错误文案也只在这里；`main.js` 只剩 dialog 与一次
-  `pickInsidePayload(pickInsideAnswer(...))`。`tools/path-guard-smoke.mjs` 逐种钉住
-  kind、键集，以及「注入的 `relativeInside` 说什么就是什么」。
-- `provider-handler.js` 把「rows 元素必须是对象」写成**拒绝**而不是透传：设置页对每个
-  元素读 `p.name`，一个 `null` 会把它变成崩溃而不是横幅，所以整次读取按「读不到」回答。
-  `tools/provider-handler-smoke.mjs` 用 `[null, "x", { name }]` 与数组元素钉住这条契约。
-- `tools/config-handler-smoke.mjs` 补 `{ ok: false }` 最小静默表 + 两段各一条不同拼写的
-  夹具，断言 `others.length === 1`，且 `section` 分别是 `providers` 与 `custom_providers`。
-- `tools/app-info-smoke.mjs` 钉住 `readVersion` 只剥 `open-code-review`（`ocr 1.13.3`
-  保留前缀）；`tools/install-info-smoke.mjs` 在三种形态下断言 `installInfo()` 的键集
-  恰好六项，与 `app-info-smoke` 末尾的 `expected` 互相钉住。
+- **`tools/e2e-flow.cjs`：没跑 ≠ 通过。** picker 的每一步现在都经 `pickerCheck`
+  登记：`dialog.showOpenDialog` 打不上桩时，每条断言都**红着出现**并写明「这一步没跑」，
+  而不是整段从报告里消失（消失会被任何数失败的汇总当成绿色）。`waitFor` 的超时带上
+  `__timeout` 标记，`screenAfter` 据此产出不同文案：「60s 内预览没出现」（CLI 慢 / spec
+  没到）与「预览出现但不含 a.go」（renderer 组错了 spec）不再读成同一句话；依赖屏幕内容
+  的另外三条断言在超时时也明确写「没有判过」，不再空屏通过。
+- **`repo:pickInside` 在开对话框之前就问「这个仓库可用吗」。** `path-guard.js` 新增
+  `repoIsPickable`（非空 + `path.isAbsolute`），`main.js` 用它挡住 renderer 传来的相对
+  路径：否则对话框会在进程工作目录打开，而 `relativeInside` 会拿相对根去比绝对选择，把
+  **真在仓库里**的子目录判成「所选目录不在该仓库内」。`audit:path` 断言顺序（先问再开
+  对话框）与「相对的仓库走 no-repo，不会去问 relativeInside」；真 Electron e2e 断言
+  `pickScanDir("relative/repo")` 根本没问对话框、答案是 `{ error }` 而不是 `{}`。
+- **kind 只有一个声明，未知 kind 抛错。** `PICK_INSIDE_KINDS` 成为四个 kind 的唯一来源，
+  `PICK_INSIDE_MESSAGES` 的键从它派生，`pickInsidePayload` 改成 `switch` + `default:
+  throw`；`{ kind: "inside" }` 没有字符串 `relPath`、拒绝没有 `error` 句子也一并抛错——
+  这些形状过去会变成 `{ error: undefined }` / `{ relPath: undefined }`，在 renderer 那边
+  读成「取消」。`src/lib/api.ts` 把三态写成一个 `PickScanDirAnswer` 联合类型（`{}` = 取消，
+  `?: never` 让漏读那一支编译就红），`ReviewPanel` 的读法改成「先 error、再 relPath、
+  最后视为取消」，与 `pickInsidePayload` 同一顺序。顺带 `pickFileOptions` 的扩展名去重
+  （`["md", ".md", " md "]` 是一条）也有断言。
+
 
 ## 上游真变了怎么办（命令驱动，而不是「记得看一眼」）
 ```bash
@@ -107,7 +114,7 @@ pin 或 ls-remote 给出的 SHA 短于 40 位时一律判「跳过」并说明�
 没变**，所以每轮的结论仍要写进上面「当前状态」——跳过时至少留下 `[UPSTREAM-DEBT]` 与
 「核对通路账」里的一行欠账。
 
-**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 65 轮：`git ls-remote` 可达，`refs/heads/main` 与 pin 一致；tag 与 pin 指向同一 commit；npm release 仍是 `1.13.3`；通路：git）**
+**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 66 轮：`git ls-remote` 可达，`refs/heads/main` 与 pin 一致；tag 与 pin 指向同一 commit；npm release 仍是 `1.13.3`；通路：git）**
 
 ### 核对通路账
 
@@ -138,6 +145,7 @@ pin 或 ls-remote 给出的 SHA 短于 40 位时一律判「跳过」并说明�
 | 63 | 2026-10-27 | none | 本文件没有核对记录（该轮未更新状态与账） | `[UPSTREAM-DEBT]` HEAD |
 | 64 | 2026-10-27 | none | 本文件没有核对记录（该轮未更新状态与账） | `[UPSTREAM-DEBT]` HEAD |
 | 65 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；pickInside / providers / 三处反向断言收口 | — |
+| 66 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；e2e 的没跑≠通过、相对仓库先拒、kind 抛错 | — |
 
 「最近一次对照」只写**那一项最近被人工重新核对**的轮次。该列没有列出本轮，表示本轮
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看

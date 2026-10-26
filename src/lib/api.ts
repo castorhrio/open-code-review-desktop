@@ -43,6 +43,27 @@ export interface FileWindow {
   lines?: { n: number; content: string }[];
 }
 
+/** 选目录 answers one of exactly three shapes, and which one it is is the whole
+ *  contract (the decision lives in `pickInsideAnswer` / `pickInsidePayload` in
+ *  `path-guard.js`, and is pinned by `tools/path-guard-smoke.mjs`):
+ *
+ *    { relPath }  a directory inside the repo; `""` is the repo itself (留空)
+ *    { error }    a refusal — outside the repo, or no usable repo chosen yet
+ *    {}           the dialog was cancelled
+ *
+ *  An empty `relPath` means 留空 (the whole repo), so a refusal must never be
+ *  readable as one: `relPath` appears only on the first shape and `error` only on
+ *  the second. Read them in that order — `error` first, then `relPath`, then the
+ *  empty object as "cancelled" — which is the same if-chain `pickInsidePayload`
+ *  writes on the main side, so there is one reading of the three shapes.
+ *
+ *  `?: never` rather than a plain `?` so a reader that forgets the empty-object
+ *  case fails to typecheck instead of silently treating it as a path. */
+export type PickScanDirAnswer =
+  | { relPath: string; error?: never }
+  | { relPath?: never; error: string }
+  | { relPath?: never; error?: never };
+
 /** Mirror of the contextBridge surface in preload.js. */
 export interface Bridge {
   info(): Promise<AppInfo>;
@@ -52,13 +73,8 @@ export interface Bridge {
   openInstallDir(): Promise<{ ok: boolean; error?: string; action?: string; path?: string }>;
   uninstall(): Promise<{ ok: boolean; error?: string }>;
   pickRepo(): Promise<string>;
-  /** 选目录 answers one of three shapes, and exactly one key is ever present:
-   *  `{ relPath }` for a directory inside the repo (`""` = the repo itself),
-   *  `{ error }` for a refusal (outside the repo, or no repo chosen yet) and
-   *  `{}` for a cancelled dialog. An empty `relPath` is 留空 (the whole repo), so
-   *  a refusal must not be readable as "the whole repo" — hence the split, and
-   *  hence the renderer reads `error` rather than only `relPath`. */
-  pickScanDir(repo: string): Promise<{ relPath?: string; error?: string }>;
+  /** The three shapes and how to read them are on `PickScanDirAnswer`. */
+  pickScanDir(repo: string): Promise<PickScanDirAnswer>;
   /** Cancelled answers `""`. Every option but `properties` is optional, and the
    *  defaults (title, button label, 所有文件 filter) come from
    *  `pickFileOptions` in `path-guard.js`. */
