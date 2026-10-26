@@ -143,8 +143,14 @@ export interface Bridge {
   sessionDiagnostics(repo: string, sessionId: string): Promise<Ok<SessionDiagnostics | null>>;
   /** How full the truncation-evidence store is — its cap, the records in use
    *  and how many repositories those belong to. Called per settings visit:
-   *  every finished run can change all three. */
-  diagnosticsStats(): Promise<DiagnosticsStoreStats>;
+   *  every finished run can change all three.
+   *
+   *  `Ok`, not a bare object: a read that could not run must be distinguishable
+   *  from a profile that has recorded nothing, or the page prints `0 / 200` for
+   *  a file it never opened. The failure's sentence is written next to `stats`
+   *  in `run-diagnostics.js` (`statsReport`), so the page shows the reason it
+   *  was given. */
+  diagnosticsStats(): Promise<Ok<DiagnosticsStoreStats>>;
   exportSession(repo: string, sessionId: string): Promise<{ ok: boolean; file?: string; opened?: boolean; canceled?: boolean; error?: string }>;
   deleteSession(repo: string, sessionId: string): Promise<{ ok: boolean; error?: string }>;
   rulesCheck(repo: string, path: string, rule: string): Promise<Ok<string>>;

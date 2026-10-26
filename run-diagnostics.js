@@ -873,6 +873,38 @@ function createStore(file, options = {}) {
 }
 
 /**
+ * How full the store is, answered in the shape the renderer reads.
+ *
+ * `stats()` answers a value; this answers `{ ok: true, value }` or
+ * `{ ok: false, error }`. The difference is not ceremony: the settings page has
+ * to tell "this profile has no records" from "I could not read the records", and
+ * a plain object with `entries: 0` cannot. Presenting zero for a read that never
+ * ran is the same lie `settled` exists to prevent, one step further from the
+ * truth — and it used to be the page's own `"failed"` string, a magic value the
+ * renderer had to remember and that said nothing about what went wrong.
+ *
+ * The sentence is written here, next to `stats`, so the page shows the reason it
+ * was given instead of one of its own. `stats()` is written not to reject
+ * (`drainBounded` catches and `readAll` answers `[]` for an unreadable file), so
+ * a failure here means something outside it broke — a store that is not a store,
+ * a `stats` that was wired to nothing — which is exactly the case that must not
+ * be rendered as an empty profile.
+ *
+ * A throwing `store.stats` is turned into the `error` sentence rather than
+ * escaping: this is an `ipcMain.handle` body, and a rejection there becomes a
+ * rejected `await` in the renderer, where the page's `catch` has nothing to show
+ * but a guess.
+ */
+async function statsReport(store, timeoutMs) {
+  try {
+    return { ok: true, value: await store.stats(timeoutMs) };
+  } catch (err) {
+    const reason = (err && err.message) || String(err || "");
+    return { ok: false, error: reason ? `读取上限证据占用失败：${reason}` : "读取上限证据占用失败" };
+  }
+}
+
+/**
  * Wait for a promise of an outcome, but not forever.
  *
  * The bound is `WRITE_TIMEOUT_MS` (2s), the same one the run-exit path uses.
@@ -1194,6 +1226,7 @@ module.exports = {
   resolveCaseInsensitive,
   MAX_ENTRIES,
   evidenceSummary,
+  statsReport,
   LIMIT_WARNING,
   WRITE_TIMEOUT_MS,
   MAX_DRAIN_ROUNDS,

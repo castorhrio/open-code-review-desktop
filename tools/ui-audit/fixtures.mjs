@@ -974,8 +974,13 @@ window.api = (() => {
   // in `audit.mjs` (which requires "37 / 137"). ?evidence=unsettled is the
   // answer a read gives when the wait for in-flight writes gave up.
   diagnosticsStats: async () => {
-    if (q.get("evidence") === "unsettled") return { limit: 137, entries: 37, repos: 4, settled: false };
-    return { limit: 137, entries: 37, repos: 4, settled: true };
+    // The answer is an `Ok` (see `statsReport` in `run-diagnostics.js`): the
+    // page has to be able to tell "no records" from "could not read". A failed
+    // read is stubbed by `?evidence=failed`.
+    if (q.get("evidence") === "failed")
+      return { ok: false, error: "读取上限证据占用失败：EACCES: permission denied" };
+    if (q.get("evidence") === "unsettled") return { ok: true, value: { limit: 137, entries: 37, repos: 4, settled: false } };
+    return { ok: true, value: { limit: 137, entries: 37, repos: 4, settled: true } };
   },
   sessionComments: async () => {
     if (q.get("clean") === "1") return { ok: true, value: [] };

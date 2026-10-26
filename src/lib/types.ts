@@ -220,6 +220,11 @@ export interface SessionDiagnostics {
  * the read could not wait for the writes still in flight, i.e. the count may be
  * missing the run that just finished; the settings page says so rather than
  * presenting it as current.
+ *
+ * It travels inside an `Ok` (`statsReport` in `run-diagnostics.js`): "this
+ * profile has no records" and "the records could not be read" are different
+ * news, and a bare object with `entries: 0` cannot tell them apart — which is
+ * how a failed read used to be rendered as an empty store.
  */
 export interface DiagnosticsStoreStats {
   limit: number;

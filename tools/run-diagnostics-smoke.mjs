@@ -1063,8 +1063,19 @@ check(
 
 // There is no Electron in this file, so the wiring itself is read from source:
 // the wrapper is only worth anything if the uninstall handler actually uses it.
-check("main.js's uninstall path flushes through the wrapper", /await flushAndReport\(runDiagnostics\)/.test(mainSrc));
-check("and it no longer awaits a bare flushNow there", !/await flushNow\(/.test(mainSrc));
+// The uninstall body lives in `uninstall-handler.js` now, so the wiring this
+// pair used to read out of `main.js` is read out of the module that owns it:
+// the default flush is `flushAndReport` (the wrapper that answers a value for
+// every way the flush can end), it is awaited, and no bare `flushNow` is used
+// there. `tools/uninstall-flush.mjs` then calls the handler with doubles and
+// pins the order it is made of.
+const uninstallSrc = fs.readFileSync(path.join(ROOT, "uninstall-handler.js"), "utf8");
+check(
+  "the uninstall path flushes through the wrapper",
+  /flushAndReport/.test(uninstallSrc) && /await flush\(store, warn\)/.test(uninstallSrc),
+  "uninstall-handler.js does not await flushAndReport"
+);
+check("and it no longer awaits a bare flushNow", !/await flushNow\(/.test(uninstallSrc) && !/await flushNow\(/.test(mainSrc));
 
 /* ---- a write that finishes after the bound must still be heard ----
  * `recordBounded` gives up so `run:exit` is not held by a slow disk, but the

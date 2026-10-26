@@ -5,7 +5,7 @@ import { api } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { cn } from "@/lib/cn";
 import { LANGUAGES } from "@/lib/spec";
-import type { DiagnosticsStoreStats, ProviderEntry } from "@/lib/types";
+import type { DiagnosticsStoreStats, Ok, ProviderEntry } from "@/lib/types";
 import { useStore } from "@/store";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Switch } from "@/components/ui/form";
@@ -42,9 +42,15 @@ export function SettingsPanel() {
   // one budget for every repository, and a busy repository rotates a quiet
   // one's records out — after which those sessions reopen looking clean. That
   // is a fact about the profile, not about the session in front of the user, so
-  // it belongs here where the rest of the on-disk state is stated. `"failed"`
-  // is its own state: a read that could not run is not "0 records".
-  const [evidence, setEvidence] = useState<DiagnosticsStoreStats | "failed" | null>(null);
+  // it belongs here where the rest of the on-disk state is stated.
+  //
+  // It is an `Ok`, not a number: "this profile has no records" and "the records
+  // could not be read" are different news, and the page used to spell the second
+  // as the string `"failed"` — a value of its own invention that also had no room
+  // for *why*. The main process writes the reason (`statsReport`), so `null` here
+  // means "not answered yet" and `ok: false` is a read that failed, with the
+  // sentence that says what went wrong.
+  const [evidence, setEvidence] = useState<Ok<DiagnosticsStoreStats> | null>(null);
   // Whether that answer came back at all, and if it did not, *why not*. Four
   // states, not two: "the main process has not answered yet" and "the main
   // process could not answer" are both "we do not know", and neither may be
@@ -144,7 +150,11 @@ export function SettingsPanel() {
     api
       .diagnosticsStats()
       .then((res) => live && setEvidence(res))
-      .catch(() => live && setEvidence("failed"));
+      // The `Ok` already carries the failures the main process can describe; a
+      // rejection here is the call never arriving (a bridge wired to nothing),
+      // which is still not "0 records" — so it gets the failure shape rather
+      // than a count.
+      .catch(() => live && setEvidence({ ok: false, error: "读取上限证据占用失败：主进程没有响应" }));
     return () => {
       live = false;
     };
@@ -556,23 +566,31 @@ export function SettingsPanel() {
           <dl className="grid grid-cols-[minmax(0,1fr)] gap-2">
             <InfoRow
               label="保留上限"
-              value={evidence === null ? "读取中…" : evidence === "failed" ? "—" : `最近 ${evidence.limit} 条`}
+              value={
+                evidence === null ? "读取中…" : evidence.ok ? `最近 ${evidence.value.limit} 条` : "—"
+              }
             />
             <InfoRow
               label="当前占用"
               value={
                 evidence === null
                   ? "读取中…"
-                  : evidence === "failed"
-                    ? "读取失败，重开本页可再试一次"
-                    : `${evidence.entries} / ${evidence.limit} 条 · ${evidence.repos} 个仓库`
+                  : evidence.ok
+                    ? `${evidence.value.entries} / ${evidence.value.limit} 条 · ${evidence.value.repos} 个仓库`
+                    : "读取失败"
               }
             />
           </dl>
           <p className="mt-2 text-meta text-faint">
             上限由所有仓库共用一个：热门仓库的运行会把更早的记录轮换掉，被轮换的会话重开时不再显示上限提示，看起来和一次干净通过一样。
           </p>
-          {typeof evidence === "object" && evidence !== null && !evidence.settled && (
+          {/* A failed read says why, instead of the "—" that could be mistaken
+              for "nothing is stored" — the reason comes from the main process,
+              which is the only side that knows what went wrong. */}
+          {evidence && !evidence.ok && (
+            <p className="mt-2 text-meta text-warn">{evidence.error}（重开本页可再试一次）</p>
+          )}
+          {evidence && evidence.ok && !evidence.value.settled && (
             <p className="mt-2 text-meta text-warn">
               刚结束的运行可能还在写盘，上面的数字可能少一条；下次打开本页会重新读取。
             </p>

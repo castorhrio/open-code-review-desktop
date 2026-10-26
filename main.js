@@ -11,22 +11,13 @@ const ocr = require("./ocr-service");
 const git = require("./git-service");
 const { installNavigationGuards } = require("./security");
 const updater = require("./update-service");
-const { createAppStore, flushAndReport, flushBeforeQuit } = require("./run-diagnostics");
+const { createAppStore, statsReport, flushBeforeQuit } = require("./run-diagnostics");
 const { makeRunHandler } = require("./run-handler");
+const { makeUninstallHandler } = require("./uninstall-handler");
 const { makeConfigHandlers } = require("./config-handler");
 const { createInstall } = require("./install-info");
 
 const DOCS_URL = "https://open-codereview.ai/docs";
-
-// How long the uninstall reply is given to reach the renderer before this
-// process quits. The number is a delay, not a wait on the uninstaller: that
-// process is spawned detached and `unref`ed, so it outlives this one by design
-// and quitting first is the whole point ("the uninstaller deletes the directory
-// this process runs from"). What the delay buys is the page that asked for the
-// uninstall getting its answer — the settings page switches to "正在卸载…" from
-// the reply, and a quit in the same tick tore the window down before it could.
-// Named rather than inline so the reason travels with the value.
-const UNINSTALL_QUIT_DELAY_MS = 400;
 
 let mainWindow = null;
 
@@ -181,52 +172,25 @@ ipcMain.handle("app:openInstallDir", async () => {
   return install.openDir(plan.dir);
 });
 
-ipcMain.handle("app:uninstall", async () => {
-  const plan = install.uninstallPlan();
-  if (!plan.ok) return plan;
-  const { target } = plan;
-  // The uninstaller deletes the directory this process runs from, so the app has
-  // to be gone first — otherwise Windows keeps the files locked and the
-  // uninstaller reports them as in use.
-  //
-  // The evidence is written before the uninstaller starts, not during the quit:
-  // `flushBeforeQuit` fires on the `app.quit()` below, by which time the
-  // uninstaller is already deleting the profile directory it would write to.
-  //
-  // The second flush that `before-quit` then performs is deliberately harmless:
-  // it calls `drain()` on a queue this flush just emptied, so it settles in the
-  // same tick and the quit proceeds — unless a run finished in the meantime and
-  // queued one more write, which is exactly the case that should be waited for.
-  // Nothing here writes after the uninstaller starts except that last write,
-  // and a failed one reports `io-error` instead of throwing.
-  //
-  // A flush that gave up (a queue that never stopped moving, or a disk that did
-  // not answer in time) is logged before the uninstaller starts: it deletes the
-  // profile directory right after, so this is the last moment the loss can be
-  // reported at all.
-  // `flushAndReport` answers a *value* for every way the flush can end — the
-  // store's own failures already arrive that way, and a flush that threw
-  // (something outside it broke) is reported as `drain-failed` instead of
-  // rejecting. The difference matters here more than anywhere else: the spawn,
-  // the quit and the reply the settings page is waiting for all come after this
-  // await, so a rejection would be an uninstall that answers nothing and
-  // deletes nothing. The evidence is worth a line, not the whole action.
-  await flushAndReport(runDiagnostics);
-  try {
-    spawn(target, [], { detached: true, stdio: "ignore", windowsHide: false }).unref();
-  } catch (err) {
-    return { ok: false, error: `启动卸载程序失败：${err.message}` };
-  }
-  setTimeout(() => app.quit(), UNINSTALL_QUIT_DELAY_MS);
-  return { ok: true };
+// The handler body lives in `uninstall-handler.js`: the order it is made of
+// (flush the evidence, then spawn the uninstaller, then let the reply out, then
+// quit) is a behaviour, and a behaviour can only be checked by calling it. This
+// registration is all that is left, and it is also where the two platform
+// details stay: how a detached process is started, and how this app quits.
+//
+// The flush is the reason the handler exists as its own thing. The uninstaller
+// deletes the profile directory, and `before-quit` fires after it has started —
+// so the evidence has to be on disk *before* the spawn, not during the quit.
+const uninstall = makeUninstallHandler({
+  install,
+  store: runDiagnostics,
+  // Detached and `unref`ed: the uninstaller outlives this process by design,
+  // because it deletes the directory this process runs from.
+  spawn: (target) => spawn(target, [], { detached: true, stdio: "ignore", windowsHide: false }).unref(),
+  quit: () => app.quit(),
 });
+ipcMain.handle("app:uninstall", uninstall);
 
-/* The table is parsed by ocr-service, not here: the readiness view judges
- * built-in names by the same output, and two parsers for one table is how the
- * list the user picks from and the list the config is judged by start disagreeing
- * after an upstream column-width change. It also means both callers share one
- * read (and one failure window) instead of one spawn each.
- */
 ipcMain.handle("app:providers", async () => {
   const table = await ocr.providerTable();
   if (!table.ok) return { ok: false, error: ocr.withHint(table.error), value: [] };
@@ -388,7 +352,13 @@ ipcMain.handle("session:diagnostics", async (_e, req) => ({
 // for the writes still in flight, and answers `settled: false` when that wait
 // gave up rather than a count that silently omits the run that just finished —
 // the page says so instead of presenting a stale number as current.
-ipcMain.handle("diagnostics:stats", () => runDiagnostics.stats());
+//
+// The answer is an `Ok`: "this profile has no records" and "I could not read
+// the records" are different news, and a page that renders both as `0` sends
+// the user to look at a file it never managed to open. The wording of the
+// failure is written next to `stats` (`statsReport` in run-diagnostics.js), so
+// the renderer shows the reason it was given rather than a string of its own.
+ipcMain.handle("diagnostics:stats", () => statsReport(runDiagnostics));
 
 ipcMain.handle("session:export", async (_e, req) => {
   const save = await dialog.showSaveDialog(mainWindow, {
