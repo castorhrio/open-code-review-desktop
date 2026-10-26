@@ -1212,6 +1212,91 @@ check(
   );
 }
 
+/* ---- two entries in one section: no action this page can offer ----
+ * The two-entry branch above is the silent-registry one, where the two spellings
+ * sit in the two different sections and the desktop genuinely cannot tell which
+ * one the run will read. There is a second way into that branch, and it is not a
+ * silent table: with the registry answered, `spellingClash` reads only the
+ * section the name belongs to — and the config file can hold both spellings
+ * there (`providers.deepseek` next to `providers.DEEPSEEK`).
+ *
+ * Both entries being in one section changes what the sentence may say. The
+ * section the run opens is not in doubt, so "说不准它会读哪一段" would be false
+ * about this config, and the refresh / reinstall tails would send the user to a
+ * button that does not change which entry is read — the same "a useless action
+ * offered instead of the real one" failure the two-silence split was made for.
+ * What is true, and what the user has to act on, is that one run reads the entry
+ * `provider` spells and the other spelling's Key is not read.
+ */
+{
+  const bothInOneSection = { providers: { deepseek: { api_key: "sk-old" }, DEEPSEEK: { api_key: "sk-other" } } };
+  const list = answeredPresets(["deepseek", "openai"]);
+  const clash = spellingClash(bothInOneSection, "DeepSeek", list);
+  check(
+    "two spellings of one name in one section are both named",
+    clash !== null &&
+      clash.name === "deepseek" &&
+      clash.section === "providers" &&
+      clash.others.length === 1 &&
+      clash.others[0].name === "DEEPSEEK" &&
+      clash.others[0].section === "providers",
+    JSON.stringify(clash)
+  );
+  const answer = spellingClashMessage(clash, "DeepSeek", list);
+  check("and the sentence counts the entries that have to be reconciled", answer.message.includes("2 条只差大小写的条目"), answer.message);
+  check("and says both of them are in the section the run reads", answer.message.includes("都在 providers 段"), answer.message);
+  check(
+    "so it offers neither 刷新 nor 重装, which would change nothing about which entry is read",
+    !answer.message.includes("刷新") && !answer.message.includes("重装"),
+    answer.message
+  );
+  check(
+    "and makes no claim about a table that answered",
+    !answer.message.includes("没能读到") && !answer.message.includes("服务表读回来是空的"),
+    answer.message
+  );
+  check(
+    "while still asking for the file to be reconciled",
+    answer.entries.length === 2 && answer.message.includes("改掉或删掉"),
+    answer.message
+  );
+
+  // Through the handler: the page is shown this very sentence, and the refusal
+  // happens before the write layer is consulted.
+  const stub = makeStub({ providers: { deepseek: { api_key: "sk-old" }, DEEPSEEK: { api_key: "sk-other" } } });
+  const h = make(stub);
+  const res = await h.save(null, { provider: "DeepSeek", isCustom: false, apiKey: "sk-new", setActive: true });
+  check("a second spelling in the section the CLI reads refuses the save", res.ok === false, JSON.stringify(res));
+  check("and the page is shown that sentence, word for word", res.error === answer.message, res.error);
+  check("and nothing reached the write layer", stub.setCalls === 0 && stub.setPairs.length === 0, `${stub.setCalls} calls`);
+  check(
+    "while both entries and both Keys are still there",
+    stub.state.providers.deepseek?.api_key === "sk-old" && stub.state.providers.DEEPSEEK?.api_key === "sk-other",
+    JSON.stringify(stub.state.providers)
+  );
+  // A refusal that came from the entries themselves is not a failed read, so the
+  // page must not offer the retry it offers for one.
+  check("and it is not marked as worth a retry", res.retryable === false, JSON.stringify(res.retryable));
+
+  /* The third shape, which `spellingClash` cannot produce but this exported
+   * function accepts: two sections *and* an answered table. The sentence still
+   * has to say only what is true — no claim about a table that answered, and no
+   * button that cannot help. */
+  const twoSectionsAnswered = spellingClashMessage(
+    { name: "deepseek", section: "providers", others: [{ name: "DEEPSEEK", section: "custom_providers" }] },
+    "DeepSeek",
+    list
+  );
+  check(
+    "a two-section clash with an answered table claims nothing false and offers nothing to press",
+    !twoSectionsAnswered.message.includes("刷新") &&
+      !twoSectionsAnswered.message.includes("重装") &&
+      !twoSectionsAnswered.message.includes("没能读到") &&
+      !twoSectionsAnswered.message.includes("服务表读回来是空的"),
+    twoSectionsAnswered.message
+  );
+}
+
 /* ---- a dotted custom name is one name, not two segments ----
  * `my.gateway` already has a `custom_providers` entry, so upstream accepts the
  * field write and routes it there. The key has to stay `providers.my.gateway.

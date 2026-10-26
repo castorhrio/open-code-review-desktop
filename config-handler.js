@@ -152,18 +152,26 @@ const spellingClash = (view, name, presetList) => {
  * One entry: name it and its section, and say which spelling to use. That is
  * the whole story — the CLI reads one section, and this is the entry in it.
  *
- * Two entries (only possible while the registry is silent, because that is the
- * only case where both sections are checked): name both, and say that the
- * desktop cannot tell which section the CLI will read, so *both* have to be
- * reconciled. Pointing at a single spelling here is what made the refusal
- * unfixable in one step: the user renamed the form to that spelling, the save
- * went through, and the other entry was still there.
+ * Two entries: name both, and say why both have to be reconciled, because a
+ * refusal that names one spelling is unfixable in one step — the user renames
+ * the form to that spelling, the save goes through, and the other entry is
+ * still there. There are two ways to be in this branch, and they have different
+ * reasons, so they get different sentences:
  *
- * The two-entry branch also says *why* the table was silent, because the fix
- * differs: an unreadable table is worth one more 刷新, a hollow one is not (see
- * `tableSilenceOf`). Both silences used to share one sentence — "这一版没能读到
- * 那张表" — which was accurate for the failed read and misleading for the empty
- * one, where the fix is on the install and the refresh button only loops.
+ * - **one section** — the two spellings both sit in the section the CLI reads
+ *   (`spellingClash` can find this while the registry answered: the file holds
+ *   two spellings of one name in `providers`). Which section the run opens is
+ *   not in doubt here, so the sentence says the doubt that *is* there: one run
+ *   reads the entry the `provider` field spells, and the other spelling's Key
+ *   is not read. It must not mention the table, 刷新 or 重装 — none of them
+ *   changes which entry the run reads, so offering one sends the user to a
+ *   button that cannot help.
+ * - **two sections** — only possible while the registry is silent, and there
+ *   the section really is unknown. The sentence says *why* the table was
+ *   silent, because the way out differs: an unreadable table is worth one more
+ *   刷新, a hollow one is not (see `tableSilenceOf`). Both silences used to
+ *   share one sentence — "这一版没能读到那张表" — accurate for the failed read
+ *   and misleading for the empty one, where the fix is on the install.
  *
  * Pure in `clash`, `name` and the registry list, so it is exported and the
  * check can assert `entries` directly — and assert that `save` hands back this
@@ -183,10 +191,6 @@ const SPELLING_SILENCE = {
     why: "CLI 自己的服务表读回来是空的（CLI 一定有内置服务名，所以这多半是装得不完整），说不准这个名字算不算内置名",
     tail: "点刷新重试也是同样的结果——请先重装或升级 OCR CLI，再回来处理这几条。",
   },
-  "": {
-    why: "这一版没能读到那张表，说不准它会读哪一段",
-    tail: "",
-  },
 };
 const spellingClashMessage = (clash, name, presetList) => {
   const entries = [{ name: clash.name, section: clash.section }, ...(clash.others || [])];
@@ -197,10 +201,30 @@ const spellingClashMessage = (clash, name, presetList) => {
       message: `配置里已有 ${listed}，与表单里的 ${name} 只差大小写；CLI 按 provider 字段的原始拼写读条目，这样保存会把同一个服务分成两条，旧条目里的 Key 不会再被读到。请改用已有的拼写 ${clash.name}。`,
     };
   }
-  const silence = SPELLING_SILENCE[tableSilenceOf(presetList)] || SPELLING_SILENCE[""];
+  // Which doubt the sentence has to describe is decided by the entries, not by
+  // the table alone: two spellings in one section leave no doubt about *which*
+  // section the run opens.
+  const sections = new Set(entries.map((entry) => entry.section));
+  const sameSection = sections.size === 1;
+  const silence = sameSection ? null : SPELLING_SILENCE[tableSilenceOf(presetList)];
+  let why;
+  let tail = "";
+  if (sameSection) {
+    why = `而且这 ${entries.length} 条都在 ${entries[0].section} 段，一次运行只会读到 provider 字段拼出来的那一条，其它拼写里的 Key 不会再被读到`;
+  } else if (silence) {
+    why = `而且读哪一段取决于这个名字在 CLI 自己的服务表里算不算内置名——${silence.why}`;
+    tail = silence.tail;
+  } else {
+    // Unreachable through `spellingClash` — both sections are only scanned while
+    // the table is silent — but this function is exported and pure in its three
+    // arguments, so a two-section clash can be handed in with an answered table.
+    // The sentence then says only what is true of the entries, and offers no
+    // action this page cannot take.
+    why = `而且这 ${entries.length} 条分布在不同的配置段里，读哪一段取决于这个名字在 CLI 自己的服务表里算不算内置名`;
+  }
   return {
     entries,
-    message: `配置里已有 ${entries.length} 条只差大小写的条目：${listed}，都与表单里的 ${name} 只差大小写；CLI 按 provider 字段的原始拼写读条目，而且读哪一段取决于这个名字在 CLI 自己的服务表里算不算内置名——${silence.why}，所以每一条都要你自己核对：请在配置文件里把不要的那一条改掉或删掉，再改用要留的那条的拼写保存。${silence.tail}`,
+    message: `配置里已有 ${entries.length} 条只差大小写的条目：${listed}，都与表单里的 ${name} 只差大小写；CLI 按 provider 字段的原始拼写读条目，${why}，所以每一条都要你自己核对：请在配置文件里把不要的那一条改掉或删掉，再改用要留的那条的拼写保存。${tail}`,
   };
 };
 
