@@ -170,6 +170,13 @@ async function inspect(repo) {
  *
  * The ref is echoed back on every failure, because the caller has to be able to
  * say *which* snapshot it could not read.
+ *
+ * `missing` / `bad-ref` / `failed` are this reader's own vocabulary. The other
+ * file reader — `install-info.js`'s `openFile`, which opens a file in the working
+ * tree — answers `no-file` / `missing` / `open-failed`, and the two are not
+ * interchangeable: the renderer branches per endpoint, and each vocabulary is
+ * pinned by its own smoke checks (`tools/git-service-smoke.mjs`,
+ * `tools/install-info-smoke.mjs`).
  */
 async function readFileAtRef(repo, relPath, ref, startLine, endLine, pad) {
   const res = await git(["show", `${ref}:${relPath}`], repo);

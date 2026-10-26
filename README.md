@@ -156,7 +156,10 @@ The UI once drifted, one reasonable-looking change at a time, into three differe
 Everything is checked by rendering the real bundle against a stubbed IPC bridge in headless Edge — no Electron, no desktop — plus one check that drives the actual Electron process, because some behaviour only exists there.
 
 ```
-npm run audit           # typecheck + all the checks below
+npm run audit           # audit:static, then audit:app — everything below
+npm run audit:static    # typecheck + packaging + install + bridge + config + diagnostics +
+                        #   service + git + update — plain Node, no build, no Electron
+npm run audit:app       # build + ui + ui-scaled + contrast + guards + exit + e2e + secrets
 npm run audit:packaging # every runtime module is in the build.files allowlist
 npm run audit:bridge    # preload.js and the Bridge interface agree, both ways
 npm run audit:diagnostics # what the app keeps about a run the CLI does not persist
@@ -169,6 +172,8 @@ npm run audit:guards    # navigation + window-open policy, in real Electron
 npm run audit:exit      # the run evidence survives the app's exit, in real Electron
 npm run audit:e2e       # renderer -> preload -> ipcMain -> CLI, in real Electron
 ```
+
+The two halves are separate so a CI job can run them in parallel, and so a red UI shot can be re-run without paying for the CLI suite again (and the reverse); `audit` is the two, in this order, which is also the order the checks grew in.
 
 All of them exit non-zero on findings, so they work as a gate rather than a log, and each states what it inspected — a check that reports "0 problems" without saying what it looked at manufactures confidence rather than providing it, so they refuse to pass vacuously.
 

@@ -948,6 +948,29 @@ check(
     JSON.stringify(spellingClash({ providers: { DeepSeek: {} }, customProviders: { deepseek: {} } }, "DeepSeek", silent))
   );
 
+  /* The exact scan is asked of the *answered* path too, and there it carries the
+   * whole weight of "a re-save is legal": saving the spelling the file already
+   * uses rewrites that entry rather than splitting it, so the refusal below must
+   * not fire. Both sections are read here — a built-in name in `providers`, and
+   * a custom one in `custom_providers` where the registry's list has nothing to
+   * say — because the section is picked by `isPreset` and only one of them is
+   * exercised by the silent-registry check above. With the exact loop removed,
+   * the variant scan underneath finds these same entries and refuses them, which
+   * is what these two turn red on.
+   */
+  const exactAnsweredBuiltin = spellingClash({ providers: { deepseek: {} } }, "deepseek", answered);
+  check(
+    "a re-save under the spelling the file already uses is not a clash, with the registry answered",
+    exactAnsweredBuiltin === null,
+    JSON.stringify(exactAnsweredBuiltin)
+  );
+  const exactAnsweredCustom = spellingClash({ customProviders: { "my.gateway": {} } }, "my.gateway", answered);
+  check(
+    "...and the same holds for a custom name, in the section the CLI reads for it",
+    exactAnsweredCustom === null,
+    JSON.stringify(exactAnsweredCustom)
+  );
+
   /* ...and the exact scan runs over *every* section before the first variant is
    * collected, so "the spelling the file already uses wins" cannot depend on
    * which section holds it.

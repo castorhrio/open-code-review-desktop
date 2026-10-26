@@ -65,7 +65,9 @@ const tableSilenceOf = (presetList) => {
  * the other spelling is a mistake, not a rename: refuse before writing.
  *
  * An exact key wins over any variant — if both spellings exist, the form is
- * pointing at the one it named.
+ * pointing at the one it named. The two scans run in that order over the same
+ * section list, so the exact answer wins even when the variant sits in the
+ * earlier section.
  *
  * The answer carries the **section** the entry was found in, not just its
  * name: the two live in different places of `config.json`, and the fix is a
@@ -111,6 +113,13 @@ const spellingClash = (view, name, presetList) => {
     // it leaves behind is harmless. A rejected save costs a retry; a split
     // entry costs a Key the run silently never reads.
     : [["providers", view && view.providers], ["custom_providers", view && view.customProviders]];
+  // Two scans over that one list, exact before variant. The exact scan is not a
+  // formality: it is what keeps a re-save legal. Saving the name the file
+  // already spells is the *same* entry being rewritten, not a second one — and
+  // it is reachable with the registry answered, which is why the loop is asked
+  // about the sections list rather than only about the silent path. Delete it
+  // and a re-save starts refusing itself; `tools/config-handler-smoke.mjs` reads
+  // both sections with a registry answer for exactly that.
   for (const [, section] of sections) {
     for (const key of Object.keys(section || {})) if (key === name) return null;
   }

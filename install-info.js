@@ -202,6 +202,11 @@ function createInstall({
   // is still there can have no handler for its type. "Failed to open path" fits
   // both, so the *missing* one is decided here, before the shell is asked — the
   // renderer then says 「不在了」 with the path instead of repeating the shell.
+  //
+  // `no-file` / `missing` / `open-failed` are this call's own vocabulary, not the
+  // one `readFile` answers with (`missing` / `bad-ref` / `failed`): different
+  // reader, different question. `missing` is the only word they share, and each
+  // smoke file pins its own list rather than the pair.
   async function openFile(target) {
     if (!target) return { ok: false, error: "没有可打开的文件", reason: "no-file", action: OPEN_FILE, path: "" };
     if (!exists(target))
