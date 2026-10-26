@@ -4,13 +4,13 @@
 规则见 [`OCR-UPSTREAM-SYNC.md`](OCR-UPSTREAM-SYNC.md)：每轮至少检查一次上游，
 有更新就记在这里，不要静默忽略。
 
-本文件只留**现状**：上游状态表、待办、最近两轮的正文。第 2–14 轮的加固正文和
+本文件只留**现状**：上游状态表、待办、最近两轮的正文。第 2–15 轮的加固正文和
 已经划掉的待办搬到了 [`hardening-log.md`](hardening-log.md)——表和十几轮正文
 挤在一个文件里，正是那张表漏过四行的温床。
 
 ---
 
-## 上游状态（最近检查：2026-10-26，第 16 轮复核）
+## 上游状态（最近检查：2026-10-26，第 17 轮复核）
 
 上游 `alibaba/open-code-review` 自 desktop 锁定的 `v1.13.0` 之后发布了
 **3 个补丁版本**：`v1.13.1` / `v1.13.2` / `v1.13.3`（共 18 个 commit）。
@@ -39,8 +39,9 @@ desktop 的依赖已升到 `^1.13.3`（`package.json` / `package-lock.json`）�
 | 14 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（GitHub API 三核对：commits / tags / releases） |
 | 15 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（GitHub API 三核对：commits / tags / releases） |
 | 16 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（GitHub API 三核对：commits / tags / releases） |
+| 17 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（`git fetch upstream --tags` 成功 + GitHub API 三核对：commits / tags / releases） |
 
-结论：第 2–12、14–16 轮都没有需要移植的新功能 / 修复 / 破坏性变更，desktop 的
+结论：第 2–12、14–17 轮都没有需要移植的新功能 / 修复 / 破坏性变更，desktop 的
 封装（CLI flag、输出解析、配置暴露点）无需改动；第 13 轮没有留下复核记录。
 顶端 commit 仍是 `375f64c`（2026-10-20，`fix(tool): report an empty code_comment
 batch instead of success (#1773)`），最新 tag / release 仍是 `v1.13.3`。
@@ -114,6 +115,78 @@ curl -s 'https://api.github.com/repos/alibaba/open-code-review/tags?per_page=5'
 
 ---
 
+## 第 17 轮 desktop 侧加固（与上游无关）
+
+上游本轮无新提交（顶端仍是 `375f64c` / `v1.13.3`，见上面第 17 轮复核），不移植。
+本轮做一件事：**把「一次运行结束时的那几句话」钉到同一个去处**，并复核简报里
+P0-1 / P1-1 两条。
+
+### P0 — 一次运行的结束，只有一个去处
+
+`run-handler.js` 这条路上有三句关于「这次运行怎么结束的」的话，严重程度不同，
+去处却有两个：
+
+| 句子 | 谁说的 | 讲的是什么 |
+| --- | --- | --- |
+| `settle-failed` | handler 自己的 `catch` | 收尾根本没做完，退出信号可能没发 |
+| `signal-failed` | `settleRunExit` 里面 | 证据在盘上，只是推送失败 |
+| 迟到的写盘结果 | `onLate` | 写盘在越过上限之后才落地 |
+
+三句里**只有第一句**走 handler 的 `warn`（也就是注入的那个去处）。后两句走的是
+`settleRunExit` 自己的 `warn`——而 **handler 以前根本没给它**：
+`settleRunExit` 把 `opts.warn` 透传给 `reportOutcome`，没给就退回 `console.warn`。
+于是：
+
+- 注入一个 `warn` 的调用方只看得到**一半**；
+- 另一半进了主进程的 stderr。它不会进渲染进程的日志抽屉（抽屉吃的是
+  `run:log`），开发时在终端里看得见，打包成 GUI 应用后没有窗口可看。
+
+改动很小：`run-handler.js` 把同一个 `log`（注入的 `warn`，没有就
+`console.warn`）交给 `settleRunExit` 的 `warn` 与 `onLate`。三句话从此一个去处。
+
+**断言**（`tools/run-diagnostics-smoke.mjs`，+7 条，走 handler 而不是直接调
+`settleRunExit`）：
+
+- 退出推送抛错 → 报的是 `signal-failed`（那句「退出信号推送失败」），**不是**
+  `settle-failed`（那是另一件事：收尾根本没做完）；
+- handler 自己的最后一道报告没有触发；
+- 那个去处里**只有这一句**（一句不多），推送也只发生了一次；
+- 证据在推送失败之前就已经在盘上；
+- 越过上限之后才落地的写盘，结果也进同一个去处。
+
+**实测**：把 `warn` 的接线去掉 → 3 条变红（`signal-failed` 那句与迟到的写盘结果
+都不在去处里）；把 handler 的 `try/catch` 改回 `.catch(() => {})` → 5 条变红
+（简报的验收条件是「至少 2 条」）。
+
+### 复核 — 简报的 P0-1 与 P1-1，已经钉住了，不用再做
+
+- **P0-1（`makeRunHandler` 的端到端断言）**：`tools/run-diagnostics-smoke.mjs`
+  里已经有「the settle that never finishes」一节——它就是用 `makeRunHandler` 造
+  handler、让 `startRun` 回调 `onDone`，然后断言 `reportOutcome` 收到的是
+  `settle-failed`、日志里是 `settleFailedMessage()` 那句、退出信号**没有**发出去
+  （门没开），以及那个拒绝被处理掉（没有 unhandledRejection）。简报担心的
+  「只钉了 `settleRunExit` 本身」是旧状态：那一节是端到端的。本轮补的是它
+  **没覆盖的那一格**——推送失败走 `signal-failed` 而不是 `settle-failed`
+  （见上），以及这两句话的**去处**。
+- **P1-1（`savedKey` 的参数形状）**：`tools/bridge-contract.mjs` 的探针按接口
+  声明的字段名逐个打标记，检查它们到达主进程时还在原来的名字下。实测把
+  `preload.js` 的 `savedKey` 改回两个位置参数
+  （`(name, url) => invoke(..., { name, url })`）→ **2 条变红**（参数个数 + 值的
+  去处）。不需要再加断言。
+
+### 仍然开放 — `signal-failed` / `settle-failed` 在真实应用里仍然读不到
+
+本轮把三句话**归到一个去处**，但这个去处今天仍然是 `console.warn`。这两句是
+唯一**没有退出信号可搭**的话（推送失败时根本没有退出信号，收尾失败时收尾本身
+没做完），所以它们到不了渲染进程的日志抽屉——store 的结果在退出信号**送达**时
+是跟着 payload 走的，渲染进程会写进日志，而这两句没有 payload。
+
+「界面可能仍显示运行中」这句话本该由日志抽屉自己打开（`TROUBLE_LINE` 匹配
+「失败」），所以缺的不是措辞，是去处。改法有两个：接 `run:log`（进抽屉，会让
+抽屉自己弹出来），或者写主进程的日志文件。**这是产品决定**，下一轮再定。
+
+---
+
 ## 第 16 轮 desktop 侧加固（与上游无关）
 
 上游本轮无新提交（顶端仍是 `375f64c` / `v1.13.3`），所以下面每一件都是
@@ -174,151 +247,35 @@ desktop 恰恰读不到那张表，所以它没有资格替用户选一条。
 
 ---
 
-## 第 15 轮 desktop 侧加固（与上游无关）
-
-上游本轮无新提交（顶端仍是 `375f64c` / `v1.13.3`，见上面第 15 轮复核），不移植。
-本轮做一件事：**把「拼写冲突时错报哪一段」从约定变成事实**，另把简报里剩下的两条
-复核结论记下来。
-
-### P0 — 拼写冲突的拒绝，要说清旧条目在哪一段
-
-`config-handler.js` 的 `spellingClash` 找出同名不同拼写的旧条目后，错误信息只说
-**名字**：
-
-> 配置里已有 deepseek，与表单里的 DeepSeek 只差大小写；…请改用已有的拼写 deepseek。
-
-但两段的条目住在 `config.json` 的不同地方：`providers` 段是内置服务的条目，
-`custom_providers` 段是自定义条目。用户拿到这句话，只能自己把整个配置文件翻一遍
-才知道去哪儿改——而「去哪儿改」正是这句话要回答的问题。
-
-- **改动**（`config-handler.js`）：`spellingClash` 的答案从「一个名字」变成
-  「名字 + 它在哪一段」，错误信息里说成「配置里已有 deepseek（在 providers 段）」。
-  段的名称用的是**配置文件里的键**（`providers` / `custom_providers`），因为那才是
-  用户要翻的地方；设置页与 store 里本来也用这两个名字（`ocr config unset
-  custom_providers.<name>`）。
-  「同名不同拼写」与「拒绝在写入之前」这两条行为一个字没改。
-- **顺带钉住一个只有顺序能回答的问题**：注册表失联时两段都查，**先查到的那段**
-  才是被点名的那段。先 `providers` 后 `custom_providers` 是现在的顺序，理由是
-  `providers` 段存的是内置服务的条目，而内置服务名是注册表认得的那一类——注册表
-  失联时它只是最可能的那一类，所以顺序是「更可能」而不是「一定」。这条顺序以前
-  只写在注释里。
-
-**验证**（`tools/config-handler-smoke.mjs`，+6 条）：
-
-- 内置名撞内置名（`providers.deepseek` vs 表单 `DeepSeek`）→ 拒绝信息说
-  `providers 段`，且不提 `custom_providers`；
-- 自定义名撞自定义名（`custom_providers.my.gateway` vs 表单 `my.Gateway`）→ 拒绝
-  信息说 `custom_providers 段`；
-- **注册表失联 + 两段各有一个同拼写条目** → 报的是先查的那段（`providers` 侧），
-  另一段的条目名**不出现在**信息里，两个条目都没被动过（Key 还在、`provider` 没被
-  指过去）。
-
-  这一条里两段的条目**故意拼得不一样**（`deepseek` 与 `DEEPSEEK`）：两段写成同一个
-  拼法时，信息里出现的名字是哪一个都一样，断言会两边都过——那就没有钉住任何东西。
-  简报的验收条件里也写了这一句（"若结果相同则说明断言写得不够严，需改成检查 section
-  来源"）。
-
-**实测**：改动前后各跑一次 `npm run audit:config`，全绿；把 `spellingClash` 里的两段
-顺序反过来 → 上面第 3 组的两条断言变红（信息改为报 `DEEPSEEK` / `custom_providers
-段`）。
-
-### P0 — 简报的 P0-1 复核：`MATCH_ORDER → order-guess → 界面文案` 已有会红的断言
-
-简报担心这条链「本轮没被 `service-smoke.mjs` 触及」，可能会静默退化。**已复核，
-不需要补**：`tools/service-smoke.mjs` 里有 7 条断言守着它（`only the order rule
-withholds a Key`、`the Key of an entry no run opens is withheld, for the reason that
-says so`、`the answer stops before the endpoint…` 等），它们逐条断言
-`entryByName` 返回的规则是 `MATCH_ORDER`、`withholdReasonFor(MATCH_ORDER)` 是
-`order-guess`、Key 被扣下、端点不报、只要值的调用方也拿不到，以及 `order-guess`
-那句话与其余五种原因逐条不同。
-
-**实测**：把 `ocr-service.js` 的 `withholdReasonFor` 改成「`MATCH_ORDER` 分支返回
-`""`」→ 上面的 7 条断言全部变红。也就是说这条链不是靠约定维持的。
-
-### 已知取舍 — `MAX_ENTRIES` 轮换后，旧会话与干净会话**答得一样**
-
-这是 README 那句「a truncated run never looks like a clean one」的**已记录例外**，
-写在这里是为了别让人把它当 bug 又修一遍：
-
-- 上限证据按「仓库 + 会话」存，全局最多 `MAX_ENTRIES`（200）条。写第 201 条时，
-  最旧的一条被挤掉。
-- 被挤掉的那条会话**重开时答 `null`**——与「这条会话本来就干净」完全一样，
-  **界面上无法区分**。
-- 只有**触发轮换的那一次运行**的日志里会出现一行（`trimmed` 计数，第 14 轮的
-  `f52ac61`）。之后没有任何地方会再提这件事。
-- 为什么接受：另一种做法是文件无限增长（它在 profile 目录里，每次运行都要整份读
-  再整份写）。被挤掉的是最旧的记录，而用户最可能重开的正是最新的那些。
-- 以后要改的话（例如给 `read` 加 `rotated: true`，或加 `wasTrimmed(repo, sessionId)`），
-  必须同时改第 14 轮钉住「两者答案相同」的那条断言，并且接到界面上——否则一个
-  200 次运行之后的用户重开早期会话，仍会看到「干净」。
-
-
 ## 待移植 / 待验证
 
-### 已完成 — `manifest.run_failure` 的中文映射与展示
+**规则**：本节只留 `[开放]` 的条目——还没做的，或者结论是「要做、但还没做」的。
+已经做完的（`[关闭]`）与查过之后确认**不用改**的（`[无需改动]`）都搬去了
+[`hardening-log.md`](hardening-log.md)。理由和上一轮拆文件一样：**标题层不区分
+状态**，下一轮的人会把已经关掉的条目当待办，而「已关闭」这三个字藏在正文里，
+正是那张表漏过四行的同一个毛病。
 
-**状态（2026-10-26）**：**全部做完，别再重复实现**。
-
-- 失败原因的**中文映射已实现**（`bf065b5`，`src/lib/format.ts` 的
-  `RUN_FAILURE_LABEL` / `ITEM_FAILURE_LABEL`，两套词表由 `tools/service-smoke.mjs`
-  逐值断言）。
-- **报告页已摆出 `run_failure.reason`**（`f884499`）：`finding.tsx` 新增
-  `RunFailureNotice`，结果页与报告页都写出一行失败原因；分类是本程序自己的句子，
-  CLI 的原话标成「CLI 原始原因」并保持可选中。
-- **`CoverageItem.classification` 也从 tooltip 提成了可见文本**（同一个提交）：
-  未审/跳过行现在直接显示中文分类，CLI 的原话挪到该行 tooltip，并按去重后在行
-  下方写出一次。
-
-上游的 `RunManifest` 有 `run_failure: { classification, reason }`，它会把
-`terminal_state` 强制成 `failed`。desktop 此前只显示一个红色「失败」徽章，
-**不显示失败原因**——用户知道失败了，但不知道为什么；这一刀已经补上。
-
-**词表（2026-10-25 复核，`internal/session/manifest.go` @ `v1.13.3`）**——上游是
-**两个**枚举，不是一份：
-
-- `RunFailureClass`（`manifest.run_failure.classification`，7 个）：
-  `input / configuration / timeout / cancelled / budget / internal / unknown`
-- `FailureClass`（`coverage.failed[].classification`，8 个）：
-  `provider / timeout / cancelled / configuration / input / budget / panic / unknown`
-
-本文档此前把 run-level 一段写成了 8 值的那一份（含 `provider` / `panic`），
-是把两个枚举当成一个读了。真源已写进 `src/lib/types.ts` 的 `run_failure` 注释，
-两套映射（`RUN_FAILURE_LABEL` / `ITEM_FAILURE_LABEL`）由
-`tools/service-smoke.mjs` 逐值断言，上游新增分类会让 `audit:service` 变红。
-
-> 注意：`run_failure` 在 `v1.13.0` 就已经存在，不是这三个版本带来的；
-> 只是这三个版本让「预算截断」更常出现，把它暴露得更明显了。
-
-### P1 — `ocr scan --path` 的行为变更（`v1.13.2` `27def86`，#1709）
-
-`--path` 现在按文件系统解析，**不存在的路径是错误**，而不是静默选中 0 个文件并
-`exit 0`；大小写写错在大小写敏感的文件系统上也是错误。
-desktop 在 scan 模式暴露 `--path`（`ocr-service.js` 的 `path` flag）。
-
-对 desktop 是改善（以前静默空扫描，现在 CLI 会报错）；desktop 侧**已修复并验证**
-（`293c891`）：`scan --path` 指向不存在的路径时，预览/「开始审查」会把 CLI 的报错
-落成中文提示，而不是渲染成一个空的文件列表。此项关闭，无需再验证。
-
-### P1 — 空 code_comment 批次现在算工具失败（`v1.13.3` `375f64c`，#1773）
+### [开放] P1 — 空 code_comment 批次现在算工具失败（`v1.13.3` `375f64c`，#1773）
 
 CLI 之前把空的 `code_comment` 批次报成成功，现在报成错误。
 desktop 的「工具调用 N（失败 M）」直接读 CLI 的 `tool_calls.failure`，数字会更诚实，
 **无需改代码**；但 `audit:service` 的夹具里没有空批次场景，可以补一条。
 
-### P2 — CLI 侧的新语言 / 规则（`v1.13.2`）
+### [开放（产品口径待定，不是代码问题）] P2 — README 的「Features」表要不要提语言支持
 
-- `1325261` Shader Languages、`6d68b1a` Nushell、`46790d9` PowerShell 审查规则、
-  `9867a3d` OpenTofu 的 `.tofu` 扩展名。
+`v1.13.2` 往 CLI 自己的 allowlist / rules 里加了几种语言：`1325261` Shader
+Languages、`6d68b1a` Nushell、`46790d9` PowerShell 审查规则、`9867a3d` OpenTofu
+的 `.tofu` 扩展名。
 
-这些都进的是 CLI 自己的 allowlist / rules。desktop 不暴露语言清单，
-**无需改动**；但 README 的「Features」表目前没提语言支持，若要宣传需要另行确认口径。
+desktop 不暴露语言清单，**代码无需改动**；但 README 的「Features」表目前没提
+语言支持——要不要宣传、怎么写，是**产品口径**，不是代码问题，等一个决定。
 
 ### 与 desktop 无关
 
-- `ea5ced2` / `d73c9d3` 依赖安全更新、`b842659` grpc 升级
-- `410ddb8` MCP `tools/list` 分页（desktop 不暴露 MCP 配置）
-- `313519f` NixPkgs 的 `pkgs/` provider 目录
-- `55450a9` / `c0d623a` 上游 CI 的 PR 策略
+这一组查过之后 desktop 不用动（依赖安全更新、grpc 升级、MCP 分页、NixPkgs 的
+provider 目录、上游 CI 的 PR 策略），正文搬去了
+[`hardening-log.md`](hardening-log.md)。这里只留一个指针，免得下一轮的人
+再抄一遍。
 
 ---
 
@@ -331,7 +288,8 @@ desktop 的「工具调用 N（失败 M）」直接读 CLI 的 `tool_calls.failu
 把「`classifyRef` 的四种答案」「运行出口只有一扇门」「服务列表也只读一次表」这三条
 钉成断言，第 14 轮把「`reportOutcome` 自抛不得带走调用方」与「`MAX_ENTRIES` 轮换后
 的静默」钉住，第 15 轮把「拼写冲突时说的是哪一段」钉住并复核了「`MATCH_ORDER`
-必须扣 Key」那条链，第 16 轮把「两段都冲突时两段都要说完」补上；剩下的按优先级排在这里，下一轮挑。标注「**未动**」的条目是
+必须扣 Key」那条链，第 16 轮把「两段都冲突时两段都要说完」补上，第 17 轮把
+「一次运行结束时的三句话归到一个去处」钉住；剩下的按优先级排在这里，下一轮挑。标注「**未动**」的条目是
 最近一轮看过、确认仍然成立但没有改的——不是新发现。
 
 - **P2**：README 的 Status 段落里有**一次实测值**（`1200 findings` / `405ms` /
@@ -387,8 +345,12 @@ desktop 的「工具调用 N（失败 M）」直接读 CLI 的 `tool_calls.failu
 - **P3**：`finding.tsx` 的 `RunFailureNote`（只显示 tooltip）与 `RunFailureNotice`
   （可见文本）名字相近，看代码的人容易认错。文件 `src/components/finding.tsx`。
 - **P3**：`settleRunExit` 的 `signal-failed` 分支——这一行到底写到哪里、用户在
-  renderer 已销毁时能不能看见，尚未确认。若确实不可见，应改写到主进程日志文件
-  而不是 stderr。
+  renderer 已销毁时能不能看见。第 17 轮**查清楚了**：它写进主进程的
+  `console.warn`（stderr），不会进渲染进程的日志抽屉（抽屉吃的是 `run:log`），
+  打包成 GUI 应用后无处可看。`settle-failed` 同理。store 的结果在退出信号
+  **送达**时是跟着 payload 走、用户看得见的，只有这两句没有 payload 可搭。
+  改法有两个（接 `run:log` 进抽屉 / 写主进程日志文件），**是产品决定**，
+  下一轮再定。文件 `run-handler.js` / `run-diagnostics.js`。
 - **P3**：`RunFailureNotice` 的「CLI 原始原因可选中」目前没有对应的 UI 断言。
 
 

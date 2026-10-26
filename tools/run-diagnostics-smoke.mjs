@@ -1487,6 +1487,117 @@ check("and the exit says the evidence did not make it", outcomeMessage(slowExit)
   check("the rejection is handled, not left to the runtime", unhandled.length === 0, unhandled.map(String).join(" | "));
 }
 
+/* ---- the two end-of-run stories, told from the handler ----
+ * `settleRunExit` is written not to reject, so a *throwing exit signal* is
+ * caught inside it and answered as `signal-failed` — the milder story: the
+ * evidence is on disk and only the push failed. The handler's own
+ * `settle-failed` is the other story: the end of the run was not carried out
+ * at all. The other half of this pair is checked above; this half is the one
+ * that could go missing, because it is made *inside* the settle.
+ *
+ * It could go missing in two ways, and both used to happen:
+ *
+ *   1. the wrong story. If the handler's `catch` ever saw the throwing signal,
+ *      the user would be told the run may not have ended when it did end and
+ *      only the push failed — the one line about a lost exit signal replaced by
+ *      a stronger, wrong one.
+ *   2. the wrong place. The settle reports through the sink it is *given*, and
+ *      the handler used to give it none: the settle's lines went to the main
+ *      process's console while the handler's own line went to the injected
+ *      sink. A caller that injected a sink therefore saw half the story, and
+ *      the half nobody could see was the half about the screen still looking
+ *      busy.
+ */
+{
+  const pushExitChannel = createRunExitDoor(() => {}).channel;
+  const pushFailedLog = [];
+  const pushFailedReports = [];
+  let pushAttempts = 0;
+  const pushStore = createStore(path.join(dir, "push-failed", "run-diagnostics.json"));
+  const pushFailedHandler = makeRunHandler({
+    ocr: {
+      startRun(spec, onLog, onDone) {
+        onDone("push-failed-run", { sessionId: "push-failed-session", value: limitResult });
+        return { id: spec.runId };
+      },
+    },
+    store: pushStore,
+    send: (channel) => {
+      // Only the exit push throws. A `send` that threw for the log lines would
+      // be a different bug, and the exit is what this check is about.
+      if (channel !== pushExitChannel) return;
+      pushAttempts += 1;
+      throw new Error("the window was already gone");
+    },
+    reportOutcome: (outcome, warn, options) => {
+      pushFailedReports.push(outcome);
+      return reportOutcome(outcome, warn, options);
+    },
+    warn: (line) => pushFailedLog.push(line),
+  });
+  pushFailedHandler({ repo, mode: "review", runId: "push-failed-run" });
+  await new Promise((r) => setTimeout(r, 150));
+
+  check(
+    "a run whose exit push fails is told the push failed",
+    pushFailedLog.includes(`[run-diagnostics] ${signalFailedMessage()}`),
+    JSON.stringify(pushFailedLog)
+  );
+  check(
+    "and not that the run itself never ended",
+    !pushFailedLog.some((line) => line.includes(settleFailedMessage())),
+    JSON.stringify(pushFailedLog)
+  );
+  check(
+    "so the handler's own last-resort report stays quiet",
+    pushFailedReports.length === 0,
+    `${pushFailedReports.length} outcomes: ${JSON.stringify(pushFailedReports.map((o) => o && o.reason))}`
+  );
+  check(
+    "and the run's sink holds that one line and nothing else",
+    pushFailedLog.length === 1,
+    JSON.stringify(pushFailedLog)
+  );
+  check("the exit was pushed exactly once", pushAttempts === 1, `${pushAttempts}`);
+  const pushEvidence = await pushStore.readSettled(repo, "push-failed-session", 500);
+  check(
+    "the evidence was on disk before the push failed",
+    pushEvidence?.warnings?.length === 1,
+    JSON.stringify(pushEvidence)
+  );
+
+  /* The third line about a run, and the one with the shortest life: a write
+   * that lands *after* the bound. The run-exit path has already moved on by
+   * then, so the log is the only place left for the news — and it used to be
+   * reported with no sink at all, so it went to the console while the
+   * handler's other lines went to the caller's sink. */
+  const lateLog = [];
+  const lateHandler = makeRunHandler({
+    ocr: {
+      startRun(spec, onLog, onDone) {
+        onDone("late-run", { sessionId: "late-session", value: limitResult });
+        return { id: spec.runId };
+      },
+    },
+    // A store whose write lands after the bound: the exit goes out without the
+    // evidence, and the write's real outcome arrives afterwards.
+    store: {
+      record: () =>
+        new Promise((resolve) => setTimeout(() => resolve({ ok: false, reason: "io-error" }), 150)),
+    },
+    send: () => {},
+    timeoutMs: 40,
+    warn: (line) => lateLog.push(line),
+  });
+  lateHandler({ repo, mode: "review", runId: "late-run" });
+  await new Promise((r) => setTimeout(r, 320));
+  check(
+    "a write that lands after the bound is reported to the run's sink",
+    lateLog.some((line) => line.includes("上限证据在运行结束后写盘失败")),
+    JSON.stringify(lateLog)
+  );
+}
+
 /* ---- the last-resort report can throw too ----
  * `reportOutcome` itself is written not to throw (see its own check above), but
  * the handler accepts an injected one, and this is already the last resort: a

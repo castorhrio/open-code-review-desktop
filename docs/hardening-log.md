@@ -1,6 +1,6 @@
 # desktop 加固日志（历史归档）
 
-第 2–14 轮的加固正文，和已经划掉的待办条目，都搬到了这里。
+第 2–15 轮的加固正文，和已经划掉的待办条目，都搬到了这里。
 **现在该看的是 [`next-iteration.md`](next-iteration.md)**：上游状态、
 本轮待办、最近两轮的正文都在那里。
 
@@ -728,10 +728,127 @@ B 是 A 的祖先时是空的——**审 0 个文件，却报成一次干净的�
 
 ---
 
+## 第 15 轮 desktop 侧加固（与上游无关）
+
+上游本轮无新提交（顶端仍是 `375f64c` / `v1.13.3`，见
+[`next-iteration.md`](next-iteration.md) 复核表的第 15 轮那一行），不移植。
+本轮做一件事：**把「拼写冲突时错报哪一段」从约定变成事实**，另把简报里剩下的两条
+复核结论记下来。
+
+### P0 — 拼写冲突的拒绝，要说清旧条目在哪一段
+
+`config-handler.js` 的 `spellingClash` 找出同名不同拼写的旧条目后，错误信息只说
+**名字**：
+
+> 配置里已有 deepseek，与表单里的 DeepSeek 只差大小写；…请改用已有的拼写 deepseek。
+
+但两段的条目住在 `config.json` 的不同地方：`providers` 段是内置服务的条目，
+`custom_providers` 段是自定义条目。用户拿到这句话，只能自己把整个配置文件翻一遍
+才知道去哪儿改——而「去哪儿改」正是这句话要回答的问题。
+
+- **改动**（`config-handler.js`）：`spellingClash` 的答案从「一个名字」变成
+  「名字 + 它在哪一段」，错误信息里说成「配置里已有 deepseek（在 providers 段）」。
+  段的名称用的是**配置文件里的键**（`providers` / `custom_providers`），因为那才是
+  用户要翻的地方；设置页与 store 里本来也用这两个名字（`ocr config unset
+  custom_providers.<name>`）。
+  「同名不同拼写」与「拒绝在写入之前」这两条行为一个字没改。
+- **顺带钉住一个只有顺序能回答的问题**：注册表失联时两段都查，**先查到的那段**
+  才是被点名的那段。先 `providers` 后 `custom_providers` 是现在的顺序，理由是
+  `providers` 段存的是内置服务的条目，而内置服务名是注册表认得的那一类——注册表
+  失联时它只是最可能的那一类，所以顺序是「更可能」而不是「一定」。这条顺序以前
+  只写在注释里。
+
+**验证**（`tools/config-handler-smoke.mjs`，+6 条）：
+
+- 内置名撞内置名（`providers.deepseek` vs 表单 `DeepSeek`）→ 拒绝信息说
+  `providers 段`，且不提 `custom_providers`；
+- 自定义名撞自定义名（`custom_providers.my.gateway` vs 表单 `my.Gateway`）→ 拒绝
+  信息说 `custom_providers 段`；
+- **注册表失联 + 两段各有一个同拼写条目** → 报的是先查的那段（`providers` 侧），
+  另一段的条目名**不出现在**信息里，两个条目都没被动过（Key 还在、`provider` 没被
+  指过去）。
+
+  这一条里两段的条目**故意拼得不一样**（`deepseek` 与 `DEEPSEEK`）：两段写成同一个
+  拼法时，信息里出现的名字是哪一个都一样，断言会两边都过——那就没有钉住任何东西。
+  简报的验收条件里也写了这一句（"若结果相同则说明断言写得不够严，需改成检查 section
+  来源"）。
+
+**实测**：改动前后各跑一次 `npm run audit:config`，全绿；把 `spellingClash` 里的两段
+顺序反过来 → 上面第 3 组的两条断言变红（信息改为报 `DEEPSEEK` / `custom_providers
+段`）。
+
+### P0 — 简报的 P0-1 复核：`MATCH_ORDER → order-guess → 界面文案` 已有会红的断言
+
+简报担心这条链「本轮没被 `service-smoke.mjs` 触及」，可能会静默退化。**已复核，
+不需要补**：`tools/service-smoke.mjs` 里有 7 条断言守着它（`only the order rule
+withholds a Key`、`the Key of an entry no run opens is withheld, for the reason that
+says so`、`the answer stops before the endpoint…` 等），它们逐条断言
+`entryByName` 返回的规则是 `MATCH_ORDER`、`withholdReasonFor(MATCH_ORDER)` 是
+`order-guess`、Key 被扣下、端点不报、只要值的调用方也拿不到，以及 `order-guess`
+那句话与其余五种原因逐条不同。
+
+**实测**：把 `ocr-service.js` 的 `withholdReasonFor` 改成「`MATCH_ORDER` 分支返回
+`""`」→ 上面的 7 条断言全部变红。也就是说这条链不是靠约定维持的。
+
+### 已知取舍 — `MAX_ENTRIES` 轮换后，旧会话与干净会话**答得一样**
+
+这是 README 那句「a truncated run never looks like a clean one」的**已记录例外**，
+写在这里是为了别让人把它当 bug 又修一遍：
+
+- 上限证据按「仓库 + 会话」存，全局最多 `MAX_ENTRIES`（200）条。写第 201 条时，
+  最旧的一条被挤掉。
+- 被挤掉的那条会话**重开时答 `null`**——与「这条会话本来就干净」完全一样，
+  **界面上无法区分**。
+- 只有**触发轮换的那一次运行**的日志里会出现一行（`trimmed` 计数，第 14 轮的
+  `f52ac61`）。之后没有任何地方会再提这件事。
+- 为什么接受：另一种做法是文件无限增长（它在 profile 目录里，每次运行都要整份读
+  再整份写）。被挤掉的是最旧的记录，而用户最可能重开的正是最新的那些。
+- 以后要改的话（例如给 `read` 加 `rotated: true`，或加 `wasTrimmed(repo, sessionId)`），
+  必须同时改第 14 轮钉住「两者答案相同」的那条断言，并且接到界面上——否则一个
+  200 次运行之后的用户重开早期会话，仍会看到「干净」。
+
+---
+
 ## 已经划掉的待办（历史）
 
 这些条目在写下时是开放的，现在都收掉了。留着它们是为了让「当时认为
 还差什么」可查——下一轮接手的人不必重新发明一遍。
+
+- ~~`manifest.run_failure` 的中文映射与展示~~ → **全部做完**（`bf065b5` 映射，
+  `f884499` 展示）：失败原因的**中文映射已实现**（`src/lib/format.ts` 的
+  `RUN_FAILURE_LABEL` / `ITEM_FAILURE_LABEL`，两套词表由 `tools/service-smoke.mjs`
+  逐值断言）；**报告页已摆出 `run_failure.reason`**（`f884499`，`finding.tsx` 新增
+  `RunFailureNotice`，结果页与报告页都写出一行失败原因，分类是本程序自己的句子，
+  CLI 的原话标成「CLI 原始原因」并保持可选中）；**`CoverageItem.classification`
+  也从 tooltip 提成了可见文本**（同一个提交：未审/跳过行直接显示中文分类，CLI 的
+  原话挪到该行 tooltip，并按去重后在行下方写出一次）。desktop 此前只显示一个红色
+  「失败」徽章，**不显示失败原因**——用户知道失败了，但不知道为什么；这一刀已经
+  补上。
+  词表（2026-10-25 复核，`internal/session/manifest.go` @ `v1.13.3`）——上游是
+  **两个**枚举，不是一份：`RunFailureClass`（`manifest.run_failure.classification`，
+  7 个：`input / configuration / timeout / cancelled / budget / internal / unknown`）
+  与 `FailureClass`（`coverage.failed[].classification`，8 个：
+  `provider / timeout / cancelled / configuration / input / budget / panic / unknown`）。
+  本文档此前把 run-level 一段写成了 8 值的那一份（含 `provider` / `panic`），是把
+  两个枚举当成一个读了。真源已写进 `src/lib/types.ts` 的 `run_failure` 注释，两套映射
+  由 `tools/service-smoke.mjs` 逐值断言，上游新增分类会让 `audit:service` 变红。
+  > 注意：`run_failure` 在 `v1.13.0` 就已经存在，不是 `v1.13.1`–`v1.13.3` 带来的；
+  > 只是这三个版本让「预算截断」更常出现，把它暴露得更明显了。
+- ~~`ocr scan --path` 的行为变更（`v1.13.2` `27def86`，#1709）~~ → **关闭**：
+  `--path` 现在按文件系统解析，**不存在的路径是错误**（而不是静默选中 0 个文件并
+  `exit 0`），大小写写错在大小写敏感的文件系统上也是错误。desktop 在 scan 模式
+  暴露 `--path`（`ocr-service.js` 的 `path` flag），对 desktop 是改善。desktop 侧
+  **已修复并验证**（`293c891`）：`scan --path` 指向不存在的路径时，预览/「开始审查」
+  会把 CLI 的报错落成中文提示，而不是渲染成一个空的文件列表。无需再验证。
+- ~~CLI 侧的新语言 / 规则（`v1.13.2`）对 desktop 的影响~~ → **无需改动**：
+  `1325261` Shader Languages、`6d68b1a` Nushell、`46790d9` PowerShell 审查规则、
+  `9867a3d` OpenTofu 的 `.tofu` 扩展名，进的都是 CLI 自己的 allowlist / rules，
+  desktop 不暴露语言清单。README 的「Features」表要不要提语言支持，是**产品口径**，
+  留在 [`next-iteration.md`](next-iteration.md) 的「待移植 / 待验证」里（`[开放]`）。
+- ~~上游那几件与 desktop 无关的改动~~ → **无需改动**：`ea5ced2` / `d73c9d3` 依赖
+  安全更新、`b842659` grpc 升级、`410ddb8` MCP `tools/list` 分页（desktop 不暴露 MCP
+  配置）、`313519f` NixPkgs 的 `pkgs/` provider 目录、`55450a9` / `c0d623a` 上游 CI
+  的 PR 策略。
 
 
 - ~~`reportOutcome` 自身抛异常时，调用方会被一起带走（退出路径因此可能关不掉）~~

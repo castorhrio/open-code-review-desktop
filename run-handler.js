@@ -47,10 +47,23 @@ function makeRunHandler(options) {
   const outcomeMessage = opts.outcomeMessage || diagnostics.outcomeMessage;
   const reportOutcome = opts.reportOutcome || diagnostics.reportOutcome;
   const timeoutMs = opts.timeoutMs == null ? diagnostics.WRITE_TIMEOUT_MS : opts.timeoutMs;
-  // Only the last-resort reports below use it; the per-outcome ones ride along
-  // with `settleRunExit` (`onLate`) or with the exit payload, which is where the
-  // wording has to come from anyway.
+  // One sink for every line about this run.
+  //
+  // The handler's own last-resort report (`settle-failed`) and the settle's
+  // reports (the record's outcome, and the `signal-failed` line for a push that
+  // threw) are two halves of one story, and they used to have two sinks: the
+  // handler's went to the injected `warn`, the settle's went to the console —
+  // because the settle reports through the `warn` it is *given*, and the handler
+  // gave it none. A caller that injected a sink therefore saw half the story,
+  // and the other half went wherever `console.warn` goes (nowhere, in a
+  // packaged app). The per-outcome ones that ride along with the exit payload
+  // are unaffected: the wording there is the renderer's to show.
   const warn = typeof opts.warn === "function" ? opts.warn : undefined;
+  // `console.warn` is looked up when the line is written, not when the handler
+  // is made: the sink is a fallback, and a fallback that captured the function
+  // early would keep writing to a console that something else had already
+  // replaced.
+  const log = warn || ((line) => console.warn(line));
   const SETTLE_FAILED = opts.settleFailedOutcome || diagnostics.SETTLE_FAILED;
 
   return function runReview(spec) {
@@ -119,9 +132,16 @@ function makeRunHandler(options) {
           sessionId: result.sessionId || (result.value && result.value.session_id) || "",
           result: result.value || null,
           timeoutMs,
-          onLate: (late) => reportOutcome(late, undefined, { late: true }),
+          onLate: (late) => reportOutcome(late, log, { late: true }),
           exit,
           send,
+          // The settle reports through the sink it is given, so it gets the same
+          // one as everything else about this run. Without it, the line about a
+          // lost exit signal went to the main process's console while the
+          // handler's own line went to the caller's sink — two sinks for one
+          // story, and the half that matters most (the screen may still be
+          // showing the run as live) was the half nobody could see.
+          warn: log,
           payload: (outcome) => ({
             id,
             result,
@@ -145,13 +165,12 @@ function makeRunHandler(options) {
           // rejected settle is undebuggable. Neither report may throw — this is
           // already the last resort, and a throw here would hand the runtime a
           // rejection nobody is left to handle.
-          const log = warn || console.warn;
           const say = (fn) => {
             try {
               fn();
             } catch (_) {}
           };
-          say(() => reportOutcome(SETTLE_FAILED, warn));
+          say(() => reportOutcome(SETTLE_FAILED, log));
           say(() =>
             log(
               `[run-diagnostics] ${spec && spec.runId ? `${spec.runId}: ` : ""}settle 抛出的原始错误: ${(err && err.message) || err}`
