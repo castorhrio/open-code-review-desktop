@@ -62,18 +62,19 @@ fs.writeFileSync(path.join(bare, "Open Code Review.exe"), "");
  * `openThrows` is the shell that rejects anyway. That is not the contract, but it
  * is not this module's contract either, and an unhandled rejection here reaches
  * the renderer as a thrown `await` — the one failure shape that says nothing.
- * `true` means "reject with no reason at all", which is the one case a message
- * cannot be read off the error.
+ * Any value other than `undefined` is thrown as-is, so the two reasonless shapes
+ * (`null`, and an `Error` with an empty message) can each be stubbed exactly.
+ * `undefined` therefore means "do not throw" — not `null`, which is a value to
+ * throw and the one case a message cannot be read off.
  */
-const makeShell = (openError = "", openThrows = null) => {
+const makeShell = (openError = "", openThrows = undefined) => {
   const calls = { reveal: [], open: [] };
   return {
     calls,
     showItemInFolder: (p) => calls.reveal.push(p),
     openPath: async (p) => {
       calls.open.push(p);
-      if (openThrows === true) return Promise.reject();
-      if (openThrows) throw openThrows;
+      if (openThrows !== undefined) throw openThrows;
       return openError;
     },
   };
@@ -358,8 +359,9 @@ for (const platform of ["darwin", "linux"]) {
   // A rejection with nothing in it must not be mistaken for success: the success
   // case is the empty string, so an empty answer gets a sentence of its own
   // instead of passing for "". A guard written as `String(err)` alone would say
-  // "undefined" here; one written as `catch (_) {}` would say nothing at all.
-  const shell = makeShell("", true);
+  // "null" here; one written as `catch (_) {}` would say nothing at all. `null`
+  // is also the throw that a falsy check (`if (openThrows)`) would swallow.
+  const shell = makeShell("", null);
   const tools = make({ packaged: true, resources: path.join(installed, "resources"), shell });
   const res = await settle(tools.openDir(installed));
   check(
@@ -367,6 +369,46 @@ for (const platform of ["darwin", "linux"]) {
     res.ok === false && res.error === "打开失败：系统没有给出原因",
     JSON.stringify(res)
   );
+}
+
+{
+  // All three readers of `shell.openPath()` go through `openPathAnswer()`, and
+  // the success case is the *empty* answer — so a rejection that carries nothing
+  // readable (`null`, or an `Error` with an empty message) is exactly the shape
+  // that would pass for "opened" if the fallback sentence were dropped. The check
+  // above pins that for `openDir` only; a guard that moved out of the shared
+  // helper, or a caller that stopped reading its answer, would show up here for
+  // the other two.
+  for (const [what, thrown] of [
+    ["null", null],
+    ["an Error with an empty message", new Error("")],
+  ]) {
+    const shell = makeShell("", thrown);
+    const tools = make({ packaged: true, resources: path.join(installed, "resources"), shell });
+    const target = path.join(installed, "resources", "not-yet", "config.json");
+    const ancestor = path.join(installed, "resources");
+    const said = (res) => res.ok === false && typeof res.error === "string" && res.error.length > 0;
+
+    const reveal = await settle(tools.revealPath(target));
+    check(`a rejection of ${what} is still a refusal on the ancestor reveal`, said(reveal), JSON.stringify(reveal));
+    check(
+      "and it still says what was tried and what was missing",
+      reveal.action === "open-parent" && reveal.path === ancestor && reveal.missing === target,
+      JSON.stringify(reveal)
+    );
+
+    const opened = await settle(tools.openDir(installed));
+    check(`a rejection of ${what} is still a refusal on 「打开安装目录」`, said(opened), JSON.stringify(opened));
+    check("with the directory action still named", opened.action === "open-dir" && opened.path === installed, JSON.stringify(opened));
+
+    const file = await settle(tools.openFile(path.join(installed, "Open Code Review.exe")));
+    check(`a rejection of ${what} is still a refusal on 「用系统默认程序打开」`, said(file), JSON.stringify(file));
+    check(
+      "and it is still an opener failure, not a missing file",
+      file.reason === "open-failed" && file.action === "open-file",
+      JSON.stringify(file)
+    );
+  }
 }
 
 {

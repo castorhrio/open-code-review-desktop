@@ -4,13 +4,13 @@
 规则见 [`OCR-UPSTREAM-SYNC.md`](OCR-UPSTREAM-SYNC.md)：每轮至少检查一次上游，
 有更新就记在这里，不要静默忽略。
 
-本文件只留**现状**：上游状态表、待办、最近两轮的正文。第 2–21 轮的加固正文和
+本文件只留**现状**：上游状态表、待办、最近两轮的正文。第 2–23 轮的加固正文和
 已经划掉的待办搬到了 [`hardening-log.md`](hardening-log.md)——表和十几轮正文
 挤在一个文件里，正是那张表漏过四行的温床。
 
 ---
 
-## 上游状态（最近检查：2026-10-26，第 24 轮复核）
+## 上游状态（最近检查：2026-10-26，第 25 轮复核）
 
 上游 `alibaba/open-code-review` 自 desktop 锁定的 `v1.13.0` 之后发布了
 **3 个补丁版本**：`v1.13.1` / `v1.13.2` / `v1.13.3`（共 18 个 commit）。
@@ -47,8 +47,9 @@ desktop 的依赖已升到 `^1.13.3`（`package.json` / `package-lock.json`）�
 | 22 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（`git fetch upstream --tags` + GitHub API 核对 commits / tags；顶端 commit 与 tag 均未变） |
 | 23 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（`git fetch upstream --tags` + GitHub API 双核对 commits / tags；顶端 commit 与 tag 均未变） |
 | 24 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（`git fetch upstream --tags` + GitHub API 双核对 commits / tags；顶端 commit 与 tag 均未变） |
+| 25 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（`git fetch upstream --tags` 成功 + GitHub API 核对 commits / tags；顶端 commit 与 tag 均未变） |
 
-结论：第 2–12、14–24 轮都没有需要移植的新功能 / 修复 / 破坏性变更，desktop 的
+结论：第 2–12、14–25 轮都没有需要移植的新功能 / 修复 / 破坏性变更，desktop 的
 封装（CLI flag、输出解析、配置暴露点）无需改动；第 13 轮没有留下复核记录。
 顶端 commit 仍是 `375f64c`（2026-10-20，`fix(tool): report an empty code_comment
 batch instead of success (#1773)`），最新 tag / release 仍是 `v1.13.3`。
@@ -122,69 +123,6 @@ curl -s 'https://api.github.com/repos/alibaba/open-code-review/tags?per_page=5'
 
 ---
 
-## 第 23 轮 desktop 侧加固（与上游无关）
-
-上游本轮无新提交（顶端仍是 `375f64c` / `v1.13.3`，见上面第 23 轮复核），不移植。
-本轮只收第 22 轮留下的三处边角：**一条永远绿的检查**、**一个没人读的返回值**、
-**三条只证明了「能这样接」的源码断言**。
-
-### P0 — `audit:install` 真的会在失败时变红
-
-第 22 轮的简报说 `tools/install-info-smoke.mjs` 末行被截断成 `if (failures.length)`。
-复核后**已经不只是截断**：末行是 `if (failures.length) process.exit(1);`，
-入口脚本本身没有 `process.exitCode` 的隐患。但「写了 `process.exit(1)`」不等于
-「真的会红」——本轮把它**跑红了一次**：把 `install-info.js` 里
-「当前形态没有安装目录」改一个字，`npm run audit:install` 立刻 `exit=1`，
-改回来又是 `all ok`。这一步没有改代码，只是把「会红」这件事本身验证了一遍。
-
-### P0 — `revealPath` 读 `shell.openPath` 的返回值
-
-Electron 的 `shell.openPath(p)` **不 reject**：打不开时它 resolve 成一个非空
-error string。`revealPath` 的祖先回退分支（配置文件还没保存过时走的就是这条）
-既没有 `await` 也没有读返回值，于是文件管理器没打开、界面上却是 `ok: true`。
-
-- `install-info.js`：`revealPath` 改成 `async`，`await shell.openPath(existing)`，
-  非空返回值直接变成 `{ ok: false, error, action: "open-parent", path, missing }`。
-  「精确路径」那条分支不受影响：`showItemInFolder()` 返回 void，本来就没有可读的。
-  注释里同时写明 UNC 路径（`\\server\share`）的终止条件靠「父等于自身」，
-  **但没有在真实共享上验证过**。
-- `main.js`：`file:reveal` 的 handler 本来就只做 `=> install.revealPath(absPath)`，
-  返回 promise 即可，一行未改；菜单项改成 `void install.revealPath(...)`，
-  免得一个没人接的 rejection 冒到主进程。
-- 渲染层两条调用（设置页、结果页）本来就是 `await api.revealFile(...)`，
-  所以这次形变对界面是透明的——但**失败分支第一次真的会说话**。
-
-**断言**（`tools/install-info-smoke.mjs`）：stub 的 `openPath` 返回非空字符串时，
-`revealPath` 给出 `{ ok: false }` 且 `error` 就是那个字符串，`action` / `path` /
-`missing` 仍然齐全；反过来，「精确路径」分支在 `openPath` 会失败的前提下仍然
-`ok: true` 且根本不问 `openPath`。
-
-**实测**：把 `await shell.openPath(existing)` 改回只 `await` 不读返回值 →
-1 条变红（`a folder that could not be opened is reported, not swallowed`）。
-
-### P0 — 三个 IPC handler 的失败分支原样透传
-
-「判定搬进 `install-info.js`」之后，剩下的风险是**应用没把结论说出去**：handler
-自己吞掉 `plan.error`、或者换个说法，界面上就只剩沉默。本轮补三条读源码的断言
-（不够精确但也不至于一重构就红）：`app:openInstallDir` 与 `app:uninstall` 在
-`if (!plan.ok) return plan;` 之后才继续，`file:reveal` 直接返回模块的答案。
-
-**实测**：删掉 `app:uninstall` 的 `if (!plan.ok) return plan;` → 1 条变红。
-
-### P1 — `uninstallerPath` 的 `readdir` 抛错分支
-
-`uninstallerPath` 有 `try { … } catch (_) { return ""; }`，但夹具里没有能让它
-抛错的用例：删掉 `catch` 也全绿。本轮补一个 `readdir: () => { throw EACCES }`
-的夹具，断言 `uninstallerPath` 返回 `""`、`canUninstall` 为 `false`、
-`uninstallPlan()` 给出的是那句普通的「没有找到卸载程序」而不是崩溃。
-
-### 文档 — 第 20 / 18 轮搬进 hardening-log
-
-`next-iteration.md` 只留最近两轮的正文：本轮加入第 23 轮后，第 20 轮与第 18 轮
-（上两轮搬家时留下的）按既定规则搬进 [`hardening-log.md`](hardening-log.md)。
-
----
-
 ## 第 24 轮 desktop 侧加固（与上游无关）
 
 上游本轮无新提交（顶端仍是 `375f64c` / `v1.13.3`，见上面第 24 轮复核）。
@@ -228,6 +166,63 @@ error string。`revealPath` 的祖先回退分支（配置文件还没保存过�
 - `README.md` / `README.zh-CN.md`：三处（真机全量扫描、千级结果页、`project_summary`
   验证）改成能力描述 + 指向那一份；`1200` 条这个**夹具规模**留着——它是夹具事实，不是
   某次测量。
+
+---
+
+## 第 25 轮 desktop 侧加固（与上游无关）
+
+上游本轮无新提交（顶端仍是 `375f64c` / `v1.13.3`，见上面第 25 轮复核）。
+
+本轮把两处**上一轮新写、却没有夹具看着**的边界钉住：一句 fallback 文案、一个返回值
+的形状。这两处都是「改了就悄悄坏」的位置——文案被删掉时没有任何检查变红，返回值的
+`others` 少了条目时只有措辞层面的断言在看着。
+
+### P0 — `openPathAnswer()` 的空 message fallback，三个调用者各有一条
+
+`b820943` 给 `install-info.js` 加了 `said || "打开失败：系统没有给出原因"`，但夹具里
+只有 `openDir` 一条走过这条分支；`revealPath` 的 `open-parent` 分支与 `openFile` 只是
+「调用了同一个 helper」，没有一条断言证明它们的答案是拒绝。
+
+- `tools/install-info-smoke.mjs`：`makeShell` 的第二参数改成「只要不是 `undefined`
+  就原样抛出」（原来 `true` 是个专门的「无理由拒绝」标记），于是 `null`（非 Error 值）
+  与 `new Error("")`（空 message）两种无话可说的拒绝都能精确 stub。
+- 新增一组两条 × 三个调用者的断言：两种拒绝下，`revealPath` 的祖先分支、`openDir`、
+  `openFile` 都必须给出 `{ ok: false }` 且 `error` 是非空字符串，`action` / `path` /
+  `missing` / `reason` 仍然齐全。
+- **实测**：把 `said || "打开失败：系统没有给出原因"` 退回成 `said` →
+  `npm run audit:install` **5 条变红**（`null` 那三条 + 原有的 `openDir` 一条 +
+  `openFile` 的 `open-failed` 一条），改回来 `all ok`。
+
+### P0 — `spellingClash` 的答案有了形状断言
+
+`spellingClash` 一直只在 `createConfigHandler` 闭包里，夹具只能通过**数句子里的
+段名**来推断它的答案；那条路径把措辞也一起钉住了，而且「沉默时查两段」与「注册表
+可用时只查一段」的区别藏在文案里。
+
+- `config-handler.js`：`spellingClash` 搬到模块顶层（它本来就只读参数），并随
+  `makeConfigHandlers` 一起导出；闭包里的调用点一行未改。
+- `tools/config-handler-smoke.mjs`：直接读返回值。
+  - 注册表可用：内置名的冲突只列 `providers` 那一条（`others.length === 0`），
+    另一段里的同拼写条目**不算**冲突（返回 `null`）；注册表不认识的 `my.gateway`
+    只查 `custom_providers`，`name` / `section` 精确匹配。
+  - 注册表沉默（`ok: false`）且两段各一条：第一条是 `providers` 段那条，`others`
+    恰好一条，`name` / `section` 各自精确匹配。
+  - 精确命中（同名同大小写）返回 `null`。
+- **实测**：把 `return { …, others }` 改成 `others: []` → 1 条结构断言变红
+  （`and carries exactly one other entry, with its own spelling and section`），
+  改回来全绿。
+
+### 文档 — 第 23 轮搬进 hardening-log
+
+`next-iteration.md` 只留最近两轮的正文：本轮加入第 25 轮后，第 23 轮按既定规则搬进
+[`hardening-log.md`](hardening-log.md)。
+
+### 本轮没能跑的检查
+
+`npm run audit:guards` 在本机跑不起来：Electron 的 `chrome-sandbox` 需要 root:4755，
+进程在出报告前就 `FATAL` 掉了（`setuid_sandbox_host.cc`）。这是沙箱环境的限制，不是
+本轮改动引起的——本轮没碰 `main.js` / `preload.js`，`audit:bridge`（24 条）与
+`typecheck` / `audit:packaging` / `audit:install` / `audit:config` 都通过。
 
 ---
 
@@ -277,7 +272,8 @@ provider 目录、上游 CI 的 PR 策略），正文搬去了
 并给 `REF_LIMIT` 的命名 bases 补上截断断言，第 20 轮把 `log` / `warn` 两个可注入点
 收成一个 `sink`，并给 `removeEntry` 的失败补上夹具，第 23 轮把 `revealPath` 读起
 `shell.openPath` 的返回值、给 `readdir` 抛错补上夹具，第 24 轮把 `requireBuilt()` 的门扩大到
-夹具与 `vite.config.mjs`、把 README 的实测值搬进 `docs/measurements.md`；剩下的按优先级排在这里，下一轮挑。标注「**未动**」的条目是
+夹具与 `vite.config.mjs`、把 README 的实测值搬进 `docs/measurements.md`，第 25 轮把
+`openPathAnswer()` 的空 message fallback 与 `spellingClash` 的答案形状各钉成断言；剩下的按优先级排在这里，下一轮挑。标注「**未动**」的条目是
 最近一轮看过、确认仍然成立但没有改的——不是新发现。
 
 - **P2**：`git-service.js` 的 `REF_LIMIT` 排序里，`upstream` 是完整名（`origin/main`），

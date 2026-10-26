@@ -1043,8 +1043,6 @@ desktop 恰恰读不到那张表，所以它没有资格替用户选一条。
 
 ---
 
----
-
 ## 第 21 轮 desktop 侧加固（与上游无关）
 
 上游本轮无新提交（顶端仍是 `375f64c` / `v1.13.3`，见上面第 21 轮复核）。
@@ -1070,6 +1068,69 @@ entries could be filed; …`。`ocr-service.js` 的计数器对每条收尾行�
 「0 comment(s)」是结论，不是「没有新消息」。
 
 **实测**：去掉 `mark !== "✗"` → 1 条变红；改回 `|| progress.comments` → 1 条变红。
+
+---
+
+## 第 23 轮 desktop 侧加固（与上游无关）
+
+上游本轮无新提交（顶端仍是 `375f64c` / `v1.13.3`，见上面第 23 轮复核），不移植。
+本轮只收第 22 轮留下的三处边角：**一条永远绿的检查**、**一个没人读的返回值**、
+**三条只证明了「能这样接」的源码断言**。
+
+### P0 — `audit:install` 真的会在失败时变红
+
+第 22 轮的简报说 `tools/install-info-smoke.mjs` 末行被截断成 `if (failures.length)`。
+复核后**已经不只是截断**：末行是 `if (failures.length) process.exit(1);`，
+入口脚本本身没有 `process.exitCode` 的隐患。但「写了 `process.exit(1)`」不等于
+「真的会红」——本轮把它**跑红了一次**：把 `install-info.js` 里
+「当前形态没有安装目录」改一个字，`npm run audit:install` 立刻 `exit=1`，
+改回来又是 `all ok`。这一步没有改代码，只是把「会红」这件事本身验证了一遍。
+
+### P0 — `revealPath` 读 `shell.openPath` 的返回值
+
+Electron 的 `shell.openPath(p)` **不 reject**：打不开时它 resolve 成一个非空
+error string。`revealPath` 的祖先回退分支（配置文件还没保存过时走的就是这条）
+既没有 `await` 也没有读返回值，于是文件管理器没打开、界面上却是 `ok: true`。
+
+- `install-info.js`：`revealPath` 改成 `async`，`await shell.openPath(existing)`，
+  非空返回值直接变成 `{ ok: false, error, action: "open-parent", path, missing }`。
+  「精确路径」那条分支不受影响：`showItemInFolder()` 返回 void，本来就没有可读的。
+  注释里同时写明 UNC 路径（`\\server\share`）的终止条件靠「父等于自身」，
+  **但没有在真实共享上验证过**。
+- `main.js`：`file:reveal` 的 handler 本来就只做 `=> install.revealPath(absPath)`，
+  返回 promise 即可，一行未改；菜单项改成 `void install.revealPath(...)`，
+  免得一个没人接的 rejection 冒到主进程。
+- 渲染层两条调用（设置页、结果页）本来就是 `await api.revealFile(...)`，
+  所以这次形变对界面是透明的——但**失败分支第一次真的会说话**。
+
+**断言**（`tools/install-info-smoke.mjs`）：stub 的 `openPath` 返回非空字符串时，
+`revealPath` 给出 `{ ok: false }` 且 `error` 就是那个字符串，`action` / `path` /
+`missing` 仍然齐全；反过来，「精确路径」分支在 `openPath` 会失败的前提下仍然
+`ok: true` 且根本不问 `openPath`。
+
+**实测**：把 `await shell.openPath(existing)` 改回只 `await` 不读返回值 →
+1 条变红（`a folder that could not be opened is reported, not swallowed`）。
+
+### P0 — 三个 IPC handler 的失败分支原样透传
+
+「判定搬进 `install-info.js`」之后，剩下的风险是**应用没把结论说出去**：handler
+自己吞掉 `plan.error`、或者换个说法，界面上就只剩沉默。本轮补三条读源码的断言
+（不够精确但也不至于一重构就红）：`app:openInstallDir` 与 `app:uninstall` 在
+`if (!plan.ok) return plan;` 之后才继续，`file:reveal` 直接返回模块的答案。
+
+**实测**：删掉 `app:uninstall` 的 `if (!plan.ok) return plan;` → 1 条变红。
+
+### P1 — `uninstallerPath` 的 `readdir` 抛错分支
+
+`uninstallerPath` 有 `try { … } catch (_) { return ""; }`，但夹具里没有能让它
+抛错的用例：删掉 `catch` 也全绿。本轮补一个 `readdir: () => { throw EACCES }`
+的夹具，断言 `uninstallerPath` 返回 `""`、`canUninstall` 为 `false`、
+`uninstallPlan()` 给出的是那句普通的「没有找到卸载程序」而不是崩溃。
+
+### 文档 — 第 20 / 18 轮搬进 hardening-log
+
+`next-iteration.md` 只留最近两轮的正文：本轮加入第 23 轮后，第 20 轮与第 18 轮
+（上两轮搬家时留下的）按既定规则搬进 [`hardening-log.md`](hardening-log.md)。
 
 ---
 

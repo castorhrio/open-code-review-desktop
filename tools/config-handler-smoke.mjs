@@ -19,7 +19,7 @@ import path from "node:path";
 const ROOT = path.resolve(import.meta.dirname, "..");
 const require = createRequire(path.join(ROOT, "package.json"));
 const real = require(path.join(ROOT, "ocr-service.js"));
-const { makeConfigHandlers } = require(path.join(ROOT, "config-handler.js"));
+const { makeConfigHandlers, spellingClash } = require(path.join(ROOT, "config-handler.js"));
 
 const failures = [];
 const check = (name, ok, detail = "") => {
@@ -652,6 +652,70 @@ check(
       stub.state.custom_providers.DEEPSEEK?.api_key === "sk-other" &&
       stub.state.provider === "",
     JSON.stringify(stub.state)
+  );
+}
+
+/* ---- the clash answer is a shape, not a sentence ----
+ * The refusals above are checked by counting section mentions in the sentence,
+ * which pins the wording as much as the decision. `spellingClash` is a pure
+ * function of the view plus the registry list, so the decision itself can be
+ * read: which entry is named first, and which entries ride along in `others`.
+ *
+ * Both paths have to be pinned, because they check a different number of
+ * sections: with a registry answer only the section the *name* belongs to is
+ * looked at, and with the registry silent both are. A check that only looked at
+ * the message would be green for a handler that got the second path wrong but
+ * happened to name two entries from the first one's section.
+ */
+{
+  const answered = { ok: true, names: ["deepseek", "openai"], rows: [], matched: 2, error: "" };
+  const silent = { ok: false, names: [], rows: [], matched: 0, error: "registry unavailable" };
+  const both = { providers: { deepseek: {} }, customProviders: { DEEPSEEK: {} } };
+
+  const builtin = spellingClash(both, "DeepSeek", answered);
+  check(
+    "a built-in name's clash names the providers entry and nothing else",
+    builtin !== null &&
+      builtin.name === "deepseek" &&
+      builtin.section === "providers" &&
+      Array.isArray(builtin.others) &&
+      builtin.others.length === 0,
+    JSON.stringify(builtin)
+  );
+
+  const strayCustom = spellingClash({ customProviders: { deepseek: {} } }, "DeepSeek", answered);
+  check(
+    "and a same-spelled entry in the section the CLI will not read is not a clash",
+    strayCustom === null,
+    JSON.stringify(strayCustom)
+  );
+
+  const custom = spellingClash({ providers: { "my.gateway": {} }, customProviders: { "my.Gateway": {} } }, "my.gateway", answered);
+  check(
+    "a name the registry does not know is answered from custom_providers",
+    custom !== null &&
+      custom.name === "my.Gateway" &&
+      custom.section === "custom_providers" &&
+      custom.others.length === 0,
+    JSON.stringify(custom)
+  );
+
+  const two = spellingClash(both, "DeepSeek", silent);
+  check(
+    "a silent registry puts the providers entry first",
+    two !== null && two.name === "deepseek" && two.section === "providers",
+    JSON.stringify(two)
+  );
+  check(
+    "and carries exactly one other entry, with its own spelling and section",
+    two !== null && two.others.length === 1 && two.others[0].name === "DEEPSEEK" && two.others[0].section === "custom_providers",
+    JSON.stringify(two && two.others)
+  );
+
+  check(
+    "an exact key is not a clash at all",
+    spellingClash({ providers: { DeepSeek: {} }, customProviders: { deepseek: {} } }, "DeepSeek", silent) === null,
+    JSON.stringify(spellingClash({ providers: { DeepSeek: {} }, customProviders: { deepseek: {} } }, "DeepSeek", silent))
   );
 }
 
