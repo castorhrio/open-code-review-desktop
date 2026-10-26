@@ -18,6 +18,39 @@ pin 块，这样它就不会某天被当成第二个权威源。
 
 ---
 
+## 上游状态（最近检查：2026-10-27，第 66 轮）
+
+第 66 轮复核：**两条通路一致，结论仍是「无新内容」**。
+`git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
+refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
+（与第 49–65 轮同一个 commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
+`dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`；`npm view @alibaba-group/open-code-review
+version dist-tags` 仍是 `1.13.3` / `latest: 1.13.3`。desktop 的 `^1.13.3` 无需改动，
+**无移植项**；本轮没有上游 API / CLI / 配置面的变化要移植。
+
+本轮不加新模块，改的是「已有断言更难被绕过」，三处：
+
+- **`tools/e2e-flow.cjs`：没跑 ≠ 通过。** picker 的每一步现在都经 `pickerCheck`
+  登记：`dialog.showOpenDialog` 打不上桩时，每条断言都**红着出现**并写明「这一步没跑」，
+  而不是整段从报告里消失（消失会被任何数失败的汇总当成绿色）。`waitFor` 的超时带上
+  `__timeout` 标记，`screenAfter` 据此产出不同文案：「60s 内预览没出现」（CLI 慢 / spec
+  没到）与「预览出现但不含 a.go」（renderer 组错了 spec）不再读成同一句话；依赖屏幕内容
+  的另外三条断言在超时时也明确写「没有判过」，不再空屏通过。
+- **`repo:pickInside` 在开对话框之前就问「这个仓库可用吗」。** `path-guard.js` 新增
+  `repoIsPickable`（非空 + `path.isAbsolute`），`main.js` 用它挡住 renderer 传来的相对
+  路径：否则对话框会在进程工作目录打开，而 `relativeInside` 会拿相对根去比绝对选择，把
+  **真在仓库里**的子目录判成「所选目录不在该仓库内」。`audit:path` 断言顺序（先问再开
+  对话框）与「相对的仓库走 no-repo，不会去问 relativeInside」；真 Electron e2e 断言
+  `pickScanDir("relative/repo")` 根本没问对话框、答案是 `{ error }` 而不是 `{}`。
+- **kind 只有一个声明，未知 kind 抛错。** `PICK_INSIDE_KINDS` 成为四个 kind 的唯一来源，
+  `PICK_INSIDE_MESSAGES` 的键从它派生，`pickInsidePayload` 改成 `switch` + `default:
+  throw`；`{ kind: "inside" }` 没有字符串 `relPath`、拒绝没有 `error` 句子也一并抛错——
+  这些形状过去会变成 `{ error: undefined }` / `{ relPath: undefined }`，在 renderer 那边
+  读成「取消」。`src/lib/api.ts` 把三态写成一个 `PickScanDirAnswer` 联合类型（`{}` = 取消，
+  `?: never` 让漏读那一支编译就红），`ReviewPanel` 的读法改成「先 error、再 relPath、
+  最后视为取消」，与 `pickInsidePayload` 同一顺序。顺带 `pickFileOptions` 的扩展名去重
+  （`["md", ".md", " md "]` 是一条）也有断言。
+
 ## 上游状态（最近检查：2026-10-27，第 65 轮）
 
 第 65 轮复核：**三条通路一致，结论仍是「无新内容」**。

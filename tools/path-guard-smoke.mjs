@@ -599,6 +599,41 @@ const check = (name, ok, detail = "") => {
       table.filter(([, pickable]) => pickable).length === 1,
     JSON.stringify(table)
   );
+
+  /* The Windows answer is the one this predicate exists for, and it is the one
+   * shape a host-only test cannot see. `C:repo` is drive-relative — "the current
+   * directory on drive C" — so the dialog would open somewhere the user did not
+   * pick, and `relativeInside` would compare an absolute pick against it and
+   * refuse a real subdirectory. It is also one character away from the valid
+   * `C:\repo`, which is exactly the kind of input a stale `last-repo` produces. */
+  const win = { pathApi: path.win32 };
+  const windows = [
+    ["C:\\repo", true],
+    ["c:\\repo\\sub", true],
+    ["C:repo", false],
+    ["C:repo\\sub", false],
+    ["\\\\server\\share", true],
+    ["\\\\?\\C:\\Repo", true],
+    ["repo", false],
+    ["", false],
+  ].map(([value, expected]) => [value, repoIsPickable(value, win), expected]);
+  check(
+    "Windows: a drive path, a UNC share and a long path are pickable; a drive-relative path is not",
+    windows.every(([, actual, expected]) => actual === expected),
+    JSON.stringify(windows)
+  );
+  check(
+    "Windows: `C:repo` is refused while `C:\\repo` is accepted",
+    repoIsPickable("C:\\repo", win) === true && repoIsPickable("C:repo", win) === false,
+    "drive-relative means 'the current directory on C', so the dialog would open somewhere else"
+  );
+  check(
+    "the injected path API decides, not the host's",
+    repoIsPickable("C:\\repo", win) === true &&
+      repoIsPickable("C:\\repo", { pathApi: path.posix }) === false &&
+      repoIsPickable("/repo", { pathApi: path.posix }) === true,
+    "the same string must not be judged by the Windows and POSIX rules alike"
+  );
   const forbidden = () => {
     throw new Error("must not be called");
   };
@@ -735,6 +770,17 @@ const check = (name, ok, detail = "") => {
     /if \(!repoIsPickable\(repo\)\) return pickInsidePayload\(pickInsideAnswer\("", null\)\);/.test(pickInsideSrc) &&
       pickInsideSrc.indexOf("repoIsPickable(repo)") < pickInsideSrc.indexOf("showOpenDialog"),
     "a relative repo would otherwise open the dialog at the process's working directory and refuse a real subdirectory"
+  );
+  // `pickInsidePayload`'s unknown-kind throw is only a dead path at the IPC
+  // boundary while every answer it receives came from the decision. A hand-built
+  // `{ kind: ... }` in the registration would put the throw back on a path the
+  // renderer can reach (and would re-spell the shapes this module owns).
+  const payloadCalls = mainSrc.match(/pickInsidePayload\(/g) || [];
+  check(
+    "repo:pickInside never hands pickInsidePayload a hand-built answer",
+    payloadCalls.length === 2 &&
+      (mainSrc.match(/pickInsidePayload\(\s*pickInsideAnswer\(/g) || []).length === payloadCalls.length,
+    `calls=${payloadCalls.length} — every payload must be pickInsidePayload(pickInsideAnswer(...))`
   );
   check(
     "...and neither picker sentence is spelled in the registration",

@@ -25,6 +25,7 @@ const {
   pickFileOptions,
   PICK_INSIDE_MESSAGES,
 } = require(path.join(ROOT, "path-guard.js"));
+const { timeoutError, screenAfter, neverAppeared } = require(path.join(ROOT, "tools", "e2e-screen.cjs"));
 const reportPath = process.argv[2];
 const results = [];
 const check = (name, ok, detail) => results.push({ name, ok: Boolean(ok), detail: detail || "" });
@@ -145,15 +146,13 @@ function whenLoaded(win, timeout = 20000) {
   });
 }
 
-// A bounded wait whose timeout is *marked*. Two different failures used to arrive
-// at the caller as one: "the screen never appeared" (the CLI is slow, or the spec
-// never reached it) and "the screen appeared but does not say what was waited
-// for" (the renderer built the wrong spec). The callers re-read the screen in the
-// catch, so without a marker the report said "a.go never showed up" for both, and
-// a slow CLI on CI read as a broken renderer. The marker travels on the error and
-// `screenAfter` turns it into a different sentence.
-const timeoutError = (message) => Object.assign(new Error(message), { __timeout: true });
-
+// The timeout marker and the screen/verdict translation live in
+// `tools/e2e-screen.cjs` and are pinned by `tools/e2e-screen-smoke.mjs`. This
+// file only implements the bounded wait and supplies the Electron reader:
+// `waitFor` marks its own deadline with the shared `timeoutError`, and
+// `screenAfterWindow` adds the "read `main`" half to the shared `screenAfter`.
+// Keeping the verdict out of here is what makes "timed out" vs "failed for
+// another reason" testable without a real window.
 async function waitFor(win, expr, { timeout = 20000, label = expr } = {}) {
   const deadline = Date.now() + timeout;
   let last = null;
@@ -169,31 +168,17 @@ async function waitFor(win, expr, { timeout = 20000, label = expr } = {}) {
   throw timeoutError(`timed out waiting for ${label} (last: ${JSON.stringify(last)})`);
 }
 
-/**
- * The screen `waitFor` was watching, together with *why* the wait ended.
- *
- * `timedOut` is the marker on the error above, not "the text came back empty": a
- * screen showing an empty-scope sentence is a real answer and has to be judged as
- * one. The screen is read either way, so a failure can quote what was there when
- * the wait gave up, and `timeoutMs` lets the sentence name the budget.
- */
-const screenAfter = async (win, waiting, { timeoutMs }) => {
-  try {
-    const screen = await waiting;
-    return { screen, timedOut: false, timeoutMs };
-  } catch (err) {
-    const screen = await win.webContents
-      .executeJavaScript(`document.querySelector("main").innerText`, true)
-      .catch(() => "");
-    return { screen, timedOut: Boolean(err && err.__timeout), timeoutMs, error: err };
-  }
-};
-
-// What a check says when the screen it depends on never appeared: the same
-// sentence for every check that would otherwise pass on an empty screen.
-const neverAppeared = (what, timeoutMs) =>
-  `${what} did not appear within ${timeoutMs}ms, so this was not judged`;
-
+// The screen `waitFor` was watching, together with *why* the wait ended.
+// `timedOut` is the marker on the error above, not "the text came back empty": a
+// screen showing an empty-scope sentence is a real answer and has to be judged as
+// one. The screen is read either way, so a failure can quote what was there when
+// the wait gave up, and `timeoutMs` lets the sentence name the budget.
+const screenAfterWindow = (win, waiting, options) =>
+  screenAfter(
+    waiting,
+    () => win.webContents.executeJavaScript(`document.querySelector("main").innerText`, true).catch(() => ""),
+    options
+  );
 
 app.whenReady().then(async () => {
   let repo = null;
@@ -248,7 +233,7 @@ app.whenReady().then(async () => {
     //    reader to different halves of the app, so they are two different
     //    sentences rather than one.
     const previewTimeoutMs = 60000;
-    const preview = await screenAfter(
+    const preview = await screenAfterWindow(
       window,
       waitFor(
         window,
@@ -309,7 +294,7 @@ app.whenReady().then(async () => {
     );
 
     const rangeTimeoutMs = 60000;
-    const range = await screenAfter(
+    const range = await screenAfterWindow(
       window,
       waitFor(
         window,

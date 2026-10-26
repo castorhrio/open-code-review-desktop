@@ -178,7 +178,15 @@ const PICK_INSIDE_MESSAGES = Object.freeze({
 //
 // `path.isAbsolute` is used as the platform's answer on purpose: this is "did the
 // renderer hand over a path the OS would open as-is", not a second path rule.
-const repoIsPickable = (repo) => usable(repo) && path.isAbsolute(repo);
+//
+// The path API is injectable for the same reason the rest of this module is: the
+// answer differs by platform, and the platform where it matters is Windows —
+// `C:\repo` is absolute, `C:repo` is *drive-relative* (it means "the current
+// directory on drive C", so the dialog would open somewhere the user did not
+// pick). `tools/path-guard-smoke.mjs` passes `path.win32` so that distinction is
+// asserted on Linux too. The default is the host's API, which is what production
+// gets; the parameter exists for the test, not for a caller to override.
+const repoIsPickable = (repo, { pathApi = path } = {}) => usable(repo) && pathApi.isAbsolute(repo);
 
 function pickInsideAnswer(repo, picked, { relativeInside: relative } = {}) {
   if (!repoIsPickable(repo)) {
@@ -210,6 +218,18 @@ function pickInsideAnswer(repo, picked, { relativeInside: relative } = {}) {
 // silent no-op. A pure function can afford to be loud; `tools/path-guard-smoke.mjs`
 // pins the throw (and that it names the kind) so the loudness cannot be softened
 // back into a fall-through by accident.
+//
+// This throw is a **dead path at the IPC boundary**, by construction: the only
+// caller is `repo:pickInside` in `main.js`, and it wraps nothing but
+// `pickInsideAnswer(...)` — whose kind is always one of the four constants
+// above. The renderer cannot send a kind, so it cannot make the handler throw.
+// The throw is aimed at the *pair drifting apart* (a fourth kind decided but not
+// translated), which the smoke test catches before the app ships. If it were
+// ever reached, Electron would reject `ipcRenderer.invoke` rather than resolve a
+// wrong answer — a failed click, which is still better than a silent cancel, so
+// loud remains the right failure even there. `tools/path-guard-smoke.mjs` also
+// asserts that `main.js` never constructs an answer literal for this function,
+// which is what keeps "dead path" true instead of a comment nobody can rely on.
 function pickInsidePayload(answer) {
   switch (answer && answer.kind) {
     case PICK_INSIDE_KINDS.cancelled:
