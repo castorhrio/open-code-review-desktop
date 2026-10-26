@@ -328,16 +328,17 @@ ipcMain.handle("review:run", (_e, spec) => {
       // The CLI does not persist warnings, so this is the only moment the
       // round-limit signal exists. Record before the exit event reaches the
       // renderer, which may refresh history immediately: the write is queued and
-      // asynchronous (one whole-file read-modify-write at a time), so `run:exit`
-      // waits for it — otherwise the renderer could read `session:diagnostics`
-      // and find nothing simply because the rename had not landed yet.
+      // asynchronous (one whole-file read-modify-write at a time), so the exit
+      // signal waits for it — otherwise the renderer could read
+      // `session:diagnostics` and find nothing simply because the rename had
+      // not landed yet.
       //
       // That wait is bounded (`recordBounded`, the same 2s the exit flush uses):
       // the store's file lives in the profile directory, which can be a network
-      // mount, and an unbounded wait there would hold `run:exit` — and every
-      // spinner that ends on it — for as long as the disk took. Past the bound
-      // the renderer is told the run is over and the write stays queued, so it
-      // still lands (and a quit still waits for it).
+      // mount, and an unbounded wait there would hold the exit signal — and
+      // every spinner that ends on it — for as long as the disk took. Past the
+      // bound the renderer is told the run is over and the write stays queued,
+      // so it still lands (and a quit still waits for it).
       //
       // Only a lost `io-error` is real news. `no-session` is a known shape — the
       // CLI answered with truncation evidence but printed no session id at all
@@ -352,17 +353,19 @@ ipcMain.handle("review:run", (_e, spec) => {
       // shows the truncation — it is only this run's exit that did not wait.
       //
       // A write that only finishes *after* the bound reports through `onLate`:
-      // by then `run:exit` has been sent, so the only place left for the news
-      // is this log. Without it, a full disk under a slow profile directory
+      // by then the exit signal has been sent, so the only place left for the
+      // news is this log. Without it, a full disk under a slow profile directory
       // (the two usually arrive together) loses the evidence and says nothing.
       //
       // `settleRunExit` owns the order — the record first, the exit signal
       // after — because the renderer refreshes the history the moment it hears
-      // `run:exit`, and a record that has not landed yet would make a
-      // truncated session look clean again. The outcome rides along with the
-      // signal so the app can say out loud when the evidence did not make it
-      // to disk; the wording comes from the same place as the log line below,
-      // so there is only one version of it.
+      // the exit, and a record that has not landed yet would make a
+      // truncated session look clean again. It owns the *channel* too: this file
+      // does not name it, so the exit cannot be sent from anywhere else — the
+      // one door is opened by `settleRunExit` itself, after the record landed.
+      // The outcome rides along with the signal so the app can say out loud
+      // when the evidence did not make it to disk; the wording comes from the
+      // same place as the log line below, so there is only one version of it.
       settleRunExit({
         store: runDiagnostics,
         repo: spec.repo,
@@ -370,8 +373,12 @@ ipcMain.handle("review:run", (_e, spec) => {
         result: result.value || null,
         timeoutMs: WRITE_TIMEOUT_MS,
         onLate: (late) => reportOutcome(late, undefined, { late: true }),
-        signal: (outcome) =>
-          send("run:exit", { id, result, diagnostics: { ...outcome, message: outcomeMessage(outcome) } }),
+        send,
+        payload: (outcome) => ({
+          id,
+          result,
+          diagnostics: { ...outcome, message: outcomeMessage(outcome) },
+        }),
       }).catch(() => {});
     },
     (id, progress) => send("run:progress", { id, progress })

@@ -1695,6 +1695,34 @@ check(
   oneReadOther.calls.length === 1 && sharedRegistryAfter.ok === sharedLookup.tableOk,
   `${oneReadOther.calls.length} reads | ${sharedRegistryAfter.ok}`
 );
+// The third caller is the service list the settings page picks from: the
+// `app:providers` handler asks `providerTable()` for it. It is the same table,
+// so it has to be the same read — a second spawn is a second read, and a second
+// read can fail where the first succeeded, so the list on screen and the
+// sentence under the Key field could describe different worlds.
+svc.resetPresetCache();
+const listRead = tableRunner(TABLE_OK);
+const sharedList = await svc.providerTable({ runner: listRead.runner });
+const listLookup = await svc.savedKeyLookupByName("DeepSeek", DEEPSEEK_URL, sharedFile, { runner: listRead.runner });
+check(
+  "the service list and the Key decision read the built-in table once",
+  listRead.calls.length === 1,
+  `${listRead.calls.length} reads`
+);
+check(
+  "and both answers describe that one read",
+  sharedList.ok === true && listLookup.tableOk === true,
+  `${sharedList.ok} | ${listLookup.tableOk}`
+);
+svc.resetPresetCache();
+const listReadOther = tableRunner(TABLE_OK);
+await svc.savedKeyLookupByName("DeepSeek", DEEPSEEK_URL, sharedFile, { runner: listReadOther.runner });
+const sharedListAfter = await svc.providerTable({ runner: listReadOther.runner });
+check(
+  "the same holds when the service list comes second",
+  listReadOther.calls.length === 1 && sharedListAfter.ok === listLookup.tableOk,
+  `${listReadOther.calls.length} reads | ${sharedListAfter.ok}`
+);
 // A read that fails is one failure for both answers: the second one is answered
 // from the remembered failure rather than from a new read, so the banner and
 // the Key sentence cannot describe different worlds.

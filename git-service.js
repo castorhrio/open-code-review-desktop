@@ -73,11 +73,24 @@ async function resolveRef(repo, ref) {
  * CLI's merge-base diff: `A...B` is empty exactly when B is an ancestor of A.
  * Picking a descendant as `from` while `to` stays on HEAD therefore reviews
  * nothing at all, silently.
+ *
+ * Exported so the four answers can be pinned one by one: this function reads
+ * git's *stdout shape* ("<only-in-HEAD> <only-in-ref>"), and a shape it does
+ * not recognise has to answer "" rather than one of the four relations — a
+ * guess here is a range that reviews no file, and says nothing about it.
+ *
+ * The shape is read strictly: exactly two counts. Anything else — a third
+ * column, a missing half, a line that is not a number — answers "" as well,
+ * because "no relation" only makes the UI fall back to the working tree,
+ * while a relation read out of a shape that is not the documented one picks a
+ * range that silently reviews nothing.
  */
 async function classifyRef(repoRoot, ref) {
   const res = await git(["rev-list", "--count", "--left-right", `HEAD...${ref}`], repoRoot);
   if (res.code !== 0) return "";
-  const [left, right] = res.stdout.trim().split(/\s+/).map((n) => Number.parseInt(n, 10));
+  const parts = res.stdout.trim().split(/\s+/);
+  if (parts.length !== 2) return "";
+  const [left, right] = parts.map((n) => Number.parseInt(n, 10));
   if (!Number.isFinite(left) || !Number.isFinite(right)) return "";
   if (left === 0 && right === 0) return "same";
   if (left === 0) return "descendant";
@@ -234,4 +247,4 @@ async function readFile(repo, relPath, { ref, startLine, endLine, pad } = {}) {
   return readFileWindow(repo, relPath, startLine, endLine, pad);
 }
 
-module.exports = { inspect, readFile, readFileWindow, readFileAtRef, resolveRef, git };
+module.exports = { inspect, readFile, readFileWindow, readFileAtRef, resolveRef, classifyRef, git };

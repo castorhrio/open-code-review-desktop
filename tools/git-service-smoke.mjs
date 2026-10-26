@@ -240,6 +240,123 @@ fs.rmSync(notARepo, { recursive: true, force: true });
   check("no wording is classified as the opposite reason", swapped.length === 0, swapped.join(" | "));
 }
 
+/* ---- the four answers, one by one ----
+ * `classifyRef` reads git's *stdout shape* — "<only-in-HEAD> <only-in-ref>" —
+ * and turns it into one of four relations: `same`, `ancestor`, `descendant`,
+ * `diverged`. Those four decide the default `from` / `to` of a branch-range
+ * review, and picking the wrong one is the quietest failure in this file: a
+ * range that compares a descendant with HEAD is empty, so the review covers
+ * **no file at all** and still reports a clean run.
+ *
+ * The shape was only ever read from a real git, which proves that *today's* git
+ * prints it — not what happens when the shape is different, empty, or not a
+ * number. A shape the classifier does not recognise has to answer "" (no
+ * relation) rather than be guessed into one of the four: "" makes `inspect`
+ * leave the ref out of `relations` and the UI fall back to the working tree,
+ * while a guess picks a range that silently reviews nothing.
+ *
+ * So the four shapes are fed to the classifier one by one, with a stubbed
+ * `spawn`, and so are the shapes it does not know. The same four are then
+ * checked against real git, so the stub cannot be "right" in a way the real
+ * thing is not.
+ */
+{
+  const { EventEmitter } = await import("node:events");
+
+  // A fresh copy of the service with `spawn` stubbed, so no git runs at all:
+  // `classifyRef` only has to read the shape it is handed.
+  const classifyStdout = async (stdoutText, code = 0) => {
+    const cp = await import("node:child_process");
+    const realSpawn = cp.default.spawn;
+    const calls = [];
+    cp.default.spawn = (...args) => {
+      calls.push(args);
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      process.nextTick(() => {
+        if (stdoutText) child.stdout.emit("data", Buffer.from(stdoutText, "utf8"));
+        child.emit("close", code);
+      });
+      return child;
+    };
+    const servicePath = path.join(ROOT, "git-service.js");
+    delete require.cache[require.resolve(servicePath)];
+    try {
+      const fresh = require(servicePath);
+      const rel = await fresh.classifyRef(dir, "some-ref");
+      return { rel, calls };
+    } finally {
+      delete require.cache[require.resolve(servicePath)];
+      cp.default.spawn = realSpawn;
+    }
+  };
+
+  const RELATIONS = ["same", "ancestor", "descendant", "diverged"];
+  const shapes = [
+    { stdout: "0 3", want: "descendant", why: "ahead of HEAD" },
+    { stdout: "3 0", want: "ancestor", why: "behind HEAD" },
+    { stdout: "2 5", want: "diverged", why: "on neither side" },
+    { stdout: "0 0", want: "same", why: "the same commit" },
+  ];
+  for (const { stdout, want, why } of shapes) {
+    const { rel, calls } = await classifyStdout(stdout);
+    check(
+      `a ref that is ${why} is classified as ${want}`,
+      calls.length === 1 && rel === want,
+      `${JSON.stringify(stdout)} -> ${JSON.stringify(rel)}`
+    );
+  }
+
+  // The shapes it does not know: a rewording of the numbers, a number that is
+  // not a number, a missing half, and no output at all. None of them may be
+  // answered with a relation — an unrecognised shape is "no relation", and
+  // "no relation" is not one of the four.
+  for (const stdout of ["garbage", "1", "0", "0 x", "", "1 2 3"]) {
+    const { rel } = await classifyStdout(stdout);
+    check(
+      `a shape that is not a pair of counts answers no relation: ${JSON.stringify(stdout)}`,
+      rel === "" && !RELATIONS.includes(rel),
+      JSON.stringify(rel)
+    );
+  }
+
+  // A git that failed (an unknown ref, a repository that is not there) has no
+  // shape to read at all, and must not be answered with one.
+  const failed = await classifyStdout("0 3", 128);
+  check(
+    "a failed git answers no relation",
+    failed.rel === "" && !RELATIONS.includes(failed.rel),
+    JSON.stringify(failed.rel)
+  );
+}
+
+/* ---- the same four answers, from a real git ----
+ * The stub above proves the classifier reads the shape it is given; it cannot
+ * prove that git prints that shape. So the same four relations are asked of a
+ * real repository: `main` is HEAD itself (`same`) and `feature` is one commit
+ * ahead of it (`descendant`).
+ */
+{
+  const inspected = await gitSvc.inspect(dir);
+  const relations = inspected.relations || {};
+  check(
+    "a branch that is HEAD itself is classified as same",
+    relations.main === "same",
+    JSON.stringify(relations)
+  );
+  check(
+    "a branch that is ahead of HEAD is classified as descendant",
+    relations.feature === "descendant",
+    JSON.stringify(relations)
+  );
+  check(
+    "a branch that does not exist is left out instead of being guessed",
+    !("master" in relations),
+    JSON.stringify(relations)
+  );
+}
+
 /* ---- the reasons survive a non-English desktop ----
  * `bad-ref` and `missing` are read out of git's stderr *sentences*, and git
  * translates them: with a Chinese locale it says "无效的对象名称" / "路径 ... 不存在",

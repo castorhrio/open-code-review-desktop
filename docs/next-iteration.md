@@ -6,7 +6,7 @@
 
 ---
 
-## 上游状态（最近检查：2026-10-26，第 10 轮复核）
+## 上游状态（最近检查：2026-10-26，第 12 轮复核）
 
 上游 `alibaba/open-code-review` 自 desktop 锁定的 `v1.13.0` 之后发布了
 **3 个补丁版本**：`v1.13.1` / `v1.13.2` / `v1.13.3`（共 18 个 commit）。
@@ -21,11 +21,21 @@
 | 3 | 2026-10-26 | `375f64c`（日期未变） | `v1.13.3`（2026-10-22 发布） | 无新内容（API 核对） |
 | 4 | 2026-10-26 | `375f64c` | `v1.13.3` | 无新内容（这次 `git fetch upstream --tags` 成功，与本地 ref 一致） |
 | 5 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（`git fetch` 成功 + API 双核对） |
+| 6 | 2026-10-26 | `375f64c` | `v1.13.3` | 无新内容（见下面「第 6 轮」一节的记录） |
+| 7 | 2026-10-26 | `375f64c` | `v1.13.3` | 无新内容（`git fetch` + GitHub API 双核对） |
+| 8 | 2026-10-26 | `375f64c` | `v1.13.3` | 无新内容（核对方式沿用上一轮） |
+| 9 | 2026-10-26 | `375f64c` | `v1.13.3` | 无新内容（GitHub API 核对；`git fetch` 在沙箱里挂住） |
 | 10 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（GitHub API 三核对：commits / tags / releases） |
 | 11 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（GitHub API 核对 commits / tags；顶端 commit 与 tag 均未变） |
+| 12 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（GitHub API 三核对：commits / tags / releases） |
 
-结论：连续 9 轮没有需要移植的新功能 / 修复 / 破坏性变更，desktop 的封装（CLI flag、
+结论：连续 12 轮没有需要移植的新功能 / 修复 / 破坏性变更，desktop 的封装（CLI flag、
 输出解析、配置暴露点）无需改动。若某轮顶端 commit 仍为 `375f64c`，本表不新增行。
+
+> 这张表以前漏了第 6–9 轮：正文里每一轮都记着自己的核对方式与结论（见下面
+> 「第 6 轮」「第 7 轮」「第 8 轮」「第 9 轮」四节），表里却没有对应的行——**表
+> 少了四行，正文不缺**。漏掉的这四轮按正文补齐，核对方式与结论照抄正文，不另编。
+> 一张会漏行的表比没有表更糟：它让人以为每一轮都记在这里。
 
 第 9 轮的核对方式与第 2/3 轮相同：`git fetch upstream --tags` 在这台机器的沙箱里
 挂住（无输出直到超时），改用 GitHub API 核对——`commits?sha=main` 顶端仍是
@@ -34,6 +44,11 @@
 第 10 轮仍是 API 核对（`commits` / `tags` / `releases` 三条都查了，`releases` 确认
 `v1.13.3` 仍是最新 release），结论与前几轮一致：没有新提交，没有新 tag，也没有新
 release。desktop 的封装面不动。
+
+第 12 轮同样是 API 三核对：`commits?sha=main` 顶端仍是 `375f64c`（2026-10-20），
+`tags` 仍是 `v1.13.3` / `v1.13.2` / `v1.13.1`，`releases` 里最新的仍是
+`v1.13.3`（2026-10-22 发布）。**没有新提交，没有新 tag，没有新 release**，封装面
+不动。
 
 只是拉 tag 时会看到几条 `would clobber existing tag`（本仓也用 `v0.1.x` 编号，
 与上游 tag 撞名）：那是本地 remote 的 tag 同步提示，不影响 `upstream/main` 的
@@ -673,6 +688,82 @@ Key」。两句都是**没有人核对过的承诺**：那句「留空表示保�
 `npm run audit:bridge`：20 条断言全绿。
 
 
+## 本轮 desktop 侧加固（与上游无关，第 12 轮）
+
+上游顶端仍是 `375f64c` / `v1.13.3`（第 12 轮复核，GitHub API 三核对：commits /
+tags / releases），无需移植。本轮继续同一条线：**把「靠约定维持的边界」钉成会 FAIL
+的断言**。两处，各钉一个方向。
+
+### P0 — `classifyRef` 的四种答案，逐条钉住
+
+`classifyRef` 决定「分支范围」这个 scope 下 `from` / `to` 的默认值。它读的是 git 的
+**stdout 形状**（`<only-in-HEAD> <only-in-ref>`），四种形状对应四种关系：`same` /
+`ancestor` / `descendant` / `diverged`。选错方向的后果就写在代码注释里：`A...B` 在
+B 是 A 的祖先时是空的——**审 0 个文件，却报成一次干净的审查**。
+
+这条注释此前**没有任何断言**：形状只被真的 git 喂过，那只证明了「今天的 git 这么
+打」，没证明形状不对时会怎样。
+
+- **改动**（`git-service.js`）：导出 `classifyRef`（纯函数，行为未变）；并把形状读
+  **严格**化——必须是**恰好两个**计数。原来是取前两个、多的忽略，于是 `"1 2 3"` 会
+  被读成 `diverged`。严格化之后，形状不对（多一列、少一半、不是数字、根本没有
+  输出）一律答 `""`（没有关系）：`inspect` 于是不把它写进 `relations`，UI 退回工作
+  区；而猜一个关系会挑出一条**静默审 0 个文件**的范围。
+- **验证**（`tools/git-service-smoke.mjs`）：用 stub `spawn` 喂 stdout，四种形状逐条
+  断言（`"0 3"` → descendant、`"3 0"` → ancestor、`"2 5"` → diverged、`"0 0"` → same）；
+  六种形状不对的（`"garbage"` / `"1"` / `"0"` / `"0 x"` / `""` / `"1 2 3"`）断言答案是
+  `""` **且不是四种关系里的任何一种**；git 失败（退出码非 0）也答 `""`。再拿**真
+  git** 走一遍同四种：仓库里的 `main`（就是 HEAD）答 `same`、领先一个 commit 的
+  `feature` 答 `descendant`、不存在的 `master` 不进 `relations`。
+- **实测**：不加严格化 → `"1 2 3"` 那条断言变红（它当时答的是 `diverged`）。
+
+### P0 — 运行的出口只有一扇门
+
+`settleRunExit` 从第 2 轮起就负责「先落盘、再发出口信号」这个顺序——**顺序是函数
+形状**。但它只管住了**走它的那条路**：`main.js` 里的 `send("run:exit", …)` 仍然写在
+外面，下一个人把那行提到 `settleRunExit` 之上，一切仍然全绿。
+
+- **改动**：
+  - `run-diagnostics.js`：通道名 `run:exit` **只在这一处**被写出来，并收进一扇
+    **门**（`createRunExitDoor`）。门造出来时是**关着的**，只有 `settleRunExit` 能
+    开（开门的钥匙是模块私有的 `Symbol`，模块外拿不到）；从没开过的门发信号会被
+    **拒绝**而不是发出去；一次运行只发一次。
+  - `settleRunExit` 的参数从 `signal` 改成 `send` + `payload`：调用方交出「怎么发」
+    与「发什么」，**不交出发的时候**——那是 `settleRunExit` 的顺序保证。
+  - `main.js`：出口信号改走 `settleRunExit`，**主进程不再写通道名**（`run:exit` 这
+    个字符串在 `main.js` 里一个都不剩）。
+- **验证**（`tools/run-diagnostics-smoke.mjs`）：
+  1. 没开过的门发信号 → **被拒绝**，且**什么都没发出去**；
+  2. 门说的通道 = 渲染层听的通道（通道名从 `preload.js` 里**读出来**，不抄一份在
+     检查里——改个名就红）；
+  3. `main.js` **不出现**通道名 → 出口不可能从别处发出去；
+  4. `main.js` 把出口交给 `settleRunExit`（`send` 与 `payload` 都在）。
+- **实测**：`main.js` 里加一句 `send("run:exit", …)` → 第 3 条变红；把门改成造出来
+  就是开的 → 第 1、2 条变红。
+- **顺带**：`tools/bridge-contract.mjs` 的「preload 听的通道主进程都发过」原来只认
+  `send("字面量")`，通道名进常量之后会被误判成「没人发这个通道」。现在常量会被解析
+  出来一起算——实测把通道改名，preload 与主进程**两侧**的检查同时变红。
+
+### P1 — 第三个读内置服务表的人：设置页的服务列表
+
+`config:read` 与 `config:savedKey` 共读一次内置服务表，第 10 轮已经钉住。第三个读
+它的人是 `app:providers`（设置页下拉框里的那份列表）——它走的是 `ocr.providerTable()`，
+也就是**同一个**缓存，但**没有断言看着**：注释承诺「两个调用方共用一次读、一个失败
+窗口」，而那份承诺涉及三个调用方，有一个（`main.js` 里的 handler）不在断言覆盖里。
+
+- **验证**（`tools/service-smoke.mjs`）：用计数的 `runner` 断言「服务列表先问、Key 判
+  定后问」与「Key 判定先问、服务列表后问」两种顺序都**只读一次**，且两个答案说的是
+  同一次读。
+- **实测**：让 `savedKeyLookupByName` 自己再读一次表 → 3 条断言变红（实测），其中
+  1 条是本轮新加的。
+
+### 上轮简报里的一条，已经不用做了
+
+- 简报的 P1-4「provider 形态下 `OCR_LLM_MODEL` 环境变量不算数」——**第 5 轮就钉住
+  了**（`tools/service-smoke.mjs` 的「an env model does not complete a selected
+  provider」）。下一个人不用重做。
+
+
 ## 待移植 / 待验证
 
 ### 已完成 — `manifest.run_failure` 的中文映射与展示
@@ -747,9 +838,20 @@ desktop 的「工具调用 N（失败 M）」直接读 CLI 的 `tool_calls.failu
 第 5 轮收了「模型名按形态对齐上游」与「`MAX_ENTRIES` 全局裁剪」，第 6 轮收了
 「按名字选配置段」，第 7 轮收了 `entryByName` 的变体取舍，第 8 轮把 Key 归属判定搬进
 主进程，第 9 轮把这条判定真正接到屏幕上并收掉端点那一端，第 10 轮把「`order` 规则
-必须扣下 Key」「两个通道只读一次表」「查不到答案不许替它编」这三条钉成断言；剩下的按
-优先级排在这里，下一轮挑。标注「**未动**」的条目是最近一轮看过、确认仍然成立但没有
-改的——不是新发现。
+必须扣下 Key」「两个通道只读一次表」「查不到答案不许替它编」这三条钉成断言，第 12 轮
+把「`classifyRef` 的四种答案」「运行出口只有一扇门」「服务列表也只读一次表」这三条
+钉成断言；剩下的按优先级排在这里，下一轮挑。标注「**未动**」的条目是最近一轮看过、
+确认仍然成立但没有改的——不是新发现。
+
+- **P2**：README 的 Status 段落里有**一次实测值**（`1200 findings` / `405ms` /
+  `8s ceiling`）。实测数字会腐，腐了之后没有任何测试会红。README 承诺的应该是**能力**
+  （能渲染 1200 条、有 8s 预算），不是某次跑出来的毫秒数——把数字挪进 `docs/`，或
+  改成「实测值见 `tools/ui-audit/` 的输出」。文件 `README.md` / `README.zh-CN.md`。
+  ——**未动**（第 12 轮只做了断言，没碰 README）。
+- **P2**：`audit:ui` / `audit:ui-scaled` / `audit:contrast` / `audit:guards` /
+  `audit:e2e` 每个脚本前面都各带一次 `npm run build`，一次完整 audit 要 build 五次。
+  合并成一次（让 `audit` 脚本先 build 一次，后面的检查都假设 `out/` 存在）能省掉
+  四次构建。文件 `package.json`。——**未动**。
 
 - **P1**：`entryByName` 的「精确命中优先」与上游的「按名字选段」在**同名跨段**时
   不一致。`tryProviderConfig` 先查注册表决定读 `providers` 还是 `custom_providers`，
@@ -788,6 +890,20 @@ desktop 的「工具调用 N（失败 M）」直接读 CLI 的 `tool_calls.failu
 
 ### 本轮做完、可以划掉的
 
+- ~~`classifyRef` 的四种答案（`same` / `ancestor` / `descendant` / `diverged`）没有
+  断言~~ → 第 12 轮做完：`git-service.js` 导出 `classifyRef` 并把 stdout 形状读严
+  （恰好两个计数），`tools/git-service-smoke.mjs` 用 stub `spawn` 逐条钉住四种形状、
+  六种形状不对的形状与 git 失败，再用真 git 走一遍同四种；不加严格化 → 1 条变红
+  （实测）。详见上面「P0 — `classifyRef` 的四种答案」。
+- ~~`send("run:exit")` 的顺序保证只保护了一条调用路径~~ → 第 12 轮做完：通道名只在
+  `run-diagnostics.js` 写一次，收进一扇只有 `settleRunExit` 能开的门（私有 `Symbol`），
+  `main.js` 不再写通道名；`tools/run-diagnostics-smoke.mjs` 断言「没开过的门发不出
+  去」「门说的通道 = preload 听的通道」「main.js 不出现通道名」「main.js 把出口交给
+  `settleRunExit`」；`main.js` 加一句 `send("run:exit", …)` → 1 条变红（实测）。
+- ~~`app:providers`（设置页的服务列表）也读那张内置服务表，但没有断言看着它与
+  `config:savedKey` 共读一次~~ → 第 12 轮做完：`tools/service-smoke.mjs` 用计数的
+  `runner` 断言两种调用顺序都只读一次；让 `savedKeyLookupByName` 自己再读一次表 →
+  3 条变红（实测）。
 - ~~`MATCH_ORDER` 下 Key 必须被扣，但「扣下」靠调用方读 `rule` 再判断，是跨函数的口头
   约定~~ → 第 10 轮做完：`ocr-service.js` 抽出 `withholdReasonFor(rule)`，
   `tools/service-smoke.mjs` 逐条断言「只有文件顺序能答的形状 → 规则是 `order` → Key

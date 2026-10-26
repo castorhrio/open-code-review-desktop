@@ -828,9 +828,63 @@ function recordBounded(store, repo, sessionId, result, timeoutMs = WRITE_TIMEOUT
 }
 
 /**
+ * The channel the renderer listens on for "the run is over".
+ *
+ * It is spelled here and nowhere else in the main process. `main.js` does not
+ * name it, so it cannot send it by accident; the only code that sends it is
+ * `settleRunExit`, which lands the evidence first.
+ */
+const RUN_EXIT_CHANNEL = "run:exit";
+
+/**
+ * Opening the door is deliberately not part of what a caller can reach: the
+ * symbol below is module-private, so only `settleRunExit` can open a door.
+ * That is what turns "the record first, the signal after" from an ordering
+ * somebody has to keep into a fact nobody can break from the outside.
+ */
+const OPEN_EXIT_DOOR = Symbol("run-exit.open");
+
+/**
+ * The one door out of a finished run.
+ *
+ * A door is closed when it is made, so sending through it before `settleRunExit`
+ * opens it is refused rather than delivered. And it opens at most once: a run
+ * that ended says so once, because a second exit signal would tell the
+ * renderer the run ended twice.
+ *
+ * The channel name lives in this closure, so the sender never has to know it.
+ */
+function createRunExitDoor(send) {
+  let open = false;
+  let sent = false;
+  return {
+    channel: RUN_EXIT_CHANNEL,
+    isOpen: () => open,
+    hasSent: () => sent,
+    /**
+     * Say that the run is over. Refused unless the door was opened by
+     * `settleRunExit` — which is the whole point of the door.
+     */
+    signal(payload) {
+      if (!open) {
+        throw new Error(`${RUN_EXIT_CHANNEL} 只能由 settleRunExit 发出：证据必须先落盘`);
+      }
+      if (sent) {
+        throw new Error(`${RUN_EXIT_CHANNEL} 一次运行只能发一次`);
+      }
+      sent = true;
+      send(RUN_EXIT_CHANNEL, payload);
+    },
+    [OPEN_EXIT_DOOR]() {
+      open = true;
+    },
+  };
+}
+
+/**
  * Record the evidence, then say that the run is over — in that order.
  *
- * The renderer refreshes the history as soon as it hears `run:exit`, and a
+ * The renderer refreshes the history as soon as it hears the exit signal, and a
  * record that has not landed yet would make a truncated session look clean
  * again. That ordering used to live in a comment in `main.js` beside a promise
  * chain, where nothing would have caught someone moving the `send()` up.
@@ -846,6 +900,11 @@ function recordBounded(store, repo, sessionId, result, timeoutMs = WRITE_TIMEOUT
  * throwing still sends the signal (or the screen never comes back), and the
  * signal throwing still leaves the evidence on disk and is logged (or a run that
  * ended looks live forever). See `SIGNAL_FAILED`.
+ *
+ * The exit channel itself is not the caller's business: `settleRunExit` sends
+ * it through a door it opens itself, so "the renderer was told the run is over"
+ * and "the evidence had already landed" are the same statement. The caller
+ * gives a `send` and a `payload`; it does not get to say when.
  */
 async function settleRunExit(options) {
   const opts = options || {};
@@ -866,14 +925,16 @@ async function settleRunExit(options) {
     // chain said so with a `finally`, and a run that ends without an exit is a
     // spinner that never stops.
   }
-  if (typeof opts.signal !== "function") return outcome;
+  if (typeof opts.send !== "function") return outcome;
+  const door = createRunExitDoor(opts.send);
+  door[OPEN_EXIT_DOOR]();
   try {
-    opts.signal(outcome);
+    door.signal(typeof opts.payload === "function" ? opts.payload(outcome) : outcome);
   } catch (_) {
     // The signal is the last thing that happens for this run, so a throw here
-    // used to be the one path `settleRunExit` left uncovered: `main.js` answers
-    // the signal with `send("run:exit")`, which throws when the window is
-    // already gone, and the rejected promise was swallowed by a `.catch(() => {})`
+    // used to be the one path `settleRunExit` left uncovered: the exit is
+    // answered with `send()`, which throws when the window is already gone,
+    // and the rejected promise was swallowed by a `.catch(() => {})`
     // — a run that ended, evidence on disk, and not a word about the screen that
     // never heard. Say it instead. Report must not throw either: the run is over
     // whether or not the news can be delivered.
@@ -941,6 +1002,7 @@ module.exports = {
   reportOutcome,
   recordBounded,
   settleRunExit,
+  createRunExitDoor,
   SIGNAL_FAILED,
   flushNow,
   flushBeforeQuit,

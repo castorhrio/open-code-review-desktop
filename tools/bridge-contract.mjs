@@ -520,7 +520,20 @@ const mainSrc = mainModules.map((f) => fs.readFileSync(path.join(root, f), "utf8
 
 const handled = new Set([...mainSrc.matchAll(/ipcMain\.handle\(\s*"([^"]+)"/g)].map((m) => m[1]));
 // `send(` also matches `webContents.send(`, so both spellings are covered.
-const sent = new Set([...mainSrc.matchAll(/\bsend\(\s*"([^"]+)"/g)].map((m) => m[1]));
+// A channel may also be sent *through a constant* — the exit channel is named
+// in `run-diagnostics.js` and sent as `send(RUN_EXIT_CHANNEL, payload)`, so the
+// main process does not spell it at all. Those bindings are resolved here: a
+// channel that moved into a constant must not look like a channel nobody sends
+// (which is what happened the first time this arrangement was introduced).
+const channelConstants = new Map(
+  [...mainSrc.matchAll(/\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*"([^"]+)"/g)].map((m) => [m[1], m[2]])
+);
+const sent = new Set([
+  ...[...mainSrc.matchAll(/\bsend\(\s*"([^"]+)"/g)].map((m) => m[1]),
+  ...[...mainSrc.matchAll(/\bsend\(\s*([A-Za-z_$][\w$]*)\b/g)]
+    .map((m) => channelConstants.get(m[1]))
+    .filter(Boolean),
+]);
 
 const unhandled = [...invokeChannels].filter((c) => !handled.has(c)).sort();
 check(

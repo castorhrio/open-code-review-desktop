@@ -34,6 +34,7 @@ const {
   reportOutcome,
   recordBounded,
   settleRunExit,
+  createRunExitDoor,
   SIGNAL_FAILED,
   flushNow,
 } = require("../run-diagnostics.js");
@@ -910,7 +911,13 @@ const exitOutcome = await settleRunExit({
   result: limitResult,
   timeoutMs: 2000,
   warn: (line) => exitLog.push(line),
-  signal: (outcome) => exitSeen.push({ outcome, onDisk: exitStore.read(repo, "exit-session")?.warnings?.length === 1 }),
+  send: (channel, payload) =>
+    exitSeen.push({
+      channel,
+      outcome: payload.outcome,
+      onDisk: exitStore.read(repo, "exit-session")?.warnings?.length === 1,
+    }),
+  payload: (outcome) => ({ outcome }),
 });
 check("the exit signal is sent only once the evidence is on disk", exitSeen.length === 1 && exitSeen[0].onDisk, JSON.stringify(exitSeen));
 check("and it carries the outcome of the record", exitOutcome?.reason === "written" && exitSeen[0].outcome?.reason === "written", JSON.stringify(exitOutcome));
@@ -929,7 +936,7 @@ await settleRunExit({
   warn: () => {
     throw new Error("the log line could not be written");
   },
-  signal: () => {
+  send: () => {
     signalAfterBadReport += 1;
   },
 });
@@ -954,7 +961,7 @@ try {
     result: limitResult,
     timeoutMs: 2000,
     warn: (line) => throwingSignalLog.push(line),
-    signal: () => {
+    send: () => {
       signalSawEvidence = throwingSignalStore.read(repo, "throwing-signal")?.warnings?.length === 1;
       throw new Error("the window was already gone");
     },
@@ -1001,10 +1008,86 @@ const slowExit = await settleRunExit({
   result: limitResult,
   timeoutMs: 80,
   warn: (line) => slowExitLog.push(line),
-  signal: (outcome) => slowExitSeen.push(outcome),
+  send: (channel, payload) => slowExitSeen.push(payload),
 });
 check("a slow disk does not hold the run's exit", slowExitSeen.length === 1 && slowExit?.reason === "timeout", JSON.stringify(slowExit));
 check("and the exit says the evidence did not make it", outcomeMessage(slowExit) !== "", outcomeMessage(slowExit));
+
+/* ---- the exit has exactly one door ----
+ * The order above is `settleRunExit`'s own shape, but it only protected the one
+ * path that goes through it: `main.js` used to send the exit signal itself, so
+ * moving that `send()` above the record would have broken the order in silence
+ * while every check stayed green — the ordering was a property of a function
+ * *shape*, not of the way the app was wired.
+ *
+ * Now the channel is named in exactly one place — `run-diagnostics.js` — and
+ * the main process does not know it at all. The door is opened by
+ * `settleRunExit` itself, with a module-private symbol, so nothing outside
+ * this file can open it: sending through a door that was never opened is
+ * refused rather than delivered.
+ *
+ * What is asserted here:
+ *   1. a door that was never opened refuses to send, and nothing is delivered;
+ *   2. the channel the door speaks is the one the renderer listens on — read
+ *      out of `preload.js` rather than copied into this file, so a rename
+ *      cannot quietly leave both sides talking past each other;
+ *   3. the main process does not name the channel at all, so the exit cannot
+ *      be sent from anywhere but through the door.
+ */
+{
+  const straySends = [];
+  const strayDoor = createRunExitDoor((channel, payload) => straySends.push({ channel, payload }));
+  let strayError = null;
+  try {
+    strayDoor.signal({ id: "not-through-settle" });
+  } catch (err) {
+    strayError = err;
+  }
+  check(
+    "an exit sent outside settleRunExit is refused",
+    strayError !== null,
+    strayError ? String(strayError.message || strayError) : "it was accepted"
+  );
+  check(
+    "...and nothing reaches the renderer",
+    straySends.length === 0,
+    JSON.stringify(straySends)
+  );
+  check(
+    "a door that was never opened is closed, and a refused send is not a send",
+    strayDoor.isOpen() === false && strayDoor.hasSent() === false,
+    `${strayDoor.isOpen()} / ${strayDoor.hasSent()}`
+  );
+
+  const preloadSrc = fs.readFileSync(path.join(ROOT, "preload.js"), "utf8");
+  const listened = [...preloadSrc.matchAll(/ipcRenderer\.on\(\s*["'`]([^"'`]+)["'`]/g)].map((m) => m[1]);
+  check(
+    "the door speaks the channel the renderer listens on",
+    listened.includes(strayDoor.channel),
+    `${strayDoor.channel} / ${JSON.stringify(listened)}`
+  );
+  check(
+    "and the exit settleRunExit sent went out on that channel",
+    exitSeen[0]?.channel === strayDoor.channel,
+    `${exitSeen[0]?.channel} / ${strayDoor.channel}`
+  );
+
+  // The main process does not name the channel, so it cannot send it by
+  // accident: the only way out of a finished run is through the door.
+  const mainSrc = fs.readFileSync(path.join(ROOT, "main.js"), "utf8");
+  check(
+    "the main process does not name the exit channel",
+    !mainSrc.includes(strayDoor.channel),
+    "main.js mentions it"
+  );
+  const settleStart = mainSrc.indexOf("settleRunExit({");
+  const settleText = settleStart === -1 ? "" : mainSrc.slice(settleStart, settleStart + 1200);
+  check(
+    "the main process hands the exit to settleRunExit",
+    settleStart !== -1 && /\bsend,/.test(settleText) && /\bpayload:/.test(settleText),
+    settleStart === -1 ? "no settleRunExit call" : settleText.slice(0, 80)
+  );
+}
 
 // The one outcome that really loses the evidence has to reach the app as
 // something it can show: the log drawer opens itself on a line that reads like
