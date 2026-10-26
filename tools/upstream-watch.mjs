@@ -187,6 +187,86 @@ export const formatDrift = (verdict) => {
   ].join("\n");
 };
 
+// ---- the doc's declarations of the pin -------------------------------------
+//
+// The pin is written down three times in `docs/OCR-UPSTREAM-SYNC.md` (a machine-
+// readable block, the fixed "本轮 HEAD 核对" line, and the prose sentence that
+// introduces `upstream:check`) and once here. Four hand-written copies of one
+// fact is how
+// a doc quotes a commit the sentinel no longer compares against — and the
+// failure is silent: the sentence stays green while the doc's table is stale.
+//
+// So the doc's declarations are read out by shape, not by trusting one line.
+// Every shape below is a place that claims "this is the pinned commit":
+//
+//   - `sha <40 hex>` inside the `<!-- upstream-pin:start/end -->` block;
+//   - the SHA in the fixed `本轮 HEAD 核对：\`…\`` line;
+//   - the SHA right after `固定的整串 40 位 SHA` in the prose.
+//
+// `findDocPins` returns them all with 1-based line numbers, and the smoke test
+// requires each to equal `PINNED_UPSTREAM.sha` — so a one-character edit
+// anywhere in the doc goes red, and the message can name the line instead of
+// leaving the reader to diff three copies by eye. Kept pure and exported so the
+// "one character changed" case can be produced from a mutated copy of the real
+// doc, rather than asserted about the doc as it happens to read today.
+export const PIN_BLOCK_START = "<!-- upstream-pin:start -->";
+export const PIN_BLOCK_END = "<!-- upstream-pin:end -->";
+
+const SHA_IN_LINE = "([0-9a-fA-F]{7,40})";
+// The shapes outside the block. `g` is not used: each rule is applied to one
+// line and the first match is the declaration.
+const PIN_LINE_RULES = [
+  { where: "本轮 HEAD 核对 行", re: new RegExp("本轮 HEAD 核对：`" + SHA_IN_LINE + "`") },
+  { where: "正文固定 SHA", re: new RegExp("固定的整串 40 位 SHA\\s*`" + SHA_IN_LINE + "`") },
+];
+
+export const findDocPins = (doc) => {
+  const pins = [];
+  let tag = null;
+  let blockFound = false;
+  let inBlock = false;
+  const lines = String(doc || "").split(/\r?\n/);
+  lines.forEach((line, index) => {
+    const n = index + 1;
+    if (line.includes(PIN_BLOCK_START)) {
+      inBlock = true;
+      blockFound = true;
+      return;
+    }
+    if (line.includes(PIN_BLOCK_END)) {
+      inBlock = false;
+      return;
+    }
+    if (inBlock) {
+      const sha = /^\s*sha\s+([0-9a-fA-F]{7,40})\s*$/.exec(line);
+      if (sha) {
+        pins.push({ line: n, sha: sha[1], where: "pin 块" });
+        return;
+      }
+      const tagLine = /^\s*tag\s+(\S+)\s*$/.exec(line);
+      if (tagLine) tag = { line: n, tag: tagLine[1] };
+      return;
+    }
+    for (const rule of PIN_LINE_RULES) {
+      const match = rule.re.exec(line);
+      if (match) {
+        pins.push({ line: n, sha: match[1], where: rule.where });
+        return;
+      }
+    }
+  });
+  return { pins, tag, blockFound };
+};
+
+// Turns a list of doc declarations into the lines the caller prints on failure.
+// The shape ("文档第 X 行（where）：value vs 常量 pin") is fixed here rather than
+// in the smoke test so the message cannot degrade into "mismatch" while the
+// three copies are exactly the thing being compared.
+export const describePinDisagreements = (pins, pinned = PINNED_UPSTREAM.sha) =>
+  (pins || [])
+    .filter((pin) => String(pin.sha).toLowerCase() !== String(pinned).toLowerCase())
+    .map((pin) => `文档第 ${pin.line} 行（${pin.where}）：${pin.sha} vs 常量 ${pinned}`);
+
 const gitRunner = () =>
   spawnSync("git", ["ls-remote", UPSTREAM_URL, UPSTREAM_REF], {
     encoding: "utf8",
@@ -223,13 +303,43 @@ const apiRunner = async () => {
   }
 };
 
-export const defaultRunner = async () => {
-  const git = classifyGit(gitRunner());
+// The orchestration the command actually runs: git first, the API only when git
+// gave no answer, and both failure sentences kept when neither did.
+//
+// Written as a factory because this ordering is invisible from the outside
+// until the network breaks in a particular way — the case that created it (a
+// timed-out git while the API could answer) was recorded as "skipped" for five
+// rounds. `tools/upstream-watch-smoke.mjs` passes stub roads in and asserts the
+// three orders: git alone, git-then-api, and neither.
+//
+// A road that *throws* is treated as a road that failed, not as the end of the
+// orchestration: `spawnSync` normally returns an error object rather than
+// throwing, but "normally" is the assumption a fallback exists to survive. The
+// failure sentence names the road it came from, because "git: …；api: …" is the
+// only thing that tells the reader both roads were tried.
+export const createRunner = ({ runGit = gitRunner, runApi = apiRunner } = {}) => async () => {
+  let git;
+  try {
+    git = classifyGit(runGit());
+  } catch (error) {
+    git = { ok: false, failure: `git ls-remote 抛错：${(error && error.message) || error}`, channel: "none" };
+  }
   if (git.ok) return git;
-  const api = await apiRunner();
-  if (api.ok) return api;
-  return { ok: false, failure: `git: ${git.failure}；api: ${api.failure}`, channel: "none" };
+  let api;
+  try {
+    api = await runApi();
+  } catch (error) {
+    api = { ok: false, failure: `GitHub API 抛错：${(error && error.message) || error}`, channel: "none" };
+  }
+  if (api && api.ok) return api;
+  return {
+    ok: false,
+    failure: `git: ${git.failure}；api: ${(api && api.failure) || "GitHub API 没有给出答案"}`,
+    channel: "none",
+  };
 };
+
+export const defaultRunner = createRunner();
 
 // `code` is always 0: a moved HEAD and an unreachable network are both answers,
 // not failures, and this command must stay safe to call from any script.

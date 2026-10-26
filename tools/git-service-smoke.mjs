@@ -206,6 +206,15 @@ check(
   unknownWording.reason || unknownWording.error || ""
 );
 check("...and it keeps git's own words in the message", /git/i.test(unknownWording.error || ""), unknownWording.error || "");
+// The wording is the part a localised or newer git changes; the exit code is
+// not. Keeping it in the sentence is what makes an unrecognised failure
+// diagnosable: "读取 … 失败（git 退出码 128）：fatal: …" can be looked up, while
+// the same sentence without the code cannot.
+check(
+  "...and it names git's exit code, the part a changed wording cannot take away",
+  /退出码\s*128/.test(unknownWording.error || ""),
+  unknownWording.error || ""
+);
 /* All three reasons answer the same question, so all three echo the ref and the
  * path they were asked about — the renderer reads `ref` back to label the pane,
  * and a `failed` answer that dropped it would leave the failure attributed to
@@ -330,6 +339,36 @@ fs.rmSync(notARepo, { recursive: true, force: true });
     if (want === "missing" && res.reason === "bad-ref") swapped.push(stderr);
   }
   check("no wording is classified as the opposite reason", swapped.length === 0, swapped.join(" | "));
+
+  // Every `failed` answer has to carry the exit code, because `failed` is where
+  // the unknown wordings land: it is the branch a localised / newer git reaches,
+  // and it is the one branch whose message cannot lean on recognising anything.
+  // The stub reports 128 for every wording, so the assertion is simply "the code
+  // is in the sentence" — the same code the stub was told to exit with.
+  const failedAnswers = [];
+  for (const { stderr, want } of wordings) {
+    if (want !== "failed") continue;
+    const { res } = await classifyStderr(stderr);
+    failedAnswers.push(res.error || "");
+  }
+  check(
+    "every unrecognised wording reports git's exit code in the message",
+    failedAnswers.length >= 2 && failedAnswers.every((message) => /退出码\s*128/.test(message)),
+    JSON.stringify(failedAnswers)
+  );
+
+  // A git that says nothing at all still has to produce a sentence rather than a
+  // dangling colon: no stderr is a real shape (a killed child, a broken pipe).
+  const silent = await classifyStderr("");
+  check(
+    "a failure with no stderr still names the exit code and is a whole sentence",
+    silent.res.ok === false &&
+      silent.res.reason === "failed" &&
+      /退出码\s*128/.test(silent.res.error || "") &&
+      !silent.res.error.trim().endsWith("：") &&
+      !silent.res.error.trim().endsWith(":"),
+    silent.res.error || ""
+  );
 }
 
 /* ---- the four answers, one by one ----

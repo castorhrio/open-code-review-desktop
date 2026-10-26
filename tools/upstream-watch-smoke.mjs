@@ -19,6 +19,9 @@ import {
   PINNED_UPSTREAM,
   ROWS_TO_REREAD,
   classifyGit,
+  createRunner,
+  describePinDisagreements,
+  findDocPins,
   formatDrift,
   parseApiCommit,
   parseLsRemote,
@@ -383,28 +386,224 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
   check("the command's text is the formatted verdict", moved.text === formatDrift(moved.verdict), moved.text);
 }
 
+/* ---- the orchestration: git first, then the API, then debt ----
+ * `runUpstreamWatch(run)` takes a runner, and that seam made the three *verdicts*
+ * testable — but the git-then-API order inside the real runner was the part that
+ * broke once (five rounds recorded a timed-out git as "skipped" while the API
+ * could answer the same question) and it stayed untested, because reaching it
+ * needed the network to fail in a specific way. `createRunner` takes the two
+ * roads as arguments, so the order is now asserted instead of hoped for:
+ * git alone, git-then-api, and neither — plus the two `throw` shapes, which are
+ * roads that failed rather than the end of the orchestration.
+ */
+{
+  const apiOk = { ok: true, sha: PINNED_SHA, channel: "api" };
+  let calls = { git: 0, api: 0 };
+  const runnerFor = ({ git, api }) =>
+    createRunner({
+      runGit: () => {
+        calls.git += 1;
+        return git();
+      },
+      runApi: () => {
+        calls.api += 1;
+        return api();
+      },
+    });
+  const reset = () => {
+    calls = { git: 0, api: 0 };
+  };
+
+  reset();
+  const gitOnly = await runnerFor({
+    git: () => ({ status: 0, stdout: `${PINNED_SHA}\trefs/heads/main\n` }),
+    api: () => apiOk,
+  })();
+  check(
+    "a git answer ends the orchestration before the API is asked",
+    gitOnly.ok && gitOnly.channel === "git" && calls.git === 1 && calls.api === 0,
+    JSON.stringify({ result: gitOnly, calls })
+  );
+
+  reset();
+  const apiFallback = await runnerFor({
+    git: () => ({ error: new Error("ETIMEDOUT") }),
+    api: () => apiOk,
+  })();
+  check(
+    "a failed git falls back to the API, and the answer says it came from there",
+    apiFallback.ok &&
+      apiFallback.channel === "api" &&
+      apiFallback.sha === PINNED_SHA &&
+      calls.git === 1 &&
+      calls.api === 1,
+    JSON.stringify({ result: apiFallback, calls })
+  );
+
+  reset();
+  const gitThrew = await runnerFor({
+    git: () => {
+      throw new Error("spawn git ENOENT");
+    },
+    api: () => apiOk,
+  })();
+  check(
+    "a git that throws is a failed road, not the end of the orchestration",
+    gitThrew.ok && gitThrew.channel === "api" && calls.api === 1,
+    JSON.stringify({ result: gitThrew, calls })
+  );
+
+  reset();
+  const bothFailed = await runnerFor({
+    git: () => ({ error: new Error("ETIMEDOUT") }),
+    api: () => ({ ok: false, failure: "GitHub API HTTP 403", channel: "none" }),
+  })();
+  check(
+    "both roads failing keeps both reasons and claims no road",
+    bothFailed.ok === false &&
+      bothFailed.channel === "none" &&
+      bothFailed.failure.includes("ETIMEDOUT") &&
+      bothFailed.failure.includes("GitHub API HTTP 403") &&
+      bothFailed.failure.includes("git:") &&
+      bothFailed.failure.includes("api:"),
+    JSON.stringify(bothFailed)
+  );
+
+  // The combined sentence is what a skipped round actually shows: the reader
+  // needs the two reasons, not a single "不可达" that hides which road was tried.
+  reset();
+  const viaCommand = await runUpstreamWatch(
+    runnerFor({
+      git: () => ({ error: new Error("ETIMEDOUT") }),
+      api: () => ({ ok: false, failure: "GitHub API HTTP 403", channel: "none" }),
+    })
+  );
+  check(
+    "a skipped command keeps both road failures in its reason, plus the debt marker, at exit 0",
+    viaCommand.verdict.state === "skipped" &&
+      viaCommand.verdict.reason.includes("ETIMEDOUT") &&
+      viaCommand.verdict.reason.includes("GitHub API HTTP 403") &&
+      viaCommand.text.startsWith(DEBT_MARKER) &&
+      viaCommand.code === 0,
+    JSON.stringify({ verdict: viaCommand.verdict, code: viaCommand.code })
+  );
+
+  reset();
+  const apiThrew = await runnerFor({
+    git: () => ({ status: 128, stderr: "fatal: unable to access" }),
+    api: () => {
+      throw new Error("getaddrinfo ENOTFOUND");
+    },
+  })();
+  check(
+    "an API that throws is a failed road, with its message and git's both kept",
+    apiThrew.ok === false &&
+      apiThrew.failure.includes("ENOTFOUND") &&
+      apiThrew.failure.includes("git:"),
+    JSON.stringify(apiThrew)
+  );
+
+  // A default runner that is missing a road must still be a runner: the factory
+  // is called with no arguments by the entry point, so the shape of the export
+  // is part of the contract.
+  const noRoads = await createRunner({ runGit: () => ({ status: 0, stdout: "" }), runApi: () => undefined })();
+  check(
+    "an API road answering nothing is a failed road, not a thrown one",
+    noRoads.ok === false && noRoads.failure.includes("api:"),
+    JSON.stringify(noRoads)
+  );
+}
+
 /* ---- the doc's fixed line and the module pin cannot drift ---- */
 {
   const doc = fs.readFileSync(SYNC_DOC, "utf8");
   // One line, fixed shape: the reader should not have to skim a paragraph to
-  // learn whether the current round was actually checked. It carries the whole
-  // 40-character commit for the same reason the pin does — a 7-character prefix
-  // cannot tell two commits apart.
+  // learn whether the current round was actually checked.
   const match = doc.match(/本轮 HEAD 核对：`([0-9a-f]{7,40})`（([^）]+)）/);
   check(
     "the sync doc carries a fixed '本轮 HEAD 核对' line with a SHA and a qualifier",
     match !== null && match[2].trim().length > 0,
     match ? `${match[1]}（${match[2]}）` : "missing"
   );
+
+  // The pin is handwritten in three places in the doc (the machine-readable
+  // block, the fixed line, the prose sentence that introduces `upstream:check`)
+  // and once in this module. Three unchecked copies is how a doc ends up quoting
+  // a commit the sentinel no longer compares against — silently, because the
+  // sentence stays green. So every declaration is read out by shape and each one
+  // must carry the constant's 40 characters; the failure names the doc line.
+  const docPins = findDocPins(doc);
+  const whereList = docPins.pins.map((pin) => `${pin.where}@${pin.line}`);
   check(
-    "that line's SHA is exactly the SHA the sentinel compares against",
-    match !== null && match[1].toLowerCase() === PINNED_SHA.toLowerCase(),
-    match ? `${match[1]} vs ${PINNED_SHA}` : "missing"
+    "the sync doc carries a machine-readable pin block",
+    docPins.blockFound && docPins.pins.some((pin) => pin.where === "pin 块"),
+    JSON.stringify({ blockFound: docPins.blockFound, pins: whereList })
   );
   check(
-    "the doc's fixed line is a whole commit too, not a prefix",
-    match !== null && match[1].length === 40,
-    match ? `${match[1].length} chars` : "missing"
+    "the pin is declared in the block, on the fixed line, and in the prose",
+    ["pin 块", "本轮 HEAD 核对 行", "正文固定 SHA"].every((where) =>
+      docPins.pins.some((pin) => pin.where === where)
+    ),
+    JSON.stringify(whereList)
+  );
+  const docDisagreements = describePinDisagreements(docPins.pins, PINNED_SHA);
+  check(
+    "every place the doc declares the pin carries the SHA the sentinel compares against",
+    docPins.pins.length >= 3 && docDisagreements.length === 0,
+    docDisagreements.join("；") || `${docPins.pins.length} declaration(s)`
+  );
+  check(
+    "every declaration is a whole 40-character commit, never the readable prefix",
+    docPins.pins.every((pin) => pin.sha.length === 40),
+    JSON.stringify(docPins.pins.map((pin) => [pin.line, pin.sha.length]))
+  );
+  check(
+    "the pin block's tag is the tag this module pins",
+    docPins.tag !== null && docPins.tag.tag === PINNED_UPSTREAM.tag,
+    JSON.stringify(docPins.tag)
+  );
+
+  // The comparison has to be red on a one-character edit *and* say where. Same
+  // doc, one character flipped in the block's pin: the declarations keep their
+  // shape, so the mismatch is the only difference. Asserted against a mutated
+  // copy rather than the live doc, which keeps the check meaningful even while
+  // the live doc and the constant agree (they always do, when this suite passes).
+  const blockPin = docPins.pins.find((pin) => pin.where === "pin 块");
+  const flipped = blockPin
+    ? blockPin.sha.slice(0, -1) + (blockPin.sha.endsWith("0") ? "1" : "0")
+    : "";
+  const mutatedDoc = blockPin
+    ? doc
+        .split(/\r?\n/)
+        .map((line, index) =>
+          index + 1 === blockPin.line ? line.replace(blockPin.sha, flipped) : line
+        )
+        .join("\n")
+    : "";
+  const mutatedDisagreements = describePinDisagreements(findDocPins(mutatedDoc).pins, PINNED_SHA);
+  check(
+    "editing one character of the doc's pin goes red, naming the line and the constant",
+    blockPin !== undefined &&
+      flipped !== blockPin.sha &&
+      mutatedDisagreements.length === 1 &&
+      mutatedDisagreements[0].includes(`文档第 ${blockPin.line} 行`) &&
+      mutatedDisagreements[0].includes(flipped) &&
+      mutatedDisagreements[0].includes(PINNED_SHA),
+    JSON.stringify(mutatedDisagreements)
+  );
+  // The mutation is one line in, one line out: if it changed more, the red
+  // below could be explained by anything else in the copy.
+  const docLines = doc.split(/\r?\n/);
+  const mutatedLines = mutatedDoc.split(/\r?\n/);
+  check(
+    "...and the mutated copy differs from the doc on exactly one line",
+    blockPin !== undefined &&
+      docLines.length === mutatedLines.length &&
+      docLines.filter((line, index) => line !== mutatedLines[index]).length === 1,
+    JSON.stringify({
+      lines: docLines.length,
+      changed: docLines.filter((line, index) => line !== mutatedLines[index]).length,
+    })
   );
   const channel = match ? /通路：(git|api|npm|none)/.exec(match[2]) : null;
   check(

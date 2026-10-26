@@ -12,6 +12,32 @@
 4. **不要**静默忽略上游 release：每轮把结论追加到下面「上游状态」，哪怕结论是
    「无新内容」。
 
+## 上游状态（最近检查：2026-10-27，第 59 轮）
+
+第 59 轮复核：**三条通路都可达，结论仍是「无新内容」**。
+`git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
+refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
+（与第 49–58 轮同一个 commit），`refs/tags/v1.13.3` = `dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`
+（annotated tag 对象，指向同一 commit）；`api.github.com/repos/alibaba/open-code-review/commits/main`
+给出同一 SHA；`npm view @alibaba-group/open-code-review version dist-tags` = `1.13.3` /
+`latest: 1.13.3`。desktop 的 `^1.13.3` 无需改动，**无移植项**。
+
+本轮把「pin 到底写了几遍」变成可断言的事，并给编排层补上 mock 断言：
+
+- pin 在本文里有三处手写声明（下面的机器可读块、「本轮 HEAD 核对」固定行、
+  `upstream:check` 那段的正文引用），加上 `tools/upstream-watch.mjs` 里的常量，共四处。
+  `tools/upstream-watch.mjs` 新增纯函数 `findDocPins` / `describePinDisagreements` 按形状把
+  三处文档声明全读出来（带行号），`audit:upstream` 要求每一处都等于 `PINNED_UPSTREAM.sha`；
+  改一位就红，报错形如「文档第 N 行（pin 块）：… vs 常量 …」，不必再用眼睛 diff 三份拷贝。
+  这条断言本身带自检：把真文档复制一份、只翻 pin 块的一位，要求恰好一处不一致并点名该行。
+- `defaultRunner` 拆成 `createRunner({ runGit, runApi })`：git→API→欠账的三条顺序、
+  「git 抛错仍改走 API」「API 抛错仍保留两条原因」都成了断言，不用再等网络以特定方式坏掉
+  才能验。两条都失败时 `reason` 同时带 `git: …` 与 `api: …`，`skipped` 的欠账标记照旧。
+- `audit:git` 补「措辞陌生」时的用户可见输出：`readFileAtRef` 的 `failed` 分支现在带 git
+  退出码（`读取 <ref> 中的 <path> 失败（git 退出码 128）：fatal: …`），并断言这个退出码确实
+  在错误串里——本地化 / 新版 git 把两句英文措辞都换掉时，读者至少还能看到「git 说了什么 +
+  退出码」，而不是一句没有原因的话；stderr 为空时也不会只剩一个冒号。
+
 ## 上游状态（最近检查：2026-10-27，第 58 轮）
 
 第 58 轮复核：**三条通路都可达，结论仍是「无新内容」**。
@@ -202,8 +228,8 @@ desktop 的 `^1.13.3` 无需改动。第 47–48 轮欠的 `git fetch upstream -
 `audit:service` / `audit:config` / `audit:git` 仍是先变红的那一道，本轮这三条全绿。
 本轮的改动（发版 fallback 的搬移函数）与上游 CLI 无关。
 
-**自最近一次有内容变更（`v1.13.3` / `375f64c`）以来，第 27–58 轮复核均无新内容。**
-第 27–46、49–51、53、55、57、58 轮每轮都核对了 `git fetch upstream --tags`（或
+**自最近一次有内容变更（`v1.13.3` / `375f64c`）以来，第 27–59 轮复核均无新内容。**
+第 27–46、49–51、53、55、57–59 轮每轮都核对了 `git fetch upstream --tags`（或
 `git ls-remote` / GitHub API）以及 GitHub API 的 commits / tags / releases，三处一致：
 顶端仍是 `375f64c`，最新仍是 `v1.13.3`；第 47–48、52–54 轮只有 npm registry 一条通路
 可达，第 56 轮 git 超时但 API 回答（见上），那几轮的「上游 commit 未核对」是网络欠账，
@@ -222,8 +248,21 @@ npm run audit:git       # `git show` 的分类与按 ref 读文件
 ```
 任一条变红就是「需要评估的上游变更」：先看红在哪条断言，再对照上面的 CLI/配置暴露点判断。
 
-另有 `npm run upstream:check`：先比对 `refs/heads/main` 与本文件固定的整串
-40 位 SHA `375f64cd6f67a48a135da83cfcf59c52669a09cb`（正文里写 `375f64c` 只是为了好读）。
+### 上游 pin（机器可读）
+
+`npm run audit:upstream` 逐字核对下面块里的 `sha` / `tag` 与 `tools/upstream-watch.mjs` 的
+`PINNED_UPSTREAM`。这个块既是给人读的，也是给脚本读的：本文里三处 pin 声明（这个块、
+「本轮 HEAD 核对」固定行、`upstream:check` 那段的正文引用）必须同值，任一处改一位就会红，
+报错会点名是第几行。
+
+<!-- upstream-pin:start -->
+```text
+sha 375f64cd6f67a48a135da83cfcf59c52669a09cb
+tag v1.13.3
+```
+<!-- upstream-pin:end -->
+
+另有 `npm run upstream:check`：先比对 `refs/heads/main` 与本文件固定的整串 40 位 SHA `375f64cd6f67a48a135da83cfcf59c52669a09cb`（正文里引用只写 `375f64c` 前缀是为了好读；这一处与上面的块、下面的固定行同值，`audit:upstream` 三处一起核对）。
 相等打印一行并注明 `通路：git`；git 不通时自动改走 `api.github.com/commits/main`，
 成功则注明 `通路：api`（两条路问的是同一个 commit）。前进打印醒目提示并列出上表四行
 （**不失败**，仍要人读源码）；两条路都失败才明确打印「跳过」，前缀固定为
@@ -269,7 +308,7 @@ pin 或 ls-remote 给出的 SHA 短于 40 位时一律判「跳过」并说明�
 没变**，所以每轮的结论仍要写进上面「上游状态」——跳过时至少留下 `[UPSTREAM-DEBT]` 与
 「核对通路账」里的一行欠账。
 
-**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 58 轮：`git ls-remote` 可达，`refs/heads/main` 与 pin 一致；`v1.13.3` 与 npm 一致；通路：git）**
+**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 59 轮：`git ls-remote` 可达，`refs/heads/main` 与 pin 一致；tag 与 npm 一致，GitHub API 与 git 一致；通路：git）**
 
 ### 核对通路账
 
@@ -293,12 +332,13 @@ pin 或 ls-remote 给出的 SHA 短于 40 位时一律判「跳过」并说明�
 | 56 | 2026-10-27 | api | `375f64c` / `v1.13.3`，无新内容；git 超时，API 作答 | — |
 | 57 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；API 与 npm 一致 | — |
 | 58 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；tag 与 npm 一致 | — |
+| 59 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；API 与 npm 一致；pin 三处声明纳入断言 | — |
 
 「最近一次对照」只写**那一项最近被人工重新核对**的轮次。该列没有列出本轮，表示本轮
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
 对应行并把轮次与日期改成本轮。
 
-**第 46–58 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
+**第 46–59 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
 npm 通路可达，第 56 轮 git 超时但 API 可达），所以下表四行的「最近一次对照」停在第 45 轮是
 **没有理由重看**，不是忘了看：
 它记录的是「最后一次有人逐行读上游源码」的轮次，而不是「最后一次确认上游没变」的轮次。

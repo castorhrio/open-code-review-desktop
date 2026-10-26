@@ -186,8 +186,23 @@ async function readFileAtRef(repo, relPath, ref, startLine, endLine, pad) {
       return { ok: false, reason: "bad-ref", ref, path: relPath, error: `无法解析 ${ref}` };
     if (/does not exist|exists on disk, but not in|no such path/i.test(err))
       return { ok: false, reason: "missing", ref, path: relPath, error: `在 ${ref} 中找不到 ${relPath}` };
-    const first = err.split(/\r?\n/)[0] || `git show 退出码 ${res.code}`;
-    return { ok: false, reason: "failed", ref, path: relPath, error: `读取 ${ref} 中的 ${relPath} 失败：${first}` };
+    // The two wordings above are git's, not this program's: a localised or newer
+    // git says it differently, and every such spelling lands here. So this
+    // sentence has to be diagnosable *without* the classification — it carries
+    // git's own first line and its exit code. Without the code, "读取 … 失败：
+    // fatal: …" leaves the reader with a sentence they cannot look up; with it,
+    // the same sentence can be matched against the git that produced it. The
+    // exit code is also the one part of a git failure that does not depend on
+    // the message language at all.
+    const first = err.split(/\r?\n/)[0] || "";
+    const code = typeof res.code === "number" ? res.code : -1;
+    return {
+      ok: false,
+      reason: "failed",
+      ref,
+      path: relPath,
+      error: `读取 ${ref} 中的 ${relPath} 失败（git 退出码 ${code}）：${first || "没有任何 stderr"}`,
+    };
   }
   const all = res.stdout.split(/\r?\n/);
   const from = Math.max(1, (startLine || 1) - pad);
