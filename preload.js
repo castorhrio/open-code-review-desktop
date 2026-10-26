@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld("api", {
   openUrl: (url) => ipcRenderer.invoke("file:openUrl", url),
 
   readConfig: (opts) => ipcRenderer.invoke("config:read", opts),
+  savedKey: (name, url) => ipcRenderer.invoke("config:savedKey", { name, url }),
   saveConfig: (form) => ipcRenderer.invoke("config:save", form),
   unsetConfig: (key) => ipcRenderer.invoke("config:unset", key),
   removeEntry: (name) => ipcRenderer.invoke("config:removeEntry", { name }),

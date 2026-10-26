@@ -437,6 +437,23 @@ const configView = async (refresh = false) =>
 
 ipcMain.handle("config:read", (_e, opts) => configView(Boolean(opts && opts.refresh)));
 
+// "May I leave the Key field blank for what the form is pointed at, and if not,
+// why not?" — the one question the settings page needs answered *before* it asks
+// the user anything. The Key itself never crosses this boundary (see
+// `savedKeyLookup`); the renderer only gets the reason and the sentence built
+// from it, so a wording that distinguishes six causes can be asserted without
+// launching Electron.
+//
+// The lookup happens in the main process because it consults the CLI's own table
+// (`ocr llm providers`), which the renderer does not hold: the form's Base URL
+// for a built-in service is prefilled from that table, so asking here keeps the
+// answer and the field it is about on the same source.
+ipcMain.handle("config:savedKey", async (_e, req) => {
+  const form = req || {};
+  const found = await ocr.savedKeyLookupByName(form.name, form.url);
+  return { ok: true, available: Boolean(found.key), reason: found.reason, hint: ocr.savedKeyFieldHint(found.reason) };
+});
+
 ipcMain.handle("config:save", async (_e, form) => {
   const pairs = [];
   const name = (form.provider || "").trim();

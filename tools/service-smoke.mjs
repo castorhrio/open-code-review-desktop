@@ -1168,16 +1168,28 @@ check(
  * key upstream too, so it stays exact throughout — answering for another
  * spelling would hand out a Key for an entry the CLI never opens.
  */
-const savedKey = (config, name, url = "", presetUrl = "") => {
+// `savedKeyLookup` defaults to "the built-in service table was not read", which
+// is the conservative direction for the question it answers (see the comment on
+// the default in ocr-service.js). The checks below are about *names*, not about
+// endpoints: what they ask is whether the entry the CLI would open is the one
+// answering. So they say `tableUnavailable: false` out loud — a caller that has
+// read the table — and the checks at the end of this block are the ones that pin
+// what happens when nobody did.
+const savedKeyResult = (config, name, url = "", presetUrl = "", options = { tableUnavailable: false }) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-saved-key-"));
   const file = path.join(dir, "config.json");
   fs.writeFileSync(file, JSON.stringify(config));
   try {
-    return svc.savedKeyFor(name, url, file, presetUrl);
+    // `"default"` means "call it the way a new call site would", which is the
+    // only way to see which answer the default itself gives.
+    if (options === "default") return svc.savedKeyLookup(name, url, file, presetUrl);
+    return svc.savedKeyLookup(name, url, file, presetUrl, options);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 };
+const savedKey = (config, name, url = "", presetUrl = "", options) =>
+  savedKeyResult(config, name, url, presetUrl, options).key;
 /* A form spelling that no entry in the file has is *not* answered — the registry
  * folds case for "is this name built in", but the entry lookup is a plain map
  * read, which a real CLI confirms:
@@ -1375,8 +1387,24 @@ check(
 // wrong host is not.
 check(
   "an unreadable registry withholds the Key instead of guessing where it goes",
-  savedKey(presetKey, "DeepSeek", "https://elsewhere.example/v1") === "",
-  savedKey(presetKey, "DeepSeek", "https://elsewhere.example/v1")
+  savedKeyResult(presetKey, "DeepSeek", "https://elsewhere.example/v1", "", { tableUnavailable: true }).reason ===
+    "table-unavailable",
+  savedKeyResult(presetKey, "DeepSeek", "https://elsewhere.example/v1", "", { tableUnavailable: true }).reason
+);
+// And the default is that answer, not the optimistic one: a caller that says
+// nothing about the table has not read it, and a bare built-in entry's endpoint
+// then lives nowhere this function can see. `savedKeyFor` is such a caller — the
+// shape a new call site takes before anyone thinks about the registry.
+const bareDefault = savedKeyResult(presetKey, "DeepSeek", "", "", "default");
+check(
+  "a caller that never read the table is treated as not having read it",
+  bareDefault.key === "" && bareDefault.reason === "table-unavailable",
+  `${bareDefault.reason} | ${bareDefault.key}`
+);
+check(
+  "and the same file answers once the caller says it read the table",
+  savedKey(presetKey, "DeepSeek", "", "", { tableUnavailable: false }) === "sk-deep",
+  savedKey(presetKey, "DeepSeek", "", "", { tableUnavailable: false })
 );
 // `savedKeyForName` is the version the main process calls: it reads the
 // built-in endpoint out of the same cached table the settings page lists. The

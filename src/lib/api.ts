@@ -80,6 +80,13 @@ export interface Bridge {
    * failure remembered for a short window — the settings page's 刷新 button.
    */
   readConfig(opts?: { refresh?: boolean }): Promise<ConfigView>;
+  /**
+   * Whether the Key field may be left blank for this name + endpoint, and the
+   * sentence to show when it may not. `reason` is one of the `KEY_WITHHELD_*`
+   * strings in `ocr-service.js` (`""` when the Key is reusable); the Key itself
+   * never reaches the renderer.
+   */
+  savedKey(req: { name: string; url: string }): Promise<{ ok: boolean; available: boolean; reason: string; hint: { tone: "ok" | "warn" | "muted"; text: string } }>;
   saveConfig(form: {
     provider: string;
     isCustom: boolean;

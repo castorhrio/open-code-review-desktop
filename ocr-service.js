@@ -232,7 +232,17 @@ const KEY_WITHHELD_TABLE = "table-unavailable"; // the built-in endpoint could n
 // makes `presetUrl` a *missing* answer rather than an empty one: for a built-in
 // entry configured without a URL (the shape this app writes), the host is then
 // unknown, and unknown is not the same as "any host will do".
-function savedKeyLookup(name, url, configPath = CONFIG_PATH, presetUrl = "", { tableUnavailable = false } = {}) {
+//
+// The default is the conservative one: a caller that says nothing about the
+// table is a caller that did not read it, so the endpoint is unknown and the Key
+// is withheld. It used to default to `false` — "the table was read and had
+// nothing to say" — which made a forgotten argument (or a new call site written
+// before the table existed) hand the Key out for whatever URL the form held.
+// The two directions of that mistake are not symmetric: a withheld Key costs one
+// retype, a Key sent to the wrong host cannot be taken back. Only a caller that
+// actually read the table may pass `false`, and `savedKeyLookupByName` is the
+// one that does.
+function savedKeyLookup(name, url, configPath = CONFIG_PATH, presetUrl = "", { tableUnavailable = true } = {}) {
   let raw = {};
   try {
     raw = JSON.parse(fs.readFileSync(configPath, "utf8"));
@@ -283,7 +293,15 @@ function savedKeyLookup(name, url, configPath = CONFIG_PATH, presetUrl = "", { t
   return { key, reason: "" };
 }
 
-/** `savedKeyLookup` for callers that only need the value (the renderer never asks). */
+/**
+ * `savedKeyLookup` for callers that only need the value.
+ *
+ * It states nothing about the table, so it inherits the conservative default and
+ * withholds a Key whose endpoint is only knowable from `ocr llm providers`. That
+ * is the point of the default: a call site that has not read the table cannot
+ * claim the endpoint is known. Callers that *have* read it use
+ * `savedKeyLookupByName` below.
+ */
 function savedKeyFor(name, url, configPath = CONFIG_PATH, presetUrl = "") {
   return savedKeyLookup(name, url, configPath, presetUrl).key;
 }
@@ -336,6 +354,41 @@ function savedKeyTestMessage({ missing = [], reason = "" } = {}) {
   // `no-entry` / `no-key`: the plain answer, and what the old wording said for
   // every case.
   return `该服务还没有已保存的 Key，请把 Key 填进来，${tail}`;
+}
+
+/**
+ * The line under the API Key field: may the user leave it blank, and if not,
+ * what stands in the way.
+ *
+ * `savedKeyTestMessage` above only speaks after a test has already failed, so
+ * the six reasons were reachable in exactly one place — press 测试连通, read the
+ * sentence, guess. The field's own hint said "该服务还没有 Key" for every one of
+ * them, including "the built-in service table could not be read" (fix: press
+ * 刷新) and "the saved Key belongs to another endpoint" (fix: put the endpoint
+ * back). Those are three different fixes behind one sentence, and the one the
+ * user is shown is the one they will try.
+ *
+ * The tone is part of the answer rather than the caller's guess: `ok` is "leaving
+ * it blank reuses the saved Key", `warn` is "something you can fix stands in the
+ * way", `muted` is the ordinary state of an entry nothing has been saved for —
+ * not a fault, and not worth an alarm colour.
+ */
+function savedKeyFieldHint(reason) {
+  if (!reason) return { tone: "ok", text: "留空即沿用这个端点已保存的 Key。" };
+  // First, because it is the one cause whose fix is an in-app button rather than
+  // typing: the read failed, nothing is wrong with what the user entered.
+  if (reason === KEY_WITHHELD_TABLE)
+    return { tone: "warn", text: "读不到内置服务表，无法确认已保存的 Key 属于哪个端点；点「刷新」重读一次，再留空保存。" };
+  if (reason === KEY_WITHHELD_URL)
+    return { tone: "warn", text: "已保存的 Key 属于另一个端点，不会发到这里：把 Base URL 改回原值，或把 Key 填进来。" };
+  // The entry exists but under a spelling no run opens — the fix is a save (which
+  // writes the entry the form is about) or a hand edit plus 刷新, not a new Key.
+  if (reason === KEY_WITHHELD_ORDER)
+    return { tone: "warn", text: "配置里没有能对上这个名字的条目（只有写法不同的条目，且当前服务没有指向它）；在这里保存一次该服务，或手改配置文件后点「刷新」。" };
+  if (reason === KEY_WITHHELD_CONFIG)
+    return { tone: "muted", text: "还没有可读的配置文件，首次保存时 CLI 才会创建它。" };
+  // `no-entry` / `no-key`: nothing is saved, which is where a new entry starts.
+  return { tone: "muted", text: "该服务还没有已保存的 Key，留空保存不会写入 Key。" };
 }
 
 // Endpoint and credential are different questions. A URL in the config or in
@@ -1372,6 +1425,7 @@ module.exports = {
   savedKeyLookup,
   savedKeyLookupByName,
   savedKeyTestMessage,
+  savedKeyFieldHint,
   KEY_WITHHELD_CONFIG,
   KEY_WITHHELD_NO_ENTRY,
   KEY_WITHHELD_ORDER,
