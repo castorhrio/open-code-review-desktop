@@ -63,22 +63,78 @@ const check = (name, ok, detail = "") => {
     !isInside("C:\\Repo", "C:\\Repo2\\sub", win)
   );
   check("Windows: a different drive is outside", !isInside("C:\\Repo", "D:\\repo", win));
-  // Recorded because it is easy to get the credit wrong: `path.win32.relative`
-  // lower-cases both sides itself, so the Windows case answer above comes from
-  // the path API and not from the `caseInsensitive` flag. The two checks below
-  // are what keep that honest — one pins the internal the answer currently rests
-  // on, the other pins that the flag is not silently load-bearing (the fold in
-  // `path-guard.js` is), so a future switch away from `relative` cannot leave
-  // "Windows works" green while the case bug is back.
   check(
-    "`path.win32.relative` lower-cases both sides itself",
-    path.win32.relative("C:\\Repo", "c:\\repo\\sub") === "sub",
-    JSON.stringify(path.win32.relative("C:\\Repo", "c:\\repo\\sub"))
+    "Windows: a drive root contains every directory on that drive",
+    isInside("C:\\", "C:\\repo\\sub", win) && !isInside("C:\\", "D:\\repo", win),
+    "the rule has to answer for a root with no segments of its own"
+  );
+}
+
+/* ---- the flag now *decides* the case answer, it does not describe it ----
+ * Round 61 recorded that `path.win32.relative` lower-cases both sides itself,
+ * so the Windows answer came from the path module while the `caseInsensitive`
+ * flag was decorative: the answer was the same with the flag off. That is a flag
+ * nobody can turn off, i.e. a comment. It is load-bearing now — the fold happens
+ * in `path-guard.js` — and these three checks are what keep it that way. Without
+ * them a future implementation could quietly fall back to `relative` and the
+ * Windows bug would come back with every check still green.
+ */
+{
+  const sensitive = { pathApi: path.win32, caseInsensitive: false };
+  check(
+    "flag off: a differently-cased child path is outside",
+    !isInside("C:\\Repo", "c:\\repo\\sub", sensitive),
+    "this is the assertion round 61 could not make, and it is the one that makes the flag real"
   );
   check(
-    "...so the Windows case answer does not depend on the flag being passed",
-    isInside("C:\\Repo", "c:\\repo\\sub", { pathApi: path.win32, caseInsensitive: false }) === true,
-    "the flag states the rule; `path.relative` is what currently lower-cases"
+    "...and the identically-cased child is still inside with the flag off",
+    isInside("C:\\Repo", "C:\\Repo\\sub", sensitive),
+    "flag off must mean case-sensitive, not 'refuse everything'"
+  );
+  check(
+    "...and the fold is applied to both sides, not just to the candidate",
+    !isInside("c:\\repo", "C:\\Repo\\sub", sensitive) &&
+      isInside("c:\\repo", "c:\\repo\\sub", sensitive),
+    "a rule that folded one side only would pass the check above but fail this one"
+  );
+
+  // Independence from `path.relative` is asserted by handing the rule a path API
+  // whose `relative` *throws*: if the answer still comes out (correctly, both
+  // with the flag on and off), the case answer cannot be coming from that
+  // internal. That is stronger than re-checking what Node's `relative` does
+  // today, which is Node's business and can change under us.
+  const noRelative = {
+    sep: path.win32.sep,
+    resolve: (value) => path.win32.resolve(value),
+    relative: () => {
+      throw new Error("isInside must not go through path.relative");
+    },
+  };
+  let relativeCalls = 0;
+  const counted = {
+    sep: path.win32.sep,
+    resolve: (value) => path.win32.resolve(value),
+    // Answers "" (= "same directory") so that using it would make the check
+    // below pass for the wrong reason; the counter is what makes it red.
+    relative: () => {
+      relativeCalls += 1;
+      return "";
+    },
+  };
+  check(
+    "the rule answers without path.relative at all (flag on: inside, flag off: outside)",
+    isInside("C:\\Repo", "c:\\repo\\sub", { pathApi: noRelative, caseInsensitive: true }) === true &&
+      isInside("C:\\Repo", "c:\\repo\\sub", { pathApi: noRelative, caseInsensitive: false }) === false,
+    "so the case answer is this module's rule, not an undocumented folding inside path.relative"
+  );
+  const countedAnswer = isInside("C:\\Repo", "c:\\repo\\sub", {
+    pathApi: counted,
+    caseInsensitive: true,
+  });
+  check(
+    "...and it never calls path.relative even once",
+    countedAnswer === true && relativeCalls === 0,
+    `answer=${countedAnswer} calls=${relativeCalls}`
   );
 }
 
@@ -86,11 +142,12 @@ const check = (name, ok, detail = "") => {
  * A prefix rule (`root + sep` / `startsWith(root)`) gets these wrong in ways
  * nobody notices, because both shapes normalise differently from a drive path:
  * `path.win32.resolve` turns a share root into `\\server\share\` (trailing
- * separator) and leaves `\\?\` in place. That is exactly why the rule is
- * expressed through `path.relative` instead of by comparing strings, and the two
- * normalisations are asserted below rather than assumed — if a future Node
- * changed them, the rule's answer is what this block is about, not the
- * normalisation, so the check would say which of the two moved.
+ * separator) and leaves `\\?\` in place. The segment rule is immune to both —
+ * a trailing separator is an empty segment and is dropped — and the two
+ * normalisations are still asserted below, because they are what made the string
+ * prefix rule look correct while it was wrong. If a future Node changed them,
+ * the rule's answer is what this block is about, not the normalisation, so the
+ * check would say which of the two moved.
  */
 {
   const win = { pathApi: path.win32, caseInsensitive: true };
@@ -109,7 +166,7 @@ const check = (name, ok, detail = "") => {
   check(
     "Windows: a different host with the same share path is outside",
     !isInside("\\\\server\\share\\repo", "\\\\other\\share\\repo\\sub", win),
-    "the answer comes back absolute, which the last clause catches"
+    "the host is the first segment, so it differs before any subdirectory is reached"
   );
   check(
     "Windows: a different share on the same host is outside",
@@ -126,6 +183,14 @@ const check = (name, ok, detail = "") => {
   check(
     "Windows: a \\\\?\\ sibling sharing the prefix is outside",
     !isInside("\\\\?\\C:\\Repo", "\\\\?\\C:\\Repo2\\sub", win)
+  );
+  check(
+    "Windows: with the case rule off, host and share are compared case-sensitively too",
+    !isInside("\\\\SERVER\\Share\\Repo", "\\\\server\\share\\repo\\sub", {
+      pathApi: path.win32,
+      caseInsensitive: false,
+    }),
+    "the fold is one rule for every segment, not a special case for the drive letter"
   );
 
   // The two normalisations, written down because they are the reason the string
@@ -145,7 +210,7 @@ const check = (name, ok, detail = "") => {
     isInside("\\\\server\\share", "\\\\server\\share\\x", win) &&
       isInside("\\\\?\\C:\\Repo", "\\\\?\\C:\\Repo\\sub", win) &&
       !isInside("\\\\server\\share", "\\\\server\\share2\\x", win),
-    "resolve() adding a separator is why the UNC root case is the sharp one"
+    "a trailing separator is an empty segment here, which is why the UNC root case holds"
   );
 }
 

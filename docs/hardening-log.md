@@ -2,7 +2,8 @@
 
 第 2–21 轮的加固正文，和已经划掉的待办条目，都搬到了这里；第 24–26 轮的
 正文随 `next-iteration.md` 一起迁往私有 control 仓，不在本仓库。
-上游状态只看 [`OCR-UPSTREAM-SYNC.md`](OCR-UPSTREAM-SYNC.md)；
+上游 pin、当前状态与对照表只看 [`OCR-UPSTREAM-SYNC.md`](OCR-UPSTREAM-SYNC.md)，
+逐轮核对正文在 [`upstream-history.md`](upstream-history.md)；
 desktop 侧的下一轮简报与逐轮复核记录放在私有 control 仓。
 **本仓库不再保留 `next-iteration.md`**——它和私有简报职责重叠，又容易某一轮
 忘了更新，读它的人便会以为上游没人查。

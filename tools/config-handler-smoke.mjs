@@ -898,6 +898,95 @@ check(
   check("and the old Key is still the only one", stub.state.providers.deepseek?.api_key === "sk-old" && !stub.state.providers.DeepSeek, JSON.stringify(stub.state));
 }
 
+/* ---- one same-spelled entry: the fix is complete, so no button is offered ----
+ * `spellingClashMessage` has three wordings: one entry, two entries in one
+ * section, and two entries in two sections while the registry is silent. Only
+ * the last one carries a doubt the page cannot resolve on its own, and only that
+ * one offers 刷新 / 重装. The one-entry case is the one users actually hit (a
+ * service they already configured, typed with a different case), and its fix is
+ * just "use the spelling that is already there" — offering 刷新 there sends them
+ * to a button that cannot change which entry the run reads, which is the same
+ * failure the two-silence split was made for.
+ *
+ * That direction was only written in the handler's comment. These checks pin it
+ * for all three table states of the same view, because the one-entry branch must
+ * not start reading the table at all: a refusal that is already complete has to
+ * read the same on a machine where the table happened to answer.
+ */
+{
+  const singleSection = { providers: { deepseek: { api_key: "sk-old" } } };
+  const STATES = [
+    ["unreadable", SILENT_PRESETS],
+    ["hollow", HOLLOW_PRESETS],
+    ["answered", answeredPresets(["deepseek", "openai"])],
+  ];
+  for (const [state, list] of STATES) {
+    const clash = spellingClash(singleSection, "DeepSeek", list);
+    check(
+      `a single same-spelled entry is a clash whatever the table says (${state})`,
+      clash !== null && clash.others.length === 0,
+      JSON.stringify(clash)
+    );
+    const answer = clash ? spellingClashMessage(clash, "DeepSeek", list) : null;
+    check(
+      `...and the ${state} sentence names that entry, its section, and the single-entry fix`,
+      answer !== null &&
+        answer.entries.length === 1 &&
+        answer.message.includes("deepseek") &&
+        answer.message.includes("providers 段") &&
+        answer.message.includes("请改用已有的拼写"),
+      answer && answer.message
+    );
+    check(
+      `...and offers neither 刷新 nor 重装 (${state}), which would change nothing about which entry is read`,
+      answer !== null &&
+        !answer.message.includes("刷新") &&
+        !answer.message.includes("重装") &&
+        !answer.message.includes("服务表"),
+      answer && answer.message
+    );
+    check(
+      `...and says what the save would have done instead (${state})`,
+      answer !== null &&
+        answer.message.includes("分成两条") &&
+        answer.message.includes("Key 不会再被读到"),
+      answer && answer.message
+    );
+  }
+
+  // Through the handler, registry silent: the same sentence reaches the page and
+  // nothing is written. `retryable` is left to the table's own answer (a failed
+  // read is worth one more 刷新 at the page level) — it is not a statement about
+  // the clash, so it is not asserted here.
+  const stub = makeStub({
+    providers: { deepseek: { api_key: "sk-old" } },
+    presetRegistry: async () => ({ ok: false, names: [], rows: [], matched: 0, error: "registry unavailable" }),
+  });
+  const h = make(stub);
+  const res = await h.save(null, {
+    provider: "DeepSeek",
+    isCustom: false,
+    apiKey: "sk-new",
+    model: "deepseek-chat",
+    setActive: true,
+  });
+  check(
+    "the handler refuses it, and nothing is written",
+    res.ok === false && stub.setCalls === 0 && stub.calls.length === 0,
+    JSON.stringify({ ok: res.ok, calls: stub.calls.length })
+  );
+  check(
+    "and shows that very sentence",
+    refusalOf(res, stub, "DeepSeek", SILENT_PRESETS).saidVerbatim,
+    res.error
+  );
+  check(
+    "while the existing entry keeps its Key and no second spelling appears",
+    stub.state.providers.deepseek?.api_key === "sk-old" && stub.state.providers.DeepSeek === undefined,
+    JSON.stringify(stub.state.providers)
+  );
+}
+
 /* ---- a hollow registry list still checks both sections ----
  * The check above proves the empty list is not taken as knowledge, because the
  * same-spelled entry sits in `providers` and a "custom name" reading would only

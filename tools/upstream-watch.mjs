@@ -212,6 +212,13 @@ export const formatDrift = (verdict) => {
 export const PIN_BLOCK_START = "<!-- upstream-pin:start -->";
 export const PIN_BLOCK_END = "<!-- upstream-pin:end -->";
 
+// The round-by-round narrative lives here, not in the sync doc: one file per
+// role keeps the pin count meaningful. `findDocPins` only ever reads the sync
+// doc, and `tools/upstream-watch-smoke.mjs` additionally asserts that the log
+// holds no pin declaration and no pin block at all — an archive that quoted the
+// pin would become a second authority nobody compares against.
+export const UPSTREAM_HISTORY_DOC = "docs/upstream-history.md";
+
 const SHA_IN_LINE = "([0-9a-fA-F]{7,40})";
 // The shapes outside the block. `g` is not used: each rule is applied to one
 // line and the first match is the declaration.

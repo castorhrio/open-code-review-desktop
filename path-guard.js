@@ -12,18 +12,35 @@ const path = require("path");
 // not a test gap — a user who typed a different case into the folder dialog (or
 // a differently-cased drive path) was told the directory was outside the repo.
 //
-// `path.relative` already handles "..", sibling prefixes (`/repo` vs `/repo2`)
-// and different Windows drives, so the rule is expressed through it instead of
-// comparing string prefixes.
+// Two things were wrong with the old spelling and both are fixed here on purpose:
 //
-// The case fold below is written out on purpose, but it is *not* what makes the
-// Windows answer right: `path.win32.relative` already lower-cases both sides
-// itself (asserted in `tools/path-guard-smoke.mjs`, together with the fact that
-// the answer is the same with the flag off). What fixed the bug was dropping the
-// string prefix, then, not a case rule. The fold stays because it states the
-// rule in this module rather than in an undocumented internal of the path
-// module; if that internal ever changed, this line is the one that would still
-// fold. Don't read it as "the flag is what makes Windows work".
+//  1. **String prefixes, not whole segments.** `/repo` vs `/repo2`, and a UNC
+//     root that `resolve` hands back with a trailing separator
+//     (`\\server\share\`), are the shapes a prefix test gets wrong while looking
+//     right for the case the author had in mind.
+//  2. **An implicit case rule.** The first fix of the Windows bug leaned on the
+//     fact that `path.win32.relative` lower-cases both sides itself; the
+//     `caseInsensitive` flag was therefore decorative — the answer was the same
+//     with the flag off. A flag nobody can turn off is not a rule, it is a
+//     comment, and the next person to switch away from `relative` would have
+//     silently turned the Windows bug back on.
+//
+// So the rule is stated here, in full, and the platform only supplies path
+// syntax:
+//
+//   resolve both sides → (if the platform folds case) lower-case both sides →
+//   compare whole segments from the first one on.
+//
+// That is the entire rule. It does not go through `path.relative` (whose case
+// behaviour is an internal of the path module, not our rule) and it does not go
+// through a string prefix. `tools/path-guard-smoke.mjs` pins the three
+// consequences that can regress separately: the flag off means case-sensitive,
+// the answer is the same whether or not a `pathApi.relative` exists at all, and
+// the UNC / `\\?\` long-path shapes still answer correctly.
+//
+// `resolve` is called before the split so `..` and `.` are already gone, and the
+// segment list drops empty ones so a leading or trailing separator (a share
+// root's, a `/` root's) cannot decide the answer.
 //
 // The path API and the case rule are injectable so the Windows answer can be
 // checked on Linux with `path.win32` — otherwise the one platform the bug
@@ -48,16 +65,23 @@ function isInside(
   if (typeof root !== "string" || typeof candidate !== "string" || root === "" || candidate === "") {
     return false;
   }
-  const fold = (value) => {
+  // Empty segments are separators, not names: `\\server\share\` (what `resolve`
+  // returns for a share root) and `\\server\share` have to compare equal, and so
+  // do `/` and `//`.
+  const segmentsOf = (value) => {
     const resolved = pathApi.resolve(value);
-    return caseInsensitive ? resolved.toLowerCase() : resolved;
+    const folded = caseInsensitive ? resolved.toLowerCase() : resolved;
+    return folded.split(pathApi.sep).filter((segment) => segment !== "");
   };
-  const rel = pathApi.relative(fold(root), fold(candidate));
-  if (rel === "") return true;
-  // `..foo` is a legal child name, so the escape test has to look at whole
-  // segments rather than at the two-character prefix. A different drive on
-  // Windows comes back absolute, which the last clause catches.
-  return rel !== ".." && !rel.startsWith(".." + pathApi.sep) && !pathApi.isAbsolute(rel);
+  const rootSegments = segmentsOf(root);
+  const candidateSegments = segmentsOf(candidate);
+  // A candidate deeper than the root cannot be inside it; a root that is itself
+  // a filesystem root (no segments) contains everything under it.
+  if (candidateSegments.length < rootSegments.length) return false;
+  // Whole-segment prefix compare. A different Windows drive, a different UNC
+  // host or share, and a sibling whose name merely starts with the root's name
+  // all differ at some segment, so none of them needs a special case here.
+  return rootSegments.every((segment, index) => candidateSegments[index] === segment);
 }
 
 module.exports = { isInside };

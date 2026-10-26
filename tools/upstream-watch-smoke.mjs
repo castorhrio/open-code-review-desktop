@@ -19,6 +19,7 @@ import {
   PINNED_UPSTREAM,
   PIN_PLACES,
   ROWS_TO_REREAD,
+  UPSTREAM_HISTORY_DOC,
   classifyGit,
   createRunner,
   describePinDisagreements,
@@ -33,6 +34,7 @@ import {
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const SYNC_DOC = path.join(ROOT, "docs", "OCR-UPSTREAM-SYNC.md");
+const HISTORY_DOC = path.join(ROOT, ...UPSTREAM_HISTORY_DOC.split("/"));
 
 const failures = [];
 const check = (name, ok, detail = "") => {
@@ -763,6 +765,54 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
     "each row the sentinel names still exists in the table",
     labels.every((label) => doc.includes(label)),
     JSON.stringify(labels.filter((label) => !doc.includes(label)))
+  );
+}
+
+/* ---- the audit log is one file, and it is not a second pin authority ----
+ * Thirteen round sections used to sit in the sync doc, above the pin and the
+ * comparison table, each quoting an upstream SHA of its own (seven-character
+ * prefixes, tag object ids). None of those matched a pin shape, so the count
+ * stayed at three — by luck of wording. The structural risk was real: the pin
+ * rule is "exactly three declarations", and the way that breaks is a historical
+ * paragraph that happens to be shaped like a declaration. So the narrative moved
+ * to its own file, and the split itself is asserted here: the sync doc keeps one
+ * current-state section, the log keeps the archived rounds, and the log declares
+ * no pin at all (otherwise it would be an authority nobody compares against).
+ */
+{
+  const syncDoc = fs.readFileSync(SYNC_DOC, "utf8");
+  const history = fs.readFileSync(HISTORY_DOC, "utf8");
+  const stateHeadings = syncDoc.match(/^## 当前状态（/gm) || [];
+  check(
+    "the sync doc keeps exactly one current-state section",
+    stateHeadings.length === 1,
+    `${stateHeadings.length} heading(s)`
+  );
+  check(
+    "...and carries no archived round sections any more",
+    !/^## 上游状态（/m.test(syncDoc),
+    "the round-by-round narrative belongs in the audit log"
+  );
+  const archivedRounds = history.match(/^## 上游状态（/gm) || [];
+  check(
+    "the audit log holds the round sections the sync doc no longer carries",
+    archivedRounds.length >= 10,
+    `${archivedRounds.length} section(s)`
+  );
+  const historyPins = findDocPins(history);
+  check(
+    "the audit log declares no pin and holds no pin block",
+    historyPins.pins.length === 0 && historyPins.blockFound === false,
+    JSON.stringify({ pins: historyPins.pins, blockFound: historyPins.blockFound })
+  );
+  check(
+    "...because the pin authority is the sync doc, which the log names",
+    history.includes("OCR-UPSTREAM-SYNC.md"),
+    UPSTREAM_HISTORY_DOC
+  );
+  check(
+    "...and the sync doc links back to the log, so the split is discoverable from either end",
+    syncDoc.includes("upstream-history.md")
   );
 }
 
