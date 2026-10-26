@@ -99,6 +99,48 @@ const declared = bridgeBody
   : [];
 
 // ---------------------------------------------------------------------------
+// The parser above is a claim, so it is checked like one.
+// ---------------------------------------------------------------------------
+// Everything below walks `declared`, which is whatever one regular expression
+// managed to read out of the interface. If that expression stops matching — a
+// reformat to four-space indentation, a `readonly` modifier, prettier splitting
+// a declaration differently — `declared` shrinks or empties, and the checks built
+// on it shrink with it: no member to compare means nothing to disagree about, so
+// the suite reports full marks for a parser that no longer parses. The failure
+// then looks like "the interface has no methods", which is not a thing anyone
+// would say out loud, and the next drift in the real contract goes unnoticed
+// behind it.
+//
+// Two claims, because a count can be wrong in two directions:
+//
+//   1. the interface has members at all — an empty `declared` used to make every
+//      comparison below vacuous (the "exposed but not declared" check is the only
+//      one that would have complained, and it blames preload.js for it);
+//   2. every method-shaped line inside the interface body produced a member —
+//      counted with an indentation-agnostic pattern that also accepts a leading
+//      `readonly`, so the two counts differing means the strict pattern missed a
+//      line that is visibly a method declaration. That is the drift this parser
+//      cannot see, made to fail out loud.
+const methodShaped = bridgeBody
+  ? [...bridgeBody[1].matchAll(/^[ \t]+(?:readonly[ \t]+)?([A-Za-z_$][\w$]*)[ \t]*[(<]/gm)].map((m) => m[1])
+  : [];
+
+check(
+  "the Bridge interface declares at least one method",
+  declared.length > 0,
+  `${declared.length} read out of src/lib/api.ts — an empty interface makes every check below vacuous`
+);
+check(
+  "and every method-shaped line in it was read, so no member is skipped",
+  methodShaped.length === declared.length,
+  methodShaped.length === declared.length
+    ? ""
+    : `${methodShaped.length} method-shaped line(s) inside the interface, ${declared.length} parsed: ${
+        methodShaped.filter((m) => !declared.includes(m)).join(", ") || "(count mismatch)"
+      } — the parser no longer understands the interface's formatting`
+);
+
+// ---------------------------------------------------------------------------
 // Both directions. A missing method is a runtime crash; an extra one is drift
 // that will become a crash the moment someone trusts it.
 // ---------------------------------------------------------------------------
@@ -258,6 +300,13 @@ const markerFor = (method, param, key) => (key ? `probe:${method}:${param.name}.
 const LISTENER_METHODS = new Set(["onUpdateState", "onLog", "onExit", "onProgress", "onMenuOpenRepo"]);
 
 const arityMismatches = [];
+// Methods whose shape was actually examined: parsed on both sides, called, and
+// found to reach the main process with a payload to look at (or to take no
+// parameter at all, where the call itself is the whole check). Counted so that
+// "every non-listener method was examined" is an assertion rather than a
+// consequence of the loop's `continue`s — each of which is a method that quietly
+// stops being checked.
+const examined = new Set();
 const shapeMismatches = [];
 const extraKeyMismatches = [];
 const parseFailures = [];
@@ -332,6 +381,7 @@ for (const name of declared) {
     unprobed.push(`${name}: calling it sent nothing to the main process, so its shape went unchecked (only the listener methods may send nothing)`);
     continue;
   }
+  examined.add(name);
   // A zero-parameter method has nothing left to compare: the call above *was* the
   // check, and it did reach a channel.
   if (!params.length) continue;
@@ -417,6 +467,23 @@ check(
   "and the listener methods send nothing",
   listenerDrift.length === 0,
   listenerDrift.join(" | ")
+);
+
+// The parsers, the loop's `continue`s and the counts are all ways for a method to
+// drop out of the shape checks while every name-shaped check above stays green.
+// The listeners are the only methods allowed to be absent from `examined` — they
+// cross the bridge in the other direction — so the two sets have to add up.
+const needExamining = declared.filter((name) => !LISTENER_METHODS.has(name));
+const notExamined = needExamining.filter((name) => !examined.has(name));
+check(
+  "and every non-listener method's shape was actually examined",
+  notExamined.length === 0,
+  notExamined.length ? `skipped without being examined: ${notExamined.join(", ")}` : ""
+);
+check(
+  "the examined set and the listener allow-list together cover the interface",
+  examined.size + declared.filter((name) => LISTENER_METHODS.has(name)).length === declared.length,
+  `${examined.size} examined + ${declared.filter((name) => LISTENER_METHODS.has(name)).length} listener(s) vs ${declared.length} declared`
 );
 
 // A stale name on the allow-list is dead weight that quietly exempts a method

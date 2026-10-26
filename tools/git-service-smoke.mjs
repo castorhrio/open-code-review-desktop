@@ -134,6 +134,112 @@ check(
 check("...and it keeps git's own words in the message", /git/i.test(unknownWording.error || ""), unknownWording.error || "");
 fs.rmSync(notARepo, { recursive: true, force: true });
 
+/* ---- each reason is a sentence, and sentences drift ----
+ * `bad-ref` and `missing` are recognised by matching git's stderr *wording*
+ * against two patterns, so the reasons are only as stable as those sentences
+ * are. `failed` already had a wording that matches neither (above); the other
+ * two branches were only ever hit by a real git, which means the checks proved
+ * that *today's* git produces those sentences — not what happens when a
+ * different one does.
+ *
+ * A pattern that stopped matching does not go quiet. Whatever wording it used
+ * to recognise falls through to the generic branch, so a file that is not in the
+ * reviewed snapshot is reported as "读取 ... 失败": a failure with no reason,
+ * which is exactly what `bad-ref` / `missing` exist to spare the reader. Since
+ * the drift is invisible from the outside — nothing crashes, the pane just says
+ * less — it is asserted here from the inside: the service is loaded against a
+ * stubbed `spawn` that emits a chosen stderr, and each wording is fed to the
+ * classifier on its own.
+ *
+ * The list has both directions. The known sentences must land on their reason,
+ * and two deliberately *unknown* ones — a plausible rewording, and a localised
+ * git with the `LC_ALL=C` fix removed (a wording nothing here should ever
+ * recognise) — must land on `failed` rather than being guessed into one of the
+ * two reasons. A pattern widened carelessly ("exists" instead of "exists on
+ * disk, but not in") would turn that guess into a green check, which is why the
+ * unknown wordings are part of the same list.
+ */
+{
+  const { EventEmitter } = await import("node:events");
+
+  // Load a fresh copy of the service with `spawn` stubbed, so the command never
+  // runs: `readFileAtRef` only has to classify what it is told.
+  const classifyStderr = async (stderrText) => {
+    const cp = await import("node:child_process");
+    const realSpawn = cp.default.spawn;
+    const calls = [];
+    cp.default.spawn = (...args) => {
+      calls.push(args);
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      process.nextTick(() => {
+        child.stderr.emit("data", Buffer.from(stderrText, "utf8"));
+        child.emit("close", 128);
+      });
+      return child;
+    };
+    const servicePath = path.join(ROOT, "git-service.js");
+    delete require.cache[require.resolve(servicePath)];
+    try {
+      const fresh = require(servicePath);
+      const res = await fresh.readFileAtRef(dir, "a.go", "HEAD", 1, 5, 0);
+      return { res, calls };
+    } finally {
+      delete require.cache[require.resolve(servicePath)];
+      cp.default.spawn = realSpawn;
+    }
+  };
+
+  const wordings = [
+    // The three spellings `bad-ref` has been seen in.
+    { stderr: "fatal: bad revision 'no-such-ref'", want: "bad-ref" },
+    { stderr: "fatal: invalid object name 'no-such-ref'.", want: "bad-ref" },
+    {
+      stderr: "fatal: ambiguous argument 'no-such-ref': unknown revision or path not in the working tree.",
+      want: "bad-ref",
+    },
+    // Both spellings of a path that is not in the ref: git uses one or the other
+    // depending on whether the path still exists on disk.
+    { stderr: "fatal: path 'a.go' does not exist in 'HEAD'", want: "missing" },
+    { stderr: "fatal: path 'a.go' exists on disk, but not in 'HEAD'", want: "missing" },
+    { stderr: "fatal: no such path 'a.go' in HEAD", want: "missing" },
+    // Drift: a rewording nothing recognises has to be reported as a plain
+    // failure, not absorbed into a reason by a loosened pattern.
+    { stderr: "fatal: Not a valid object name no-such-ref", want: "failed" },
+    { stderr: "fatal: couldn't find 'a.go' in 'HEAD'", want: "failed" },
+    // What a localised git says. `LC_ALL=C` is what keeps this off the wire, so
+    // it is also the proof that the override is what makes the reasons work: with
+    // the locale left alone, both of these become `failed`.
+    { stderr: "致命错误：无效的对象名称 'no-such-ref'", want: "failed" },
+  ];
+
+  for (const { stderr, want } of wordings) {
+    const { res, calls } = await classifyStderr(stderr);
+    const said = `${res.reason || "(none)"} / ${res.error || ""}`;
+    check(
+      `a stderr wording is classified as ${want}: ${stderr.slice(0, 46)}`,
+      calls.length === 1 && res.ok === false && res.reason === want,
+      calls.length === 1 ? said : `the stub was not used (${calls.length} spawn call(s))`
+    );
+    // A reason is reported with the ref it is about, whichever branch it took —
+    // the reader has to know which snapshot could not be read.
+    check("...and the message names the ref it is about", /HEAD/.test(res.error || ""), res.error || "");
+  }
+
+  // The two directions must not be able to swap: the `missing` wordings above
+  // also contain the word "ref"/"revision"-free sentences, and the `bad-ref` ones
+  // never mention a path. A pattern that matched both would silently classify
+  // everything as the same thing, which is the failure this list is here for.
+  const swapped = [];
+  for (const { stderr, want } of wordings) {
+    const { res } = await classifyStderr(stderr);
+    if (want === "bad-ref" && res.reason === "missing") swapped.push(stderr);
+    if (want === "missing" && res.reason === "bad-ref") swapped.push(stderr);
+  }
+  check("no wording is classified as the opposite reason", swapped.length === 0, swapped.join(" | "));
+}
+
 /* ---- the reasons survive a non-English desktop ----
  * `bad-ref` and `missing` are read out of git's stderr *sentences*, and git
  * translates them: with a Chinese locale it says "无效的对象名称" / "路径 ... 不存在",
