@@ -661,6 +661,16 @@ check(
   capStore.read(capA, `cap-${String(MAX_ENTRIES).padStart(3, "0")}`)?.warnings?.length === 1,
   JSON.stringify(capStore.read(capA, `cap-${String(MAX_ENTRIES).padStart(3, "0")}`))
 );
+// The number the settings page shows is this store's own answer, and it has to
+// agree with the file after the trim: a write that pushed records out leaves the
+// occupancy at the cap, not one above it, and the count is current (settled), so
+// the page cannot claim a bigger history than the profile holds.
+const capStats = await capStore.stats();
+check(
+  "the occupancy the settings page reads reports the cap, not the writes",
+  capStats.entries === MAX_ENTRIES && capStats.settled === true,
+  JSON.stringify(capStats)
+);
 // The survivors are the global tail in the order they were written — not one
 // repository's oldest kept and another's dropped, which is what a per-repository
 // cap would produce.

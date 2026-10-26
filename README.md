@@ -172,6 +172,8 @@ npm run audit:diagnostics # what the app keeps about a run the CLI does not pers
 npm run audit:service   # the real CLI: arg building and output parsing, all 4 modes
 npm run audit:git       # the code pane reads the reviewed snapshot, not the worktree
 npm run audit:update    # the update state machine, with the updater stubbed
+npm run audit:release   # what a release must not start from, the order it runs in,
+                        #   and the move that recovers a locked win-unpacked build
 npm run audit:ui        # 65 states x 3 window sizes x 2 themes
 npm run audit:contrast  # WCAG AA for every text/background pair
 npm run audit:guards    # navigation + window-open policy, in real Electron
@@ -194,6 +196,8 @@ All of them exit non-zero on findings, so they work as a gate rather than a log,
 Two of the fixtures are not invented: `ocr session list --json` was run against real repositories on this machine, and the shapes it returns are what the fixtures encode — including a pre-manifest session (`legacy: true`, no `run_manifest`) whose 27 of 27 files failed. That is the session that exposed `sessionState()` returning `"complete"` for every manifest-less record, i.e. a green 完成 badge on a run that failed outright.
 
 The progress parser is tested the same way — by replaying a transcript rather than by describing it. `audit:service` feeds `feedProgressLine()` the stderr of a real single-file review, captured live (3m48s, 6 findings, 10 tool calls), and asserts the numbers the run screen shows. That replay is what the parser had no equivalent of when it matched only the scan wording `N file(s) discovered, reviewing M`: across all three diff modes the CLI prints `N file(s) changed`, so 进入审查 never left "—", and the run screen was three zeros over an empty window for four minutes.
+
+**`audit:release`** covers the release script's decisions, which are the ones that fail quietly: a release cut from a detached HEAD commits to a branch nobody can reach from, and a dirty tree ships half-finished work — both refusals are asserted before any command is built. The step order is executed against recording doubles rather than read out of the source, and a step that throws ends the release there. It also drives the packaging fallback on a fake disk: when electron-builder cannot rename into a locked `release/win-unpacked`, the retry builds elsewhere and the artefacts are moved across, and that move is the one path in the chain that rearranges the real disk with no command behind it — so the check pins the order (the previous app dir removed *before* the new one is renamed into its place, since a rename onto a non-empty directory fails on Windows), that the temp output dir's `builder-debug.yml` is never shipped over the real one's, and that the temp dir is deleted last and not at all when a move fails.
 
 **`audit:update`** drives `update-service.js` with the updater stubbed — no network, no Electron, no release. It exists because that state machine had no test and it showed: two of its states could not be reached or could not be left, and neither is visible in a development build.
 

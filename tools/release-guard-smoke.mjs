@@ -16,6 +16,9 @@
 //   - a dirty tree ships someone else's half-finished work.
 //
 // Run with `npm run audit:release`.
+import path from "node:path";
+
+import { relocateDistOutput } from "./release-dist.mjs";
 import { executeRelease, releasePrecheck, planRelease, RELEASE_GUARD_MESSAGES, RELEASE_STEPS } from "./release-guard.mjs";
 
 const failures = [];
@@ -300,6 +303,254 @@ const STATUS = "git status --porcelain";
       `a plan that is ${JSON.stringify(empty) || "missing"} executes nothing and says so`,
       answerForEmpty.ok === false && answerForEmpty.ran.length === 0 && calls.length === 0,
       JSON.stringify([answerForEmpty, calls])
+    );
+  }
+}
+
+/* ---- the packaging fallback moves a build without losing it ----
+ * `tools/release.mjs` retries packaging into `release-<version>/` when
+ * electron-builder cannot rename into a locked `release/win-unpacked`, and then
+ * moves the artefacts across. That move is the only place in the release chain
+ * that rearranges the real disk without a command behind it, so nothing above
+ * could reach it: importing `release.mjs` starts packaging. `relocateDistOutput`
+ * takes the filesystem and the path module as arguments, so the whole path can
+ * be walked here against a fake disk.
+ *
+ * The three facts being pinned are the ones a well-meaning rewrite loses:
+ * `builder-debug.yml` describes the *temp* output dir and must not overwrite the
+ * real one's, the previous `win-unpacked` has to go before the new one is
+ * renamed into its place (a rename onto a non-empty directory fails on Windows,
+ * the platform this path exists for), and the fallback dir is deleted *last* —
+ * deleting it first would remove exactly the files the move exists to keep.
+ */
+{
+  const posix = path.posix;
+
+  /**
+   * A fake disk: nested objects, a directory being an object and a file being
+   * `null`. Uniform on purpose — a release artefact and an app dir are moved by
+   * the same call, and the check has to see both.
+   *
+   * `renameSync` refuses when the target exists — that is Windows' answer
+   * (`EEXIST`/`EPERM`), and it makes "the stale dir was removed first" a
+   * behavioural fact rather than a comment about op order.
+   */
+  function fakeDisk(root) {
+    const ops = [];
+    const parts = (p) => p.split("/").filter(Boolean);
+    const lookup = (names) => {
+      let node = root;
+      for (const name of names) {
+        if (!node || typeof node !== "object" || !Object.prototype.hasOwnProperty.call(node, name)) return undefined;
+        node = node[name];
+      }
+      return node;
+    };
+    const resolve = (p) => {
+      const names = parts(p);
+      if (names.length === 0) return { parent: null, name: "", exists: true };
+      const parent = lookup(names.slice(0, -1));
+      const name = names[names.length - 1];
+      const exists = Boolean(parent) && typeof parent === "object" && Object.prototype.hasOwnProperty.call(parent, name);
+      return { parent, name, exists };
+    };
+    const fs = {
+      existsSync: (p) => resolve(p).exists,
+      readdirSync: (p) => {
+        const node = lookup(parts(p));
+        if (!node || typeof node !== "object") throw new Error(`ENOENT: no such directory, scandir '${p}'`);
+        return Object.keys(node);
+      },
+      renameSync: (from, to) => {
+        const source = resolve(from);
+        if (!source.exists) throw new Error(`ENOENT: no such file or directory, rename '${from}'`);
+        const target = resolve(to);
+        if (!target.parent) throw new Error(`ENOENT: no such directory, rename '${to}'`);
+        if (target.exists) throw new Error(`EEXIST: '${to}' already exists`);
+        target.parent[target.name] = source.parent[source.name];
+        delete source.parent[source.name];
+        ops.push({ op: "rename", from, to });
+      },
+      rmSync: (p) => {
+        const target = resolve(p);
+        if (target.exists) delete target.parent[target.name];
+        ops.push({ op: "rm", path: p });
+      },
+      mkdirSync: (p) => {
+        let node = root;
+        for (const name of parts(p)) {
+          if (!node[name] || typeof node[name] !== "object") node[name] = {};
+          node = node[name];
+        }
+        ops.push({ op: "mkdir", path: p });
+      },
+    };
+    const index = (pred) => ops.findIndex(pred);
+    return { fs, ops, index, lookup: (p) => lookup(parts(p)), resolve };
+  }
+
+  const FROM = "/release-0.1.14";
+  const TO = "/release";
+  const SETUP = "open-code-review-desktop-0.1.14-setup.exe";
+  const PORTABLE = "open-code-review-desktop-0.1.14-portable.exe";
+  const LATEST = "latest.yml";
+
+  /* the ordinary fallback: a previous release/win-unpacked is in the way */
+  {
+    const d = fakeDisk({
+      "release-0.1.14": {
+        "win-unpacked": { "open-code-review-desktop.exe": null },
+        "builder-debug.yml": null,
+        [SETUP]: null,
+        [PORTABLE]: null,
+        [LATEST]: null,
+      },
+      release: {
+        "win-unpacked": { "stale.exe": null },
+        "open-code-review-desktop-0.1.13-setup.exe": null,
+      },
+    });
+    // Caught rather than left to crash the run: the first thing a rewrite gets
+    // wrong here is the order below, and "the move threw" has to read as a failed
+    // check with the platform's words, not as a stack trace that stops the suite.
+    let answer = null;
+    let moveError = null;
+    try {
+      answer = relocateDistOutput({ from: FROM, to: TO, fs: d.fs, path: posix });
+    } catch (err) {
+      moveError = err;
+    }
+    check("the fallback move completes with a previous app dir in the way", moveError === null, moveError && moveError.message);
+    if (!answer) answer = { moved: [], skipped: [], replaced: null };
+
+    check(
+      "the fallback moves every artefact into release/",
+      answer.moved.join(" | ") === [SETUP, PORTABLE, LATEST].join(" | "),
+      answer.moved.join(" | ")
+    );
+    // Only `builder-debug.yml` is *left behind*: `win-unpacked` was moved as a
+    // directory before the loop ran, so it is no longer in the temp dir to skip.
+    // Both are the entries the temp output dir owns rather than the release's.
+    check(
+      "...leaving the temp output dir's builder-debug.yml behind instead of shipping it",
+      answer.skipped.join(" | ") === "builder-debug.yml",
+      answer.skipped.join(" | ")
+    );
+    check("...and saying that it replaced a previous app dir", answer.replaced === true, JSON.stringify(answer));
+
+    check(
+      "the temp dir's builder-debug.yml never overwrites the real one",
+      !d.ops.some((o) => o.op === "rename" && o.from === `${FROM}/builder-debug.yml`),
+      JSON.stringify(d.ops)
+    );
+    const staleIndex = d.index((o) => o.op === "rm" && o.path === `${TO}/win-unpacked`);
+    const freshIndex = d.index((o) => o.op === "rename" && o.from === `${FROM}/win-unpacked`);
+    check(
+      "the previous win-unpacked is removed before the new one is renamed into place",
+      staleIndex >= 0 && freshIndex > staleIndex,
+      `${staleIndex} -> ${freshIndex}`
+    );
+    check(
+      "...and the new app dir is the one that lands there",
+      JSON.stringify(d.lookup(`${TO}/win-unpacked`)) === JSON.stringify({ "open-code-review-desktop.exe": null }),
+      JSON.stringify(d.lookup(`${TO}/win-unpacked`))
+    );
+    const last = d.ops[d.ops.length - 1];
+    check(
+      "the fallback dir is deleted last, after everything worth keeping has left it",
+      Boolean(last) && last.op === "rm" && last.path === FROM,
+      JSON.stringify(last)
+    );
+    check(
+      "...so it is gone and release/ holds the old and the new artefacts",
+      !d.resolve(FROM).exists && Object.keys(d.lookup(TO)).length === 5,
+      JSON.stringify(Object.keys(d.lookup(TO) || {}))
+    );
+  }
+
+  /* first fallback in a clean tree: nothing to replace, and release/ may not exist */
+  {
+    const d = fakeDisk({
+      "release-0.1.14": {
+        "win-unpacked": { "open-code-review-desktop.exe": null },
+        "builder-debug.yml": null,
+        [SETUP]: null,
+      },
+    });
+    const answer = relocateDistOutput({ from: FROM, to: TO, fs: d.fs, path: posix });
+    check("a fallback with no previous build replaces nothing", answer.replaced === false, JSON.stringify(answer));
+    check(
+      "...and does not remove an app dir that is not there",
+      !d.ops.some((o) => o.op === "rm" && o.path === `${TO}/win-unpacked`),
+      JSON.stringify(d.ops)
+    );
+    check(
+      "and creates release/ before the first rename, because the failed build made no output dir",
+      d.index((o) => o.op === "mkdir" && o.path === TO) === 0 &&
+        d.index((o) => o.op === "mkdir" && o.path === TO) < d.index((o) => o.op === "rename"),
+      JSON.stringify(d.ops)
+    );
+    const last = d.ops[d.ops.length - 1];
+    check(
+      "...and still ends by deleting the fallback dir",
+      Boolean(last) && last.op === "rm" && last.path === FROM,
+      JSON.stringify(last)
+    );
+  }
+
+  /* nothing to move: say so, and touch nothing */
+  {
+    const d = fakeDisk({ "release-0.1.14": { "builder-debug.yml": null }, release: { "win-unpacked": {} } });
+    let threw = null;
+    try {
+      relocateDistOutput({ from: FROM, to: TO, fs: d.fs, path: posix });
+    } catch (err) {
+      threw = err;
+    }
+    check(
+      "a retried build that produced no app dir is refused with a sentence naming the path",
+      threw !== null && /nothing to relocate/.test(threw.message) && threw.message.includes(`${FROM}/win-unpacked`),
+      threw && threw.message
+    );
+    check("...before anything on the disk is touched", d.ops.length === 0, JSON.stringify(d.ops));
+  }
+
+  /* relocating a directory onto itself would delete the build */
+  {
+    const d = fakeDisk({ "release-0.1.14": { "win-unpacked": { "a.exe": null } } });
+    let threw = null;
+    try {
+      relocateDistOutput({ from: FROM, to: `${FROM}/`, fs: d.fs, path: posix });
+    } catch (err) {
+      threw = err;
+    }
+    check("relocating a directory onto itself is refused", threw !== null && /onto itself/.test(threw.message), threw && threw.message);
+    check("...without deleting it", d.ops.length === 0 && d.resolve(FROM).exists, JSON.stringify(d.ops));
+  }
+
+  /* a move that fails halfway leaves the artefacts where they are */
+  {
+    const d = fakeDisk({
+      "release-0.1.14": { [SETUP]: null, "win-unpacked": { "open-code-review-desktop.exe": null } },
+      // A second fallback run against the same output dir finds its own earlier
+      // artefact already in place — the rename that cannot land on top of it.
+      release: { [SETUP]: null },
+    });
+    let threw = null;
+    try {
+      relocateDistOutput({ from: FROM, to: TO, fs: d.fs, path: posix });
+    } catch (err) {
+      threw = err;
+    }
+    check(
+      "a file that cannot be renamed surfaces as an exception, not as a quiet half-move",
+      threw !== null && /EEXIST/.test(threw.message),
+      threw && threw.message
+    );
+    check(
+      "...and the fallback dir is not deleted, so what is left can still be moved by hand",
+      d.resolve(FROM).exists && !d.ops.some((o) => o.op === "rm" && o.path === FROM),
+      JSON.stringify(d.ops)
     );
   }
 }

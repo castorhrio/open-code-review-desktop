@@ -15,11 +15,12 @@
 // file inside the tmp dir, held by an unidentified external handle (an antivirus
 // scan is the likeliest owner; no process in the list admits it). Building to a
 // fresh output dir sidesteps the locked path entirely, and the artefacts are then
-// moved into release/ by hand — copying never touches the locked directory.
+// moved into release/ by `relocateDistOutput` — a rename out of the temp dir never
+// touches the locked path.
 import { execSync, spawnSync } from "node:child_process";
-import fs from "node:fs";
 import path from "node:path";
 
+import { relocateDistOutput } from "./release-dist.mjs";
 import { executeRelease, planRelease } from "./release-guard.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
@@ -66,16 +67,16 @@ const runDist = (step) => {
   const alt = `release-${version}`;
   console.log(`\ndist:win failed; retrying into ${alt}/ to sidestep a locked win-unpacked.tmp`);
   run(`npx electron-builder --win -c.directories.output=${alt}`);
-  const from = path.join(ROOT, alt);
-  const to = path.join(ROOT, "release");
-  const stale = path.join(to, "win-unpacked");
-  if (fs.existsSync(stale)) fs.rmSync(stale, { recursive: true, force: true });
-  fs.renameSync(path.join(from, "win-unpacked"), stale);
-  for (const f of fs.readdirSync(from)) {
-    if (f === "win-unpacked" || f === "builder-debug.yml") continue;
-    fs.renameSync(path.join(from, f), path.join(to, f));
-  }
-  fs.rmSync(from, { recursive: true, force: true });
+  // The move itself lives in `release-dist.mjs`, where `audit:release` can drive
+  // it against a fake disk: the order (stale dir out, then the new one in, then
+  // the rest of the files, then the fallback dir last) is the whole point of this
+  // path, and it is not something this script can be asked to prove.
+  const landed = relocateDistOutput({ from: path.join(ROOT, alt), to: path.join(ROOT, "release") });
+  console.log(
+    `\nrelocated ${landed.moved.length + 1} into release/` +
+      ` (left behind: ${landed.skipped.join(", ") || "nothing"})` +
+      (landed.replaced ? ", previous win-unpacked replaced" : "")
+  );
 };
 
 // The order is the plan's, not this file's. `executeRelease` walks the steps the
