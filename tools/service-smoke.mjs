@@ -1423,6 +1423,85 @@ const orderOnly = ruleFor(
   "deepseek"
 );
 check("file order reports itself instead of pretending to answer", orderOnly === svc.MATCH_ORDER, orderOnly);
+
+// The endpoint the CLI's own table gives the built-in service. Declared here
+// because the order-rule checks below need an entry that names a host (so the
+// order rule is the only thing that can withhold its Key).
+const DEEPSEEK_URL = "https://api.deepseek.com";
+// The rule that is not an answer must not hand out a Key — and the *reason* has
+// to say so, because the reason is what the settings page words itself from.
+//
+// Nothing asserted that link until now. The check above asks for an empty Key,
+// and the "table-unavailable" branch produces an empty Key too — so replacing
+// the order check with any other withholding branch would have kept every check
+// green while the screen showed a cause that has nothing to do with this one
+// ("the built-in list is unreadable" for a config whose problem is that the
+// entry is spelled differently, or "your Key belongs to another endpoint" for
+// an entry no run ever opens).
+//
+// The mapping is now a function of its own (`withholdReasonFor`), so it can be
+// asked directly, and the answer is the reason the screen shows.
+//
+// The shape is the narrow one the rule exists for: the config's `provider`
+// names another service, and the file spells the name in two ways the registry
+// does not — "DeepSEEK" and "DeepSeek" — so neither the config's own provider
+// nor the registry's spelling ("deepseek") can answer. (Put the registry's own
+// spelling in the file and the registry rule answers instead — that is the
+// check above with three spellings.)
+//
+// The entries carry a URL on purpose: the endpoint is then known whatever the
+// table says, so the *only* thing standing between this Key and the settings
+// form is the order rule itself. Remove that rule and the Key comes out.
+const ORDER_SHAPE = {
+  provider: "corp-gateway",
+  providers: {
+    DeepSEEK: { url: DEEPSEEK_URL, api_key: "sk-first" },
+    DeepSeek: { url: DEEPSEEK_URL, api_key: "sk-second" },
+  },
+};
+const orderFound = svc.entryByName(ORDER_SHAPE, "deepseek");
+check(
+  "the shape only file order can answer is answered by file order",
+  Boolean(orderFound) && orderFound.rule === svc.MATCH_ORDER,
+  orderFound ? orderFound.rule : "no entry at all"
+);
+const orderAnswer = savedKeyResult(ORDER_SHAPE, "deepseek", "", "", { tableUnavailable: false });
+check(
+  "and the Key of an entry no run opens is withheld, for the reason that says so",
+  orderAnswer.key === "" && orderAnswer.reason === svc.KEY_WITHHELD_ORDER,
+  `${orderAnswer.reason} | ${orderAnswer.key}`
+);
+check(
+  "and the answer stops before the endpoint, because no run opens that entry",
+  orderAnswer.endpoint === "",
+  orderAnswer.endpoint
+);
+// The value-only caller (`savedKeyFor`) asks no questions and takes no options,
+// so it is the one that could hand the Key out by accident. It must not.
+const orderDir = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-order-key-"));
+const orderFile = path.join(orderDir, "config.json");
+fs.writeFileSync(orderFile, JSON.stringify(ORDER_SHAPE));
+check(
+  "the caller that only wants the value gets nothing for it either",
+  svc.savedKeyFor("deepseek", "", orderFile, "") === "",
+  svc.savedKeyFor("deepseek", "", orderFile, "")
+);
+fs.rmSync(orderDir, { recursive: true, force: true });
+// And the mapping itself: one rule withholds, the three that answer a question
+// the CLI asks do not.
+check(
+  "only the order rule withholds a Key",
+  svc.withholdReasonFor(svc.MATCH_ORDER) === svc.KEY_WITHHELD_ORDER &&
+    svc.withholdReasonFor(svc.MATCH_EXACT) === "" &&
+    svc.withholdReasonFor(svc.MATCH_ACTIVE) === "" &&
+    svc.withholdReasonFor(svc.MATCH_REGISTRY) === "",
+  JSON.stringify([
+    svc.withholdReasonFor(svc.MATCH_EXACT),
+    svc.withholdReasonFor(svc.MATCH_ACTIVE),
+    svc.withholdReasonFor(svc.MATCH_REGISTRY),
+    svc.withholdReasonFor(svc.MATCH_ORDER),
+  ])
+);
 // A name nothing is called has no entry and no rule — the settings page asks
 // this for a form that was never saved.
 check(
@@ -1463,7 +1542,6 @@ check(
  * endpoint does not.
  */
 const presetKey = { providers: { deepseek: { api_key: "sk-deep" } } };
-const DEEPSEEK_URL = "https://api.deepseek.com";
 check(
   "a Key saved without a URL is reused for the endpoint the CLI fills in",
   savedKey(presetKey, "DeepSeek", `${DEEPSEEK_URL}/`, DEEPSEEK_URL) === "sk-deep",
@@ -1776,6 +1854,29 @@ check(
   "the same holds for the sentence a failed test shows",
   new Set(withheldReasons.map((reason) => testFor(reason))).size === withheldReasons.length - 1,
   JSON.stringify(Object.fromEntries(withheldReasons.map((r) => [r, testFor(r).slice(0, 12)])))
+);
+// The order cause gets a sentence of its own — checked one cause at a time
+// rather than by counting distinct sentences, because two causes are allowed
+// to share one (`no-entry` and `no-key` are both "nothing is saved"). If the
+// order cause borrowed any of the other five, the user would be sent to fix the
+// wrong thing: "your Key belongs to another endpoint" and "the built-in list is
+// unreadable" are both about a *host*, and the entry in question is one no run
+// opens at all.
+for (const other of withheldReasons.filter((reason) => reason !== svc.KEY_WITHHELD_ORDER)) {
+  check(
+    `「${svc.KEY_WITHHELD_ORDER}」 does not borrow the sentence of 「${other}」`,
+    hintFor(svc.KEY_WITHHELD_ORDER).text !== hintFor(other).text &&
+      testFor(svc.KEY_WITHHELD_ORDER) !== testFor(other),
+    `${hintFor(svc.KEY_WITHHELD_ORDER).text.slice(0, 18)} | ${hintFor(other).text.slice(0, 18)}`
+  );
+}
+// And it names the fix that is *not* a new Key: a save writes the entry the
+// form is about, while "type a Key" would add a secret to a config the CLI
+// still refuses.
+check(
+  "the order cause names the fix, and the fix is not a new Key",
+  /保存/.test(hintFor(svc.KEY_WITHHELD_ORDER).text) && !/填进来|重新填/.test(hintFor(svc.KEY_WITHHELD_ORDER).text),
+  hintFor(svc.KEY_WITHHELD_ORDER).text
 );
 // Tone per cause: the three the user can act on in place are warnings, the two
 // "nothing saved yet" states are not (a first save is not a fault), and an

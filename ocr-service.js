@@ -233,6 +233,27 @@ const KEY_WITHHELD_TABLE = "table-unavailable"; // the built-in endpoint could n
 const strip = (value) => String(value || "").trim().replace(/\/+$/, "");
 
 /**
+ * Why a match rule withholds the Key — the mapping from "which rule answered"
+ * to "no Key for you".
+ *
+ * `entryByName` answers with a *rule* as well as an entry, and one of the four
+ * rules is not an answer the CLI ever asks: the entry was picked by position
+ * in the file, so no run opens it. That rule has to turn into "the Key is
+ * withheld" here, where the Key is decided — not in each caller. A caller that
+ * read only `entry` and not `rule` would hand out the Key of an entry nothing
+ * opens, and nothing would notice: the Key is still the right Key for the right
+ * entry, it simply belongs to a config the CLI refuses.
+ *
+ * So the mapping is a function of its own, and the smoke checks ask it what
+ * every rule means. The three rules that answer a question `ocr` asks mean
+ * "nothing is withheld": their entries are the ones a run opens.
+ */
+function withholdReasonFor(rule) {
+  if (rule === MATCH_ORDER) return KEY_WITHHELD_ORDER;
+  return "";
+}
+
+/**
  * The endpoint one service resolves to — the rule both ends of the Key decision
  * ask.
  *
@@ -305,7 +326,12 @@ function savedKeyLookup(name, url, configPath = CONFIG_PATH, presetUrl = "", { t
   // the same reason a custom provider's Key is matched exactly rather than
   // folded. The entry stays visible in `view.providers` (that is what the
   // section is for); it just does not travel through here.
-  if (found.rule === MATCH_ORDER) return withheld(KEY_WITHHELD_ORDER);
+  //
+  // The rule → reason mapping is `withholdReasonFor`, so that "which rule
+  // answers" and "does the Key come out" cannot drift apart: a caller that
+  // only looked at the entry would leak the Key of an entry no run opens.
+  const orderReason = withholdReasonFor(found.rule);
+  if (orderReason) return withheld(orderReason);
   const entry = found.entry;
   const target = strip(url);
   // Which host the Key belongs to is *not* only the entry's own `url`: a
@@ -1515,6 +1541,7 @@ module.exports = {
   savedKeyForName,
   savedKeyLookup,
   savedKeyLookupByName,
+  withholdReasonFor,
   savedKeyTestMessage,
   savedKeyFieldHint,
   KEY_WITHHELD_CONFIG,
