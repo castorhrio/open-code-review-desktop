@@ -206,6 +206,24 @@ check(
   unknownWording.reason || unknownWording.error || ""
 );
 check("...and it keeps git's own words in the message", /git/i.test(unknownWording.error || ""), unknownWording.error || "");
+/* All three reasons answer the same question, so all three echo the ref and the
+ * path they were asked about — the renderer reads `ref` back to label the pane,
+ * and a `failed` answer that dropped it would leave the failure attributed to
+ * whatever the pane was showing before. The two checks above pin this for
+ * `missing` and `bad-ref`; this one closes the third branch, and the summary
+ * below keeps all three in one place so a fourth reason cannot be added without
+ * deciding whether it echoes too.
+ */
+check(
+  "...and a plain failure echoes the ref and the path as well",
+  unknownWording.ref === "HEAD" && unknownWording.path === "a.go",
+  `${unknownWording.ref} / ${unknownWording.path}`
+);
+check(
+  "every reason echoes the ref and the path it was asked about",
+  [noSuchPath, badRefByPath, unknownWording].every((answer) => answer.ok === false && Boolean(answer.ref) && Boolean(answer.path)),
+  JSON.stringify([noSuchPath, badRefByPath, unknownWording].map((answer) => [answer.reason, answer.ref, answer.path]))
+);
 fs.rmSync(notARepo, { recursive: true, force: true });
 
 /* ---- each reason is a sentence, and sentences drift ----

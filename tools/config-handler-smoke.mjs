@@ -1074,6 +1074,59 @@ check(
   );
 }
 
+/* ---- two same-spelled entries, three table states, one shape each ----
+ * The refusal's entries and its wording both come out of one call, and the
+ * wording is picked by `SPELLING_SILENCE[tableSilenceOf(presetList)]`. The two
+ * silences are the states where the desktop cannot tell whether the name is a
+ * built-in one — so both entries have to be named — and they differ in *what
+ * the user can do about it*: a failed read may work on a retry, a hollow table
+ * answers the same every time and means the install is incomplete.
+ *
+ * Both states are asked of the same two-entry view, so the entries cannot
+ * differ between them, and each sentence is checked for the clause only its own
+ * state has — in both directions, so "one wording for every silence" (which
+ * sent hollow-table users to the refresh button) turns one of them red wherever
+ * the two sentences are made equal.
+ */
+{
+  const bothSections = { providers: { deepseek: {} }, customProviders: { DEEPSEEK: {} } };
+  const SILENCES = [
+    { state: TABLE_UNREADABLE, list: SILENT_PRESETS, why: "读 CLI 自己的服务表没成功", tail: "可以先点刷新重试" },
+    { state: TABLE_HOLLOW, list: HOLLOW_PRESETS, why: "CLI 自己的服务表读回来是空的", tail: "重装或升级" },
+  ];
+  for (const { state, list, why, tail } of SILENCES) {
+    const answer = spellingClashMessage(spellingClash(bothSections, "DeepSeek", list), "DeepSeek", list);
+    check(
+      `both same-spelled entries are named when the table is ${state}`,
+      answer.entries.length === 2 &&
+        answer.entries[0].name === "deepseek" &&
+        answer.entries[0].section === "providers" &&
+        answer.entries[1].name === "DEEPSEEK" &&
+        answer.entries[1].section === "custom_providers",
+      JSON.stringify(answer.entries)
+    );
+    const other = SILENCES.find((item) => item.state !== state);
+    check(
+      `and the ${state} sentence carries its own why and its own tail, and not the other state's`,
+      answer.message.includes(why) && answer.message.includes(tail) && !answer.message.includes(other.why) && !answer.message.includes(other.tail),
+      `${answer.message.includes(other.why) ? `has ${other.state} why; ` : ""}${answer.message.includes(other.tail) ? `has ${other.state} tail; ` : ""}${answer.message}`
+    );
+  }
+
+  // The mapping has three members and the sentence reads it with `||`, so a
+  // fourth return value would be swallowed by the fallback instead of showing up
+  // anywhere it is read. Pin the range over the shapes a caller actually hands
+  // in, including the ones that are not registry answers at all.
+  const TABLE_SILENCES = new Set([TABLE_UNREADABLE, TABLE_HOLLOW, ""]);
+  const samples = [undefined, null, {}, { ok: false }, { ok: true }, { ok: true, names: [] }, SILENT_PRESETS, HOLLOW_PRESETS, answeredPresets(["deepseek"])];
+  const answers = samples.map((sample) => tableSilenceOf(sample));
+  check(
+    "tableSilenceOf only ever answers one of its three values",
+    answers.every((value) => TABLE_SILENCES.has(value)),
+    JSON.stringify(answers)
+  );
+}
+
 /* ---- a dotted custom name is one name, not two segments ----
  * `my.gateway` already has a `custom_providers` entry, so upstream accepts the
  * field write and routes it there. The key has to stay `providers.my.gateway.
@@ -1313,6 +1366,81 @@ check(
       res.hint?.text === real.savedKeyFieldHint("order-guess").text,
     JSON.stringify(res.hint)
   );
+}
+
+/* ---- the withheld reason comes from the rule, not from a caller's string ----
+ * The check above hands the handler a canned `order-guess`. This one goes all
+ * the way: a real config file in the positional shape, the real `entryByName`
+ * and `savedKeyLookup` reading it, and the handler's answer carried through to
+ * the two fields the settings page reads.
+ *
+ * It is here because `namesEntry: false` is a *rule's* answer and it comes with
+ * `entry: null` — and the page's Key field branches on the answer, not on the
+ * entry: a non-empty `reason` wins over `entry.hasKey` / `entry.keyPreview`
+ * (src/components/SettingsPanel.tsx). The config view still holds that preview,
+ * because `providers` is built from the raw section line by line, so the two
+ * halves really do disagree on a real config — the reason getting through is
+ * the only thing keeping a Key nothing opens off the screen. This pins the
+ * main-process half; the render half is the UI shot
+ * `99-settings-savedkey-order-guess`.
+ */
+{
+  // One entry, spelled `DeepSeek`, and no `provider` field. The form asks about
+  // `DEEPSEEK`: nothing matches exactly, nothing matches the active spelling,
+  // nothing matches the registry's spelling, so only the file-order rule is
+  // left — the guess that names no entry.
+  const file = path.join(dir, "order-config.json");
+  const shape = { providers: { DeepSeek: { url: "https://api.deepseek.com/v1", api_key: "sk-positional" } } };
+  fs.writeFileSync(file, JSON.stringify(shape));
+  const stub = makeStub();
+  const ocr = {
+    ...stub.ocr,
+    // The real lookup over the real file: the reason is what the rule decides,
+    // not a string this check typed in. The table is reported unread, which is
+    // the conservative answer for a caller that did not read it.
+    savedKeyLookupByName: async (name, url) => {
+      stub.lookupCalls.push({ name, url });
+      return { ...real.savedKeyLookup(name, url, file, "", { tableUnavailable: true }), tableOk: false };
+    },
+  };
+  const h = makeConfigHandlers({ ocr, tempRoot: dir });
+  const res = await h.savedKey(null, { name: "DEEPSEEK", url: "" });
+
+  const rule = real.entryByName(shape, "DEEPSEEK");
+  check(
+    "the fixture's shape really is the rule that names no entry",
+    rule?.rule === real.MATCH_ORDER && rule.namesEntry === false && rule.entry === null,
+    JSON.stringify(rule)
+  );
+  check("a name the file only spells differently is withheld", res.ok === true && res.available === false, JSON.stringify(res));
+  check("and the reason is the rule's own, not a caller's guess", res.reason === real.KEY_WITHHELD_ORDER, res.reason);
+  check(
+    "the answer carries the sentence to show instead of a Key preview",
+    res.hint?.tone === real.savedKeyFieldHint(real.KEY_WITHHELD_ORDER).tone &&
+      res.hint?.text === real.savedKeyFieldHint(real.KEY_WITHHELD_ORDER).text &&
+      Boolean(res.hint?.text),
+    JSON.stringify(res.hint)
+  );
+  // The renderer shows `savedKey.reason` first and only falls back to
+  // `entry.hasKey` / `entry.keyPreview` when there is none, so nothing that is a
+  // preview may ride along — and the positional entry's Key must not travel at
+  // all. A rule that put its candidate back into `entry` would leak here.
+  check(
+    "and no Key, preview or bare key field rides along for a withheld answer",
+    !("key" in res) && !("keyPreview" in res) && !("apiKey" in res) && !JSON.stringify(res).includes("sk-positional"),
+    JSON.stringify(res)
+  );
+  // The other half of the same disagreement, on the same config: the view the
+  // page renders from *does* hold the preview, for an entry no run opens. So the
+  // reason is not decoration — it is the only thing that keeps the sentence off
+  // the screen.
+  const view = real.readConfigView({ configPath: file, presetList: { ok: false, names: [], rows: [], matched: 0, error: "" } });
+  check(
+    "while the config view does hold that entry's preview, which is why the reason must win",
+    view.providers?.DeepSeek?.hasKey === true && Boolean(view.providers?.DeepSeek?.keyPreview) && view.providers.DeepSeek.api_key === undefined,
+    JSON.stringify(view.providers)
+  );
+  fs.rmSync(file, { force: true });
 }
 
 /* ---- config:read forwards the refresh flag ---- */
