@@ -18,6 +18,16 @@ const { createInstall } = require("./install-info");
 
 const DOCS_URL = "https://open-codereview.ai/docs";
 
+// How long the uninstall reply is given to reach the renderer before this
+// process quits. The number is a delay, not a wait on the uninstaller: that
+// process is spawned detached and `unref`ed, so it outlives this one by design
+// and quitting first is the whole point ("the uninstaller deletes the directory
+// this process runs from"). What the delay buys is the page that asked for the
+// uninstall getting its answer — the settings page switches to "正在卸载…" from
+// the reply, and a quit in the same tick tore the window down before it could.
+// Named rather than inline so the reason travels with the value.
+const UNINSTALL_QUIT_DELAY_MS = 400;
+
 let mainWindow = null;
 
 const boundsFile = () => path.join(app.getPath("userData"), "window-bounds.json");
@@ -200,7 +210,7 @@ ipcMain.handle("app:uninstall", async () => {
   } catch (err) {
     return { ok: false, error: `启动卸载程序失败：${err.message}` };
   }
-  setTimeout(() => app.quit(), 400);
+  setTimeout(() => app.quit(), UNINSTALL_QUIT_DELAY_MS);
   return { ok: true };
 });
 

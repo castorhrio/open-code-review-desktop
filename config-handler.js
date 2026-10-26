@@ -137,6 +137,49 @@ const spellingClashMessage = (clash, name) => {
 };
 
 /**
+ * The writes one save sends, in the order it sends them.
+ *
+ * The order is part of the answer, not an accident of how the lines were typed.
+ * `ocr.setConfig` sends the pairs one after another and stops at the first
+ * refusal, so whatever comes first is what a half-finished save has already
+ * done. Two rules follow from that:
+ *
+ * 1. Every write about the entry (`providers.<name>.*`) goes out before the pair
+ *    that points the run at it (`provider`). Reversed, a Key the CLI refuses
+ *    would leave `provider` already switched to an entry with no Key, and the
+ *    next run would fail as "the Key is wrong" when nothing was wrong with the
+ *    Key — the same silent half-success `removeEntry` answers with an error.
+ * 2. `model` follows `provider`, because it is the model of the *selected*
+ *    service: written first, a refusal of `provider` would leave a model chosen
+ *    for a service the config is not on.
+ *
+ * It is a pure function of the form and the (already validated) name, and it is
+ * exported, so `tools/config-handler-smoke.mjs` asserts the sequence itself
+ * rather than the arguments a stubbed `ocr.setConfig` happened to receive. The
+ * handler then sends exactly what this returns — one definition, not two.
+ */
+const buildSavePairs = (form, name) => {
+  const pairs = [];
+  if (form.isCustom) {
+    if (form.url) pairs.push([`providers.${name}.url`, form.url]);
+    if (form.protocol) pairs.push([`providers.${name}.protocol`, form.protocol]);
+  }
+  // A blank Key means "leave the saved one alone", not "erase it": the form
+  // is empty whenever one is already stored. Clearing goes through
+  // `removeEntry`, so this branch must not write an empty value either.
+  if (form.apiKey) pairs.push([`providers.${name}.api_key`, form.apiKey]);
+  if (form.model) pairs.push([`providers.${name}.model`, form.model]);
+  // Saving an entry must not silently switch the active service; the caller
+  // asks for that explicitly.
+  if (form.setActive !== false) pairs.push(["provider", name]);
+  if (form.model && form.setActive !== false) pairs.push(["model", form.model]);
+  if (form.effort) pairs.push(["effort", form.effort]);
+  if (form.language) pairs.push(["language", form.language]);
+  if (form.maxTokens) pairs.push(["max_tokens", form.maxTokens]);
+  return pairs;
+};
+
+/**
  * @param {object} options
  * @param {object} options.ocr       the CLI service
  * @param {string} [options.tempRoot] where `config:test` gets a throwaway HOME
@@ -166,24 +209,6 @@ function makeConfigHandlers(options) {
   const configView = async (refresh = false) => (await loadConfig(refresh)).view;
 
   const save = async (_e, form) => {
-    const pairs = [];
-    // The order of these pairs is part of the answer, not an accident of how the
-    // lines were typed. `ocr.setConfig` sends them one after another and stops at
-    // the first refusal, so whatever comes first is what a half-finished save has
-    // already done. Two rules follow from that:
-    //
-    // 1. Every write about the entry (`providers.<name>.*`) goes out before the
-    //    pair that points the run at it (`provider`). Reversed, a Key the CLI
-    //    refuses would leave `provider` already switched to an entry with no Key,
-    //    and the next run would fail as "the Key is wrong" when nothing was wrong
-    //    with the Key — the same silent half-success `removeEntry` answers with an
-    //    error.
-    // 2. `model` follows `provider`, because it is the model of the *selected*
-    //    service: written first, a refusal of `provider` would leave a model
-    //    chosen for a service the config is not on.
-    //
-    // `tools/config-handler-smoke.mjs` pins the resulting sequence exactly; a
-    // reordering here is a change of behaviour and has to show up as a red check.
     const name = (form.provider || "").trim();
     if (!name) return { ok: false, error: "未选择 provider", steps: [] };
 
@@ -197,24 +222,10 @@ function makeConfigHandlers(options) {
       };
     }
 
-    if (form.isCustom) {
-      if (form.url) pairs.push([`providers.${name}.url`, form.url]);
-      if (form.protocol) pairs.push([`providers.${name}.protocol`, form.protocol]);
-    }
-    // A blank Key means "leave the saved one alone", not "erase it": the form
-    // is empty whenever one is already stored. Clearing goes through
-    // `removeEntry`, so this branch must not write an empty value either.
-    if (form.apiKey) pairs.push([`providers.${name}.api_key`, form.apiKey]);
-    if (form.model) pairs.push([`providers.${name}.model`, form.model]);
-    // Saving an entry must not silently switch the active service; the caller
-    // asks for that explicitly.
-    if (form.setActive !== false) pairs.push(["provider", name]);
-    if (form.model && form.setActive !== false) pairs.push(["model", form.model]);
-    if (form.effort) pairs.push(["effort", form.effort]);
-    if (form.language) pairs.push(["language", form.language]);
-    if (form.maxTokens) pairs.push(["max_tokens", form.maxTokens]);
-
-    const steps = await ocr.setConfig(pairs);
+    // The writes themselves — and their order — come from `buildSavePairs`, so
+    // the sequence has one definition and the smoke checks can assert it without
+    // going through a stub. See there for why the order is part of the answer.
+    const steps = await ocr.setConfig(buildSavePairs(form, name));
     const failed = steps.find((s) => !s.ok);
     return failed
       ? { ok: false, error: `${failed.key}: ${ocr.withHint(failed.message)}`, steps }
@@ -360,4 +371,4 @@ function makeConfigHandlers(options) {
   return { save, read, savedKey, unset, removeEntry, use, test };
 }
 
-module.exports = { makeConfigHandlers, spellingClash, spellingClashMessage };
+module.exports = { makeConfigHandlers, buildSavePairs, spellingClash, spellingClashMessage };

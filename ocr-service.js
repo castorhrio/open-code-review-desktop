@@ -125,6 +125,117 @@ function stripEntry(entry) {
 const mapSection = (section) =>
   Object.fromEntries(Object.entries(section || {}).map(([k, v]) => [k, stripEntry(v)]));
 
+// What decided which entry answers. Three of the four rules answer a question
+// `ocr` itself asks; the last one (`order`) answers one it never asks, so the
+// caller is told which rule it got instead of only which entry — and that one
+// comes back with no entry at all (`entry: null`), because a caller holding an
+// entry and a rule will eventually act on the entry alone.
+//
+// The four are an ordered array (`MATCH_RULES`), not an if/else chain: the
+// precedence *is* the array's order, and `entryByName` walks it. Both the
+// constants and the array are therefore exported, so the smoke checks can ask
+// which rule answered for each shape *and* ask the array itself what order it
+// is in: moving one rule below another (the registry rule below file order,
+// say) makes an assertion red instead of silently handing the settings page a
+// Key from the wrong entry. A chain only ever showed its order in the source, so
+// the order was a thing to read rather than a thing to check.
+const MATCH_EXACT = "exact"; // the file spells the name this way
+const MATCH_ACTIVE = "active"; // the config's own `provider` names this entry
+const MATCH_REGISTRY = "registry"; // the registry's spelling, from `ocr llm providers`
+const MATCH_ORDER = "order"; // file order — a guess, not an answer
+
+// The entry in `matches` (built case-insensitively, so every key here is a
+// spelling variant of the same name) that is spelled exactly this way, or
+// `null`. One helper for both folding rules, because they differ only in *which*
+// spelling they ask about.
+const entrySpelled = (matches, spelling) => {
+  if (!spelling) return null;
+  const hit = matches.find(([key]) => key === spelling);
+  return hit ? hit[1] : null;
+};
+
+/**
+ * The four rules, in the order they are asked.
+ *
+ * Each `test` answers with the entry it names, or with something falsy for "not
+ * mine to answer" — except the last one, whose answer is a guess and therefore
+ * carries no entry at all (`namesEntry: false`). `entryByName` does nothing but
+ * run them in order and take the first answer; there is no second copy of the
+ * precedence anywhere.
+ */
+const MATCH_RULES = Object.freeze([
+  {
+    // The spelling the config already uses is the one the user meant — in either
+    // section, so this rule needs no case folding at all.
+    rule: MATCH_EXACT,
+    test: ({ providers, custom, name }) => providers[name] || custom[name] || null,
+  },
+  {
+    rule: MATCH_ACTIVE,
+    // Only the built-in section folds case, because only it is resolved through
+    // the registry. Two entries whose names differ only by case (`DeepSeek` and
+    // `deepseek`) are two different entries to everything below, so which one is
+    // meant has to be decided here rather than guessed: `tryProviderConfig` tests
+    // the name against the registry, which folds case, and then reads
+    // `cfg.Providers[cfg.Provider]` — the *raw* string out of the config, not the
+    // registry's spelling (internal/llm/resolver.go, v1.13.3). So the entry the
+    // config's own `provider` field names is the one `ocr` actually opens, and it
+    // is the one asked about. The registry's spelling comes next (that is the form
+    // `ocr llm providers` prints, so it is what a form filled from the table
+    // holds); picking it first was a guess that only looked right while the two
+    // agreed.
+    test: ({ matches, active }) => entrySpelled(matches, active),
+  },
+  {
+    rule: MATCH_REGISTRY,
+    // See the rule above for why this one comes second: the form holds what
+    // `ocr llm providers` printed, so when the config's `provider` names nothing
+    // in the section, this is the spelling the settings page is editing.
+    test: ({ matches, wanted }) => entrySpelled(matches, wanted),
+  },
+  {
+    rule: MATCH_ORDER,
+    // A rule that answers "someone has to pick one, so the file's order picks"
+    // is a last resort, not a second opinion: it only fires when the config's
+    // `provider` is not one of these spellings at all (empty, or another service
+    // than the one asked about) *and* the file never spells the name the way the
+    // registry does — e.g. only `DeepSeek` exists while the form asks about
+    // `DEEPSEEK`. Then there is exactly one question left to answer, and no
+    // ordering left to get wrong.
+    //
+    // It is still reported as `order`, not as an answer, and the Key is still
+    // withheld: a single candidate says which entry the *user* means, not which
+    // entry `ocr` opens — with `provider` empty or naming something else, the
+    // CLI's `cfg.Providers[cfg.Provider]` read misses and the config is refused,
+    // so no run reads this entry. The rule describes the lookup, and the lookup
+    // is a guess whatever the number of candidates. Both shapes (one entry, two
+    // entries) are pinned in `tools/service-smoke.mjs`.
+    //
+    // A third spelling can also arrive, and it is worth saying what `ocr` does
+    // with such a file: `provider: "DEEPSEEK"` with entries named `DeepSeek` and
+    // `deepseek` matches no map key, so `cfg.Providers["DEEPSEEK"]` misses and the
+    // run fails with "provider DEEPSEEK is set but not configured in providers
+    // section" — nothing opens, so there is no entry a Key could be reused from
+    // *and* no entry this answer can contradict. That shape stops at the registry
+    // rule above instead, because the file does spell the name the registry way.
+    //
+    // `namesEntry: false` is the *structural* half of "do not act on this": a
+    // rule and an entry used to travel back together, and "the entry is here for
+    // display, just do not use it" was a promise a caller had to keep by reading
+    // `rule` first. A caller that reached for `entry` alone got a Key from an
+    // entry no run opens — the right Key for the right entry, out of a config the
+    // CLI refuses. Nothing is displayed from here anyway (`view.providers` is
+    // built from the raw sections, line by line), so the entry had exactly one
+    // possible use and it was the one use forbidden. Now that use fails loudly:
+    // `null.api_key` throws instead of handing out a secret, and the smoke checks
+    // assert the `null` for both order shapes.
+    namesEntry: false,
+    // An empty `matches` means the question never arose (no entry is spelled
+    // like this at all), which is a different answer from "several are".
+    test: ({ matches }) => matches.length > 0,
+  },
+]);
+
 /**
  * The entry a service name refers to, spelled the way the CLI would find it.
  *
@@ -138,99 +249,43 @@ const mapSection = (section) =>
  *
  * A custom name is a plain map key upstream (`custom_providers[name]`), so it is
  * matched exactly: answering for another spelling would hand out a Key for a
- * config entry the CLI never opens.
+ * config entry the CLI never opens. An exact match always wins over a case
+ * variant, in either section — the spelling the config already uses is the one
+ * the user meant.
  *
- * An exact match always wins over a case variant, in either section — the
- * spelling the config already uses is the one the user meant.
+ * The rules and their precedence live in `MATCH_RULES`; this function only
+ * builds the context they are asked about and takes the first answer. `null`
+ * means no rule answered at all — no entry in either section is spelled like
+ * this name, in any case — which is not the same as `MATCH_ORDER`, where an
+ * entry exists but no run opens it.
  */
-// What decided which entry answers. Three of the four rules answer a question
-// `ocr` itself asks; the last one (`order`) answers one it never asks, so the
-// caller is told which rule it got instead of only which entry — and that one
-// comes back with no entry at all (`entry: null`), because a caller holding an
-// entry and a rule will eventually act on the entry alone.
-//
-// The four are *ordered by if/else*, so "the rules are mutually exclusive" is a
-// property of this function's shape and not of anything a caller can see. Both
-// the constants and `entryByName` are therefore exported: the smoke checks ask
-// which rule answered for each shape, so moving one `if` below another (the
-// registry rule below file order, say) makes an assertion red instead of
-// silently handing the settings page a Key from the wrong entry.
-const MATCH_EXACT = "exact"; // the file spells the name this way
-const MATCH_ACTIVE = "active"; // the config's own `provider` names this entry
-const MATCH_REGISTRY = "registry"; // the registry's spelling, from `ocr llm providers`
-const MATCH_ORDER = "order"; // file order — a guess, not an answer
-
 function entryByName(raw, name) {
   if (!name) return null;
   const providers = raw.providers || {};
   const custom = raw.custom_providers || {};
-  const exact = providers[name] || custom[name];
-  if (exact) return { entry: exact, rule: MATCH_EXACT };
-  // Only the built-in section folds case, because only it is resolved through
-  // the registry. Two entries whose names differ only by case (`DeepSeek` and
-  // `deepseek`) are two different entries to everything below, so which one is
-  // meant has to be decided here rather than guessed: `tryProviderConfig` tests
-  // the name against the registry, which folds case, and then reads
-  // `cfg.Providers[cfg.Provider]` — the *raw* string out of the config, not the
-  // registry's spelling (internal/llm/resolver.go, v1.13.3). So the entry the
-  // config's own `provider` field names is the one `ocr` actually opens, and it
-  // is the one asked about. The registry's spelling comes next (that is the form
-  // `ocr llm providers` prints, so it is what a form filled from the table
-  // holds); picking it first was a guess that only looked right while the two
-  // agreed.
   const wanted = String(name).toLowerCase();
+  // Every spelling variant in the built-in section, in file order. Built once so
+  // the three rules that need it agree on what they are choosing between.
   const matches = Object.entries(providers).filter(([key]) => key.toLowerCase() === wanted);
-  if (!matches.length) return null;
-  const active = String(raw.provider || "");
-  // The last fallback is a last resort, not a second opinion: it only answers
-  // when the config's `provider` is not one of these spellings at all (empty, or
-  // another service than the one asked about) *and* the file never spells the
-  // name the way the registry does — e.g. only `DeepSeek` exists while the form
-  // asks about `DEEPSEEK`. Then there is exactly one entry the question can be
-  // about, and no ordering left to get wrong.
-  //
-  // It is still reported as `order`, not as an answer, and the Key is still
-  // withheld: a single candidate says which entry the *user* means, not which
-  // entry `ocr` opens — with `provider` empty or naming something else, the CLI's
-  // `cfg.Providers[cfg.Provider]` read misses and the config is refused, so no
-  // run reads this entry. The rule describes the lookup, and the lookup is a
-  // guess whatever the number of candidates. Both shapes (one entry, two
-  // entries) are pinned in `tools/service-smoke.mjs`.
-  //
-  // A third spelling can also arrive, and it is worth saying what `ocr` does
-  // with such a file: `provider: "DEEPSEEK"` with entries named `DeepSeek` and
-  // `deepseek` matches no map key, so `cfg.Providers["DEEPSEEK"]` misses and the
-  // run fails with "provider DEEPSEEK is set but not configured in providers
-  // section" — nothing opens, so there is no entry a Key could be reused from
-  // *and* no entry this answer can contradict. The registry rule still answers,
-  // with the registry's spelling, because that is the name the settings page is
-  // editing (the form holds what `ocr llm providers` printed).
-  //
-  // File order (`MATCH_ORDER`) is left only for the narrower shape above, where
-  // even the registry's spelling is absent, and it is *not* an answer the app may
-  // act on: it comes back with `entry: null` and `savedKeyFor` withholds the Key
-  // (see there). `tools/service-smoke.mjs` pins all three shapes so none can
-  // become another by accident.
-  //
-  // `entry: null` is the *structural* half of that: a rule and an entry travelled
-  // back together, and "the entry is here for display, just do not use it" was a
-  // promise a caller had to keep by reading `rule` first. A caller that reached
-  // for `entry` alone got a Key from an entry no run opens — the right Key for
-  // the right entry, out of a config the CLI refuses. Nothing is displayed from
-  // here anyway (`view.providers` is built from the raw sections, line by line),
-  // so the entry had exactly one possible use and it was the one use forbidden.
-  // Now that use fails loudly: `null.api_key` throws instead of handing out a
-  // secret, and the smoke checks assert the `null` for both order shapes.
-  if (matches.some(([key]) => key === active)) {
-    return { entry: matches.find(([key]) => key === active)[1], rule: MATCH_ACTIVE };
+  const context = {
+    name,
+    providers,
+    custom,
+    // Only the built-in section folds case, because only it is resolved through
+    // the registry: a custom name is a plain map key upstream
+    // (`custom_providers[name]`), so answering for another spelling would hand
+    // out a Key for an entry the CLI never opens. That is why `exact` is the only
+    // rule that looks at `custom` at all.
+    wanted,
+    active: String(raw.provider || ""),
+    matches,
+  };
+  for (const rule of MATCH_RULES) {
+    const hit = rule.test(context);
+    if (!hit) continue;
+    return { rule: rule.rule, entry: rule.namesEntry === false ? null : hit };
   }
-  if (matches.some(([key]) => key === wanted)) {
-    return { entry: matches.find(([key]) => key === wanted)[1], rule: MATCH_REGISTRY };
-  }
-  // No entry: `order` is a guess, and nothing downstream may act on it. See the
-  // comment block above — this is the whole point of returning `null` rather
-  // than the first match.
-  return { rule: MATCH_ORDER, entry: null };
+  return null;
 }
 
 /**
@@ -1582,6 +1637,7 @@ module.exports = {
   MATCH_ACTIVE,
   MATCH_REGISTRY,
   MATCH_ORDER,
+  MATCH_RULES,
   parseProviderTable,
   parseProviderNames,
   providerTable,

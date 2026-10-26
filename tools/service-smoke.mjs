@@ -1495,6 +1495,23 @@ check(
   new Set([svc.MATCH_EXACT, svc.MATCH_ACTIVE, svc.MATCH_REGISTRY, svc.MATCH_ORDER]).size === 4,
   [svc.MATCH_EXACT, svc.MATCH_ACTIVE, svc.MATCH_REGISTRY, svc.MATCH_ORDER].join(",")
 );
+// The precedence is data now (`MATCH_RULES`), so it can be read and asserted
+// instead of inferred from the answers: the array itself says exact before the
+// config's provider before the registry before file order. Every check below
+// still asks a shape which rule answered — this one catches a rule *moved in the
+// array* even before a shape exists that would notice.
+check(
+  "the rules are one ordered array, in precedence order",
+  JSON.stringify((svc.MATCH_RULES || []).map((item) => item.rule)) ===
+    JSON.stringify([svc.MATCH_EXACT, svc.MATCH_ACTIVE, svc.MATCH_REGISTRY, svc.MATCH_ORDER]),
+  JSON.stringify((svc.MATCH_RULES || []).map((item) => item.rule))
+);
+check(
+  "and only the file-order rule is marked as naming no entry",
+  (svc.MATCH_RULES || []).filter((item) => item.namesEntry === false).map((item) => item.rule).join(",") ===
+    svc.MATCH_ORDER,
+  JSON.stringify((svc.MATCH_RULES || []).map((item) => [item.rule, item.namesEntry]))
+);
 // Exact before anything else, across sections: the file already spells the name
 // this way, so no other rule gets a say — even when `provider` names an entry.
 check(
@@ -1537,6 +1554,31 @@ check(
   "and it is the active entry, not the one wearing the registry's spelling",
   Boolean(activeWins) && activeWins.entry.api_key === "sk-upper",
   activeWins ? activeWins.entry.api_key : "no entry at all"
+);
+// The same shape asked the question the settings page actually asks: two case
+// variants, the config's `provider` naming one of them and the registry's
+// spelling naming the other. The rule and the Key are asserted together, because
+// "active wins" only means something if the Key that comes out is the active
+// entry's — the registry's spelling is the one a form filled from
+// `ocr llm providers` holds, so picking it first hands the user a Key from the
+// entry `ocr` does not open.
+const ACTIVE_VS_REGISTRY_KEY_SHAPE = {
+  provider: "DeepSeek",
+  providers: {
+    deepseek: { url: "https://api.deepseek.com", api_key: "sk-registry-spelling" },
+    DeepSeek: { url: "https://api.deepseek.com", api_key: "sk-provider-spelling" },
+  },
+};
+const activeKeyAnswer = savedKeyResult(ACTIVE_VS_REGISTRY_KEY_SHAPE, "DEEPSEEK", "", "", { tableUnavailable: false });
+check(
+  "two case variants, provider naming one and the registry the other: the active rule answers",
+  svc.entryByName(ACTIVE_VS_REGISTRY_KEY_SHAPE, "DEEPSEEK")?.rule === svc.MATCH_ACTIVE,
+  svc.entryByName(ACTIVE_VS_REGISTRY_KEY_SHAPE, "DEEPSEEK")?.rule
+);
+check(
+  "and the Key handed out is the provider-named entry's, not the registry-spelled one's",
+  activeKeyAnswer.key === "sk-provider-spelling" && activeKeyAnswer.reason === "",
+  `${activeKeyAnswer.reason} | ${activeKeyAnswer.key}`
 );
 // The endpoint the CLI's own table gives the built-in service. Declared before
 // the shapes that use it: the third-spelling and order entries carry a URL on

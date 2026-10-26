@@ -19,7 +19,7 @@ import path from "node:path";
 const ROOT = path.resolve(import.meta.dirname, "..");
 const require = createRequire(path.join(ROOT, "package.json"));
 const real = require(path.join(ROOT, "ocr-service.js"));
-const { makeConfigHandlers, spellingClash, spellingClashMessage } = require(path.join(ROOT, "config-handler.js"));
+const { makeConfigHandlers, buildSavePairs, spellingClash, spellingClashMessage } = require(path.join(ROOT, "config-handler.js"));
 
 const failures = [];
 const check = (name, ok, detail = "") => {
@@ -265,7 +265,7 @@ check(
 {
   const stub = makeStub();
   const h = make(stub);
-  const res = await h.save(null, {
+  const form = {
     provider: "DeepSeek",
     isCustom: false,
     apiKey: "sk-order",
@@ -274,9 +274,15 @@ check(
     effort: "high",
     language: "zh",
     maxTokens: "8192",
-  });
+  };
+  const res = await h.save(null, form);
   check("a save with the globals filled succeeds", res.ok === true, res.error);
-  const keys = stub.setPairs.map(([key]) => key);
+  // The sequence is asserted where it is *defined* (`buildSavePairs`), not from
+  // the arguments a stub happened to receive: the order then has one home, and a
+  // save that stopped using it shows up as the next check instead of as a second
+  // copy of the expected list.
+  const pairs = buildSavePairs(form, "DeepSeek");
+  const keys = pairs.map(([key]) => key);
   check(
     "the built-in write order is: the entry's fields, then the pointer, then the model",
     JSON.stringify(keys) ===
@@ -296,13 +302,18 @@ check(
     keys.indexOf("provider") === 2 && keys.slice(0, 2).every((key) => key.startsWith("providers.DeepSeek.")),
     JSON.stringify(keys)
   );
+  check(
+    "and `save` sends exactly that sequence, value for value",
+    JSON.stringify(stub.setPairs) === JSON.stringify(pairs),
+    `sent ${JSON.stringify(stub.setPairs)}`
+  );
 }
 
 /* ---- and the custom entry's own fields go first too ---- */
 {
   const stub = makeStub({ customProviders: { "my.gateway": {} } });
   const h = make(stub);
-  const res = await h.save(null, {
+  const form = {
     provider: "my.gateway",
     isCustom: true,
     url: "https://gw.example/v1",
@@ -310,9 +321,11 @@ check(
     apiKey: "sk-order",
     model: "gpt-x",
     setActive: true,
-  });
+  };
+  const res = await h.save(null, form);
   check("a custom save succeeds", res.ok === true, res.error);
-  const keys = stub.setPairs.map(([key]) => key);
+  const pairs = buildSavePairs(form, "my.gateway");
+  const keys = pairs.map(([key]) => key);
   check(
     "a custom write sends url, protocol, Key and model before the pointer",
     JSON.stringify(keys) ===
@@ -325,6 +338,11 @@ check(
         "model",
       ]),
     JSON.stringify(keys)
+  );
+  check(
+    "and the custom save sends that exact sequence",
+    JSON.stringify(stub.setPairs) === JSON.stringify(pairs),
+    `sent ${JSON.stringify(stub.setPairs)}`
   );
 }
 
@@ -344,7 +362,7 @@ check(
   const stub = makeStub({ providers: { other: { api_key: "sk-other" } } });
   stub.state.provider = "other";
   const h = make(stub);
-  const res = await h.save(null, {
+  const form = {
     provider: "DeepSeek",
     isCustom: false,
     apiKey: "sk-idle",
@@ -353,9 +371,11 @@ check(
     effort: "high",
     language: "zh",
     maxTokens: "8192",
-  });
+  };
+  const res = await h.save(null, form);
   check("a save that must not switch the active service succeeds", res.ok === true, res.error);
-  const keys = stub.setPairs.map(([key]) => key);
+  const pairs = buildSavePairs(form, "DeepSeek");
+  const keys = pairs.map(([key]) => key);
   check(
     "its write order is the entry's fields, then the globals — no pointer, no global model",
     JSON.stringify(keys) ===
@@ -367,6 +387,11 @@ check(
         "max_tokens",
       ]),
     JSON.stringify(keys)
+  );
+  check(
+    "and the save without a switch sends that exact sequence",
+    JSON.stringify(stub.setPairs) === JSON.stringify(pairs),
+    `sent ${JSON.stringify(stub.setPairs)}`
   );
   check(
     "and the active service is still the one from before the save",
