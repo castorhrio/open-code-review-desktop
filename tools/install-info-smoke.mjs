@@ -281,6 +281,107 @@ for (const platform of ["darwin", "linux"]) {
   check("the shell is left alone for an empty path", shell.calls.open.length === 0 && shell.calls.reveal.length === 0);
 }
 
+/* ---------------- one shape for 「打开一个目录」 ---------------- */
+
+{
+  // The renderer reads `action`/`path` off a failed `revealFile`. 「打开安装目录」
+  // is the same act — hand a directory to the file manager — so it must answer
+  // with the same fields instead of a bare `{ ok: false, error }`.
+  const shell = makeShell();
+  const tools = make({ packaged: true, resources: path.join(installed, "resources"), shell });
+  const res = await tools.openDir(installed);
+  check("opening the install root says which action it was", res.ok === true && res.action === "open-dir" && res.path === installed, JSON.stringify(res));
+  check("and the directory is what got opened", shell.calls.open.length === 1 && shell.calls.open[0] === installed);
+  check("opening a directory never falls back to revealing it", shell.calls.reveal.length === 0);
+}
+
+{
+  const shell = makeShell("Failed to open path: denied by policy");
+  const tools = make({ packaged: true, resources: path.join(installed, "resources"), shell });
+  const res = await tools.openDir(installed);
+  check("a directory that could not be opened is reported, not swallowed", res.ok === false && res.error === "Failed to open path: denied by policy", JSON.stringify(res));
+  check("and the failure still names the action and the path", res.action === "open-dir" && res.path === installed, JSON.stringify(res));
+}
+
+{
+  const shell = makeShell();
+  const tools = make({ packaged: true, resources: path.join(installed, "resources"), shell });
+  const res = await tools.openDir("");
+  check("an empty directory is refused before the shell is asked", res.ok === false && res.action === "open-dir" && res.path === "", JSON.stringify(res));
+  check("and the shell is left alone", shell.calls.open.length === 0);
+}
+
+{
+  // The other half of the same shape: the plan's own refusal (there is no
+  // directory to open) carries `action`/`path` too, so a caller can read the
+  // four fields without asking which branch answered.
+  const tools = make({
+    packaged: true,
+    resources: path.join(installed, "resources"),
+    env: { PORTABLE_EXECUTABLE_DIR: tmp },
+  });
+  const plan = tools.installDirPlan();
+  const fields = ["ok", "error", "action", "path"];
+  check("a refused 「打开安装目录」 carries all four fields", plan.ok === false && fields.every((f) => f in plan), JSON.stringify(plan));
+  check("its action matches the one openDir answers with", plan.action === "open-dir");
+  check("its path is empty because there is none", plan.path === "");
+}
+
+/* ---------------- `exists` is the only opinion asked ---------------- */
+
+{
+  // Every "is it there?" decision goes through the injected `exists`, not
+  // through fs. These stubs say a path that is really on disk is missing, which
+  // is the counter-example the earlier checks (all using fs.existsSync) cannot
+  // express: if any of the three helpers reached for the real filesystem
+  // instead, these would answer as if the path existed.
+  const target = path.join(installed, "Open Code Review.exe");
+  const shell = makeShell();
+  const tools = make({
+    packaged: true,
+    resources: path.join(installed, "resources"),
+    shell,
+    exists: (p) => p !== target,
+  });
+  const res = await tools.revealPath(target);
+  check(
+    "a target the injected exists calls missing walks up to its parent",
+    res.ok === true && res.action === "open-parent" && res.path === installed && res.missing === target,
+    JSON.stringify(res)
+  );
+  check("so the file itself was not revealed", shell.calls.reveal.length === 0);
+  check("its parent was opened instead", shell.calls.open.length === 1 && shell.calls.open[0] === installed);
+}
+
+{
+  const tools = make({
+    packaged: true,
+    resources: path.join(installed, "resources"),
+    exists: (p) => p !== installed,
+  });
+  const plan = tools.installDirPlan();
+  check("a directory the injected exists calls missing is refused", plan.ok === false && refusal(plan).includes("没有安装目录"), JSON.stringify(plan));
+  check("and its uninstaller is not looked for", tools.uninstallerPath(installed) === "");
+  check("so 「卸载」 is not offered either", tools.uninstallPlan().ok === false);
+}
+
+{
+  // The same stub the other way round: the directory is gone from the
+  // filesystem's point of view but the walk must still stop on a path `exists`
+  // accepts, otherwise 「打开配置文件所在目录」 would report 路径不存在 for a
+  // path whose parent is right there.
+  const shell = makeShell();
+  const target = path.join(installed, "resources", "no-such.json");
+  const tools = make({
+    packaged: true,
+    resources: path.join(installed, "resources"),
+    shell,
+    exists: (p) => p === path.join(installed, "resources"),
+  });
+  const res = await tools.revealPath(target);
+  check("a synthetic exists decides the walk, not fs", res.ok === true && res.path === path.join(installed, "resources"), JSON.stringify(res));
+}
+
 /* ---------------- the module stays importable without Electron ---------------- */
 
 {
@@ -304,8 +405,28 @@ for (const platform of ["darwin", "linux"]) {
   check("main.js still routes 打开安装目录 and 卸载 through the module", /install\.installDirPlan\(\)/.test(main) && /install\.uninstallPlan\(\)/.test(main));
   // A refusal is only worth anything if it reaches the screen: the handler must
   // return the plan's own `error`, not a rewording of it and not `undefined`.
-  check("app:openInstallDir hands the refusal through unchanged", /app:openInstallDir[\s\S]{0,400}?if \(!plan\.ok\) return plan;/.test(main));
-  check("app:uninstall hands the refusal through unchanged", /app:uninstall[\s\S]{0,400}?if \(!plan\.ok\) return plan;/.test(main));
+  const handlerBody = (name) => {
+    const hit = main.match(new RegExp(`ipcMain\\.handle\\(\\s*"${name}"[\\s\\S]*?\\n\\}\\);`));
+    return hit ? hit[0] : "";
+  };
+  const openInstallDir = handlerBody("app:openInstallDir");
+  const uninstall = handlerBody("app:uninstall");
+  check("app:openInstallDir hands the refusal through unchanged", /if \(!plan\.ok\) return plan;/.test(openInstallDir));
+  check("app:uninstall hands the refusal through unchanged", /if \(!plan\.ok\) return plan;/.test(uninstall));
+  // The refusal is only unchanged if the handler returns the plan itself: a
+  // hand-built `{ ok: false, error }` is the shape this round removed, and it is
+  // what a "helpful" edit puts back. So neither handler may build one, and the
+  // open-directory answer must come from the module.
+  check("app:openInstallDir does not build its own failure shape", !/\{\s*ok:\s*false/.test(openInstallDir));
+  check("app:openInstallDir opens through the module", /return install\.openDir\(plan\.dir\);/.test(openInstallDir));
+  // 卸载 has one failure of its own that is not a refusal: the uninstaller would
+  // not launch. That one is allowed to be built here — it is about an exe, not
+  // about a directory — but it must stay the only one, so the plan's refusal
+  // cannot quietly get rewrapped on the way out.
+  const uninstallFailures = [...uninstall.matchAll(/\{\s*ok:\s*false,\s*error:/g)].map((m) => m[0]);
+  check("app:uninstall builds exactly one failure of its own", uninstallFailures.length === 1, String(uninstallFailures.length));
+  check("and it is the uninstaller that would not launch", /启动卸载程序失败/.test(uninstall));
+  check("install-info.js answers the open-directory failure shape", /async function openDir\(\s*target\s*\)/.test(fs.readFileSync(path.join(ROOT, "install-info.js"), "utf8")));
   check("file:reveal returns what the module answered", /ipcMain\.handle\(\s*"file:reveal",\s*\(_e, absPath\)\s*=>\s*install\.revealPath\(absPath\)\s*\)/.test(main));
 }
 

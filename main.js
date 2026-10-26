@@ -165,8 +165,10 @@ ipcMain.handle("app:info", async () => {
 ipcMain.handle("app:openInstallDir", async () => {
   const plan = install.installDirPlan();
   if (!plan.ok) return plan;
-  const err = await shell.openPath(plan.dir);
-  return err ? { ok: false, error: err } : { ok: true };
+  // `install.openDir()` answers with `{ ok, error, action, path }` — the same
+  // fields `revealPath()` uses for the other "open a directory" button — so the
+  // renderer reads one shape whichever button failed.
+  return install.openDir(plan.dir);
 });
 
 ipcMain.handle("app:uninstall", async () => {

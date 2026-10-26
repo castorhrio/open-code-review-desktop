@@ -36,6 +36,10 @@ function createInstall({
 }) {
   const isWindows = () => platform === "win32";
 
+  // The `action` both ways of opening a directory answer with. One name, so the
+  // plan's refusal and `openDir()`'s result cannot drift apart.
+  const OPEN_DIR = "open-dir";
+
   // NSIS writes `Uninstall <productName>.exe` into the install root; scanning for
   // it is more robust than re-deriving the name from productName. A directory
   // that is not there (a portable build reports no install dir at all) answers
@@ -75,9 +79,15 @@ function createInstall({
    * one in) and an installed copy without an uninstaller cannot be told to
    * delete the exe. */
 
+  // A refusal from here carries the same `action`/`path` pair that `openDir()`
+  // answers with below. It used to be just `{ ok: false, error }`, so the one
+  // failure the renderer can do nothing about (there is no directory to open)
+  // arrived in a different shape from every other "open a directory" failure.
   function installDirPlan() {
     const dir = installInfo().installDir;
-    if (!dir || !exists(dir)) return { ok: false, error: "当前形态没有安装目录（免安装版运行时解压在临时目录）" };
+    if (!dir || !exists(dir)) {
+      return { ok: false, error: "当前形态没有安装目录（免安装版运行时解压在临时目录）", action: OPEN_DIR, path: dir };
+    }
     return { ok: true, dir };
   }
 
@@ -130,7 +140,21 @@ function createInstall({
     return { ok: true, action: "open-parent", path: existing, missing: target };
   }
 
-  return { installInfo, uninstallerPath, installDirPlan, uninstallPlan, revealPath };
+  // 「打开安装目录」 was written inline in main.js and answered `{ ok: false,
+  // error }` when `shell.openPath()` came back with an error string, while
+  // `revealPath()` (the other "open a directory" path) answers with the action
+  // and the path it tried. Two shapes for one failure means the renderer has to
+  // know which button was pressed to read the answer. Same fields here, and the
+  // error string is read rather than ignored, for the same reason as above.
+  async function openDir(target) {
+    if (!target) return { ok: false, error: "没有可打开的目录", action: OPEN_DIR, path: "" };
+    const error = await shell.openPath(target);
+    return error
+      ? { ok: false, error, action: OPEN_DIR, path: target }
+      : { ok: true, action: OPEN_DIR, path: target };
+  }
+
+  return { installInfo, uninstallerPath, installDirPlan, uninstallPlan, revealPath, openDir };
 }
 
 module.exports = { createInstall };

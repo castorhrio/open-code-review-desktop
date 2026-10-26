@@ -46,7 +46,9 @@ export interface FileWindow {
 export interface Bridge {
   info(): Promise<AppInfo>;
   providers(): Promise<{ ok: boolean; error?: string; value: Provider[] }>;
-  openInstallDir(): Promise<{ ok: boolean; error?: string }>;
+  /** Same shape as `revealFile`'s refusal: `action`/`path` are always present,
+   *  so an "open a directory" failure reads the same whichever button it was. */
+  openInstallDir(): Promise<{ ok: boolean; error?: string; action?: string; path?: string }>;
   uninstall(): Promise<{ ok: boolean; error?: string }>;
   pickRepo(): Promise<string>;
   pickScanDir(repo: string): Promise<{ relPath?: string; error?: string }>;
