@@ -194,14 +194,19 @@ const preloadParams = (src, name) => {
 };
 
 // The keys of an inline object type, e.g. `{ name: string; url: string }`.
-const objectTypeKeys = (typeText) => {
+// `inline` is reported separately from the key count so a type that *is* an
+// object literal but yields no keys can be told apart from a type that is not an
+// object at all (a `Spec`, a `string`): the first is a parse that got worse, the
+// second is a shape this check has nothing to say about.
+const objectType = (typeText) => {
   const text = typeText.trim();
-  if (!text.startsWith("{")) return [];
+  if (!text.startsWith("{")) return { inline: false, keys: [] };
   const close = text.lastIndexOf("}");
-  if (close < 0) return [];
-  return splitTopLevel(text.slice(1, close))
+  if (close < 0) return { inline: true, keys: [] };
+  const keys = splitTopLevel(text.slice(1, close))
     .map((member) => member.split(":")[0].replace(/\?$/, "").trim())
     .filter((key) => /^[A-Za-z_$][\w$]*$/.test(key));
+  return { inline: true, keys };
 };
 
 // One parameter of one method: the name the interface gives it, and — when the
@@ -210,7 +215,8 @@ const parseParam = (text) => {
   const colon = text.indexOf(":");
   const name = (colon < 0 ? text : text.slice(0, colon)).replace(/\?$/, "").trim();
   const typeText = colon < 0 ? "" : text.slice(colon + 1).trim();
-  return { name, typeText, keys: objectTypeKeys(typeText) };
+  const { inline, keys } = objectType(typeText);
+  return { name, typeText, keys, inlineObject: inline };
 };
 
 // Where a value sits inside what the main process received, as a key path.
@@ -223,8 +229,6 @@ const collectPaths = (value, path, into) => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return;
   for (const [key, inner] of Object.entries(value)) collectPaths(inner, [...path, key], into);
 };
-
-const getPath = (value, path) => path.reduce((acc, key) => (acc && typeof acc === "object" ? acc[key] : undefined), value);
 
 // The key paths a value is allowed to arrive at. The interface names the
 // parameter; a preload may forward the object flat (`invoke("file:read", req)`)
@@ -243,20 +247,55 @@ const allowedPaths = (param, paramCount) => {
 
 const markerFor = (method, param, key) => (key ? `probe:${method}:${param.name}.${key}` : `probe:${method}:${param.name}`);
 
+// Methods that only subscribe to a channel: the contract is "call it with the
+// callback the interface declares and it will call back", and nothing crosses the
+// bridge in the other direction, so there is no payload whose shape could be
+// checked. Keeping this list explicit is the point. Everything *not* on it has to
+// reach the main process when called, so a method that used to send a request and
+// stopped — a renamed channel, a dropped `invoke`, a method whose request moved
+// behind a condition — fails instead of silently losing its shape checks while the
+// name-only comparison above stays green.
+const LISTENER_METHODS = new Set(["onUpdateState", "onLog", "onExit", "onProgress", "onMenuOpenRepo"]);
+
 const arityMismatches = [];
 const shapeMismatches = [];
 const extraKeyMismatches = [];
+const parseFailures = [];
+const unprobed = [];
+const listenerDrift = [];
 const describePath = (path) => (path.length ? `\`${path.join(".")}\`` : "the argument itself");
 
 for (const name of declared) {
   const wantedList = interfaceParams(bridgeBody[1], name);
   const actual = preloadParams(preloadSrc, name);
-  if (!wantedList || !actual) continue;
+  // `continue` on a failed parse is what a silently worse parser looks like: the
+  // method stops being examined at all, while the name-only checks above stay
+  // green. A signature this parser does not understand — method shorthand in the
+  // preload instead of a `name: (…) =>` property, an object type written as an
+  // index signature, a declaration with no parenthesised parameter list — used to
+  // leave that method's shape unexamined with nothing said about it. (A parameter
+  // list spread over several lines *is* understood: the splitter below keeps
+  // nesting depth, not line breaks.) So the parse is a claim of its own, and it
+  // has to fail out loud.
+  if (!wantedList) {
+    parseFailures.push(`${name}: could not read its parameter list out of the Bridge interface — its shape went unchecked`);
+    continue;
+  }
+  if (!actual) {
+    parseFailures.push(`${name}: could not read its parameter list out of preload.js — its shape went unchecked`);
+    continue;
+  }
   if (wantedList.length !== actual.length)
     arityMismatches.push(`${name}: the interface declares ${wantedList.length}, the preload takes ${actual.length}`);
-  if (!wantedList.length) continue;
 
   const params = wantedList.map(parseParam);
+  for (const param of params) {
+    // An inline object type with zero keys is a parse that got worse, not a
+    // parameter without fields: every key below would go unexamined while the
+    // check stayed green.
+    if (param.inlineObject && !param.keys.length)
+      parseFailures.push(`${name}: the inline object type of \`${param.name}\` yields no keys, so its fields went unchecked`);
+  }
   // The probe: one marker per interface parameter, and per key of every inline
   // object type — so a value that lands under the wrong name, or a key the
   // preload invents or drops, shows up as a marker that never arrives where the
@@ -268,14 +307,34 @@ for (const name of declared) {
   );
 
   invoked.length = 0;
+  let threw = null;
   try {
     exposed[name](...probeArgs);
   } catch (err) {
-    shapeMismatches.push(`${name}: calling it with the interface's shape threw ${err && err.message}`);
+    threw = err;
+  }
+  const isListener = LISTENER_METHODS.has(name);
+  const sentNothing = invoked.length === 0;
+
+  if (threw) {
+    shapeMismatches.push(`${name}: calling it with the interface's shape threw ${threw && threw.message}`);
     continue;
   }
-  // A method that only listens sends nothing; its shape is not a request.
-  if (!invoked.length) continue;
+  if (isListener) {
+    if (!sentNothing)
+      listenerDrift.push(`${name}: listed as a listener but it sends an IPC request, so its shape is not the listener shape`);
+    continue;
+  }
+  if (sentNothing) {
+    // Nothing was invoked, so there is no payload to examine. For anything but a
+    // listener that is a method that no longer works, not a method with nothing to
+    // check — and "nothing to check" is exactly how it used to be skipped.
+    unprobed.push(`${name}: calling it sent nothing to the main process, so its shape went unchecked (only the listener methods may send nothing)`);
+    continue;
+  }
+  // A zero-parameter method has nothing left to compare: the call above *was* the
+  // check, and it did reach a channel.
+  if (!params.length) continue;
   const sent = invoked[0].args;
 
   // Several positional arguments: the interface's names do not cross the bridge
@@ -343,6 +402,30 @@ check(
   "and nothing arrives under a key the interface does not declare",
   extraKeyMismatches.length === 0,
   extraKeyMismatches.join(" | ")
+);
+check(
+  "every method's parameter list could be read, so none was skipped",
+  parseFailures.length === 0,
+  parseFailures.join(" | ")
+);
+check(
+  "every declared method reaches the main process when called",
+  unprobed.length === 0,
+  unprobed.join(" | ")
+);
+check(
+  "and the listener methods send nothing",
+  listenerDrift.length === 0,
+  listenerDrift.join(" | ")
+);
+
+// A stale name on the allow-list is dead weight that quietly exempts a method
+// from the "must reach the main process" check above.
+const staleListeners = [...LISTENER_METHODS].filter((name) => !declared.includes(name));
+check(
+  "the listener allow-list names only methods the interface declares",
+  staleListeners.length === 0,
+  staleListeners.length ? `not in the Bridge interface: ${staleListeners.join(", ")}` : ""
 );
 
 // A channel name is a string on both sides, so a typo is a call that never

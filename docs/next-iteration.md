@@ -22,6 +22,7 @@
 | 4 | 2026-10-26 | `375f64c` | `v1.13.3` | 无新内容（这次 `git fetch upstream --tags` 成功，与本地 ref 一致） |
 | 5 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（`git fetch` 成功 + API 双核对） |
 | 10 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（GitHub API 三核对：commits / tags / releases） |
+| 11 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（GitHub API 核对 commits / tags；顶端 commit 与 tag 均未变） |
 
 结论：连续 9 轮没有需要移植的新功能 / 修复 / 破坏性变更，desktop 的封装（CLI flag、
 输出解析、配置暴露点）无需改动。若某轮顶端 commit 仍为 `375f64c`，本表不新增行。
@@ -630,6 +631,48 @@ Key」。两句都是**没有人核对过的承诺**：那句「留空表示保�
 ---
 
 
+## 本轮 desktop 侧加固（与上游无关，第 11 轮）
+
+上游顶端仍是 `375f64c` / `v1.13.3`（第 11 轮复核，GitHub API 核对），无需移植。
+本轮不引入新功能，只处理**检查器自己的静默退化**：`tools/bridge-contract.mjs` 里
+有三处 `continue`，写坏的代码或写坏的解析都能让形状检查无声消失，而方法名比对仍然
+全绿。
+
+### P0 — 解析失败现在是 FAIL，不再 `continue`
+
+`for (const name of declared)` 循环里原来有一句
+`if (!wantedList || !actual) continue;`：一旦某方法的参数列表读不出来（preload 改用
+方法简写、对象类型写成索引签名、签名里没有括号参数表），这个方法就**不再被检查**，
+而「声明的都在 preload 上 / 暴露的都在接口里」两条仍然通过。
+
+- **改动**：`wantedList` / `actual` 各自一条解析断言（指名方法与哪一侧读不出来）；
+  `objectTypeKeys` 改成返回 `{ inline, keys }`，于是「看起来是对象字面量但解析出 0 个
+  key」能和「本来就不是对象类型（`Spec`、`string`）」分开——前者 FAIL，后者照旧无话可说。
+- **实测**（改坏 → 变红 → 还原）：
+  - `preload.js` 的 `rulesCheck` 改成方法简写 → `FAIL every method's parameter list
+    could be read … rulesCheck: could not read its parameter list out of preload.js`；
+  - `api.ts` 的 `savedKey(req: { [key: string]: string })` → `FAIL … the inline object
+    type of \`req\` yields no keys`。
+  - 顺带记一笔：**多行参数列表本来就能读**（切分靠嵌套深度、不靠换行），把它写成
+    多行不会变红——注释里写清了这一点，免得下一个人以为「多行 = 已知盲区」。
+
+### P0 — 每个声明的方法都必须真的走到主进程
+
+`if (!invoked.length) continue;` 把「只监听、不发请求」的方法排除在外，理由成立，
+但它没区分**合法的事件订阅方法**和**本该发 IPC 却没发的方法**。
+
+- **改动**：加显式白名单 `LISTENER_METHODS`（`onUpdateState` / `onLog` / `onExit` /
+  `onProgress` / `onMenuOpenRepo`）。白名单外的方法若调用后一个 invoke 都没有 → FAIL；
+  白名单内的方法若真发了请求 → 也 FAIL（它的形状就不再是监听形状了）；白名单里出现
+  接口不再声明的方法 → FAIL（躺着豁免一条不存在的断言）。零参数方法（`info`、
+  `pickRepo`…）现在也会被调用，因此「调用本身有没有到主进程」对它们同样成立。
+- **实测**：`preload.js` 的 `pickRepo` 改成 `() => Promise.resolve("")` →
+  `FAIL every declared method reaches the main process when called <- pickRepo: calling
+  it sent nothing to the main process`（改之前这条静默通过）。
+
+`npm run audit:bridge`：20 条断言全绿。
+
+
 ## 待移植 / 待验证
 
 ### 已完成 — `manifest.run_failure` 的中文映射与展示
@@ -727,6 +770,9 @@ desktop 的「工具调用 N（失败 M）」直接读 CLI 的 `tool_calls.failu
   渲染层不再有规则可写错，但也没有一条断言能证明这一点。文件
   `src/components/SettingsPanel.tsx`。——第 10 轮给渲染层补了一条 UI 断言，但补的是
   「查不到答案时怎么说话」，**不是**「端点只查表」这一条；后者仍然没有断言看着。
+- **P1**：`tools/ui-audit/fixtures.mjs` 的 `run_manifest.schema_version` 是手写常量，
+  `ocr-service.js` 实际读的字段集合没有断言看着。上游改 manifest schema 时，夹具会继续
+  喂旧形状而没人发现。加一条「夹具字段集合 = 服务端读取的字段集合」的断言。
 - **P2**：设置页的 `loading` 态（「正在确认是否已有可用的 Key…」）是转瞬即逝的，
   `tools/ui-audit` 抓不到它——夹具的 `savedKey` 立刻 resolve。要钉住它得让 stub
   挂住不答，那是另一件事。
