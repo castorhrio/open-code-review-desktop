@@ -36,6 +36,15 @@
  * install has no built-in services": the settings page reads an empty list as
  * "every name on screen is custom", so hollow data must not be able to arrive
  * dressed as a successful read.
+ *
+ * Every element of `rows` must also be an object. `providerTable()` builds them
+ * itself (`{ name, protocol, url }`), so a `null`, a string or an array in the
+ * list is not a shape the CLI can produce — it is a parser or caller mistake.
+ * The renderer reads `p.name` off each element (`providers.find`, `.some`,
+ * `.filter`), so passing the mistake through would crash the settings page
+ * rather than show the banner; the whole read is answered as unreadable instead.
+ * That is deliberate: a half-list would tell the page "these are all the
+ * services", and one bad row is enough to make that false.
  */
 
 // The answer when there is no usable table. `providerTable()` always returns an
@@ -43,6 +52,8 @@
 // refactor) or a parser that stopped returning rows, not a state the CLI
 // produces — and it must not read as "no built-in service exists".
 const PROVIDERS_UNREAD = "还没有读取过内置服务名单";
+
+const rowShaped = (row) => row !== null && typeof row === "object" && !Array.isArray(row);
 
 const errorTextOf = (table) => {
   const said = String((table && table.error) || "").trim();
@@ -60,7 +71,7 @@ const errorTextOf = (table) => {
  */
 function providersAnswer(table, { withHint = (text) => text } = {}) {
   const rows = table && Array.isArray(table.rows) ? table.rows : null;
-  if (!table || table.ok !== true || !rows) {
+  if (!table || table.ok !== true || !rows || !rows.every(rowShaped)) {
     return { ok: false, error: withHint(errorTextOf(table)), value: [] };
   }
   return { ok: true, value: rows };

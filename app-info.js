@@ -20,6 +20,12 @@ const firstNonEmptyLine = (text) =>
 // stderr instead, so whichever actually spoke is the one to read. Only the
 // first non-empty line is a version — the rest is a banner. The name prefix is
 // part of the sentence, not part of the version the page wants to show.
+//
+// Only the product's long name is stripped. The binary is also called `ocr`,
+// but a line starting with that word is not the same declaration, and guessing
+// which short name a future build might print is how a version number loses a
+// word that was part of it. `tools/app-info-smoke.mjs` pins the other side too:
+// `ocr 1.13.3` keeps its prefix.
 const readVersion = (binaryPath, stdout, stderr) => {
   if (!binaryPath) return "";
   const line = firstNonEmptyLine(stdout) || firstNonEmptyLine(stderr);

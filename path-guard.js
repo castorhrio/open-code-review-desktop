@@ -126,4 +126,58 @@ function relativeInside(
   return candidateSegments.slice(rootSegments.length).join("/");
 }
 
-module.exports = { isInside, relativeInside };
+// The picker's *answer* is one more translation on top of `relativeInside`, and
+// it used to live in `main.js` as an `if`/`return` chain. Three answers came out
+// of it —
+//
+//   dialog cancelled      → {}
+//   pick outside the repo → { error: "所选目录不在该仓库内" }
+//   pick inside           → { relPath }   ("" = the repo itself)
+//
+// — and only the third was ever exercised by a test. The shapes are what the
+// renderer reads (`pickScanDir` in `preload.js`), so "which key is present" is
+// the contract; a picker that answered `{ relPath: null }` for an outside
+// directory, or `{}` for it, would look like 留空 (the whole repo) instead of a
+// refusal. The translation is therefore a pure value here, and
+// `tools/path-guard-smoke.mjs` pins all three shapes plus which one must not
+// carry the other's key.
+//
+// `no-repo` is not a pick outcome: the dialog is not opened at all when the app
+// has no repository yet. It is here anyway so `main.js` has one place to send
+// every branch and neither message is spelled in the registration.
+const PICK_INSIDE_MESSAGES = Object.freeze({
+  "no-repo": "请先选择仓库",
+  outside: "所选目录不在该仓库内",
+});
+
+function pickInsideAnswer(repo, picked, { relativeInside: relative } = {}) {
+  if (!usable(repo)) return { kind: "no-repo", error: PICK_INSIDE_MESSAGES["no-repo"] };
+  // A cancelled dialog hands over no path (or an empty one), which is not the
+  // same as the repo itself: `""` is the inside answer, and answering `{}` here
+  // keeps 留空 from being confused with "the user changed their mind".
+  if (!usable(picked)) return { kind: "cancelled" };
+  const relPath = (relative || relativeInside)(repo, picked);
+  // Reuse the refusal `relativeInside` already documents, rather than re-asking
+  // `isInside`: one comparison, one answer, and the injection point above is
+  // what proves this function does not re-derive the path itself.
+  if (relPath === null) return { kind: "outside", error: PICK_INSIDE_MESSAGES.outside };
+  return { kind: "inside", relPath };
+}
+
+// The IPC shape, kept separate from the decision so the renderer-facing keys are
+// pinned as a value. `inside` is the only kind that carries `relPath`; the two
+// refusals are the only kinds that carry `error`; a cancelled pick carries
+// neither. That mapping is the contract `tools/path-guard-smoke.mjs` reads.
+function pickInsidePayload(answer) {
+  if (answer.kind === "cancelled") return {};
+  if (answer.kind === "inside") return { relPath: answer.relPath };
+  return { error: answer.error };
+}
+
+module.exports = {
+  isInside,
+  relativeInside,
+  pickInsideAnswer,
+  pickInsidePayload,
+  PICK_INSIDE_MESSAGES,
+};

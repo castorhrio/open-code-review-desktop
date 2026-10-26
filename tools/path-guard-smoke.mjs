@@ -26,7 +26,13 @@ import path from "node:path";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const require = createRequire(path.join(ROOT, "package.json"));
-const { isInside, relativeInside } = require(path.join(ROOT, "path-guard.js"));
+const {
+  isInside,
+  relativeInside,
+  pickInsideAnswer,
+  pickInsidePayload,
+  PICK_INSIDE_MESSAGES,
+} = require(path.join(ROOT, "path-guard.js"));
 const gitSvc = require(path.join(ROOT, "git-service.js"));
 
 const failures = [];
@@ -374,23 +380,144 @@ const check = (name, ok, detail = "") => {
   );
 }
 
+/* ---- the picker's answer is a value, not an if-chain in main.js ----
+ * `repo:pickInside` answers the renderer with one of three shapes, and only the
+ * `{ relPath }` one had a test behind it. The dangerous confusion is not a
+ * crash: an outside pick answered as `{}` or `{ relPath: null }` reads as 留空
+ * (the whole repo), which silently widens the scan instead of refusing it.
+ * `pickInsideAnswer` decides the kind and `pickInsidePayload` fixes the keys;
+ * these checks pin both, and the injected `relativeInside` proves the decision
+ * does not recompute the path on the side.
+ */
+{
+  const inside = pickInsideAnswer("/repo", "/repo/src");
+  check(
+    "pick: a subdirectory answers kind inside with the relPath",
+    inside.kind === "inside" && inside.relPath === "src" && !("error" in inside),
+    JSON.stringify(inside)
+  );
+  check(
+    "pick: the repo itself is inside with the empty relPath, not cancelled",
+    JSON.stringify(pickInsideAnswer("/repo", "/repo")) ===
+      JSON.stringify({ kind: "inside", relPath: "" }),
+    JSON.stringify(pickInsideAnswer("/repo", "/repo"))
+  );
+  const outside = pickInsideAnswer("/repo", "/repo2");
+  check(
+    "pick: an outside directory answers kind outside with the refusal sentence",
+    outside.kind === "outside" &&
+      outside.error === PICK_INSIDE_MESSAGES.outside &&
+      !("relPath" in outside),
+    JSON.stringify(outside)
+  );
+  check(
+    "pick: a `..` escape is outside too",
+    pickInsideAnswer("/repo", "/repo/../etc").kind === "outside"
+  );
+  check(
+    "pick: a cancelled dialog (null / undefined / empty) is one answer",
+    [null, undefined, ""].every(
+      (picked) => JSON.stringify(pickInsideAnswer("/repo", picked)) === JSON.stringify({ kind: "cancelled" })
+    ),
+    JSON.stringify([null, undefined, ""].map((picked) => pickInsideAnswer("/repo", picked)))
+  );
+  check(
+    "pick: no repository is its own answer, with the sentence that asks for one",
+    JSON.stringify(pickInsideAnswer("", "/repo")) ===
+      JSON.stringify({ kind: "no-repo", error: PICK_INSIDE_MESSAGES["no-repo"] }),
+    JSON.stringify(pickInsideAnswer("", "/repo"))
+  );
+
+  // The injection point is why this translation is testable without a dialog:
+  // the answer is whatever `relativeInside` said, and the two early returns do
+  // not consult it at all.
+  {
+    const calls = [];
+    const stub = (root, picked) => {
+      calls.push([root, picked]);
+      return "from/stub";
+    };
+    const answer = pickInsideAnswer("/repo", "/anywhere", { relativeInside: stub });
+    check(
+      "pick: the relPath is whatever relativeInside answered, not recomputed here",
+      answer.kind === "inside" &&
+        answer.relPath === "from/stub" &&
+        calls.length === 1 &&
+        calls[0][0] === "/repo" &&
+        calls[0][1] === "/anywhere",
+      JSON.stringify({ answer, calls })
+    );
+    check(
+      "pick: the stub's null decides outside, with the guard's sentence",
+      pickInsideAnswer("/repo", "/anywhere", { relativeInside: () => null }).kind === "outside",
+      "the decision reads the guard's answer instead of asking isInside again"
+    );
+    const forbidden = () => {
+      throw new Error("must not be called");
+    };
+    check(
+      "pick: a cancelled pick never reaches relativeInside",
+      pickInsideAnswer("/repo", "", { relativeInside: forbidden }).kind === "cancelled"
+    );
+    check(
+      "pick: a missing repository never reaches relativeInside either",
+      pickInsideAnswer("", "/repo", { relativeInside: forbidden }).kind === "no-repo"
+    );
+  }
+
+  // The IPC keys, one shape at a time. `inside` is the only answer with
+  // `relPath`; the two refusals are the only ones with `error`; cancelled has
+  // neither. A helper that always returned `{ relPath, error }` would put an
+  // empty `relPath` beside a refusal, and the renderer would have to guess
+  // which one to believe.
+  const cancelledPayload = pickInsidePayload({ kind: "cancelled" });
+  check(
+    "payload: cancelled is exactly the empty object",
+    JSON.stringify(cancelledPayload) === "{}",
+    JSON.stringify(cancelledPayload)
+  );
+  const insidePayload = pickInsidePayload({ kind: "inside", relPath: "" });
+  check(
+    "payload: inside carries relPath (empty means the repo) and nothing else",
+    JSON.stringify(Object.keys(insidePayload)) === JSON.stringify(["relPath"]) &&
+      insidePayload.relPath === "",
+    JSON.stringify(insidePayload)
+  );
+  const outsidePayload = pickInsidePayload({ kind: "outside", error: PICK_INSIDE_MESSAGES.outside });
+  check(
+    "payload: outside carries the refusal and no relPath",
+    JSON.stringify(Object.keys(outsidePayload)) === JSON.stringify(["error"]) &&
+      outsidePayload.error === PICK_INSIDE_MESSAGES.outside,
+    JSON.stringify(outsidePayload)
+  );
+  const noRepoPayload = pickInsidePayload({ kind: "no-repo", error: PICK_INSIDE_MESSAGES["no-repo"] });
+  check(
+    "payload: no-repo has the same shape, with the other sentence",
+    JSON.stringify(Object.keys(noRepoPayload)) === JSON.stringify(["error"]) &&
+      noRepoPayload.error === PICK_INSIDE_MESSAGES["no-repo"] &&
+      noRepoPayload.error !== outsidePayload.error,
+    JSON.stringify(noRepoPayload)
+  );
+}
+
 /* ---- the call sites use the shared rule, not their own spelling ---- */
 {
   const mainSrc = fs.readFileSync(path.join(ROOT, "main.js"), "utf8");
   const gitSrc = fs.readFileSync(path.join(ROOT, "git-service.js"), "utf8");
   check(
-    "repo:pickInside asks path-guard for the relPath, not for a guard plus a hand-rolled relative",
+    "repo:pickInside hands the dialog's answer to path-guard, not an inline if-chain",
     /require\("\.\/path-guard"\)/.test(mainSrc) &&
-      /relativeInside\(repo, result\.filePaths\[0\]\)/.test(mainSrc) &&
+      /pickInsidePayload\(pickInsideAnswer\(repo, (?:null|picked)\)\)/.test(mainSrc) &&
+      !/relativeInside\(repo/.test(mainSrc) &&
       !/path\.relative\(root, picked\)/.test(mainSrc),
     "main.js"
   );
   check(
-    "...and the picker's three answers come from that one call",
-    /const relPath = relativeInside\(/.test(mainSrc) &&
-      /relPath === null\) return \{ error: "所选目录不在该仓库内" \}/.test(mainSrc) &&
-      /return \{ relPath \}/.test(mainSrc),
-    "outside → error, everything else → relPath (empty string for the repo itself)"
+    "...and neither picker sentence is spelled in the registration",
+    ![PICK_INSIDE_MESSAGES.outside, PICK_INSIDE_MESSAGES["no-repo"]].some((said) =>
+      mainSrc.includes(said)
+    ),
+    "the translation and its wording live in path-guard.js"
   );
   check(
     "readFileWindow guards the worktree read with isInside",

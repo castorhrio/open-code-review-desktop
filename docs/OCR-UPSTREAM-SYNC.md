@@ -12,24 +12,32 @@
 4. **不要**静默忽略上游 release：每轮把结论写进下面「当前状态」，并把上一轮的正文搬到
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。
 
-## 当前状态（第 62 轮，2026-10-27）
+## 当前状态（第 65 轮，2026-10-27）
 
-第 62 轮复核：**两条通路一致，结论仍是「无新内容」**。
+第 65 轮复核：**三条通路一致，结论仍是「无新内容」**。
 `git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
 refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
-（与第 49–61 轮同一个 commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
-`dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`。desktop 的 `^1.13.3` 无需改动，**无移植项**。
+（与第 49–64 轮同一个 commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
+`dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`；`npm view @alibaba-group/open-code-review
+version dist-tags` 仍是 `1.13.3` / `latest: 1.13.3`。desktop 的 `^1.13.3` 无需改动，
+**无移植项**。（第 63–64 轮没有更新本文件的核对账；本轮不替它们补写通路，只在账里记下
+「无记录」。）
 
-本轮没有新功能要移植，改的是 desktop 自己的两条规则：
+本轮继续把 IPC 层的翻译收进可测纯函数，并补反向断言：
 
-- `path-guard.js` 的 `caseInsensitive` 从「装饰」变成真正决定答案的开关：判据改成
-  「resolve 两侧 → 需要时折小写 → **整段比较**」，不再经过 `path.relative`（它自己会折
-  小写，所以旗标关掉答案曾经也是 true）。`tools/path-guard-smoke.mjs` 补上「旗标关掉、
-  大小写不同 → 在外」与「把 `path.relative` 换成会抛错的桩，答案照旧」两组断言。
-- 逐轮正文（第 47–61 轮）整体搬到 [`upstream-history.md`](upstream-history.md)，本文件只留
-  关系 / 规则 / 当前状态 / 对照表 / pin 块。`audit:upstream` 因此仍能要求 pin 恰好三处，
-  而历史叙述不再参与扫描（`tools/upstream-watch-smoke.mjs` 同时断言归档里没有任何 pin
-  声明，免得它变成第二个权威源）。
+- `path-guard.js` 新增 `pickInsideAnswer` / `pickInsidePayload`：`repo:pickInside` 的
+  `{}` / `{ error }` / `{ relPath }` 三种答案不再由 `main.js` 的 `if` 链拼出。取消、
+  越界、仓库内各是一种 `kind`，两条错误文案也只在这里；`main.js` 只剩 dialog 与一次
+  `pickInsidePayload(pickInsideAnswer(...))`。`tools/path-guard-smoke.mjs` 逐种钉住
+  kind、键集，以及「注入的 `relativeInside` 说什么就是什么」。
+- `provider-handler.js` 把「rows 元素必须是对象」写成**拒绝**而不是透传：设置页对每个
+  元素读 `p.name`，一个 `null` 会把它变成崩溃而不是横幅，所以整次读取按「读不到」回答。
+  `tools/provider-handler-smoke.mjs` 用 `[null, "x", { name }]` 与数组元素钉住这条契约。
+- `tools/config-handler-smoke.mjs` 补 `{ ok: false }` 最小静默表 + 两段各一条不同拼写的
+  夹具，断言 `others.length === 1`，且 `section` 分别是 `providers` 与 `custom_providers`。
+- `tools/app-info-smoke.mjs` 钉住 `readVersion` 只剥 `open-code-review`（`ocr 1.13.3`
+  保留前缀）；`tools/install-info-smoke.mjs` 在三种形态下断言 `installInfo()` 的键集
+  恰好六项，与 `app-info-smoke` 末尾的 `expected` 互相钉住。
 
 ## 上游真变了怎么办（命令驱动，而不是「记得看一眼」）
 ```bash
@@ -99,7 +107,7 @@ pin 或 ls-remote 给出的 SHA 短于 40 位时一律判「跳过」并说明�
 没变**，所以每轮的结论仍要写进上面「当前状态」——跳过时至少留下 `[UPSTREAM-DEBT]` 与
 「核对通路账」里的一行欠账。
 
-**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 62 轮：`git ls-remote` 可达，`refs/heads/main` 与 pin 一致；tag 与 pin 指向同一 commit；通路：git）**
+**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 65 轮：`git ls-remote` 可达，`refs/heads/main` 与 pin 一致；tag 与 pin 指向同一 commit；npm release 仍是 `1.13.3`；通路：git）**
 
 ### 核对通路账
 
@@ -127,13 +135,17 @@ pin 或 ls-remote 给出的 SHA 短于 40 位时一律判「跳过」并说明�
 | 60 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；pin 三处覆盖断言、路径越界统一、`app:info` 抽纯函数 | — |
 | 61 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；UNC / 长路径、pin 重复声明、`installInfo` 缺失三处测试收口 | — |
 | 62 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；`caseInsensitive` 改成承重、逐轮正文搬进 `upstream-history.md` | — |
+| 63 | 2026-10-27 | none | 本文件没有核对记录（该轮未更新状态与账） | `[UPSTREAM-DEBT]` HEAD |
+| 64 | 2026-10-27 | none | 本文件没有核对记录（该轮未更新状态与账） | `[UPSTREAM-DEBT]` HEAD |
+| 65 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；pickInside / providers / 三处反向断言收口 | — |
 
 「最近一次对照」只写**那一项最近被人工重新核对**的轮次。该列没有列出本轮，表示本轮
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
 对应行并把轮次与日期改成本轮。
 
-**第 46–62 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
-npm 通路可达，第 56 轮 git 超时但 API 可达），所以下表四行的「最近一次对照」停在第 45 轮是
+**第 46–65 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
+npm 通路可达，第 56 轮 git 超时但 API 可达，第 63–64 轮本文件无通路记录），所以下表四行的
+「最近一次对照」停在第 45 轮是
 **没有理由重看**，不是忘了看：
 它记录的是「最后一次有人逐行读上游源码」的轮次，而不是「最后一次确认上游没变」的轮次。
 换言之：**停在第 45 轮 = 未重看，不等于欠账**；欠账只有一种——`375f64c` 前进之后没人

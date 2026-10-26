@@ -1116,6 +1116,47 @@ check(
     JSON.stringify(two && two.others)
   );
 
+  /* The minimal shape a failed registry read actually has: `{ ok: false }`, no
+   * `names`, no `rows`. `registryNames` reads only `ok` and `names`, so this is
+   * the one-object fixture that says "silent registry" without borrowing the
+   * full `failedRead` shape; a function that started requiring `rows` would
+   * answer "empty list" here and quietly stop checking both sections.
+   *
+   * The two entries spell the name differently from each other *and* from the
+   * save, so neither is the exact key: both are variants, one per section. The
+   * first section checked is named first (`providers`), and the other rides in
+   * `others` with `custom_providers` — the two sections must not collapse into
+   * one name, or the refusal sends the user to only half the problem.
+   */
+  const failedRead = { ok: false };
+  const twoSections = spellingClash(
+    { providers: { DeepSeek: {} }, customProviders: { deepseek: {} } },
+    "DEEPSEEK",
+    failedRead
+  );
+  check(
+    "`{ ok: false }` alone still checks both sections",
+    twoSections !== null &&
+      twoSections.name === "DeepSeek" &&
+      twoSections.section === "providers" &&
+      twoSections.others.length === 1,
+    JSON.stringify(twoSections)
+  );
+  check(
+    "...and the other entry is the custom_providers one, in its own spelling",
+    twoSections !== null &&
+      twoSections.others[0].name === "deepseek" &&
+      twoSections.others[0].section === "custom_providers",
+    JSON.stringify(twoSections && twoSections.others)
+  );
+  check(
+    "...so two sections are two answers, not one name repeated",
+    twoSections !== null &&
+      twoSections.section !== twoSections.others[0].section &&
+      twoSections.name !== twoSections.others[0].name,
+    JSON.stringify(twoSections)
+  );
+
   check(
     "an exact key is not a clash at all",
     spellingClash({ providers: { DeepSeek: {} }, customProviders: { deepseek: {} } }, "DeepSeek", silent) === null,

@@ -18,6 +18,25 @@ pin 块，这样它就不会某天被当成第二个权威源。
 
 ---
 
+## 上游状态（最近检查：2026-10-27，第 62 轮）
+
+第 62 轮复核：**两条通路一致，结论仍是「无新内容」**。
+`git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
+refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
+（与第 49–61 轮同一个 commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
+`dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`。desktop 的 `^1.13.3` 无需改动，**无移植项**。
+
+本轮没有新功能要移植，改的是 desktop 自己的两条规则：
+
+- `path-guard.js` 的 `caseInsensitive` 从「装饰」变成真正决定答案的开关：判据改成
+  「resolve 两侧 → 需要时折小写 → **整段比较**」，不再经过 `path.relative`（它自己会折
+  小写，所以旗标关掉答案曾经也是 true）。`tools/path-guard-smoke.mjs` 补上「旗标关掉、
+  大小写不同 → 在外」与「把 `path.relative` 换成会抛错的桩，答案照旧」两组断言。
+- 逐轮正文（第 47–61 轮）整体搬到 [`upstream-history.md`](upstream-history.md)，本文件只留
+  关系 / 规则 / 当前状态 / 对照表 / pin 块。`audit:upstream` 因此仍能要求 pin 恰好三处，
+  而历史叙述不再参与扫描（`tools/upstream-watch-smoke.mjs` 同时断言归档里没有任何 pin
+  声明，免得它变成第二个权威源）。
+
 ## 上游状态（最近检查：2026-10-27，第 61 轮）
 
 第 61 轮复核：**通路可达，结论仍是「无新内容」**。

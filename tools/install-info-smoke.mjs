@@ -858,6 +858,35 @@ for (const platform of ["darwin", "linux"]) {
   check("a synthetic exists decides the walk, not fs", res.ok === true && res.path === path.join(installed, "resources"), JSON.stringify(res));
 }
 
+/* ---------------- the install facts are exactly these six keys ---------------- */
+
+/* The checks above ask about a field at a time, so a *new* field slips into
+ * `installInfo()` without any of them noticing. That matters beyond this module:
+ * `app:info` spreads this object into the IPC payload, and `src/lib/types.ts`
+ * reads those names, so a rename or an addition is a blank row on the settings
+ * page. The key set is pinned once per install shape — the facts are the same
+ * six whether the copy is installed, portable or a dev build, only their values
+ * differ. `tools/app-info-smoke.mjs` pins the same six names in its payload
+ * `expected` list; the two fixtures are what keep this contract from drifting
+ * with only one side noticing.
+ */
+{
+  const expected = ["canUninstall", "executable", "installDir", "packaged", "portable", "userData"];
+  const shapes = [
+    ["installed", make({ packaged: true, resources: path.join(installed, "resources") })],
+    ["portable", make({ packaged: true, resources: path.join(installed, "resources"), env: { PORTABLE_EXECUTABLE_DIR: tmp } })],
+    ["dev", make({ packaged: false, resources: path.join(installed, "resources") })],
+  ];
+  for (const [label, tools] of shapes) {
+    const keys = Object.keys(tools.installInfo()).sort();
+    check(
+      `${label}: installInfo() answers exactly the six pinned keys`,
+      JSON.stringify(keys) === JSON.stringify(expected),
+      JSON.stringify({ got: keys, want: expected })
+    );
+  }
+}
+
 /* ---------------- the module stays importable without Electron ---------------- */
 
 {

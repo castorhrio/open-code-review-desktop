@@ -16,7 +16,7 @@ const { makeRunHandler } = require("./run-handler");
 const { makeUninstallHandler } = require("./uninstall-handler");
 const { makeConfigHandlers } = require("./config-handler");
 const { createInstall } = require("./install-info");
-const { relativeInside } = require("./path-guard");
+const { pickInsideAnswer, pickInsidePayload } = require("./path-guard");
 const { providersAnswer } = require("./provider-handler");
 const { formatAppInfo } = require("./app-info");
 
@@ -228,22 +228,19 @@ ipcMain.handle("repo:pick", async () => {
 });
 
 ipcMain.handle("repo:pickInside", async (_e, repo) => {
-  if (!repo) return { error: "请先选择仓库" };
+  // The three answers the picker can give are decided in `path-guard.js`; this
+  // registration only asks the dialog and hands the result to that translation.
+  // `no-repo` is the same request with the dialog skipped, because there is
+  // nothing to default the dialog's start directory to.
+  if (!repo) return pickInsidePayload(pickInsideAnswer(repo, null));
   const result = await dialog.showOpenDialog(mainWindow, {
     title: "选择要扫描的子目录（可留空表示整个仓库）",
     buttonLabel: "使用此目录",
     defaultPath: repo,
     properties: ["openDirectory"],
   });
-  if (result.canceled || !result.filePaths.length) return {};
-  // `relativeInside` answers the three cases in one spelling — `""` for the repo
-  // itself (the picker treats that as 留空 = the whole repo), a forward-slash
-  // `relPath` for a subdirectory, and `null` for anything outside. The old body
-  // kept those three answers in step by hand (a `startsWith` guard, a
-  // `path.relative`, and a `|| ""`) and only the guard had a test behind it.
-  const relPath = relativeInside(repo, result.filePaths[0]);
-  if (relPath === null) return { error: "所选目录不在该仓库内" };
-  return { relPath };
+  const picked = result.canceled || !result.filePaths.length ? null : result.filePaths[0];
+  return pickInsidePayload(pickInsideAnswer(repo, picked));
 });
 
 ipcMain.handle("repo:pickFile", async (_e, opts) => {

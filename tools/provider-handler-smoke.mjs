@@ -67,6 +67,45 @@ const check = (name, ok, detail = "") => {
   );
 }
 
+/* ---- every row must be an object, or the whole read is unreadable ----
+ * `providerTable()` builds `{ name, protocol, url }` rows itself, so a null, a
+ * string or an array in `rows` is not something the CLI can produce — it is a
+ * parser or caller mistake. The settings page reads `p.name` off each element
+ * (`providers.find`, `.some`, `.filter`), so "pass it through as-is" would be a
+ * crash on the page instead of the banner. The contract is therefore "reject
+ * the read", not "hand the mistake on", and one bad element is enough: a
+ * filtered list would tell the page it had seen every built-in service.
+ */
+{
+  const mixed = [null, "x", { name: "DeepSeek" }];
+  const answer = providersAnswer({ ok: true, rows: mixed, matched: mixed.length, error: "" });
+  check(
+    "a rows list with a non-object element is a failure, not a list the renderer will crash on",
+    answer.ok === false && Array.isArray(answer.value) && answer.value.length === 0,
+    JSON.stringify(answer)
+  );
+  check(
+    "...and the sentence is the unread one, not the element's text",
+    answer.error === PROVIDERS_UNREAD,
+    JSON.stringify(answer.error)
+  );
+  const arrayRow = providersAnswer({ ok: true, rows: [[]], matched: 1, error: "" });
+  check(
+    "an array is not a row either",
+    arrayRow.ok === false && arrayRow.error === PROVIDERS_UNREAD,
+    JSON.stringify(arrayRow)
+  );
+  check(
+    "a table whose rows are all objects is still passed through whole",
+    (() => {
+      const rows = [{ name: "DeepSeek" }, { name: "Moonshot" }];
+      const ok = providersAnswer({ ok: true, rows, matched: rows.length, error: "" });
+      return ok.ok === true && ok.value === rows;
+    })(),
+    "the same list, not a filtered copy — nothing is dropped silently"
+  );
+}
+
 /* ---- a table that could not be read ---- */
 {
   const said = "ocr llm providers 的输出里没有可识别的服务行";

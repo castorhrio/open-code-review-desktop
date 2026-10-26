@@ -94,6 +94,20 @@ const base = {
     bare.version === "1.13.3",
     JSON.stringify(bare.version)
   );
+  // Only the product's long name is a prefix. The binary is also called `ocr`,
+  // but stripping every short name a build might print is how a version loses
+  // a word that was part of it; the contract is "strip exactly
+  // `open-code-review`", so this line keeps its `ocr ` and the check says so.
+  const shortName = formatAppInfo({
+    ...base,
+    binary: { path: "/opt/app/ocr", source: "package" },
+    versionStdout: "ocr 1.13.3\n",
+  });
+  check(
+    "stdout: a line starting with `ocr ` keeps that prefix (only the long name is stripped)",
+    shortName.version === "ocr 1.13.3",
+    JSON.stringify(shortName.version)
+  );
   const noSource = formatAppInfo({ ...base, binary: { path: "/opt/app/ocr" }, versionStdout: "1.13.3\n" });
   check(
     "a path with no source reports null rather than undefined",
