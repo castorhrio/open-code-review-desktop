@@ -33,6 +33,11 @@ export function SettingsPanel() {
   const [confirmUnset, setConfirmUnset] = useState(false);
   const [confirmUninstall, setConfirmUninstall] = useState(false);
   const [pendingRemove, setPendingRemove] = useState<[string, ProviderEntry] | null>(null);
+  // What the main process says about leaving the Key box blank: the six causes
+  // it can withhold a saved Key for, each with its own sentence. Kept here as
+  // the answer itself (reason + wording + tone), not re-derived in the renderer
+  // — the wording is written where the reasons are, so the two cannot drift.
+  const [savedKey, setSavedKey] = useState<Awaited<ReturnType<typeof api.savedKey>> | null>(null);
 
   useEffect(() => {
     if (!config) return;
@@ -80,17 +85,51 @@ export function SettingsPanel() {
     }
   };
 
+  // The form's target, its saved entry, and the endpoint the request would go to.
+  // All three are needed before the early return below, because the effect that
+  // asks about the saved Key is a hook and has to run on every render.
+  const isCustomTarget = picked === "__custom__";
+  const name = isCustomTarget ? customName.trim() : picked;
+  const entry = (config && (config.providers[name] || config.customProviders[name])) || ({} as ProviderEntry);
+  const builtIn = providers.find((p) => p.name === name);
+  const endpoint = (isCustomTarget ? customUrl : builtIn?.url || entry.url || "").trim();
+
+  // "May I leave the Key box blank for what this form is pointed at?" is a
+  // question only the main process can answer: the endpoint of a built-in
+  // service comes from the CLI's own table, and the Key must not be sent to a
+  // host it does not belong to. The renderer used to guess, and its guess was
+  // one sentence for every cause — "该服务还没有 Key" even when a Key was saved
+  // and simply not reusable. Three different fixes hid behind that sentence
+  // (press 刷新 / put the endpoint back / retype the Key), so the form shows the
+  // cause it was given instead.
+  useEffect(() => {
+    if (!config || !name) {
+      setSavedKey(null);
+      return;
+    }
+    let live = true;
+    api
+      .savedKey({ name, url: endpoint })
+      .then((res) => {
+        if (live) setSavedKey(res);
+      })
+      // A lookup that could not run is not a reason to claim a Key is reusable:
+      // fall back to the plain "nothing saved" wording rather than to the
+      // optimistic one.
+      .catch(() => {
+        if (live) setSavedKey(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [config, name, endpoint]);
+
   if (!config)
     return (
       <Page>
         <p className="text-body text-faint">读取配置中…</p>
       </Page>
     );
-
-  const isCustomTarget = picked === "__custom__";
-  const name = isCustomTarget ? customName.trim() : picked;
-  const entry = config.providers[name] || config.customProviders[name] || {};
-  const builtIn = providers.find((p) => p.name === name);
   const configuredNames = new Set([...Object.keys(config.providers), ...Object.keys(config.customProviders)]);
   const pickable = providers.filter((p) => !config.customProviders[p.name]);
   const visibleProviders = showAllProviders
@@ -110,7 +149,7 @@ export function SettingsPanel() {
   // the CLI's own built-in table so a brand-new provider can be tested too.
   const formValues = {
     name,
-    url: (isCustomTarget ? customUrl : builtIn?.url || entry.url || "").trim(),
+    url: endpoint,
     protocol: (isCustomTarget ? customProtocol : builtIn?.protocol || entry.protocol || "").trim(),
     model: model.trim(),
     apiKey: apiKey.trim(),
@@ -260,7 +299,24 @@ export function SettingsPanel() {
               </Field>
 
               <div className="col-span-full">
-                <Field label="API Key" hint={entry.hasKey ? `已保存：${entry.keyPreview || "（由命令取键）"}　留空表示保持不变` : "该服务还没有 Key，审查前必填。"}>
+                {/* A withheld Key is a different field than an empty one: the
+                    entry may well hold a Key (entry.hasKey) that this endpoint
+                    would never receive, and saying "留空表示保持不变" there is the
+                    promise the CLI breaks. So a reason always wins over the
+                    preview, and its tone says whether it is a fault (warn) or
+                    just where a new entry starts (muted). */}
+                <Field
+                  label="API Key"
+                  hint={
+                    savedKey && savedKey.reason ? (
+                      <span className={savedKey.hint.tone === "warn" ? "text-warn" : undefined}>{savedKey.hint.text}</span>
+                    ) : entry.hasKey ? (
+                      `已保存：${entry.keyPreview || "（由命令取键）"}　留空表示保持不变`
+                    ) : (
+                      "该服务还没有 Key，审查前必填。"
+                    )
+                  }
+                >
                   <div className="flex items-center gap-2">
                     <KeyRound className="size-4 shrink-0 text-faint" />
                     <Input

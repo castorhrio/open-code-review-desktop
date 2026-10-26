@@ -596,6 +596,28 @@ const HUGE = {
   SESSIONS: SESSIONS.map((s, i) => (i ? s : { ...s, total_comments: 1200 })),
 };
 
+// The sentence the main process builds for each way a saved Key can be
+// withheld (ocr-service.js `savedKeyFieldHint`), keyed by the reason code.
+//
+// The fixture hands these out verbatim from the real function, and the shot
+// compares the screen against them, because the gap being closed is not "does
+// the wording distinguish six causes" (that is asserted in the service smoke) but
+// "does the wording ever reach the screen": `config:savedKey` existed and the
+// settings page never called it, so every cause still rendered as the one
+// sentence "该服务还没有 Key". Paraphrasing the sentences here would let the
+// fixture and the UI agree with each other while both disagreed with the app.
+export const SAVED_KEY_HINTS = Object.fromEntries(
+  [
+    "",
+    ocr.KEY_WITHHELD_TABLE,
+    ocr.KEY_WITHHELD_URL,
+    ocr.KEY_WITHHELD_ORDER,
+    ocr.KEY_WITHHELD_CONFIG,
+    ocr.KEY_WITHHELD_NO_ENTRY,
+    ocr.KEY_WITHHELD_EMPTY,
+  ].map((reason) => [reason, ocr.savedKeyFieldHint(reason)])
+);
+
 export const BRIDGE = `
 window.api = (() => {
   const q = new URLSearchParams(location.search);
@@ -1018,6 +1040,19 @@ window.api = (() => {
   unsetConfig: async () => ({ ok: true, config: (${JSON.stringify(CONFIG)}) }),
   removeEntry: async () => ({ ok: true }),
   useProvider: async () => ({ ok: true }),
+  // ?savedkey=<reason> is the answer for "may I leave the Key box blank?": the
+  // reason the Key is withheld, plus the sentence to show for it. With no query
+  // the reason is empty, which is the ordinary "the saved Key will be reused".
+  savedKey: async () => {
+    const reason = q.get("savedkey") || "";
+    const hints = ${JSON.stringify(SAVED_KEY_HINTS)};
+    return {
+      ok: true,
+      available: !reason,
+      reason,
+      hint: hints[reason] || hints[""] || { tone: "muted", text: "" },
+    };
+  },
   testLlm: async () => ({ ok: true, output: "[ok] deepseek deepseek-v4-pro 连通正常", via: "form" }),
   exportSession: async () => ({ ok: true, file: "C:/tmp/report.html" }),
   deleteSession: async () => ({ ok: true }),
