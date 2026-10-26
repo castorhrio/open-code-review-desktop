@@ -15,8 +15,12 @@ import path from "node:path";
 
 import {
   DEBT_MARKER,
+  HISTORY_ALLOWED_SHA_CONTEXTS,
   MOVED_MARKER,
   PINNED_UPSTREAM,
+  PIN_BLOCK_END,
+  PIN_BLOCK_START,
+  PIN_LINE_SHAPES,
   PIN_PLACES,
   ROWS_TO_REREAD,
   UPSTREAM_HISTORY_DOC,
@@ -24,7 +28,10 @@ import {
   createRunner,
   describePinDisagreements,
   findDocPins,
+  findPinShapedCitations,
+  findShaCitations,
   formatDrift,
+  historyShaRule,
   parseApiCommit,
   parseLsRemote,
   pinPlaceCoverage,
@@ -804,6 +811,137 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
     "the audit log declares no pin and holds no pin block",
     historyPins.pins.length === 0 && historyPins.blockFound === false,
     JSON.stringify({ pins: historyPins.pins, blockFound: historyPins.blockFound })
+  );
+
+  /* ---- the archive's rule, stated as a rule instead of inferred ----
+   * "No pin was found in the archive" is true for two different worlds: the
+   * archive really only cites commits, or `findDocPins` has stopped matching
+   * declarations at all. The distinction matters because the archive quotes
+   * *whole 40-character* SHAs (a round's `refs/heads/main`, a tag object id), and
+   * a future shape like "any `sha: <40 hex>`" would make those lines red for a
+   * reason nobody reading the failure would guess. So the rule is two lists —
+   * allowed citations, forbidden declaration shapes — and both are asserted.
+   */
+  const rule = historyShaRule();
+  check(
+    "the archive rule is one sentence that names every forbidden shape and the allowed whole SHA",
+    PIN_PLACES.every((place) => rule.includes(place)) && rule.includes("40 位"),
+    rule
+  );
+  check(
+    "...and the list of allowed citation contexts is short, non-empty and spelled out",
+    HISTORY_ALLOWED_SHA_CONTEXTS.length >= 2 &&
+      HISTORY_ALLOWED_SHA_CONTEXTS.every(
+        (context) => typeof context === "string" && context.trim().length > 0 && rule.includes(context)
+      ),
+    JSON.stringify(HISTORY_ALLOWED_SHA_CONTEXTS)
+  );
+  // The places a declaration may appear are derived from the shapes, so a fourth
+  // shape in `PIN_LINE_RULES` becomes a fourth required place instead of a rule
+  // that silently stops being checked (`pinPlaceCoverage` counts by name).
+  check(
+    "every declaration place is one line shape plus the machine block, and an empty doc misses all of them",
+    PIN_PLACES.length === PIN_LINE_SHAPES.length + 1 &&
+      PIN_PLACES[0] === "pin 块" &&
+      PIN_LINE_SHAPES.every((shape) => PIN_PLACES.includes(shape)) &&
+      JSON.stringify(pinPlaceCoverage([]).missing) === JSON.stringify([...PIN_PLACES]),
+    JSON.stringify({ places: [...PIN_PLACES], shapes: [...PIN_LINE_SHAPES] })
+  );
+
+  // The real archive: it does quote whole SHAs, and none of them is in a
+  // declaration shape. Both halves are asserted, because "zero violations" over a
+  // document with no citations would be a vacuous pass.
+  const historyCitations = findShaCitations(history);
+  check(
+    "the archive really does quote whole 40-character SHAs in prose",
+    historyCitations.length > 0 && historyCitations.every((citation) => citation.sha.length === 40),
+    `${historyCitations.length} citation(s)`
+  );
+  check(
+    "...including commits that are not the pin, so citing another commit stays allowed",
+    historyCitations.some((citation) => citation.sha !== PINNED_SHA),
+    JSON.stringify([...new Set(historyCitations.map((citation) => citation.sha))])
+  );
+  const historyShaped = findPinShapedCitations(history);
+  check(
+    "no citation in the archive sits in a pin declaration shape",
+    historyShaped.length === 0,
+    historyShaped.length ? JSON.stringify(historyShaped) : rule
+  );
+  check(
+    "...and every citation there is classified as a plain citation, not as a declaration",
+    historyCitations.every((citation) => citation.shape === null),
+    JSON.stringify(historyCitations.filter((citation) => citation.shape !== null))
+  );
+  // The same predicate, pointed at the sync doc, must find exactly the three
+  // declarations — otherwise the archive's clean answer above could just mean
+  // the predicate never matches anything.
+  const syncShaped = findPinShapedCitations(syncDoc);
+  check(
+    "the same rule finds exactly the sync doc's three declarations, one per place",
+    syncShaped.length === 3 &&
+      JSON.stringify([...new Set(syncShaped.map((citation) => citation.shape))].sort()) ===
+        JSON.stringify([...PIN_PLACES].sort()) &&
+      syncShaped.every((citation) => citation.sha === PINNED_SHA),
+    JSON.stringify(syncShaped.map((citation) => [citation.line, citation.shape]))
+  );
+
+  // The shapes, one line each, built here rather than read out of the doc: a
+  // whole SHA in prose is a citation, the same SHA in any declaration shape is
+  // not, and the machine block declares without matching a per-line rule.
+  const proseCitation = "`refs/heads/main` = `" + PINNED_SHA + "`";
+  const tagCitation = "`refs/tags/v1.13.3` 仍指向 annotated tag 对象 `" + "d".repeat(40) + "`";
+  const shapeFixtures = [
+    ["本轮 HEAD 核对 行", "本轮 HEAD 核对：`" + PINNED_SHA + "`（第 99 轮）"],
+    ["正文固定 SHA", "固定的整串 40 位 SHA `" + PINNED_SHA + "`"],
+    ["pin 块", [PIN_BLOCK_START, "sha " + PINNED_SHA, PIN_BLOCK_END].join("\n")],
+  ];
+  check(
+    "a whole SHA cited in prose is allowed, both for the pin and for another commit",
+    findShaCitations(proseCitation).length === 1 &&
+      findShaCitations(proseCitation)[0].shape === null &&
+      findShaCitations(tagCitation)[0].shape === null &&
+      findShaCitations(tagCitation)[0].sha === "d".repeat(40),
+    JSON.stringify([findShaCitations(proseCitation), findShaCitations(tagCitation)])
+  );
+  for (const [where, line] of shapeFixtures) {
+    const shaped = findPinShapedCitations(line);
+    check(
+      `the ${where} shape is caught even when the SHA is a whole commit`,
+      shaped.length === 1 && shaped[0].shape === where && shaped[0].sha === PINNED_SHA,
+      JSON.stringify(shaped)
+    );
+  }
+  check(
+    "a hex run longer than a commit is not read as a commit with a stray digit",
+    findShaCitations("blob " + PINNED_SHA + "a").length === 0,
+    JSON.stringify(findShaCitations("blob " + PINNED_SHA + "a"))
+  );
+
+  // And the answer must flip on the real archive with one edited line: take a
+  // genuine citation and give it the fixed line's wording. Same file, one line
+  // different, so the red cannot be explained by anything else.
+  const firstCitation = historyCitations[0];
+  const historyLines = history.split(/\r?\n/);
+  const rewritten = firstCitation
+    ? historyLines
+        .map((line, index) =>
+          index + 1 === firstCitation.line
+            ? `本轮 HEAD 核对：\`${firstCitation.sha}\`（第 99 轮：改写在归档里）`
+            : line
+        )
+        .join("\n")
+    : "";
+  const rewrittenHits = firstCitation ? findPinShapedCitations(rewritten) : [];
+  const rewrittenLines = rewritten.split(/\r?\n/);
+  check(
+    "rewriting one archived citation into a declaration shape goes red, naming that line",
+    firstCitation !== undefined &&
+      rewrittenHits.length === 1 &&
+      rewrittenHits[0].line === firstCitation.line &&
+      rewrittenHits[0].shape === "本轮 HEAD 核对 行" &&
+      historyLines.filter((line, index) => line !== rewrittenLines[index]).length === 1,
+    JSON.stringify({ citation: firstCitation, hits: rewrittenHits })
   );
   check(
     "...because the pin authority is the sync doc, which the log names",

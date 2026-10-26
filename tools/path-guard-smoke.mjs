@@ -193,6 +193,53 @@ const check = (name, ok, detail = "") => {
     "the fold is one rule for every segment, not a special case for the drive letter"
   );
 
+  /* ---- `\\?\UNC\` is where the two lines above meet ----
+   * The UNC cases and the long-path cases were each half of this shape, and the
+   * combination is the one Windows actually produces for a long path on a share
+   * (`os.path`-style tools, .NET's `\\?\` prefix, and any repo checked out under
+   * one). It is not the union of the two answers: a device prefix means
+   * `path.win32.resolve` no longer treats the leading `\\` as a UNC marker, so the
+   * segments come out as `?`, `UNC`, host, share, … — which the segment rule
+   * handles unchanged, but only because nothing strips a prefix as a special
+   * case. Asserting it here is what keeps it that way.
+   */
+  check(
+    "Windows: a `\\\\?\\UNC\\` long-path root contains its subdirectory",
+    isInside("\\\\?\\UNC\\server\\share\\repo", "\\\\?\\UNC\\server\\share\\repo\\sub", win),
+    "the union of the UNC case and the long-path case, which is the shape a share checkout gets"
+  );
+  check(
+    "Windows: a `\\\\?\\UNC\\` path is case-insensitive across the prefix, host and share too",
+    isInside("\\\\?\\UNC\\SERVER\\Share\\Repo", "\\\\?\\UNC\\server\\share\\repo\\sub", win) &&
+      isInside("\\\\?\\unc\\server\\share\\repo", "\\\\?\\UNC\\Server\\Share\\Repo\\sub", win),
+    "folding one side of the prefix is not enough"
+  );
+  check(
+    "Windows: a `\\\\?\\UNC\\` sibling sharing the root as a string prefix is outside",
+    !isInside("\\\\?\\UNC\\server\\share\\repo", "\\\\?\\UNC\\server\\share\\repo2\\sub", win)
+  );
+  check(
+    "Windows: a different share on the same host under the prefix is outside",
+    !isInside("\\\\?\\UNC\\server\\a", "\\\\?\\UNC\\server\\b", win)
+  );
+  check(
+    "...and a drive long path is not inside a UNC long-path root, even with the same tail",
+    !isInside("\\\\?\\UNC\\server\\share\\repo", "\\\\?\\C:\\UNC\\server\\share\\repo\\sub", win),
+    "stripping the `\\\\?\\` prefix before comparing would lose the host and make these look related"
+  );
+  check(
+    "...and with the case rule off the prefixed path is case-sensitive like every other shape",
+    !isInside("\\\\?\\UNC\\SERVER\\Share\\Repo", "\\\\?\\UNC\\server\\share\\repo\\sub", {
+      pathApi: path.win32,
+      caseInsensitive: false,
+    })
+  );
+  check(
+    "`path.win32.resolve` leaves `\\\\?\\UNC\\` in place, prefix and all",
+    path.win32.resolve("\\\\?\\UNC\\server\\share\\repo") === "\\\\?\\UNC\\server\\share\\repo",
+    JSON.stringify(path.win32.resolve("\\\\?\\UNC\\server\\share\\repo"))
+  );
+
   // The two normalisations, written down because they are the reason the string
   // prefix rule could look correct and still be wrong.
   check(

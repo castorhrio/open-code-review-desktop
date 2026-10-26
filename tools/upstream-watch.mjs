@@ -227,12 +227,29 @@ const PIN_LINE_RULES = [
   { where: "正文固定 SHA", re: new RegExp("固定的整串 40 位 SHA\\s*`" + SHA_IN_LINE + "`") },
 ];
 
+// The shape names, outside the private rule table: `PIN_PLACES` is built from
+// this list, so adding a fourth shape cannot leave the coverage count asserting
+// three places while four exist.
+export const PIN_LINE_SHAPES = Object.freeze(PIN_LINE_RULES.map((rule) => rule.where));
+
+// One matcher for "is this line a pin declaration?", shared by `findDocPins`
+// (the sync doc's copies of the pin) and `findShaCitations` (the archive's
+// rule). Two spellings of the same shape list is how the archive rule would
+// silently stop covering a shape added to the doc rule.
+export const matchPinShape = (line) => {
+  for (const rule of PIN_LINE_RULES) {
+    const match = rule.re.exec(String(line == null ? "" : line));
+    if (match) return { where: rule.where, sha: match[1] };
+  }
+  return null;
+};
+
 // The three places a pin is declared, in the order a reader meets them. Named
 // here so "one declaration went missing" has an answer: `findDocPins` reads by
 // shape, so a reworded line simply produces fewer pins — and a caller that only
 // asserts "everything I read equals the constant" stays green while no longer
 // checking the line the wording moved away from.
-export const PIN_PLACES = Object.freeze(["pin 块", "本轮 HEAD 核对 行", "正文固定 SHA"]);
+export const PIN_PLACES = Object.freeze(["pin 块", ...PIN_LINE_SHAPES]);
 
 // Counts declarations per place. The smoke test compares this against the
 // expected three rather than checking `pins.length >= 3`, so a missing place is
@@ -282,16 +299,86 @@ export const findDocPins = (doc) => {
       if (tagLine) tag = { line: n, tag: tagLine[1] };
       return;
     }
-    for (const rule of PIN_LINE_RULES) {
-      const match = rule.re.exec(line);
-      if (match) {
-        pins.push({ line: n, sha: match[1], where: rule.where });
-        return;
-      }
+    const shape = matchPinShape(line);
+    if (shape) {
+      pins.push({ line: n, sha: shape.sha, where: shape.where });
+      return;
     }
   });
   return { pins, tag, blockFound };
 };
+
+// ---- what the archive may quote, and what only the sync doc may declare ----
+//
+// `docs/upstream-history.md` quotes upstream commits in prose — whole
+// 40-character SHAs included (the round's `refs/heads/main`, the annotated tag
+// object id). That is *not* a pin declaration, and the archive is deliberately
+// allowed to do it: a commit *is* 40 hex characters, so any check written as
+// "find the 40 hex characters" sees those lines too.
+//
+// So the rule is stated as two halves instead of one regex:
+//
+//   allowed   — a whole SHA cited in prose (`refs/heads/main` = `<sha>`), the
+//               tag object a tag points at, and the paragraph explaining why the
+//               pin stores 40 characters rather than a readable prefix;
+//   forbidden — any of the declaration shapes in `PIN_PLACES`: the machine
+//               block, the fixed "本轮 HEAD 核对" line, the prose sentence that
+//               introduces `upstream:check`. Declarations live in the sync doc
+//               and nowhere else, exactly once per place.
+//
+// `findShaCitations` answers which of the two a line is, so the smoke test can
+// assert the archive's rule itself instead of inferring it from "no pin was
+// found" — that inference also passes once `findDocPins` stops matching shapes
+// at all. Both lists are exported so a failure can print the rule, not just the
+// violation.
+export const HISTORY_ALLOWED_SHA_CONTEXTS = Object.freeze([
+  "轮次叙述里直接引用某个 commit（`refs/heads/main` = `<40 位>`）",
+  "叙述里引用 annotated tag 对象 id（`refs/tags/vN.N.N` 指向的那个）",
+  "解释 pin 为什么存全 40 位、而不是 7 位前缀的规则段落",
+]);
+
+// The rule as one readable sentence, built from the two lists so it cannot go
+// stale when a shape is added. The smoke test asserts the sentence names every
+// place and keeps the "40 位" allowance.
+export const historyShaRule = () =>
+  `归档允许整串 40 位 SHA 的自由引用（${HISTORY_ALLOWED_SHA_CONTEXTS.join("；")}），` +
+  `但任何一行都不许用 pin 声明形状（${PIN_PLACES.join("、")}）：声明只写在同步文档里，每处恰好一次。`;
+
+// A whole commit, not a longer hex run: the lookarounds keep a 41-character blob
+// from being read as a 40-character commit with a stray digit beside it, which
+// would make the archive's answer depend on substring luck.
+const WHOLE_SHA = /(?<![0-9a-fA-F])[0-9a-fA-F]{40}(?![0-9a-fA-F])/g;
+
+// Every whole-SHA citation in a document, with the declaration shape it sits in
+// (`null` = merely cited). The pin block counts as a shape: a `sha …` line inside
+// it is a declaration even though it matches no per-line rule.
+export const findShaCitations = (doc) => {
+  const citations = [];
+  let inBlock = false;
+  String(doc || "")
+    .split(/\r?\n/)
+    .forEach((line, index) => {
+      if (line.includes(PIN_BLOCK_START)) {
+        inBlock = true;
+        return;
+      }
+      if (line.includes(PIN_BLOCK_END)) {
+        inBlock = false;
+        return;
+      }
+      const shapeHit = inBlock ? { where: "pin 块" } : matchPinShape(line);
+      const shape = shapeHit ? shapeHit.where : null;
+      for (const match of line.matchAll(WHOLE_SHA)) {
+        citations.push({ line: index + 1, sha: match[0], shape });
+      }
+    });
+  return citations;
+};
+
+// The archive's half of the rule: citations wearing a declaration's clothes.
+// Empty is the answer `docs/upstream-history.md` must give.
+export const findPinShapedCitations = (doc) =>
+  findShaCitations(doc).filter((citation) => citation.shape !== null);
 
 // Turns a list of doc declarations into the lines the caller prints on failure.
 // The shape ("文档第 X 行（where）：value vs 常量 pin") is fixed here rather than
