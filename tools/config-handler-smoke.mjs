@@ -30,6 +30,20 @@ const check = (name, ok, detail = "") => {
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-config-handler-"));
 
 /**
+ * How many times a refusal names each config section.
+ *
+ * "Which section is the old entry in" is the question the refusal answers, so
+ * it is counted rather than matched as a phrase: a fixed wording would let a
+ * rewrite that drops (or adds) a section pass, and the two names overlap
+ * (`custom_providers` contains `providers`), so a plain `includes` cannot tell
+ * which section was meant.
+ */
+const sectionMentions = (text) => ({
+  providers: (String(text).match(/(^|[^A-Za-z_])providers 段/g) || []).length,
+  customProviders: (String(text).match(/custom_providers 段/g) || []).length,
+});
+
+/**
  * A stubbed `ocr` that records what the handler asks it to do.
  *
  * `exec` is the seam the brief asks for: `setConfig` is implemented on top of it
@@ -325,18 +339,23 @@ check(
   );
 }
 
-/* ---- the refusal says *where* the old entry lives, and which one it picked ----
+/* ---- the refusal says *where* every same-spelled entry lives ----
  * The two sections live in different places of `config.json`, so a refusal that
  * names only the spelling leaves the user to grep the whole file for it. The
  * message therefore names the section too.
  *
- * With the registry silent both sections are checked, and the order they are
- * checked in is the only tie-break there is: the first section holding a
- * same-spelled entry is the one that gets named. The two entries below are
- * spelled differently on purpose (`deepseek` vs `DEEPSEEK`) so the message
- * says *which* one was picked — with the same spelling in both sections, the
- * name in the message would not tell the two apart and the assertion would
- * pass either way.
+ * With the registry silent both sections are checked, and the desktop cannot
+ * tell which one the CLI will open: the CLI picks the section by the *name*
+ * (`tryProviderConfig` → `LookupProvider`: a built-in name reads `providers`,
+ * every other name reads `custom_providers`), and the registry is the only
+ * place that knows which names are built-in. So both entries below have to be
+ * named — naming only one of them sent the user to the wrong entry, and the
+ * other one stayed in the file with its Key.
+ *
+ * The two entries are spelled differently on purpose (`deepseek` vs `DEEPSEEK`)
+ * so the message says *which* one is in *which* section — with the same
+ * spelling in both sections, the name in the message would not tell the two
+ * apart and the assertion would pass either way.
  */
 {
   const stub = makeStub({
@@ -348,17 +367,27 @@ check(
   const res = await h.save(null, { provider: "DeepSeek", isCustom: false, apiKey: "sk-new", setActive: true });
   check("a save is refused when both sections hold a same-spelled entry", res.ok === false, JSON.stringify(res));
   check(
-    "the refusal names the entry from the section that is checked first",
-    res.error.includes("deepseek") && !res.error.includes("DEEPSEEK"),
+    "the refusal names both same-spelled entries, not just the first one",
+    res.error.includes("deepseek") && res.error.includes("DEEPSEEK"),
     res.error
   );
   check(
-    "and it names that section, not the other one",
-    res.error.includes("providers 段") && !res.error.includes("custom_providers"),
+    "and it says which section each of them is in",
+    sectionMentions(res.error).providers === 1 && sectionMentions(res.error).customProviders === 1,
     res.error
   );
   check(
-    "and neither entry is touched",
+    "it does not point at a single spelling, because both have to be reconciled",
+    !res.error.includes("请改用已有的拼写"),
+    res.error
+  );
+  check(
+    "and it asks for the other entry to be dealt with, not only renamed",
+    res.error.includes("改掉或删掉"),
+    res.error
+  );
+  check(
+    "neither entry is touched",
     stub.state.providers.deepseek?.api_key === "sk-old" &&
       stub.state.custom_providers.DEEPSEEK?.api_key === "sk-other" &&
       stub.state.provider === "",
@@ -392,6 +421,16 @@ check(
   check(
     "the refusal names both spellings here too",
     res.error.includes("deepseek") && res.error.includes("DeepSeek"),
+    res.error
+  );
+  check(
+    "only the section that really holds an entry is named",
+    sectionMentions(res.error).providers === 0 && sectionMentions(res.error).customProviders === 1,
+    res.error
+  );
+  check(
+    "and a single entry still gets the single-entry advice",
+    res.error.includes("请改用已有的拼写"),
     res.error
   );
   check(

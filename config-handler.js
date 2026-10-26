@@ -67,6 +67,14 @@ function makeConfigHandlers(options) {
    * name: the two live in different places of `config.json`, and the fix is a
    * hand edit of that file (or a save under the existing spelling). A refusal
    * that names only the spelling leaves the user to grep the whole file for it.
+   *
+   * It carries every same-spelled entry, not just the first one. The section
+   * the CLI reads is decided by the *name* (`LookupProvider`: a built-in name
+   * reads `providers`, every other name reads `custom_providers`), so while
+   * the registry is silent the desktop cannot tell which of the two sections
+   * the run will open — and a refusal that names one of the two entries sends
+   * the user to that entry, leaving the other one in place with a Key the run
+   * may end up reading. The answer therefore lists them all.
    */
   const spellingClash = (view, name, presetList) => {
     // Which section the CLI opens is decided by the *name* (`tryProviderConfig`:
@@ -90,12 +98,42 @@ function makeConfigHandlers(options) {
     for (const [, section] of sections) {
       for (const key of Object.keys(section || {})) if (key === name) return null;
     }
+    // Every same-spelled entry is collected, in the order the sections are
+    // checked. The first one is the entry the advice points at; the rest ride
+    // along in `others`, because with the registry silent the desktop cannot
+    // tell which section the CLI will read, and naming only one of two entries
+    // leaves the other one in place — with its Key — for the run to read.
+    const found = [];
     for (const [sectionName, section] of sections) {
       for (const key of Object.keys(section || {})) {
-        if (key.toLowerCase() === name.toLowerCase()) return { name: key, section: sectionName };
+        if (key.toLowerCase() === name.toLowerCase()) found.push({ name: key, section: sectionName });
       }
     }
-    return null;
+    if (!found.length) return null;
+    const [first, ...others] = found;
+    return { name: first.name, section: first.section, others };
+  };
+
+  /**
+   * The refusal a spelling clash is answered with.
+   *
+   * One entry: name it and its section, and say which spelling to use. That is
+   * the whole story — the CLI reads one section, and this is the entry in it.
+   *
+   * Two entries (only possible while the registry is silent, because that is
+   * the only case where both sections are checked): name both, and say that the
+   * desktop cannot tell which section the CLI will read, so *both* have to be
+   * reconciled. Pointing at a single spelling here is what made the refusal
+   * unfixable in one step: the user renamed the form to that spelling, the
+   * save went through, and the other entry was still there.
+   */
+  const spellingClashMessage = (clash, name) => {
+    const entries = [{ name: clash.name, section: clash.section }, ...(clash.others || [])];
+    const listed = entries.map((entry) => `${entry.name}（在 ${entry.section} 段）`).join("、");
+    if (entries.length === 1) {
+      return `配置里已有 ${listed}，与表单里的 ${name} 只差大小写；CLI 按 provider 字段的原始拼写读条目，这样保存会把同一个服务分成两条，旧条目里的 Key 不会再被读到。请改用已有的拼写 ${clash.name}。`;
+    }
+    return `配置里已有 ${entries.length} 条只差大小写的条目：${listed}，都与表单里的 ${name} 只差大小写；CLI 按 provider 字段的原始拼写读条目，而且读哪一段取决于这个名字在 CLI 自己的服务表里算不算内置名——这一版没能读到那张表，说不准它会读哪一段，所以每一条都要你自己核对：请在配置文件里把不要的那一条改掉或删掉，再改用要留的那条的拼写保存。`;
   };
 
   const save = async (_e, form) => {
@@ -108,7 +146,7 @@ function makeConfigHandlers(options) {
     if (clash) {
       return {
         ok: false,
-        error: `配置里已有 ${clash.name}（在 ${clash.section} 段），与表单里的 ${name} 只差大小写；CLI 按 provider 字段的原始拼写读条目，这样保存会把同一个服务分成两条，旧条目里的 Key 不会再被读到。请改用已有的拼写 ${clash.name}。`,
+        error: spellingClashMessage(clash, name),
         steps: [],
       };
     }
