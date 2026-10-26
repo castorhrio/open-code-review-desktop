@@ -98,6 +98,45 @@ const spellingClash = (view, name, presetList) => {
 };
 
 /**
+ * The refusal a spelling clash is answered with, and the entries it names.
+ *
+ * The answer is a shape plus a sentence, not a sentence: the sentence is what
+ * the settings page shows, and the entries are what the check reads. Counting
+ * section names in the sentence pinned the *wording* of the refusal — a rewrite
+ * that said the same thing ("在 providers 段" → "属于 providers") turned the
+ * fixture red without any decision changing — while the thing worth guarding is
+ * "which entries are named, with which spelling, from which section".
+ *
+ * One entry: name it and its section, and say which spelling to use. That is
+ * the whole story — the CLI reads one section, and this is the entry in it.
+ *
+ * Two entries (only possible while the registry is silent, because that is the
+ * only case where both sections are checked): name both, and say that the
+ * desktop cannot tell which section the CLI will read, so *both* have to be
+ * reconciled. Pointing at a single spelling here is what made the refusal
+ * unfixable in one step: the user renamed the form to that spelling, the save
+ * went through, and the other entry was still there.
+ *
+ * Pure in `clash` and `name`, so it is exported and the check can assert
+ * `entries` directly — and assert that `save` hands back this very sentence,
+ * which ties the two halves together without spelling out any phrase.
+ */
+const spellingClashMessage = (clash, name) => {
+  const entries = [{ name: clash.name, section: clash.section }, ...(clash.others || [])];
+  const listed = entries.map((entry) => `${entry.name}（在 ${entry.section} 段）`).join("、");
+  if (entries.length === 1) {
+    return {
+      entries,
+      message: `配置里已有 ${listed}，与表单里的 ${name} 只差大小写；CLI 按 provider 字段的原始拼写读条目，这样保存会把同一个服务分成两条，旧条目里的 Key 不会再被读到。请改用已有的拼写 ${clash.name}。`,
+    };
+  }
+  return {
+    entries,
+    message: `配置里已有 ${entries.length} 条只差大小写的条目：${listed}，都与表单里的 ${name} 只差大小写；CLI 按 provider 字段的原始拼写读条目，而且读哪一段取决于这个名字在 CLI 自己的服务表里算不算内置名——这一版没能读到那张表，说不准它会读哪一段，所以每一条都要你自己核对：请在配置文件里把不要的那一条改掉或删掉，再改用要留的那条的拼写保存。`,
+  };
+};
+
+/**
  * @param {object} options
  * @param {object} options.ocr       the CLI service
  * @param {string} [options.tempRoot] where `config:test` gets a throwaway HOME
@@ -126,28 +165,6 @@ function makeConfigHandlers(options) {
   };
   const configView = async (refresh = false) => (await loadConfig(refresh)).view;
 
-  /**
-   * The refusal a spelling clash is answered with.
-   *
-   * One entry: name it and its section, and say which spelling to use. That is
-   * the whole story — the CLI reads one section, and this is the entry in it.
-   *
-   * Two entries (only possible while the registry is silent, because that is
-   * the only case where both sections are checked): name both, and say that the
-   * desktop cannot tell which section the CLI will read, so *both* have to be
-   * reconciled. Pointing at a single spelling here is what made the refusal
-   * unfixable in one step: the user renamed the form to that spelling, the
-   * save went through, and the other entry was still there.
-   */
-  const spellingClashMessage = (clash, name) => {
-    const entries = [{ name: clash.name, section: clash.section }, ...(clash.others || [])];
-    const listed = entries.map((entry) => `${entry.name}（在 ${entry.section} 段）`).join("、");
-    if (entries.length === 1) {
-      return `配置里已有 ${listed}，与表单里的 ${name} 只差大小写；CLI 按 provider 字段的原始拼写读条目，这样保存会把同一个服务分成两条，旧条目里的 Key 不会再被读到。请改用已有的拼写 ${clash.name}。`;
-    }
-    return `配置里已有 ${entries.length} 条只差大小写的条目：${listed}，都与表单里的 ${name} 只差大小写；CLI 按 provider 字段的原始拼写读条目，而且读哪一段取决于这个名字在 CLI 自己的服务表里算不算内置名——这一版没能读到那张表，说不准它会读哪一段，所以每一条都要你自己核对：请在配置文件里把不要的那一条改掉或删掉，再改用要留的那条的拼写保存。`;
-  };
-
   const save = async (_e, form) => {
     const pairs = [];
     // The order of these pairs is part of the answer, not an accident of how the
@@ -175,7 +192,7 @@ function makeConfigHandlers(options) {
     if (clash) {
       return {
         ok: false,
-        error: spellingClashMessage(clash, name),
+        error: spellingClashMessage(clash, name).message,
         steps: [],
       };
     }
@@ -343,4 +360,4 @@ function makeConfigHandlers(options) {
   return { save, read, savedKey, unset, removeEntry, use, test };
 }
 
-module.exports = { makeConfigHandlers, spellingClash };
+module.exports = { makeConfigHandlers, spellingClash, spellingClashMessage };

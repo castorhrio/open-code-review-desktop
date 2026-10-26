@@ -19,7 +19,7 @@ import path from "node:path";
 const ROOT = path.resolve(import.meta.dirname, "..");
 const require = createRequire(path.join(ROOT, "package.json"));
 const real = require(path.join(ROOT, "ocr-service.js"));
-const { makeConfigHandlers, spellingClash } = require(path.join(ROOT, "config-handler.js"));
+const { makeConfigHandlers, spellingClash, spellingClashMessage } = require(path.join(ROOT, "config-handler.js"));
 
 const failures = [];
 const check = (name, ok, detail = "") => {
@@ -29,19 +29,39 @@ const check = (name, ok, detail = "") => {
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-config-handler-"));
 
+/* The registry answers the stub hands out, as `presetRegistry` returns them.
+ * `spellingClash` reads only `ok` and `names`, so the shape can stay this thin. */
+const answeredPresets = (names) => ({ ok: true, names });
+const SILENT_PRESETS = { ok: false, names: [] };
+const HOLLOW_PRESETS = { ok: true, names: [] };
+
 /**
- * How many times a refusal names each config section.
+ * The entries a clash refusal names, read as a shape.
  *
- * "Which section is the old entry in" is the question the refusal answers, so
- * it is counted rather than matched as a phrase: a fixed wording would let a
- * rewrite that drops (or adds) a section pass, and the two names overlap
- * (`custom_providers` contains `providers`), so a plain `includes` cannot tell
- * which section was meant.
+ * "Which entries does the refusal name, spelled how, from which section" is the
+ * question worth pinning, and it used to be answered by counting `providers 段`
+ * in the sentence — which pinned the *wording*: any rewrite that said the same
+ * thing turned the check red while the decision was unchanged, and the two
+ * section names overlap (`custom_providers` contains `providers`), so the count
+ * needed a hand-written regex to tell them apart.
+ *
+ * The answer is read from the handler's own pure function (`spellingClash` then
+ * `spellingClashMessage`) with the view and registry list the stub just gave the
+ * handler — so it is the real decision, not a second copy of it. `saidVerbatim`
+ * closes the loop on the other half: `save` has to show exactly this sentence,
+ * which is what catches a handler that named different entries.
  */
-const sectionMentions = (text) => ({
-  providers: (String(text).match(/(^|[^A-Za-z_])providers 段/g) || []).length,
-  customProviders: (String(text).match(/custom_providers 段/g) || []).length,
-});
+const refusalOf = (res, stub, name, presetList) => {
+  const clash = spellingClash(stub.ocr.readConfigView(), name, presetList);
+  const answer = clash ? spellingClashMessage(clash, name) : null;
+  return {
+    count: answer ? answer.entries.length : 0,
+    entries: answer ? answer.entries : [],
+    spellings: answer ? answer.entries.map((entry) => entry.name).join(",") : "",
+    sections: answer ? answer.entries.map((entry) => entry.section).join(",") : "",
+    saidVerbatim: Boolean(answer) && res.error === answer.message,
+  };
+};
 
 /**
  * A stubbed `ocr` that records what the handler asks it to do.
@@ -422,11 +442,13 @@ check(
     res.error.includes("deepseek") && res.error.includes("DeepSeek"),
     res.error
   );
+  const refused = refusalOf(res, stub, "DeepSeek", answeredPresets(["deepseek"]));
   check(
-    "and says which section the old entry is in",
-    res.error.includes("providers 段") && !res.error.includes("custom_providers"),
-    res.error
+    "and the refusal names that one entry, with its own spelling and section",
+    refused.count === 1 && refused.spellings === "deepseek" && refused.sections === "providers",
+    JSON.stringify(refused)
   );
+  check("which is the sentence `save` hands back unchanged", refused.saidVerbatim, res.error);
   check(
     "the existing entry keeps the Key it had",
     stub.state.providers.deepseek?.api_key === "sk-old" && stub.state.providers.DeepSeek === undefined,
@@ -460,11 +482,13 @@ check(
     res.ok === false && stub.calls.length === 0 && res.error.includes("my.gateway"),
     JSON.stringify(res)
   );
+  const refused = refusalOf(res, stub, "my.Gateway", answeredPresets(["deepseek"]));
   check(
-    "and a custom name's clash is reported in the custom section",
-    res.error.includes("custom_providers 段"),
-    res.error
+    "and the clash is that one entry, from the custom section",
+    refused.count === 1 && refused.spellings === "my.gateway" && refused.sections === "custom_providers",
+    JSON.stringify(refused)
   );
+  check("with the sentence `save` hands back unchanged", refused.saidVerbatim, res.error);
 }
 
 /* ---- the refusal says *where* every same-spelled entry lives ----
@@ -499,11 +523,15 @@ check(
     res.error.includes("deepseek") && res.error.includes("DEEPSEEK"),
     res.error
   );
+  const refused = refusalOf(res, stub, "DeepSeek", SILENT_PRESETS);
   check(
-    "and it says which section each of them is in",
-    sectionMentions(res.error).providers === 1 && sectionMentions(res.error).customProviders === 1,
-    res.error
+    "and it names both entries, each with its own spelling and section",
+    refused.count === 2 &&
+      refused.spellings === "deepseek,DEEPSEEK" &&
+      refused.sections === "providers,custom_providers",
+    JSON.stringify(refused)
   );
+  check("with the sentence `save` hands back unchanged", refused.saidVerbatim, res.error);
   check(
     "it does not point at a single spelling, because both have to be reconciled",
     !res.error.includes("请改用已有的拼写"),
@@ -551,10 +579,11 @@ check(
     res.error.includes("deepseek") && res.error.includes("DeepSeek"),
     res.error
   );
+  const refused = refusalOf(res, stub, "DeepSeek", SILENT_PRESETS);
   check(
     "only the section that really holds an entry is named",
-    sectionMentions(res.error).providers === 0 && sectionMentions(res.error).customProviders === 1,
-    res.error
+    refused.count === 1 && refused.sections === "custom_providers" && refused.spellings === "deepseek",
+    JSON.stringify(refused)
   );
   check(
     "and a single entry still gets the single-entry advice",
@@ -591,10 +620,11 @@ check(
   });
   check("an empty registry list is treated as unknown, not as \"all custom\"", res.ok === false, JSON.stringify(res));
   check("and nothing was written to the CLI", stub.calls.length === 0 && stub.setPairs.length === 0, `${stub.calls.length} calls`);
+  const refused = refusalOf(res, stub, "DeepSeek", HOLLOW_PRESETS);
   check(
     "the refusal names the entry in the providers section",
-    res.error.includes("deepseek") && sectionMentions(res.error).providers === 1,
-    res.error
+    refused.count === 1 && refused.spellings === "deepseek" && refused.sections === "providers",
+    JSON.stringify(refused)
   );
   check("and the old Key is still the only one", stub.state.providers.deepseek?.api_key === "sk-old" && !stub.state.providers.DeepSeek, JSON.stringify(stub.state));
 }
@@ -619,10 +649,11 @@ check(
   const h = make(stub);
   const res = await h.save(null, { provider: "DeepSeek", isCustom: false, apiKey: "sk-new", setActive: true });
   check("a hollow registry list refuses a clash in custom_providers too", res.ok === false, JSON.stringify(res));
+  const refused = refusalOf(res, stub, "DeepSeek", HOLLOW_PRESETS);
   check(
-    "and that refusal points at custom_providers",
-    res.error.includes("deepseek") && sectionMentions(res.error).customProviders === 1 && sectionMentions(res.error).providers === 0,
-    res.error
+    "and that refusal points at custom_providers, and only at it",
+    refused.count === 1 && refused.sections === "custom_providers" && refused.spellings === "deepseek",
+    JSON.stringify(refused)
   );
   check("nothing was written for it either", stub.calls.length === 0 && stub.setPairs.length === 0, `${stub.calls.length} calls`);
 }
@@ -640,10 +671,13 @@ check(
   const res = await h.save(null, { provider: "DeepSeek", isCustom: false, apiKey: "sk-new", setActive: true });
   check("a hollow registry list refuses a clash in both sections", res.ok === false, JSON.stringify(res));
   check("and lists both entries", res.error.includes("deepseek") && res.error.includes("DEEPSEEK"), res.error);
+  const refused = refusalOf(res, stub, "DeepSeek", HOLLOW_PRESETS);
   check(
-    "naming the section each one is in",
-    sectionMentions(res.error).providers === 1 && sectionMentions(res.error).customProviders === 1,
-    res.error
+    "naming each entry with its own spelling and section",
+    refused.count === 2 &&
+      refused.spellings === "deepseek,DEEPSEEK" &&
+      refused.sections === "providers,custom_providers",
+    JSON.stringify(refused)
   );
   check("with the two-entry advice, not a single spelling", !res.error.includes("请改用已有的拼写") && res.error.includes("改掉或删掉"), res.error);
   check(
@@ -656,16 +690,16 @@ check(
 }
 
 /* ---- the clash answer is a shape, not a sentence ----
- * The refusals above are checked by counting section mentions in the sentence,
- * which pins the wording as much as the decision. `spellingClash` is a pure
- * function of the view plus the registry list, so the decision itself can be
- * read: which entry is named first, and which entries ride along in `others`.
+ * The refusals above read this answer (through `refusalOf`); these pin it on its
+ * own, so the empty and the silent registry can be compared side by side.
+ * `spellingClash` is a pure function of the view plus the registry list, so the
+ * decision itself can be read: which entry is named first, and which entries
+ * ride along in `others`.
  *
  * Both paths have to be pinned, because they check a different number of
  * sections: with a registry answer only the section the *name* belongs to is
- * looked at, and with the registry silent both are. A check that only looked at
- * the message would be green for a handler that got the second path wrong but
- * happened to name two entries from the first one's section.
+ * looked at, and with the registry silent both are. A check that only read one
+ * path would be green for a function that got the other one wrong.
  */
 {
   const answered = { ok: true, names: ["deepseek", "openai"], rows: [], matched: 2, error: "" };
@@ -716,6 +750,38 @@ check(
     "an exact key is not a clash at all",
     spellingClash({ providers: { DeepSeek: {} }, customProviders: { deepseek: {} } }, "DeepSeek", silent) === null,
     JSON.stringify(spellingClash({ providers: { DeepSeek: {} }, customProviders: { deepseek: {} } }, "DeepSeek", silent))
+  );
+
+  // A registry that answered with an empty list is not "every name is custom":
+  // the CLI always has built-in names, so the list came back hollow. This is the
+  // same answer `spellingClash` gives for an unreachable registry — both
+  // sections checked, both entries named — and it is pinned here directly so the
+  // rule survives a handler that happens to call it with the same list.
+  const hollow = spellingClash(both, "DeepSeek", HOLLOW_PRESETS);
+  check(
+    "an empty registry list is read like a silent one",
+    hollow !== null &&
+      hollow.name === "deepseek" &&
+      hollow.section === "providers" &&
+      hollow.others.length === 1 &&
+      hollow.others[0].name === "DEEPSEEK" &&
+      hollow.others[0].section === "custom_providers",
+    JSON.stringify(hollow)
+  );
+
+  // The sentence and the entries come out of one call, so the refusal cannot
+  // name one entry and list another. `entries` is what the checks above read.
+  const one = spellingClashMessage(builtin, "DeepSeek");
+  const twoSaid = spellingClashMessage(two, "DeepSeek");
+  check(
+    "the refusal's entries are the clash's entries, first one included",
+    one.entries.length === 1 && one.entries[0].name === "deepseek" && one.entries[0].section === "providers",
+    JSON.stringify(one.entries)
+  );
+  check(
+    "and both entries ride along for a two-entry clash",
+    twoSaid.entries.length === 2 && twoSaid.entries[1].name === "DEEPSEEK" && twoSaid.entries[1].section === "custom_providers",
+    JSON.stringify(twoSaid.entries)
   );
 }
 

@@ -1583,6 +1583,7 @@ module.exports = {
   spawnFailure,
   createProgress,
   feedProgressLine,
+  parseJson,
   listSessions,
   sessionComments,
   exportSession,

@@ -371,6 +371,73 @@ const EMPTY_BATCH_MSG =
   );
 }
 
+/* ---- an empty code_comment batch is a failed tool call, both halves ----
+ * The same upstream change (`v1.13.3` `375f64c`) has a second half: the CLI now
+ * counts the refused batch in `tool_calls.failure` / `failure_by_tool` instead
+ * of reporting the run as clean. The desktop's header reads those numbers as the
+ * CLI printed them ("工具调用 N（失败 M）", `ResultsPanel`), so no code had to
+ * change — which is exactly why nothing checked that they arrive intact.
+ *
+ * They come from the *other* half of the run than the feed does: the tally is
+ * on stdout (the payload `startRun` JSON-parses), the `✗` rows are on stderr.
+ * So one run is replayed here as both: the transcript above, and the payload
+ * `v1.13.3` prints for it. The check is that the two independent readings agree
+ * — one refused batch, one failed tool call, zero findings — because a header
+ * that said "失败 1" over a feed with no failed row (or the reverse) is the kind
+ * of disagreement neither half can see on its own.
+ */
+const REFUSED_BATCH_PAYLOAD = {
+  session_id: "smoke-refused-batch",
+  summary: { files_reviewed: 1, comments: 0, tokens_used: 81601, elapsed_seconds: 228 },
+  tool_calls: {
+    total: 2,
+    by_tool: { code_comment: 1, code_search: 1 },
+    failure: 1,
+    failure_by_tool: { code_comment: 1 },
+  },
+  comments: [],
+};
+{
+  const feed = svc.createProgress();
+  for (const line of [
+    "[ocr] 1 file(s) changed, reviewing 1 in C:/Users/x/work/payments-api",
+    "[ocr]   ▶ code_comment",
+    `[ocr]   ✗ code_comment failed: ${EMPTY_BATCH_MSG}`,
+    "[ocr]   ▶ code_search search_text=tokenFor",
+    "[ocr]   ✔ code_search (21ms)",
+    "[ocr] Summary: 1 file(s) reviewed, 0 comment(s), ~81601 token(s) used, 3m48s elapsed",
+  ]) {
+    svc.feedProgressLine(feed, line);
+  }
+  // The payload arrives as stdout text, so it goes through the same parse the
+  // run path uses rather than around it.
+  const parsed = svc.parseJson(JSON.stringify(REFUSED_BATCH_PAYLOAD));
+  const value = parsed.ok ? parsed.value : {};
+  const toolCalls = value.tool_calls || {};
+
+  const failedRows = feed.activity.filter((a) => a.kind === "tool" && a.state === "failed").length;
+  check(
+    "the header's failure count is the CLI's own field, unchanged by the wrapper",
+    toolCalls.failure === 1 && toolCalls.failure_by_tool?.code_comment === 1,
+    JSON.stringify(toolCalls)
+  );
+  check(
+    "and the feed settles that same one call as failed",
+    failedRows === toolCalls.failure,
+    `${failedRows} failed rows vs ${toolCalls.failure} in the payload`
+  );
+  check(
+    "the refused batch is still a tool call, not a dropped one",
+    feed.byTool.code_comment === 1 && toolCalls.total === 2 && toolCalls.by_tool?.code_comment === 1,
+    JSON.stringify({ feed: feed.byTool, payload: toolCalls.by_tool, total: toolCalls.total })
+  );
+  check(
+    "and it is a failure, not a finding, in both halves",
+    feed.comments === 0 && Array.isArray(value.comments) && value.comments.length === 0 && value.summary?.comments === 0,
+    JSON.stringify({ feedComments: feed.comments, comments: value.comments, summary: value.summary })
+  );
+}
+
 // The feed is capped and the rows are React keys, so a long run must keep
 // producing distinct ids once the cap is reached — an id derived from the array
 // length silently collided there.
