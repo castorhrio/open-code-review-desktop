@@ -932,6 +932,12 @@ module.exports = {
   outcomeMessage,
   outcomeLogMessage,
   signalFailedMessage,
+  // Exported so the renderer's drawer rule (`TROUBLE_LINE` in
+  // `src/lib/format.ts`) can be checked against *every* wording in both tables
+  // rather than against the ones a check happens to remember. A new outcome
+  // added to either table is then a red check until it is classified.
+  OUTCOME_MESSAGES,
+  LATE_OUTCOME_MESSAGES,
   reportOutcome,
   recordBounded,
   settleRunExit,

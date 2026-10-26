@@ -7,6 +7,7 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import childProcess from "node:child_process";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -28,6 +29,8 @@ const {
   outcomeMessage,
   outcomeLogMessage,
   signalFailedMessage,
+  OUTCOME_MESSAGES,
+  LATE_OUTCOME_MESSAGES,
   reportOutcome,
   recordBounded,
   settleRunExit,
@@ -466,6 +469,73 @@ check("building the app's store asks the volume nothing", startupProbes === 0, `
 await lazyStore.record(casedRepo, "lazy-session", limitResult);
 check("and the first use of a repository is where it costs", startupProbes === 1, `${startupProbes} probes after one record`);
 check("while the answer it got is the one the entry is filed under", lazyStore.read(casedRepo.toLowerCase(), "lazy-session")?.warnings?.length === 1);
+
+/* ---- construction is I/O-free, not merely probe-free ----
+ * The check above pins "no volume probe at startup". That is one syscall out of
+ * several a later change could slip in: a `statSync` to make the profile
+ * directory, a `readFileSync` to warm a cache, a `spawn` to ask the CLI
+ * something. Launching must never wait on a disk — the store's file can live on
+ * a network mount, and `main.js` builds the store before Electron is ready — so
+ * the check counts the calls themselves rather than trusting the wiring to stay
+ * minimal. Every entry point the module could reach is wrapped, `createAppStore`
+ * is called with no injected probe, and nothing may fire before the first use.
+ *
+ * The counters are proved live rather than assumed: the `record` below has to
+ * move two of them, or a wrapper that counted nothing would look green.
+ */
+const ioCount = { stat: 0, statSync: 0, readFile: 0, readFileSync: 0, spawn: 0 };
+const ioOriginals = {
+  stat: fsp.stat,
+  statSync: fs.statSync,
+  readFile: fsp.readFile,
+  readFileSync: fs.readFileSync,
+  spawn: childProcess.spawn,
+};
+const wrapped = (fn, bump) => (...args) => {
+  bump();
+  return fn(...args);
+};
+let startupStore = null;
+let startupIoAtConstruction = null;
+let startupIoAfterUse = null;
+try {
+  fsp.stat = wrapped(ioOriginals.stat, () => { ioCount.stat += 1; });
+  fs.statSync = wrapped(ioOriginals.statSync, () => { ioCount.statSync += 1; });
+  fsp.readFile = wrapped(ioOriginals.readFile, () => { ioCount.readFile += 1; });
+  fs.readFileSync = wrapped(ioOriginals.readFileSync, () => { ioCount.readFileSync += 1; });
+  childProcess.spawn = wrapped(ioOriginals.spawn, () => { ioCount.spawn += 1; });
+
+  startupStore = createAppStore(path.join(dir, "startup", "run-diagnostics.json"));
+  startupIoAtConstruction = { ...ioCount };
+  await startupStore.record(dir, "startup-session", limitResult);
+  startupIoAfterUse = { ...ioCount };
+} finally {
+  fsp.stat = ioOriginals.stat;
+  fs.statSync = ioOriginals.statSync;
+  fsp.readFile = ioOriginals.readFile;
+  fs.readFileSync = ioOriginals.readFileSync;
+  childProcess.spawn = ioOriginals.spawn;
+}
+const ioTotal = (counts) => Object.values(counts).reduce((sum, n) => sum + n, 0);
+check(
+  "building the app's store touches no file and starts no process",
+  ioTotal(startupIoAtConstruction) === 0,
+  JSON.stringify(startupIoAtConstruction)
+);
+check(
+  "and the first use is the one that reads the file and asks the volume",
+  startupIoAfterUse.statSync > 0 && startupIoAfterUse.readFileSync > 0,
+  JSON.stringify(startupIoAfterUse)
+);
+check(
+  "while neither ever starts a process",
+  startupIoAfterUse.spawn === 0,
+  `${startupIoAfterUse.spawn} spawn calls`
+);
+check(
+  "and the evidence it wrote is the evidence it reads back",
+  startupStore.read(dir, "startup-session")?.warnings?.length === 1
+);
 
 const mainSrc = fs.readFileSync(path.join(ROOT, "main.js"), "utf8");
 const buildsItself = /createStore\(/.test(mainSrc);
@@ -968,21 +1038,58 @@ check(
   troubleLine instanceof RegExp,
   ruleSrc ? ruleSrc[1] : "no `TROUBLE_LINE` in src/lib/format.ts"
 );
-// The two outcomes that mean something was lost — the evidence, or the screen —
-// have to read like trouble: nobody goes looking for them in a collapsed drawer.
-// The screen one comes from `signalFailedMessage`, because it is not a store
-// outcome and `outcomeMessage` deliberately answers nothing for it.
-for (const [name, message] of [
-  ["io-error", outcomeMessage({ ok: false, reason: "io-error" })],
-  ["signal-failed", signalFailedMessage()],
-]) {
-  check(`「${name}」 reads like trouble to the log drawer`, opensDrawer(message), message);
+/* Every wording in both tables, classified once.
+ *
+ * The checks above ask about the messages they remember — the shape that let
+ * `signal-failed` stay unread for a round: the rule lives in the renderer, the
+ * wording in the main process, and nothing forced the two to be looked at
+ * together. So the tables themselves are the input now. Each reason is declared
+ * `trouble` (the drawer must open itself, or the line is written and never read)
+ * or `quiet` (`timeout` / `max-rounds` / `drain-failed` say "still writing",
+ * which is news a user goes looking for on purpose; opening the drawer on every
+ * slow disk is how the lines that matter get skimmed past).
+ *
+ * A new outcome added to either table arrives unclassified: it fails the first
+ * check below and matches neither branch, so `audit:diagnostics` goes red until
+ * someone decides which one it is. That is the point — the decision cannot be
+ * skipped by not thinking about it.
+ */
+const DRAWER = {
+  "io-error": "trouble",
+  "signal-failed": "trouble",
+  timeout: "quiet",
+  "max-rounds": "quiet",
+  "drain-failed": "quiet",
+};
+for (const [table, messages] of Object.entries({ OUTCOME_MESSAGES, LATE_OUTCOME_MESSAGES })) {
+  for (const [reason, message] of Object.entries(messages)) {
+    const want = DRAWER[reason];
+    check(
+      `「${table}.${reason}」 is classified for the log drawer`,
+      want === "trouble" || want === "quiet",
+      want ? `classified ${want}` : "no entry in this file's DRAWER table"
+    );
+    if (want === "trouble") {
+      check(`「${table}.${reason}」 reads like trouble to the log drawer`, opensDrawer(message), message);
+    } else if (want === "quiet") {
+      check(`「${table}.${reason}」 is not dressed up as trouble`, !opensDrawer(message), message);
+    }
+  }
 }
-// The reverse, deliberately: `timeout` / `max-rounds` / `drain-failed` say "still
-// writing", which is news read on purpose — not a reason to take the drawer's
-// room away from the live feed on every slow disk.
-const stillWriting = outcomeMessage({ ok: false, reason: "timeout" });
-check("and a 「still writing」 outcome is not dressed up as trouble", !opensDrawer(stillWriting), stillWriting);
+// The screen's own line is in neither table (`outcomeMessage` answers nothing
+// for it), so it is checked by name — and it is the line this contract was
+// written for: it used to end on 「运行中」, which matched nothing.
+check("「signal-failed」 reads like trouble to the log drawer", opensDrawer(signalFailedMessage()), signalFailedMessage());
+// And no stale declarations: everything classified above still has to be a
+// reason one of the tables answers, or the classification outlives it wording.
+for (const reason of Object.keys(DRAWER)) {
+  if (reason === SIGNAL_FAILED.reason) continue;
+  check(
+    `the drawer classification has no stale 「${reason}」`,
+    reason in OUTCOME_MESSAGES && reason in LATE_OUTCOME_MESSAGES,
+    reason
+  );
+}
 /* The other direction, and the one that would bite in daily use: a *healthy*
  * run has to say nothing at all. Both the drawer rule and this file's silence
  * rule rest on "no message means nothing happened" — the moment a normal

@@ -171,6 +171,18 @@ function entryByName(raw, name) {
   // name the way the registry does — e.g. only `DeepSeek` exists while the form
   // asks about `DEEPSEEK`. Then there is exactly one entry the question can be
   // about, and no ordering left to get wrong.
+  //
+  // A third spelling can also arrive, and it is worth saying what `ocr` does
+  // with such a file: `provider: "DEEPSEEK"` with entries named `DeepSeek` and
+  // `deepseek` matches no map key, so `cfg.Providers["DEEPSEEK"]` misses and the
+  // run fails with "provider DEEPSEEK is set but not configured in providers
+  // section" — nothing opens, so there is no entry a Key could be reused from
+  // *and* no entry this answer can contradict. The middle rule still answers,
+  // with the registry's spelling, because that is the name the settings page is
+  // editing (the form holds what `ocr llm providers` printed); `matches[0]` is
+  // reached only in the narrower shape above, where even the registry's spelling
+  // is absent and file order is all that is left. `tools/service-smoke.mjs`
+  // pins both shapes so neither can become the other by accident.
   const chosen =
     matches.find(([key]) => key === active) ||
     matches.find(([key]) => key === wanted) ||

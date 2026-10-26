@@ -1226,6 +1226,50 @@ check(
   savedKey({ providers: { DeepSeek: { api_key: "sk-upper" }, deepseek: { api_key: "sk-lower" } } }, "DEEPSEEK") ===
     "sk-lower"
 );
+/* The third spelling: `providers` holds both variants, and the config's own
+ * `provider` reads `DEEPSEEK` — a spelling no entry is named with. The two rules
+ * above both miss, so which entry answers is decided by the next one: the
+ * registry's spelling (`ocr llm providers` prints `deepseek`, and a form filled
+ * from that table holds it), *not* insertion order. That ordering is what makes
+ * this check worth having: the file lists two variants before the registry's own
+ * spelling, so "first match" (sk-first) and "the registry's spelling" (sk-third)
+ * give different Keys.
+ *
+ * What `ocr` does with this file is worth knowing while reading it: the lookup
+ * is `cfg.Providers[cfg.Provider]` on the raw string, so `DEEPSEEK` misses and
+ * the run fails with "provider DEEPSEEK is set but not configured in providers
+ * section". Nothing opens — so this answer cannot send the settings page a Key
+ * for a run that would have used another one. */
+const thirdSpelling = (provider, name) =>
+  savedKey(
+    {
+      provider,
+      providers: {
+        DeepSEEK: { api_key: "sk-first" },
+        DeepSeek: { api_key: "sk-second" },
+        deepseek: { api_key: "sk-third" },
+      },
+    },
+    name
+  );
+check(
+  "a config whose provider names no entry falls to the registry's spelling",
+  thirdSpelling("DEEPSEEK", "DEEPSEEK") === "sk-third",
+  thirdSpelling("DEEPSEEK", "DEEPSEEK")
+);
+/* And only when the file never spells the name the registry way is `matches[0]`
+ * left: here both entries are variants of `deepseek` and neither *is* it, so the
+ * question has no right answer and file order is what remains. Pinned because it
+ * is a guess, not because it is good — it is reachable only for a config `ocr`
+ * rejects, and if this ever answers for a config the CLI runs, the ordering
+ * needs a real rule instead. */
+check(
+  "and file order answers only when no spelling matches at all",
+  savedKey(
+    { provider: "corp-gateway", providers: { DeepSEEK: { api_key: "sk-first" }, DeepSeek: { api_key: "sk-second" } } },
+    "deepseek"
+  ) === "sk-first"
+);
 // The question the settings page asks is not always spelled the way the file is:
 // the form holds the name the user picked, while the config's `provider` decides
 // which entry a run opens. The two are read separately, and the rule between them
