@@ -440,6 +440,37 @@ check(
   );
 }
 
+/* ---- a registry that answered with no names is not an answer ----
+ * `{ ok: true, names: [] }` used to count as "the registry knows the list", so
+ * "DeepSeek" was judged a custom name and only `custom_providers` was checked.
+ * The same-spelled entry below sits in `providers`, so the save went through and
+ * split it. The CLI always has built-in names, so an empty list means the read
+ * came back hollow; it has to be treated like an unreachable registry and both
+ * sections checked.
+ */
+{
+  const stub = makeStub({
+    providers: { deepseek: { api_key: "sk-old" } },
+    presetRegistry: async () => ({ ok: true, names: [], rows: [], matched: 0, error: "" }),
+  });
+  const h = make(stub);
+  const res = await h.save(null, {
+    provider: "DeepSeek",
+    isCustom: false,
+    apiKey: "sk-new",
+    model: "deepseek-chat",
+    setActive: true,
+  });
+  check("an empty registry list is treated as unknown, not as \"all custom\"", res.ok === false, JSON.stringify(res));
+  check("and nothing was written to the CLI", stub.calls.length === 0 && stub.setPairs.length === 0, `${stub.calls.length} calls`);
+  check(
+    "the refusal names the entry in the providers section",
+    res.error.includes("deepseek") && sectionMentions(res.error).providers === 1,
+    res.error
+  );
+  check("and the old Key is still the only one", stub.state.providers.deepseek?.api_key === "sk-old" && !stub.state.providers.DeepSeek, JSON.stringify(stub.state));
+}
+
 /* ---- a dotted custom name is one name, not two segments ----
  * `my.gateway` already has a `custom_providers` entry, so upstream accepts the
  * field write and routes it there. The key has to stay `providers.my.gateway.

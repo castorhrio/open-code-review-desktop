@@ -81,8 +81,15 @@ function makeConfigHandlers(options) {
     // a built-in name reads `providers`, every other name reads
     // `custom_providers`). Only that section can collide with the save; a
     // same-spelled entry in the other one is dead weight either way.
-    const known = Boolean(presetList && presetList.ok && Array.isArray(presetList.names));
-    const isPreset = known && presetList.names.some((knownName) => String(knownName).toLowerCase() === name.toLowerCase());
+    //
+    // An empty list is not an answer. The CLI always has built-in service names,
+    // so `{ ok: true, names: [] }` means the registry read came back hollow, not
+    // that every name is custom. Treating it as knowledge would check only
+    // `custom_providers` and let a same-spelled entry in `providers` be split —
+    // the same hole as an unreachable registry, and the same fix: check both.
+    const names = presetList && presetList.ok && Array.isArray(presetList.names) ? presetList.names : [];
+    const known = names.length > 0;
+    const isPreset = known && names.some((knownName) => String(knownName).toLowerCase() === name.toLowerCase());
     // The section names are the ones the config file uses, because that is
     // where the user has to look. The order is the order the sections are
     // checked in, and with the registry silent it is also the tie-break: the
