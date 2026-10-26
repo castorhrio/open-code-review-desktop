@@ -469,6 +469,12 @@ const MAX_DRAIN_ROUNDS = 100;
 /**
  * Wait for a queue to stop moving, or give up and say why.
  *
+ * The bound is `MAX_DRAIN_ROUNDS` rounds, not a clock: a queue that keeps
+ * re-arming cannot hold the exit forever, and reaching the limit returns
+ * `MAX_ROUNDS` as a fact for the caller to report instead of throwing. What
+ * this does *not* do is cancel the writes — they are still queued, and a quit
+ * still waits for them (`flushBeforeQuit`).
+ *
  * `current()` returns the promise standing for "everything queued so far"; the
  * same promise twice in a row means nothing new was queued while we waited, so
  * the queue has settled. Going through a getter instead of a promise keeps this
@@ -751,6 +757,13 @@ function createStore(file, options = {}) {
 /**
  * Wait for a promise of an outcome, but not forever.
  *
+ * The bound is `WRITE_TIMEOUT_MS` (2s), the same one the run-exit path uses.
+ * Past it this resolves with `TIMEOUT` rather than rejecting or throwing: the
+ * caller has to keep going (the exit signal, the quit), and the write itself is
+ * untouched — it stays queued and still lands. `DRAIN_FAILED` is the other
+ * answer that is not a store outcome, and neither of them may be reported as
+ * one.
+ *
  * `current()` returns the promise standing for "the writes queued so far have
  * landed"; the answer may be a real outcome (`drained`, `max-rounds`) or a
  * failure. The clock is what keeps a caller off a disk that never answers —
@@ -786,6 +799,12 @@ function flushNow(store, timeoutMs = WRITE_TIMEOUT_MS) {
 
 /**
  * Record, but never hold the caller longer than `timeoutMs`.
+ *
+ * The bound is `WRITE_TIMEOUT_MS` (2s) by default. Past it the answer is
+ * `TIMEOUT` — a value, not a throw — and the write is *not* abandoned: it stays
+ * queued, so a quit still waits for it, and its real outcome arrives through
+ * `onLate` once, only if the bound was actually hit. Returning a value rather
+ * than throwing is what lets `settleRunExit` send the exit either way.
  *
  * `record()` settles after the write, which is what the run-exit path wants: the
  * renderer refreshes the session as soon as it hears `run:exit`, and a record
@@ -894,6 +913,15 @@ function createRunExitDoor(send) {
 
 /**
  * Record the evidence, then say that the run is over — in that order.
+ *
+ * The signature used to take a `signal` callback, i.e. the caller made the
+ * promise "this is called after the record landed" and the function only
+ * trusted it. That is the wrong side of the contract: it made the ordering a
+ * property of the caller's discipline, and the one caller that mattered
+ * (`main.js`) had already got it wrong once. The parameters are `send` +
+ * `payload` now: the caller says *how* to send and *what* to send, and
+ * `settleRunExit` keeps *when*. The order is then the shape of this function
+ * instead of a promise somebody else has to keep.
  *
  * The renderer refreshes the history as soon as it hears the exit signal, and a
  * record that has not landed yet would make a truncated session look clean
