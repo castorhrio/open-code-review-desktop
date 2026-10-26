@@ -71,28 +71,41 @@ export function describeChannel() {
     : `bundled/${CHANNEL}`;
 }
 
-// Newest mtime under a directory, so a build can be compared with the sources it
-// claims to be built from.
-function newestMtime(dir) {
+// Newest mtime under a file or a directory, so a build can be compared with the
+// sources it claims to be built from. `skip` holds absolute paths of run
+// artefacts — `tools/ui-audit/shots/` is written *by* a run, so counting it would
+// make the run after any audit refuse the bundle that audit just went green on.
+function newestMtime(target, skip = new Set()) {
+  if (skip.has(target)) return 0;
+  const stat = fs.statSync(target);
+  if (!stat.isDirectory()) return stat.mtimeMs;
   let newest = 0;
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      newest = Math.max(newest, newestMtime(full));
-    } else {
-      newest = Math.max(newest, fs.statSync(full).mtimeMs);
-    }
+  for (const entry of fs.readdirSync(target, { withFileTypes: true })) {
+    newest = Math.max(newest, newestMtime(path.join(target, entry.name), skip));
   }
   return newest;
+}
+
+// Everything a green UI audit is a statement about. `src/` is the renderer;
+// `tools/ui-audit/` is the fixtures and assertions that read it — an edited
+// fixture audited against the previous bundle is exactly the blind spot this
+// check exists to close, and it opened when the build moved out of these
+// harnesses' own command lines; `vite.config.mjs` decides how `src/` is bundled.
+function auditedSources(root) {
+  return [
+    { label: "src/", path: path.join(root, "src") },
+    { label: "tools/ui-audit/", path: path.join(root, "tools/ui-audit") },
+    { label: "vite.config.mjs", path: path.join(root, "vite.config.mjs") },
+  ].filter((source) => fs.existsSync(source.path));
 }
 
 // Guard against a silently empty page: every harness should assert it actually
 // rendered something before reporting success.
 //
-// It also refuses a bundle older than the sources. `npm run audit` now builds
-// once and hands that build to four harnesses instead of rebuilding in each of
-// them, so the failure mode the old prefixes ruled out by construction is now
-// this check's job: a UI audit run against the previous edit's bundle reports
+// It also refuses a bundle older than the sources above. `npm run audit` now
+// builds once and hands that build to four harnesses instead of rebuilding in
+// each of them, so the failure mode the old prefixes ruled out by construction is
+// now this check's job: a UI audit run against the previous edit's bundle reports
 // the layout of code that no longer exists, and reports it green. The build
 // writes `out/index.html`, so its mtime is the fact to compare.
 export function requireBuilt() {
@@ -102,21 +115,23 @@ export function requireBuilt() {
     console.error(`No build found at ${index}. Run \`npm run build\` first (\`npm run audit\` builds once for all of them).`);
     process.exit(2);
   }
-  const src = path.join(root, "src");
-  if (fs.existsSync(src)) {
-    const builtAt = fs.statSync(index).mtimeMs;
-    const sourceAt = newestMtime(src);
-    if (sourceAt > builtAt) {
-      console.error(
-        [
-          `out/ is older than src/ — this harness would audit the previous build and report it green.`,
-          `  build: ${new Date(builtAt).toISOString()}`,
-          `  src:   ${new Date(sourceAt).toISOString()}`,
-          "Run `npm run build` first, or `npm run audit`, which builds once for every harness.",
-        ].join("\n")
-      );
-      process.exit(2);
-    }
+  const builtAt = fs.statSync(index).mtimeMs;
+  const skip = new Set([path.join(root, "tools/ui-audit/shots")]);
+  let newest = { label: "sources", mtime: 0 };
+  for (const source of auditedSources(root)) {
+    const mtime = newestMtime(source.path, skip);
+    if (mtime > newest.mtime) newest = { label: source.label, mtime };
+  }
+  if (newest.mtime > builtAt) {
+    console.error(
+      [
+        `out/ is older than ${newest.label} — this harness would audit the previous build and report it green.`,
+        `  build:     ${new Date(builtAt).toISOString()}`,
+        `  ${newest.label.padEnd(10)} ${new Date(newest.mtime).toISOString()}`,
+        "Run `npm run build` first, or `npm run audit`, which builds once for every harness.",
+      ].join("\n")
+    );
+    process.exit(2);
   }
   return index;
 }
