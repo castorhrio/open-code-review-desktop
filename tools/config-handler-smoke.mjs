@@ -522,6 +522,92 @@ check(
   );
 }
 
+/* ---- a custom removal the CLI refuses is a failure, and names the entry ----
+ * Deleting a custom entry is one `config unset`, so a refusal means nothing was
+ * removed — but `unsetConfig` answers with the CLI's sentence only. The page's
+ * error toast would then say why the CLI refused without saying which entry it
+ * refused, and a custom name may contain dots (`custom_providers.my.gateway`),
+ * which is exactly the case this branch exists for. So the key is named by the
+ * handler, the way the built-in branch names the write that failed.
+ */
+{
+  const stub = makeStub({ customProviders: { "my.gateway": { api_key: "sk-gateway" } } });
+  const ocr = {
+    ...stub.ocr,
+    unsetConfig: async (key) => {
+      stub.unsetCalls.push(key);
+      return { ok: false, error: real.withHint('Error: cannot unset "my.gateway": config file is read-only') };
+    },
+  };
+  const h = makeConfigHandlers({ ocr, tempRoot: dir });
+  const res = await h.removeEntry(null, { name: "my.gateway" });
+  check("a custom removal the CLI refuses is not reported as removed", res.ok === false, JSON.stringify(res));
+  check(
+    "and the refusal names the key that failed, whole name included",
+    String(res.error).startsWith("custom_providers.my.gateway: "),
+    res.error
+  );
+  check("with the CLI's own sentence kept", String(res.error).includes("config file is read-only"), res.error);
+  check(
+    "and no built-in clear was attempted instead",
+    stub.setPairs.length === 0 && stub.unsetCalls.length === 1,
+    `${stub.setPairs.length} pairs, ${stub.unsetCalls.length} unsets`
+  );
+}
+{
+  // The same branch with a CLI that fails silently: the failure still has to be
+  // a failure with a sentence, not `ok: true` and an empty message.
+  const stub = makeStub({ customProviders: { "my.gateway": { api_key: "sk-gateway" } } });
+  const ocr = { ...stub.ocr, unsetConfig: async () => ({ ok: false }) };
+  const h = makeConfigHandlers({ ocr, tempRoot: dir });
+  const res = await h.removeEntry(null, { name: "my.gateway" });
+  check("a refusal with no sentence is still a failure", res.ok === false, JSON.stringify(res));
+  check(
+    "and it still names the key, with a sentence of its own",
+    String(res.error).includes("custom_providers.my.gateway") && String(res.error).length > "custom_providers.my.gateway: ".length,
+    res.error
+  );
+}
+
+/* ---- a custom save the CLI refuses is not a success either ----
+ * The `isCustom` writes (`url` / `protocol`) go out before the Key, so one
+ * refusal stops the rest of the save. The answer has to say so and name the
+ * write that failed: a save that dropped the url half and reported success
+ * would leave the form showing an endpoint the config does not have.
+ */
+{
+  const stub = makeStub({ customProviders: { "my.gateway": { api_key: "sk-gateway" } } });
+  const ocr = {
+    ...stub.ocr,
+    setConfig: async (pairs) => {
+      stub.setPairs.push(...pairs);
+      return pairs.map(([key]) => ({
+        key,
+        ok: key !== "providers.my.gateway.url",
+        message: key === "providers.my.gateway.url" ? 'invalid value for "url": not an absolute URL' : "",
+      }));
+    },
+  };
+  const h = makeConfigHandlers({ ocr, tempRoot: dir });
+  const res = await h.save(null, {
+    provider: "my.gateway",
+    isCustom: true,
+    url: "gw.example/v1",
+    protocol: "openai",
+    apiKey: "sk-typed",
+    model: "gpt-x",
+    setActive: true,
+  });
+  check("a custom save the CLI refuses is not a success", res.ok === false, JSON.stringify(res));
+  check("and the error names the url write", String(res.error).includes("providers.my.gateway.url"), res.error);
+  check("with the CLI's own sentence kept", String(res.error).includes("not an absolute URL"), res.error);
+  check(
+    "the steps ride along so the page can see what did get written",
+    Array.isArray(res.steps) && res.steps.some((s) => !s.ok) && res.steps[0]?.key === "providers.my.gateway.url",
+    JSON.stringify(res.steps)
+  );
+}
+
 /* ---- `use` switches only what it was asked to switch ----
  * The settings page calls this when the user activates a service from history.
  * Writing a `model` pair without a model in the request would overwrite the

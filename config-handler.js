@@ -223,7 +223,20 @@ function makeConfigHandlers(options) {
     const name = (req.name || "").trim();
     if (!name) return { ok: false, error: "未指定服务名" };
     const isCustom = Boolean((await configView()).customProviders[name]);
-    if (isCustom) return ocr.unsetConfig(`custom_providers.${name}`);
+    // A custom entry is deleted whole (`config unset custom_providers.<name>`),
+    // which is the only write this branch makes — so a refusal means nothing was
+    // removed. `unsetConfig` answers with the CLI's own sentence and no key of
+    // its own, and the page cannot say which entry was refused from a sentence
+    // alone (a custom name may contain dots, which is the whole reason this
+    // branch exists). The key is therefore named here, the same way the built-in
+    // branch below names the write that failed.
+    if (isCustom) {
+      const key = `custom_providers.${name}`;
+      const res = await ocr.unsetConfig(key);
+      if (res && res.ok) return res;
+      const said = String((res && res.error) || "").trim();
+      return { ok: false, error: `${key}: ${said || "删除没有成功，CLI 没有给出原因"}` };
+    }
     const steps = await ocr.setConfig([
       [`providers.${name}.api_key`, ""],
       [`providers.${name}.model`, ""],
