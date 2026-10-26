@@ -12,6 +12,29 @@
 4. **不要**静默忽略上游 release：每轮把结论追加到下面「上游状态」，哪怕结论是
    「无新内容」。
 
+## 上游状态（最近检查：2026-10-27，第 60 轮）
+
+第 60 轮复核：**三条通路都可达，结论仍是「无新内容」**。
+`git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
+refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
+（与第 49–59 轮同一个 commit），`refs/tags/v1.13.3` = `dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`
+（annotated tag 对象，指向同一 commit）；`api.github.com/repos/alibaba/open-code-review/commits/main`
+给出同一 SHA，`/releases/latest` 仍是 `v1.13.3`。desktop 的 `^1.13.3` 无需改动，
+**无移植项**。
+
+本轮把三处「绿着但可能什么都没测 / 规则写重了」的缝合上：
+
+- `findDocPins` 在文档措辞漂移时会少返回声明，而「读到的都等于常量」会静默绿。现在
+  `pinPlaceCoverage` 要求三处（pin 块 / 固定行 / 正文引用）各出现且仅出现一次；
+  smoke 里删掉任一处的突变用例先由「只剩两条」和「缺的是哪一个」报红，再谈值。
+- 新增 `path-guard.js` 的 `isInside(root, candidate)`：`repo:pickInside` 与
+  `readFileWindow` 共用同一条越界规则。原先 `startsWith(root + sep)` 在 Windows 上
+  区分大小写，`C:\Repo` 会拒绝 `c:\repo\sub`，是真实 bug；判据改为 `path.relative`，
+  Windows 上折叠大小写。`tools/path-guard-smoke.mjs` 用 `path.win32` 在 Linux 上钉住
+  这条答案，并断言两个调用点确实走同一条规则。
+- `app:info` 的组合抽成 `app-info.js` 的 `formatAppInfo`，三种形状（无二进制 /
+  版本在 stdout / 仅 stderr）由 `tools/app-info-smoke.mjs` 断言；`main.js` 只留取数。
+
 ## 上游状态（最近检查：2026-10-27，第 59 轮）
 
 第 59 轮复核：**三条通路都可达，结论仍是「无新内容」**。
@@ -308,7 +331,7 @@ pin 或 ls-remote 给出的 SHA 短于 40 位时一律判「跳过」并说明�
 没变**，所以每轮的结论仍要写进上面「上游状态」——跳过时至少留下 `[UPSTREAM-DEBT]` 与
 「核对通路账」里的一行欠账。
 
-**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 59 轮：`git ls-remote` 可达，`refs/heads/main` 与 pin 一致；tag 与 npm 一致，GitHub API 与 git 一致；通路：git）**
+**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 60 轮：`git ls-remote` 可达，`refs/heads/main` 与 pin 一致；tag 与 npm 一致，GitHub API 与 git 一致；通路：git）**
 
 ### 核对通路账
 
@@ -333,12 +356,13 @@ pin 或 ls-remote 给出的 SHA 短于 40 位时一律判「跳过」并说明�
 | 57 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；API 与 npm 一致 | — |
 | 58 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；tag 与 npm 一致 | — |
 | 59 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；API 与 npm 一致；pin 三处声明纳入断言 | — |
+| 60 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；pin 三处覆盖断言、路径越界统一、`app:info` 抽纯函数 | — |
 
 「最近一次对照」只写**那一项最近被人工重新核对**的轮次。该列没有列出本轮，表示本轮
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
 对应行并把轮次与日期改成本轮。
 
-**第 46–59 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
+**第 46–60 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
 npm 通路可达，第 56 轮 git 超时但 API 可达），所以下表四行的「最近一次对照」停在第 45 轮是
 **没有理由重看**，不是忘了看：
 它记录的是「最后一次有人逐行读上游源码」的轮次，而不是「最后一次确认上游没变」的轮次。

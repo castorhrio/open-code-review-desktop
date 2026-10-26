@@ -4,6 +4,7 @@
 const path = require("path");
 const fs = require("fs");
 const { spawn } = require("child_process");
+const { isInside } = require("./path-guard");
 
 // Every git command runs in the C locale, deliberately.
 //
@@ -220,8 +221,7 @@ async function readFileAtRef(repo, relPath, ref, startLine, endLine, pad) {
 
 function readFileWindow(repo, relPath, startLine, endLine, pad) {
   const abs = path.resolve(repo, relPath);
-  const root = path.resolve(repo) + path.sep;
-  if (!abs.startsWith(root) && abs !== path.resolve(repo)) return { ok: false, error: "路径越界" };
+  if (!isInside(repo, abs)) return { ok: false, error: "路径越界" };
   let text;
   try {
     text = fs.readFileSync(abs, "utf8");

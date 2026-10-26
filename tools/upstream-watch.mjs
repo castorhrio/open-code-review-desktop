@@ -220,6 +220,34 @@ const PIN_LINE_RULES = [
   { where: "正文固定 SHA", re: new RegExp("固定的整串 40 位 SHA\\s*`" + SHA_IN_LINE + "`") },
 ];
 
+// The three places a pin is declared, in the order a reader meets them. Named
+// here so "one declaration went missing" has an answer: `findDocPins` reads by
+// shape, so a reworded line simply produces fewer pins — and a caller that only
+// asserts "everything I read equals the constant" stays green while no longer
+// checking the line the wording moved away from.
+export const PIN_PLACES = Object.freeze(["pin 块", "本轮 HEAD 核对 行", "正文固定 SHA"]);
+
+// Counts declarations per place. The smoke test compares this against the
+// expected three rather than checking `pins.length >= 3`, so a missing place is
+// red on the count (and the missing name is printed) before any value is read.
+export const pinPlaceCoverage = (pins) => {
+  const counts = Object.fromEntries(PIN_PLACES.map((place) => [place, 0]));
+  for (const pin of pins || []) {
+    const where = pin && pin.where;
+    if (Object.prototype.hasOwnProperty.call(counts, where)) counts[where] += 1;
+  }
+  const missing = PIN_PLACES.filter((place) => counts[place] === 0);
+  const duplicated = PIN_PLACES.filter((place) => counts[place] > 1);
+  return {
+    expected: [...PIN_PLACES],
+    counts,
+    total: (pins || []).length,
+    missing,
+    duplicated,
+    complete: missing.length === 0 && duplicated.length === 0,
+  };
+};
+
 export const findDocPins = (doc) => {
   const pins = [];
   let tag = null;

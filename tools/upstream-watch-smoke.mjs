@@ -17,6 +17,7 @@ import {
   DEBT_MARKER,
   MOVED_MARKER,
   PINNED_UPSTREAM,
+  PIN_PLACES,
   ROWS_TO_REREAD,
   classifyGit,
   createRunner,
@@ -25,6 +26,7 @@ import {
   formatDrift,
   parseApiCommit,
   parseLsRemote,
+  pinPlaceCoverage,
   runUpstreamWatch,
   upstreamDrift,
 } from "./upstream-watch.mjs";
@@ -79,6 +81,15 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
     "the 'moved' fixture is a whole commit and is not the pin either",
     OTHER_SHA !== PINNED_SHA && /^[0-9a-f]{40}$/.test(OTHER_SHA),
     `${OTHER_SHA} vs ${PINNED_SHA}`
+  );
+  // The two fixtures answer different questions: `OTHER_SHA` is "some other
+  // commit" (no prefix relation), `SAME_PREFIX_SHA` is "same first 7, different
+  // commit". If they shared the pin's prefix, the plain `moved` case would stop
+  // covering the no-prefix branch and both would test the same thing.
+  check(
+    "...and the plain 'moved' fixture does not share the pin's first 7 characters",
+    OTHER_SHA.slice(0, 7) !== PINNED_SHA.slice(0, 7),
+    JSON.stringify({ moved: OTHER_SHA.slice(0, 7), pin: PINNED_SHA.slice(0, 7) })
   );
 }
 
@@ -539,17 +550,16 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
     docPins.blockFound && docPins.pins.some((pin) => pin.where === "pin 块"),
     JSON.stringify({ blockFound: docPins.blockFound, pins: whereList })
   );
+  const coverage = pinPlaceCoverage(docPins.pins);
   check(
-    "the pin is declared in the block, on the fixed line, and in the prose",
-    ["pin 块", "本轮 HEAD 核对 行", "正文固定 SHA"].every((where) =>
-      docPins.pins.some((pin) => pin.where === where)
-    ),
-    JSON.stringify(whereList)
+    "the pin is declared exactly three times, once in each of the three places",
+    docPins.pins.length === 3 && coverage.complete,
+    JSON.stringify(coverage)
   );
   const docDisagreements = describePinDisagreements(docPins.pins, PINNED_SHA);
   check(
     "every place the doc declares the pin carries the SHA the sentinel compares against",
-    docPins.pins.length >= 3 && docDisagreements.length === 0,
+    docDisagreements.length === 0,
     docDisagreements.join("；") || `${docPins.pins.length} declaration(s)`
   );
   check(
@@ -605,6 +615,29 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
       changed: docLines.filter((line, index) => line !== mutatedLines[index]).length,
     })
   );
+
+  // Removing a declaration is the failure that used to stay green: the two
+  // remaining pins still equal the constant, so only a count can see it. Each
+  // mutation deletes exactly the line holding one place, and the coverage
+  // answer has to name that place — "2 < 3" alone would not tell the reader
+  // which sentence stopped being checked.
+  for (const place of PIN_PLACES) {
+    const pin = docPins.pins.find((entry) => entry.where === place);
+    const without = pin
+      ? docLines.filter((_, index) => index + 1 !== pin.line).join("\n")
+      : "";
+    const after = findDocPins(without);
+    const afterCoverage = pinPlaceCoverage(after.pins);
+    check(
+      `deleting the ${place} declaration fails the count and names the missing place`,
+      pin !== undefined &&
+        after.pins.length === 2 &&
+        afterCoverage.missing.length === 1 &&
+        afterCoverage.missing[0] === place &&
+        !afterCoverage.complete,
+      JSON.stringify({ line: pin && pin.line, total: after.pins.length, missing: afterCoverage.missing })
+    );
+  }
   const channel = match ? /通路：(git|api|npm|none)/.exec(match[2]) : null;
   check(
     "the fixed line says which road checked the HEAD this round",

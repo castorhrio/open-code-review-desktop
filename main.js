@@ -16,6 +16,8 @@ const { makeRunHandler } = require("./run-handler");
 const { makeUninstallHandler } = require("./uninstall-handler");
 const { makeConfigHandlers } = require("./config-handler");
 const { createInstall } = require("./install-info");
+const { isInside } = require("./path-guard");
+const { formatAppInfo } = require("./app-info");
 
 const DOCS_URL = "https://open-codereview.ai/docs";
 
@@ -143,24 +145,28 @@ function buildMenu() {
 
 /* ---------------- ipc: app ---------------- */
 
+// The assembly lives in `app-info.js`: a value built inside a handler can only
+// be observed by launching Electron, and the absent-data shapes (no binary, a
+// version on stderr) are exactly the ones the settings page shows verbatim.
 ipcMain.handle("app:info", async () => {
   const binary = ocr.binaryResolution();
-  const bin = binary.path;
-  let version = "";
-  if (bin) {
+  let versionStdout = "";
+  let versionStderr = "";
+  if (binary.path) {
     const res = await ocr.exec(["version"]);
-    version = (res.stdout || res.stderr || "").trim().split(/\r?\n/).filter(Boolean)[0] || "";
+    versionStdout = res.stdout || "";
+    versionStderr = res.stderr || "";
   }
-  return {
-    binary: bin,
-    binarySource: binary.source,
-    version: version.replace(/^open-code-review\s*/, ""),
+  return formatAppInfo({
+    binary,
+    versionStdout,
+    versionStderr,
     configPath: ocr.CONFIG_PATH,
     docsUrl: DOCS_URL,
     appVersion: app.getVersion(),
     platform: process.platform,
-    ...install.installInfo(),
-  };
+    installInfo: install.installInfo(),
+  });
 });
 
 /* ---------------- ipc: install ---------------- */
@@ -228,7 +234,7 @@ ipcMain.handle("repo:pickInside", async (_e, repo) => {
   if (result.canceled || !result.filePaths.length) return {};
   const picked = path.resolve(result.filePaths[0]);
   const root = path.resolve(repo);
-  if (picked !== root && !picked.startsWith(root + path.sep)) {
+  if (!isInside(root, picked)) {
     return { error: "所选目录不在该仓库内" };
   }
   const rel = path.relative(root, picked).split(path.sep).join("/");
