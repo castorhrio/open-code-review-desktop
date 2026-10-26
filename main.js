@@ -188,6 +188,12 @@ const uninstall = makeUninstallHandler({
   // because it deletes the directory this process runs from.
   spawn: (target) => spawn(target, [], { detached: true, stdio: "ignore", windowsHide: false }).unref(),
   quit: () => app.quit(),
+  // The two sentences this path can produce — a flush that lost evidence, and a
+  // quit that did not take — have to land where a packaged app can read them.
+  // `console.warn` is not that place: an installed Windows app has no terminal,
+  // so the same `run:log` the run paths use is the one sink, and the drawer that
+  // self-opens on a trouble line is where these are read.
+  warn: (line) => send("run:log", { line }),
 });
 ipcMain.handle("app:uninstall", uninstall);
 

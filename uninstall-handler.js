@@ -28,9 +28,11 @@
 // What the caller supplies, and why each is a parameter rather than an import:
 // `install` (the uninstall plan, which decides whether there is anything to
 // spawn at all), `store` (the evidence to flush), `spawn` (how a detached
-// process is started on this platform), `quit`, and `schedule`/`quitDelayMs`.
-// The last two are what make "the reply arrives before the quit" checkable
-// without waiting 400ms in a test.
+// process is started on this platform), `quit`, `warn` (where a sentence about a
+// step that went wrong is written — `main.js` points it at the renderer's log
+// drawer, because a packaged app has no terminal to read `console.warn` from),
+// and `schedule`/`quitDelayMs`. The last two are what make "the reply arrives
+// before the quit" checkable without waiting 400ms in a test.
 
 const { flushAndReport } = require("./run-diagnostics");
 
@@ -44,6 +46,12 @@ const { flushAndReport } = require("./run-diagnostics");
  * tick tears the window down before it can. Named rather than inline so the
  * reason travels with the value, and spelled in exactly one place: a second copy
  * in `main.js` would be the one that drifts.
+ *
+ * 400ms is best-effort, not a guarantee that the reply has already been drawn:
+ * the reply is on its way when this handler resolves, and the delay only gives
+ * it a head start. Nothing here waits for the page to confirm, because by this
+ * point the window is about to be closed by the same server that would answer
+ * such a confirmation.
  */
 const UNINSTALL_QUIT_DELAY_MS = 400;
 
@@ -85,8 +93,53 @@ function makeUninstallHandler(options) {
   // `flushAndReport`, not `flushNow`: see above — the failure has to arrive as a
   // value, and the line it writes has to go out before the uninstaller starts.
   const flush = typeof opts.flush === "function" ? opts.flush : flushAndReport;
-  const warn = opts.warn;
+  const warn = typeof opts.warn === "function" ? opts.warn : defaultWarn;
   const quitDelayMs = Number.isFinite(opts.quitDelayMs) ? opts.quitDelayMs : UNINSTALL_QUIT_DELAY_MS;
+
+  /**
+   * A quit that failed, as a line.
+   *
+   * The uninstaller has already been started when this is reached, so the user's
+   * action is done and the app failing to close is a nuisance, not a lost
+   * uninstall. It is still said out loud: if `app.quit()` did not take, the
+   * window stays open showing 「正在卸载…」 forever, and the only thing that turns
+   * that into an explanation is this sentence arriving in the log drawer.
+   *
+   * `warn` is called inside its own try/catch for the same reason
+   * `run-diagnostics`' `reportOutcome` does: a sink that throws would become the
+   * uncaught exception this wrapper exists to prevent, one call later.
+   */
+  const logQuitFailure = (err) => {
+    const reason = (err && err.message) || (typeof err === "string" ? err : "");
+    const line = reason ? `[uninstall] 退出失败：${reason}` : "[uninstall] 退出失败";
+    try {
+      warn(`${line}（卸载程序已经启动，可以直接结束本程序）`);
+    } catch (_) {
+      // No second sink left to tell.
+    }
+  };
+
+  /**
+   * The quit, and what is left of a quit that went wrong.
+   *
+   * This is scheduled, so it runs in a timer where nothing above it can catch a
+   * throw: a throwing `quit` would become an uncaught exception in the main
+   * process — a crash at the exact moment the user expected the app to close,
+   * after the uninstaller started. And a `quit` wired to an async teardown
+   * answers a promise that nobody awaits, whose rejection surfaces as an
+   * unhandled rejection instead. Both are the same news, so both become the same
+   * line, and neither can undo the uninstall.
+   */
+  const quitAfterReply = () => {
+    try {
+      const answer = quit();
+      if (answer && typeof answer.then === "function") {
+        answer.then(undefined, (err) => logQuitFailure(err));
+      }
+    } catch (err) {
+      logQuitFailure(err);
+    }
+  };
 
   return async function uninstall() {
     // The plan decides whether there is anything to spawn at all, so it runs
@@ -111,9 +164,23 @@ function makeUninstallHandler(options) {
     }
     // Scheduled, never called inline: the reply this function is about to return
     // has to be on its way to the renderer first.
-    schedule(() => quit(), quitDelayMs);
+    schedule(quitAfterReply, quitDelayMs);
     return { ok: true };
   };
+}
+
+/**
+ * The sink when the caller supplies none.
+ *
+ * `console.warn` is the fallback, not the rule: a packaged Windows app has no
+ * terminal, so `main.js` passes the renderer's own log channel instead. The
+ * throw is swallowed because a console that is gone must not be able to break
+ * the uninstall either.
+ */
+function defaultWarn(line) {
+  try {
+    console.warn(line);
+  } catch (_) {}
 }
 
 /**

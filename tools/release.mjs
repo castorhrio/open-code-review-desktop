@@ -20,6 +20,8 @@ import { execSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
+import { releasePrecheck } from "./release-guard.mjs";
+
 const ROOT = path.resolve(import.meta.dirname, "..");
 const version = process.argv[2];
 if (!/^\d+\.\d+\.\d+$/.test(version || "")) {
@@ -37,12 +39,19 @@ const run = (cmd, opts = {}) => {
 };
 const capture = (cmd) => execSync(cmd, { cwd: ROOT, encoding: "utf8" });
 
-// A release commit on top of uncommitted work would ship someone's half-finished
-// tree, and the gate afterwards would be testing a mix neither of us can name.
-if (capture("git status --porcelain").trim()) {
-  console.error("release aborted: the working tree is not clean — commit or stash first");
+// Two states a release must not start from, and both of them fail silently:
+// a clean-tree check on a dirty tree ships someone's half-finished work, and a
+// detached HEAD gives every step below a place to succeed — the bump, the
+// commit, the build — that no branch points at, so the release is unreachable
+// from the moment it is made. The decisions live in `release-guard.mjs`, where
+// `tools/release-guard-smoke.mjs` can feed them one fixture at a time; this is
+// the call, and it happens before anything is written.
+const pre = releasePrecheck(capture);
+if (!pre.ok) {
+  console.error(`release aborted: ${pre.error}`);
   process.exit(2);
 }
+console.log(`releasing ${version} from ${pre.branch}`);
 
 run(`npm version ${version} --no-git-tag-version`);
 run(`git add package.json package-lock.json && git commit -m "chore(release): ${version}"`);

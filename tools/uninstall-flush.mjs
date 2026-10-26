@@ -275,6 +275,120 @@ function harness(overrides = {}) {
   );
 }
 
+/* ---- a quit that fails: a line, not an uncaught exception ----
+ * The quit is the last thing this handler does, and it is *scheduled*: it runs in
+ * a timer, where nothing above it can catch a throw. A throwing `quit` therefore
+ * does not answer anything — it becomes an uncaught exception in the main
+ * process, a crash at the exact moment the user expected the app to close, one
+ * step after the uninstaller was started. A `quit` wired to an async teardown is
+ * the same news one tick later: nobody awaits its promise, so its rejection
+ * surfaces as an unhandled rejection instead.
+ *
+ * Neither can undo the uninstall — it has already been spawned, detached,
+ * before the quit is scheduled. So what is under test here is only that the
+ * failure stays *inside*: one line, a sentence about the quit, and no stray
+ * exception or rejection leaving the process. Both cases are called with nothing
+ * around them, so a handler that stopped containing them turns the check red
+ * instead of taking the suite down.
+ */
+{
+  const stray = [];
+  const onRejection = (err) => stray.push(`未处理的 rejection：${(err && err.message) || err}`);
+  const onException = (err) => stray.push(`未捕获的异常：${(err && err.message) || err}`);
+  process.on("unhandledRejection", onRejection);
+  process.on("uncaughtException", onException);
+  // A rejected quit needs its turn of the event loop to surface; the same turn a
+  // resolved promise uses, so one timer tick is enough.
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+  // 1. a quit that throws on the spot
+  const throwing = harness({
+    handler: {
+      quit: () => {
+        throw new Error("EPERM: app.quit() was refused");
+      },
+    },
+  });
+  const throwingAnswer = await throwing.handler();
+  throwing.scheduled[0].fn();
+  await settle();
+  check(
+    "a quit that throws is answered first, so the page still gets its reply",
+    throwingAnswer && throwingAnswer.ok === true,
+    JSON.stringify(throwingAnswer)
+  );
+  check(
+    "and the uninstaller had already started, which is why quitting is not retried",
+    throwing.spawnCalls.length === 1,
+    throwing.order.join(" -> ")
+  );
+  check(
+    "and the failure becomes one line instead of a crash",
+    throwing.logs.length === 1,
+    JSON.stringify(throwing.logs)
+  );
+  check(
+    "...a line that says what failed and why",
+    /退出失败/.test(throwing.logs[0] || "") && /EPERM/.test(throwing.logs[0] || ""),
+    throwing.logs[0]
+  );
+  check(
+    "...and that says the uninstall itself is not in doubt",
+    /卸载程序已经启动/.test(throwing.logs[0] || ""),
+    throwing.logs[0]
+  );
+  check(
+    "...and that reads like trouble, so the log drawer opens on it",
+    /失败|无法|error|warning/i.test(throwing.logs[0] || ""),
+    throwing.logs[0]
+  );
+
+  // 2. a quit that answers a rejected promise
+  const rejecting = harness({
+    handler: {
+      quit: () => Promise.reject(new Error("teardown 里还有没写完的东西")),
+    },
+  });
+  const rejectingAnswer = await rejecting.handler();
+  rejecting.scheduled[0].fn();
+  await settle();
+  check(
+    "a quit that rejects is answered first too",
+    rejectingAnswer && rejectingAnswer.ok === true,
+    JSON.stringify(rejectingAnswer)
+  );
+  check(
+    "and its rejection becomes the same one line, with the same reason",
+    rejecting.logs.length === 1 && /退出失败/.test(rejecting.logs[0]) && /teardown/.test(rejecting.logs[0]),
+    JSON.stringify(rejecting.logs)
+  );
+
+  // 3. a quit that fails with something that is not an Error
+  const odd = harness({
+    handler: {
+      quit: () => {
+        throw "窗口已经销毁";
+      },
+    },
+  });
+  await odd.handler();
+  odd.scheduled[0].fn();
+  await settle();
+  check(
+    "a quit that throws something which is not an Error is still a sentence",
+    odd.logs.length === 1 && /窗口已经销毁/.test(odd.logs[0]),
+    JSON.stringify(odd.logs)
+  );
+
+  process.off("unhandledRejection", onRejection);
+  process.off("uncaughtException", onException);
+  check(
+    "nothing escapes the handler as an uncaught exception or a stray rejection",
+    stray.length === 0,
+    stray.join(" | ")
+  );
+}
+
 /* ---- the wiring `main.js` actually uses ---- */
 {
   const mainSrc = fs.readFileSync(path.join(ROOT, "main.js"), "utf8");
@@ -331,6 +445,17 @@ function harness(overrides = {}) {
     "the reply delay is named in exactly one place",
     !ownDelay,
     why(!ownDelay, "main.js declares its own copy of the delay")
+  );
+  // The handler writes its two sentences through `warn`, and a packaged app has
+  // no terminal: `console.warn` would put them somewhere nobody can read. The
+  // sink has to be the renderer's own log channel — the one `runLog` below uses
+  // — so the drawer that self-opens on a trouble line is also where an uninstall
+  // that lost evidence, or could not close the app, is read.
+  const warnWired = /warn:\s*\(line\)\s*=>\s*send\(\s*["']run:log["']/.test(mainSrc);
+  check(
+    "main.js points the handler's warnings at the renderer's log",
+    warnWired,
+    why(warnWired, "the uninstall handler is wired without a run:log sink")
   );
   // And the platform detail that *is* `main.js`'s business stays there: the
   // uninstaller is spawned detached and `unref`ed, because it deletes the

@@ -491,15 +491,26 @@ fs.rmSync(notARepo, { recursive: true, force: true });
     await manyGit(["branch", "master"]);
     // 58 more branches, all sorting before `main` / `master`.
     for (let i = 0; i < 58; i++) await manyGit(["branch", `b${String(i).padStart(2, "0")}`]);
-    // A real upstream: bare remote, main pushed and tracked, so `@{upstream}`
+    // A real upstream: bare remote, and `main` tracked on it, so `@{upstream}`
     // resolves to `origin/main` the way it does in a working clone.
+    //
+    // Set up without `git push -u`, deliberately. A push is not something a
+    // checker can count on — a sandboxed or proxied environment can throttle or
+    // soft-skip it, and on this machine it silently succeeds without ever
+    // writing the upstream, which turned the two checks below red for a reason
+    // that had nothing to do with `inspect`. What `git push -u` would have left
+    // behind is exactly three things: the remote-tracking ref, `branch.<name>.remote`
+    // and `branch.<name>.merge`. Written directly, the fixture tests `inspect`'s
+    // reading of `@{upstream}` instead of the git installation's ability to push.
     await new Promise((resolve, reject) => {
       const child = spawn("git", ["init", "-q", "--bare", remoteDir], { cwd: manyDir, windowsHide: true });
       child.on("error", reject);
       child.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`git init --bare failed (${code})`))));
     });
     await manyGit(["remote", "add", "origin", remoteDir]);
-    await manyGit(["push", "-q", "-u", "origin", "main"]);
+    await manyGit(["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    await manyGit(["config", "branch.main.remote", "origin"]);
+    await manyGit(["config", "branch.main.merge", "refs/heads/main"]);
 
     const many = await gitSvc.inspect(manyDir);
     const relations = many.relations || {};
