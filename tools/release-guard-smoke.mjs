@@ -95,6 +95,56 @@ function fakeGit(answers) {
 const SYMBOLIC = "git symbolic-ref --short HEAD";
 const STATUS = "git status --porcelain";
 
+/**
+ * Source with comments removed and string literals left alone.
+ *
+ * Used for the two facts about `tools/release.mjs` that only its own text can
+ * answer: the call site of the platform refusal, and the order the three input
+ * readings happen in. A plain line filter would miss a trailing comment and a
+ * block comment would survive entirely, so the header's prose could stand in for
+ * code that is not there. Quote tracking keeps a `//` inside a string (a path, a
+ * usage line) from being mistaken for a comment.
+ */
+function stripComments(source) {
+  let out = "";
+  let i = 0;
+  let quote = "";
+  while (i < source.length) {
+    const ch = source[i];
+    const next = source[i + 1];
+    if (quote) {
+      out += ch;
+      if (ch === "\\") {
+        out += next ?? "";
+        i += 2;
+        continue;
+      }
+      if (ch === quote) quote = "";
+      i += 1;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      quote = ch;
+      out += ch;
+      i += 1;
+      continue;
+    }
+    if (ch === "/" && next === "/") {
+      while (i < source.length && source[i] !== "\n") i += 1;
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      i += 2;
+      while (i < source.length && !(source[i] === "*" && source[i + 1] === "/")) i += 1;
+      i += 2;
+      continue;
+    }
+    out += ch;
+    i += 1;
+  }
+  return out;
+}
+
 /* ---- the version argument is refused before a single step is planned ----
  * It used to be a regex test and a `process.exit(2)` at the top of
  * `release.mjs`, which is the one part of the release no check could reach:
@@ -218,20 +268,30 @@ const STATUS = "git status --porcelain";
     parsePlatform().platform === process.platform && parsePlatform().ok === (process.platform === "win32"),
     JSON.stringify(parsePlatform())
   );
+  // Written as an equivalence rather than as "this machine is Windows": the
+  // release only runs on Windows, but this check has to be green everywhere a
+  // contributor runs `audit:release` — a mac or a linux box must be able to
+  // verify the contract, not skip it.
+  check(
+    "an explicit undefined asks for exactly the same answer as a bare call",
+    JSON.stringify(parsePlatform(undefined)) === JSON.stringify(parsePlatform()),
+    JSON.stringify(parsePlatform(undefined))
+  );
+  check(
+    "...which is `process.platform`, so a mac would be told about a mac",
+    JSON.stringify(parsePlatform(undefined)) === JSON.stringify(parsePlatform(process.platform)),
+    `${JSON.stringify(parsePlatform(undefined))} vs ${JSON.stringify(parsePlatform(process.platform))}`
+  );
 
   // The one check that reads a source file rather than calling a function, and it
   // is deliberate: `tools/release.mjs` starts packaging the moment it is imported,
   // so the *call site* of this refusal is the only part no fixture can reach.
   // Without it, deleting the guard from the script leaves every check above green
-  // while the refusal becomes dead code. Comment lines are stripped first, so the
+  // while the refusal becomes dead code. Comments are stripped first, so the
   // sentence in the header cannot satisfy it on the guard's behalf.
   {
     const ROOT = path.resolve(import.meta.dirname, "..");
-    const script = fs
-      .readFileSync(path.join(ROOT, "tools", "release.mjs"), "utf8")
-      .split("\n")
-      .filter((line) => !line.trim().startsWith("//"))
-      .join("\n");
+    const script = stripComments(fs.readFileSync(path.join(ROOT, "tools", "release.mjs"), "utf8"));
     check(
       "the release script refuses the machine before it plans anything",
       /parsePlatform\(\s*process\.platform\s*\)/.test(script),
@@ -241,6 +301,35 @@ const STATUS = "git status --porcelain";
       "...printing the module's own sentence, so the words have one home",
       /console\.error\(\s*platform\.error\s*\)/.test(script) && /process\.exit\(\s*2\s*\)/.test(script),
       "tools/release.mjs does not print platform.error and exit 2"
+    );
+
+    // Each refusal is a sentence the user reads *instead of* the others, so the
+    // order the script reads its inputs in decides which one they get. The three
+    // are placed by position in the comment-stripped source because the script
+    // cannot be imported; a reordering that keeps all three calls would pass a
+    // presence-only check while turning "this path is Windows-only" into "no
+    // version given" — a different, and misleading, first answer.
+    const orderOf = (src) => ["parsePlatform(", "parseVersion(", "planRelease("].map((call) => src.indexOf(call));
+    const [machineAt, versionAt, planAt] = orderOf(script);
+    const calls = ["parsePlatform(", "parseVersion(", "planRelease("].map((call) => script.split(call).length - 1);
+    check(
+      "the script asks the machine, then the version, then plans the release",
+      machineAt >= 0 && versionAt > machineAt && planAt > versionAt,
+      JSON.stringify({ machineAt, versionAt, planAt })
+    );
+    check(
+      "...once each, so the positions above are the calls that actually run",
+      calls.every((count) => count === 1),
+      JSON.stringify(calls)
+    );
+    // The comparison above has to be order-sensitive, not merely "all present":
+    // a version read placed before the machine refusal is the regression this
+    // exists for, and it must turn the predicate false.
+    const versionFirst = orderOf(`parseVersion([]);\n${script}`);
+    check(
+      "...and the check would fail if the version were read first",
+      !(versionFirst[1] > versionFirst[0] && versionFirst[2] > versionFirst[1]),
+      JSON.stringify(versionFirst)
     );
   }
 }
@@ -1257,6 +1346,56 @@ const STATUS = "git status --porcelain";
       threw === null && clearedFile !== null && clearedFile.removed.length === 0 && !file.resolve(FROM).exists,
       `${threw && threw.message} / ${JSON.stringify(clearedFile)}`
     );
+
+    // The catch around `readdirSync` deliberately does not look at the error
+    // kind: a directory this process may not read is still one it can remove,
+    // and "could not list it" must not turn into "left it in place". The
+    // file-shaped fixture above reaches the catch through `ENOTDIR`; this one
+    // reaches it through `EACCES`, so the property is not a side effect of the
+    // path being a file.
+    {
+      const d = fakeDisk({ "release-0.1.14": { [SETUP]: null } });
+      let injected = null;
+      const removals = [];
+      const fsApi = {
+        ...d.fs,
+        readdirSync: (p) => {
+          injected = Object.assign(new Error(`EACCES: permission denied, scandir '${p}'`), { code: "EACCES" });
+          throw injected;
+        },
+        rmSync: (p, opts) => {
+          removals.push(p);
+          d.fs.rmSync(p, opts);
+        },
+      };
+      let unreadableThrew = null;
+      let clearedUnreadable = null;
+      try {
+        clearedUnreadable = clearStaleDistOutput({ dir: FROM, fs: fsApi });
+      } catch (err) {
+        unreadableThrew = err;
+      }
+      check(
+        "a fallback dir that cannot be read is still cleared",
+        unreadableThrew === null && clearedUnreadable !== null && !d.resolve(FROM).exists,
+        `${unreadableThrew && unreadableThrew.message} / ${JSON.stringify(clearedUnreadable)}`
+      );
+      check(
+        "...on an error that is not ENOTDIR, so the catch is not the file case in disguise",
+        injected !== null && injected.code === "EACCES",
+        injected && injected.message
+      );
+      check(
+        "...answering no entries rather than guessing at ones it never saw",
+        clearedUnreadable !== null && clearedUnreadable.removed.length === 0,
+        JSON.stringify(clearedUnreadable && clearedUnreadable.removed)
+      );
+      check(
+        "...and removing it anyway, because unreadable is not unclearable",
+        removals.includes(FROM),
+        JSON.stringify(removals)
+      );
+    }
 
     let noDir = null;
     try {

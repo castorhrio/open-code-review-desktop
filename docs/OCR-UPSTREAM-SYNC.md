@@ -12,7 +12,22 @@
 4. **不要**静默忽略上游 release：每轮把结论追加到下面「上游状态」，哪怕结论是
    「无新内容」。
 
-## 上游状态（最近检查：2026-10-27，第 51 轮）
+## 上游状态（最近检查：2026-10-27，第 52 轮）
+
+第 52 轮复核：`git ls-remote https://github.com/alibaba/open-code-review.git
+refs/heads/main refs/tags/v1.13.3` 本轮 40s 超时（`timeout` 返回 124，与第 47–48、51
+轮的部分通路同因，GitHub 不可达），因此「有无新 commit / tag」只有 npm registry 一条
+通路：`npm view @alibaba-group/open-code-review version dist-tags` = `1.13.3` /
+`latest: 1.13.3`，与 desktop 的 `^1.13.3` 一致，**无新发布**。上游 commit 一处本轮
+无法直接核对；`audit:service` / `audit:config` / `audit:git` 是上游语义变化先变红的三
+道，本轮无需改动它们（本轮只改发版链的检查）。
+
+本轮改动全部在 `tools/release-guard-smoke.mjs`：钉住发版入口「机器 → 版本 → 计划」的
+拒绝顺序、`parsePlatform(undefined)` 与 `parsePlatform(process.platform)` 的等价（机器
+无关），以及 `clearStaleDistOutput` 在 `readdirSync` 报 `EACCES`（非 `ENOTDIR`）时仍然
+删除目录。与上游 CLI、配置读写、`git show` 分类都无关，**无移植项**。
+
+## 上游状态（第 51 轮，2026-10-27）
 
 第 51 轮复核：`git ls-remote https://github.com/alibaba/open-code-review.git` 可达，
 `refs/heads/main` 仍是 `375f64c`（与第 50 轮同一个 SHA），`npm view
