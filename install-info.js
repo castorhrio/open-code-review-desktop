@@ -100,7 +100,16 @@ function createInstall({
   // newcomer clicks this. Fall back to the nearest existing ancestor. The walk
   // stops when the parent repeats (the filesystem root), so a path nothing on
   // the volume exists for is reported instead of walked forever.
-  function revealPath(target) {
+  //
+  // The fallback opens the ancestor with shell.openPath(), which does *not*
+  // reject when it cannot open it: it resolves to an error string, and an empty
+  // string means it worked. So this function is async and returns that string as
+  // `error` — reporting `ok: true` without reading it would tell a user their
+  // file manager opened when nothing happened. shell.showItemInFolder() (the
+  // exact-path case) returns nothing, so there is nothing to read there; and a
+  // UNC target (`\\server\share`) ends the walk when the parent equals the path
+  // itself, which has not been exercised on a real share.
+  async function revealPath(target) {
     if (!target) return { ok: false, error: "没有可显示的路径" };
     let existing = target;
     while (existing && !exists(existing)) {
@@ -116,7 +125,8 @@ function createInstall({
       shell.showItemInFolder(target);
       return { ok: true, action: "reveal", path: target };
     }
-    shell.openPath(existing);
+    const error = await shell.openPath(existing);
+    if (error) return { ok: false, error, action: "open-parent", path: existing, missing: target };
     return { ok: true, action: "open-parent", path: existing, missing: target };
   }
 

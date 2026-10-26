@@ -132,7 +132,7 @@ function buildMenu() {
         { label: "Open Code Review 文档", click: () => shell.openExternal(DOCS_URL) },
         {
           label: "打开配置文件所在目录",
-          click: () => install.revealPath(ocr.CONFIG_PATH),
+          click: () => void install.revealPath(ocr.CONFIG_PATH),
         },
       ],
     },

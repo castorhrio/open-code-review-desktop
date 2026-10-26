@@ -946,6 +946,105 @@ desktop 恰恰读不到那张表，所以它没有资格替用户选一条。
 
 ---
 
+## 第 20 轮 desktop 侧加固（与上游无关）
+
+上游本轮无新提交（顶端仍是 `375f64c` / `v1.13.3`，见上面第 20 轮复核），不移植。
+
+### P0 — 一次运行只有一个可注入的去处
+
+第 17–18 轮把收尾的三句话归到 `run:log`，但 `makeRunHandler` 仍然收两个参数
+（`log` 与 `warn`）：`main.js` 手工把同一个 `runLog` 传给两者，测试也只能证明
+「源码里两处都写了 `runLog`」。这是一个可以被拆开的形状——调用方只要漏掉一个，
+漏掉的那一半就退回 `console.warn`，而打包后的应用没有终端。
+
+本轮把两个参数收成一个 `sink(line, id)`：CLI 自己的进度行与三句收尾话都从这一处
+出去。默认值仍不同（没有注入时，CLI 行去 `run:log`，收尾话去 `console.warn`），
+但应用注入的那一个 `sink` 同时覆盖两者，「只接一半」不再是这个模块能表达的状态。
+
+**断言**（`tools/run-diagnostics-smoke.mjs`）：
+
+- 注入一个 `sink`，CLI 行与 `signal-failed` 都落在它上面，且 id 是 CLI 给的那个；
+- 同一个 `sink` 也接住 `settle-failed` 与迟到的写盘结果；
+- 注入了 `sink` 时 `console.warn` 一行也收不到——回退路径确实没有被走；
+- `main.js` 只写 `sink: runLog`，不再出现 `log:` / `warn:` 两个键。
+
+**实测**：把每运行的 `report` 改回无条件 `console.warn` → 12 条变红。
+
+### P0 — `removeEntry` 的失败已经会报出来，本轮补上夹具
+
+`config-handler.js` 的 `removeEntry` 已经与 `save` 对齐
+（`steps.find(s => !s.ok)` → `{ ok: false, error }`），但测试里没有「清空内置服务时
+`config set` 返回一项失败」的夹具，所以这条行为没有被钉住。
+
+`tools/config-handler-smoke.mjs` 新增：第二次写入被 CLI 拒绝时，`removeEntry` 返回
+`{ ok: false }`，错误里带着失败的键与 CLI 的原话（`withHint` 之后）。
+
+**实测**：把失败分支改回直接返回 `{ ok: true, cleared: true, steps }` → 3 条变红。
+
+### 文档 — 第 17 轮搬进 hardening-log
+
+`next-iteration.md` 只留最近两轮的正文；本轮加入第 20 轮后，第 17 轮按既定规则
+搬进 [`hardening-log.md`](hardening-log.md)。
+
+---
+
+## 第 18 轮 desktop 侧加固（与上游无关）
+
+上游本轮无新提交（顶端仍是 `375f64c` / `v1.13.3`，见上面第 18 轮复核），不移植。
+本轮做两件事：把第 17 轮留下的**产品决定**落地（三句收尾话的去处），并把
+`REF_LIMIT` 的截断钉成断言。
+
+### P0 — 三句收尾话的去处：`run:log`，不是 stderr
+
+第 17 轮把 `settle-failed` / `signal-failed` / 迟到写盘结果归到了同一个 `warn`，
+但 `main.js` 根本没有注入 `warn`——那个「一个去处」就是主进程的 `console.warn`，
+打包成 GUI 应用后没有终端可看。本轮选定解法一：**接 `run:log`**。
+
+- `main.js`：`warn: runLog`，其中
+  `runLog = (line, id) => send("run:log", { id, line })`。渲染进程的日志抽屉吃
+  `run:log`，而 `TROUBLE_LINE`（`src/lib/format.ts`）匹配「失败」，所以这两句话
+  会让抽屉自己打开。另一个方向（在 `userData` 下写日志文件）被放弃：还得再给用户
+  一个读它的入口，而抽屉已经是现成的。
+- `run-handler.js`：去处从「handler 构造时」挪到「CLI 回调里按 run 创建」。原因是
+  渲染层传的 `spec` 没有运行 id，能拿到 id 的时刻只有 `onDone(id, result)`；用这个
+  id，`run:log` 的 `{ id }` 与 `run:exit` 载荷里的 `id` 就是同一个。
+- 没注入 `warn` 的调用方仍然落到 `console.warn`，而且三句话仍走同一个闭包。
+
+**断言**（`tools/run-diagnostics-smoke.mjs`，+6 条）：
+
+- 退出推送抛错 → 渲染进程的 `run:log` 收到 `signal-failed` 那句话（不再只进 stderr）；
+- 该行登记在 CLI 给的 id 下（不是渲染层的 `spec.runId`），且没有第二份；
+- 收尾 rejection → `settle-failed` 那句同样进 `run:log`；
+- 不注入 `warn` → 同一句话仍然只去 `console.warn` 这一个地方；
+- `main.js` 源码确实把 `warn` 接到了 `run:log`——行为断言只能证明 handler **能**
+  这样接，证明不了应用**真的**这样接，而这正是前两轮漏掉的那一半。
+
+**实测**：删掉 `main.js` 的 `warn: runLog` → 1 条变红；让 handler 不给 `warn`
+传 id → 2 条变红（id 与 settle 那两格）。
+
+### P1 — `REF_LIMIT` 的截断：命名 bases 必须活在前 40 名内
+
+`inspect` 对 ref 排序后取前 40。注释说「named bases first」，但没有断言：夹具只有
+三个分支，`refs.slice(0, 40)` 也能全绿，而 60 个分支的真实仓库里 `main` 可能被
+截掉，界面于是把两个本可比的分支说成不可比。
+
+`tools/git-service-smoke.mjs` 新增一个 60 分支的仓库：`b00`…`b57` 按字母序排在
+`main` / `master` 之前，另配一个真实 upstream（bare remote + `push -u`）。断言
+`refs` 仍是 60 个、`upstream` 是 `origin/main`、`main` / `master` / `origin/main`
+都在 `relations` 里，而 `b57` 不在、`relations` 恰好 40 个。
+
+**实测**：把排序改回 `[...new Set(refs)].slice(0, REF_LIMIT)` → 3 条变红
+（三个命名 base 全部被挤出）。`git-service.js` 一行未改——这轮是给既有行为补断言。
+
+### 文档 — 第 16 轮搬进 hardening-log
+
+`next-iteration.md` 只留最近两轮正文；本轮加入第 18 轮后，第 16 轮按既定规则
+搬进 [`hardening-log.md`](hardening-log.md)。
+
+---
+
+---
+
 ## 已经划掉的待办（历史）
 
 这些条目在写下时是开放的，现在都收掉了。留着它们是为了让「当时认为

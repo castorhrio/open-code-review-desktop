@@ -41,15 +41,19 @@ const bare = path.join(tmp, "bare");
 fs.mkdirSync(bare, { recursive: true });
 fs.writeFileSync(path.join(bare, "Open Code Review.exe"), "");
 
-/** `shell` that records the calls instead of opening a file manager. */
-const makeShell = () => {
+/**
+ * `shell` that records the calls instead of opening a file manager.
+ * `openError` is what `shell.openPath` resolves to — Electron's contract is that
+ * a failure comes back as a non-empty string, not as a rejection.
+ */
+const makeShell = (openError = "") => {
   const calls = { reveal: [], open: [] };
   return {
     calls,
     showItemInFolder: (p) => calls.reveal.push(p),
     openPath: async (p) => {
       calls.open.push(p);
-      return "";
+      return openError;
     },
   };
 };
@@ -65,7 +69,15 @@ const makeApp = ({ packaged, resources = "", userData = path.join(tmp, "profile"
   getPath: (name) => (name === "userData" ? userData : exe),
 });
 
-const make = ({ packaged, resources = "", platform = "win32", env = {}, shell = makeShell(), exists = fs.existsSync }) =>
+const make = ({
+  packaged,
+  resources = "",
+  platform = "win32",
+  env = {},
+  shell = makeShell(),
+  exists = fs.existsSync,
+  readdir = fs.readdirSync,
+}) =>
   createInstall({
     app: makeApp({ packaged, resources }),
     shell,
@@ -73,6 +85,7 @@ const make = ({ packaged, resources = "", platform = "win32", env = {}, shell = 
     env,
     resourcesPath: () => resources,
     exists,
+    readdir,
   });
 
 /* ---------------- shape 1: installed ---------------- */
@@ -167,6 +180,25 @@ const make = ({ packaged, resources = "", platform = "win32", env = {}, shell = 
   );
 }
 
+/* ---------------- the install root will not be listed ---------------- */
+
+{
+  // An install root the process may not read (a locked profile volume, a policy
+  // that denies directory listing). The scan is a best-effort lookup, so it must
+  // answer "no uninstaller" — not throw out of 「卸载」 and out of `app:info`.
+  const tools = make({
+    packaged: true,
+    resources: path.join(installed, "resources"),
+    readdir: () => {
+      throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+    },
+  });
+  check("a root that cannot be listed reports no uninstaller", tools.uninstallerPath(installed) === "");
+  check("so 「卸载」 is not offered there", tools.installInfo().canUninstall === false);
+  const said = refusal(tools.uninstallPlan());
+  check("and its refusal is the ordinary one, not a crash", said.includes("没有找到卸载程序"), said);
+}
+
 /* ---------------- a platform with no NSIS uninstaller ---------------- */
 
 for (const platform of ["darwin", "linux"]) {
@@ -183,7 +215,7 @@ for (const platform of ["darwin", "linux"]) {
   const shell = makeShell();
   const tools = make({ packaged: true, resources: path.join(installed, "resources"), shell });
   const target = path.join(installed, "Open Code Review.exe");
-  const res = tools.revealPath(target);
+  const res = await tools.revealPath(target);
   check("an existing file is revealed in its folder", res.ok === true && res.action === "reveal" && res.path === target);
   check("showItemInFolder got the exact path", shell.calls.reveal.length === 1 && shell.calls.reveal[0] === target);
   check("and nothing was opened", shell.calls.open.length === 0);
@@ -196,7 +228,7 @@ for (const platform of ["darwin", "linux"]) {
   // newcomer clicks 「打开配置文件所在目录」.
   const target = path.join(installed, "resources", "not-yet", "config.json");
   const ancestor = path.join(installed, "resources");
-  const res = tools.revealPath(target);
+  const res = await tools.revealPath(target);
   check("a missing path falls back to the nearest existing ancestor", res.ok === true && res.action === "open-parent" && res.path === ancestor, JSON.stringify(res));
   check("the missing target is still reported", res.missing === target);
   check("the ancestor is what gets opened", shell.calls.open.length === 1 && shell.calls.open[0] === ancestor);
@@ -204,10 +236,39 @@ for (const platform of ["darwin", "linux"]) {
 }
 
 {
+  // Electron's shell.openPath resolves to an error string when it cannot open
+  // anything — it does not reject. Reading it is the whole point of the fallback
+  // branch: without it the user is told the folder opened, and nothing did.
+  const shell = makeShell("Failed to open path: no handler for directory");
+  const tools = make({ packaged: true, resources: path.join(installed, "resources"), shell });
+  const target = path.join(installed, "resources", "not-yet", "config.json");
+  const ancestor = path.join(installed, "resources");
+  const res = await tools.revealPath(target);
+  check(
+    "a folder that could not be opened is reported, not swallowed",
+    res.ok === false && res.error === "Failed to open path: no handler for directory",
+    JSON.stringify(res)
+  );
+  check("the report still says what was missing and what was tried", res.action === "open-parent" && res.path === ancestor && res.missing === target);
+  check("the ancestor was still what got opened", shell.calls.open.length === 1 && shell.calls.open[0] === ancestor);
+}
+
+{
+  // showItemInFolder returns nothing at all, so a shell whose openPath would
+  // fail must not turn the exact-path reveal into a refusal.
+  const shell = makeShell("never used here");
+  const tools = make({ packaged: true, resources: path.join(installed, "resources"), shell });
+  const target = path.join(installed, "Open Code Review.exe");
+  const res = await tools.revealPath(target);
+  check("an exact path is still revealed when openPath would fail", res.ok === true && res.action === "reveal", JSON.stringify(res));
+  check("and openPath is not asked for it", shell.calls.open.length === 0);
+}
+
+{
   const shell = makeShell();
   const tools = make({ packaged: true, resources: path.join(installed, "resources"), shell, exists: () => false });
   const target = path.join(tmp, "nowhere", "deeper", "config.json");
-  const res = tools.revealPath(target);
+  const res = await tools.revealPath(target);
   check("nothing existing at all is an error, not a crash", res.ok === false && res.error === `路径不存在：${target}`, JSON.stringify(res));
   check("and the shell is left alone", shell.calls.open.length === 0 && shell.calls.reveal.length === 0);
 }
@@ -215,7 +276,7 @@ for (const platform of ["darwin", "linux"]) {
 {
   const shell = makeShell();
   const tools = make({ packaged: true, resources: path.join(installed, "resources"), shell });
-  const res = tools.revealPath("");
+  const res = await tools.revealPath("");
   check("an empty path is refused before the filesystem is asked", res.ok === false && res.error === "没有可显示的路径");
   check("the shell is left alone for an empty path", shell.calls.open.length === 0 && shell.calls.reveal.length === 0);
 }
@@ -241,6 +302,11 @@ for (const platform of ["darwin", "linux"]) {
     ["当前形态没有安装目录", "免安装版没有卸载器", "没有找到卸载程序", "路径不存在："].every((s) => !main.includes(s))
   );
   check("main.js still routes 打开安装目录 and 卸载 through the module", /install\.installDirPlan\(\)/.test(main) && /install\.uninstallPlan\(\)/.test(main));
+  // A refusal is only worth anything if it reaches the screen: the handler must
+  // return the plan's own `error`, not a rewording of it and not `undefined`.
+  check("app:openInstallDir hands the refusal through unchanged", /app:openInstallDir[\s\S]{0,400}?if \(!plan\.ok\) return plan;/.test(main));
+  check("app:uninstall hands the refusal through unchanged", /app:uninstall[\s\S]{0,400}?if \(!plan\.ok\) return plan;/.test(main));
+  check("file:reveal returns what the module answered", /ipcMain\.handle\(\s*"file:reveal",\s*\(_e, absPath\)\s*=>\s*install\.revealPath\(absPath\)\s*\)/.test(main));
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });

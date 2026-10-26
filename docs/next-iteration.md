@@ -10,7 +10,7 @@
 
 ---
 
-## 上游状态（最近检查：2026-10-26，第 22 轮复核）
+## 上游状态（最近检查：2026-10-26，第 23 轮复核）
 
 上游 `alibaba/open-code-review` 自 desktop 锁定的 `v1.13.0` 之后发布了
 **3 个补丁版本**：`v1.13.1` / `v1.13.2` / `v1.13.3`（共 18 个 commit）。
@@ -45,8 +45,9 @@ desktop 的依赖已升到 `^1.13.3`（`package.json` / `package-lock.json`）�
 | 20 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（`git fetch upstream --tags` + GitHub API 三核对：commits / releases；顶端 commit 与 tag 均未变） |
 | 21 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（`git fetch upstream --tags` + GitHub API 三核对：commits / tags / releases；顶端 commit 与 tag 均未变） |
 | 22 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（`git fetch upstream --tags` + GitHub API 核对 commits / tags；顶端 commit 与 tag 均未变） |
+| 23 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（`git fetch upstream --tags` + GitHub API 双核对 commits / tags；顶端 commit 与 tag 均未变） |
 
-结论：第 2–12、14–22 轮都没有需要移植的新功能 / 修复 / 破坏性变更，desktop 的
+结论：第 2–12、14–23 轮都没有需要移植的新功能 / 修复 / 破坏性变更，desktop 的
 封装（CLI flag、输出解析、配置暴露点）无需改动；第 13 轮没有留下复核记录。
 顶端 commit 仍是 `375f64c`（2026-10-20，`fix(tool): report an empty code_comment
 batch instead of success (#1773)`），最新 tag / release 仍是 `v1.13.3`。
@@ -120,6 +121,69 @@ curl -s 'https://api.github.com/repos/alibaba/open-code-review/tags?per_page=5'
 
 ---
 
+## 第 23 轮 desktop 侧加固（与上游无关）
+
+上游本轮无新提交（顶端仍是 `375f64c` / `v1.13.3`，见上面第 23 轮复核），不移植。
+本轮只收第 22 轮留下的三处边角：**一条永远绿的检查**、**一个没人读的返回值**、
+**三条只证明了「能这样接」的源码断言**。
+
+### P0 — `audit:install` 真的会在失败时变红
+
+第 22 轮的简报说 `tools/install-info-smoke.mjs` 末行被截断成 `if (failures.length)`。
+复核后**已经不只是截断**：末行是 `if (failures.length) process.exit(1);`，
+入口脚本本身没有 `process.exitCode` 的隐患。但「写了 `process.exit(1)`」不等于
+「真的会红」——本轮把它**跑红了一次**：把 `install-info.js` 里
+「当前形态没有安装目录」改一个字，`npm run audit:install` 立刻 `exit=1`，
+改回来又是 `all ok`。这一步没有改代码，只是把「会红」这件事本身验证了一遍。
+
+### P0 — `revealPath` 读 `shell.openPath` 的返回值
+
+Electron 的 `shell.openPath(p)` **不 reject**：打不开时它 resolve 成一个非空
+error string。`revealPath` 的祖先回退分支（配置文件还没保存过时走的就是这条）
+既没有 `await` 也没有读返回值，于是文件管理器没打开、界面上却是 `ok: true`。
+
+- `install-info.js`：`revealPath` 改成 `async`，`await shell.openPath(existing)`，
+  非空返回值直接变成 `{ ok: false, error, action: "open-parent", path, missing }`。
+  「精确路径」那条分支不受影响：`showItemInFolder()` 返回 void，本来就没有可读的。
+  注释里同时写明 UNC 路径（`\\server\share`）的终止条件靠「父等于自身」，
+  **但没有在真实共享上验证过**。
+- `main.js`：`file:reveal` 的 handler 本来就只做 `=> install.revealPath(absPath)`，
+  返回 promise 即可，一行未改；菜单项改成 `void install.revealPath(...)`，
+  免得一个没人接的 rejection 冒到主进程。
+- 渲染层两条调用（设置页、结果页）本来就是 `await api.revealFile(...)`，
+  所以这次形变对界面是透明的——但**失败分支第一次真的会说话**。
+
+**断言**（`tools/install-info-smoke.mjs`）：stub 的 `openPath` 返回非空字符串时，
+`revealPath` 给出 `{ ok: false }` 且 `error` 就是那个字符串，`action` / `path` /
+`missing` 仍然齐全；反过来，「精确路径」分支在 `openPath` 会失败的前提下仍然
+`ok: true` 且根本不问 `openPath`。
+
+**实测**：把 `await shell.openPath(existing)` 改回只 `await` 不读返回值 →
+1 条变红（`a folder that could not be opened is reported, not swallowed`）。
+
+### P0 — 三个 IPC handler 的失败分支原样透传
+
+「判定搬进 `install-info.js`」之后，剩下的风险是**应用没把结论说出去**：handler
+自己吞掉 `plan.error`、或者换个说法，界面上就只剩沉默。本轮补三条读源码的断言
+（不够精确但也不至于一重构就红）：`app:openInstallDir` 与 `app:uninstall` 在
+`if (!plan.ok) return plan;` 之后才继续，`file:reveal` 直接返回模块的答案。
+
+**实测**：删掉 `app:uninstall` 的 `if (!plan.ok) return plan;` → 1 条变红。
+
+### P1 — `uninstallerPath` 的 `readdir` 抛错分支
+
+`uninstallerPath` 有 `try { … } catch (_) { return ""; }`，但夹具里没有能让它
+抛错的用例：删掉 `catch` 也全绿。本轮补一个 `readdir: () => { throw EACCES }`
+的夹具，断言 `uninstallerPath` 返回 `""`、`canUninstall` 为 `false`、
+`uninstallPlan()` 给出的是那句普通的「没有找到卸载程序」而不是崩溃。
+
+### 文档 — 第 20 / 18 轮搬进 hardening-log
+
+`next-iteration.md` 只留最近两轮的正文：本轮加入第 23 轮后，第 20 轮与第 18 轮
+（上两轮搬家时留下的）按既定规则搬进 [`hardening-log.md`](hardening-log.md)。
+
+---
+
 ## 第 21 轮 desktop 侧加固（与上游无关）
 
 上游本轮无新提交（顶端仍是 `375f64c` / `v1.13.3`，见上面第 21 轮复核）。
@@ -145,101 +209,6 @@ entries could be filed; …`。`ocr-service.js` 的计数器对每条收尾行�
 「0 comment(s)」是结论，不是「没有新消息」。
 
 **实测**：去掉 `mark !== "✗"` → 1 条变红；改回 `|| progress.comments` → 1 条变红。
-
-## 第 20 轮 desktop 侧加固（与上游无关）
-
-上游本轮无新提交（顶端仍是 `375f64c` / `v1.13.3`，见上面第 20 轮复核），不移植。
-
-### P0 — 一次运行只有一个可注入的去处
-
-第 17–18 轮把收尾的三句话归到 `run:log`，但 `makeRunHandler` 仍然收两个参数
-（`log` 与 `warn`）：`main.js` 手工把同一个 `runLog` 传给两者，测试也只能证明
-「源码里两处都写了 `runLog`」。这是一个可以被拆开的形状——调用方只要漏掉一个，
-漏掉的那一半就退回 `console.warn`，而打包后的应用没有终端。
-
-本轮把两个参数收成一个 `sink(line, id)`：CLI 自己的进度行与三句收尾话都从这一处
-出去。默认值仍不同（没有注入时，CLI 行去 `run:log`，收尾话去 `console.warn`），
-但应用注入的那一个 `sink` 同时覆盖两者，「只接一半」不再是这个模块能表达的状态。
-
-**断言**（`tools/run-diagnostics-smoke.mjs`）：
-
-- 注入一个 `sink`，CLI 行与 `signal-failed` 都落在它上面，且 id 是 CLI 给的那个；
-- 同一个 `sink` 也接住 `settle-failed` 与迟到的写盘结果；
-- 注入了 `sink` 时 `console.warn` 一行也收不到——回退路径确实没有被走；
-- `main.js` 只写 `sink: runLog`，不再出现 `log:` / `warn:` 两个键。
-
-**实测**：把每运行的 `report` 改回无条件 `console.warn` → 12 条变红。
-
-### P0 — `removeEntry` 的失败已经会报出来，本轮补上夹具
-
-`config-handler.js` 的 `removeEntry` 已经与 `save` 对齐
-（`steps.find(s => !s.ok)` → `{ ok: false, error }`），但测试里没有「清空内置服务时
-`config set` 返回一项失败」的夹具，所以这条行为没有被钉住。
-
-`tools/config-handler-smoke.mjs` 新增：第二次写入被 CLI 拒绝时，`removeEntry` 返回
-`{ ok: false }`，错误里带着失败的键与 CLI 的原话（`withHint` 之后）。
-
-**实测**：把失败分支改回直接返回 `{ ok: true, cleared: true, steps }` → 3 条变红。
-
-### 文档 — 第 17 轮搬进 hardening-log
-
-`next-iteration.md` 只留最近两轮的正文；本轮加入第 20 轮后，第 17 轮按既定规则
-搬进 [`hardening-log.md`](hardening-log.md)。
-
----
-
-## 第 18 轮 desktop 侧加固（与上游无关）
-
-上游本轮无新提交（顶端仍是 `375f64c` / `v1.13.3`，见上面第 18 轮复核），不移植。
-本轮做两件事：把第 17 轮留下的**产品决定**落地（三句收尾话的去处），并把
-`REF_LIMIT` 的截断钉成断言。
-
-### P0 — 三句收尾话的去处：`run:log`，不是 stderr
-
-第 17 轮把 `settle-failed` / `signal-failed` / 迟到写盘结果归到了同一个 `warn`，
-但 `main.js` 根本没有注入 `warn`——那个「一个去处」就是主进程的 `console.warn`，
-打包成 GUI 应用后没有终端可看。本轮选定解法一：**接 `run:log`**。
-
-- `main.js`：`warn: runLog`，其中
-  `runLog = (line, id) => send("run:log", { id, line })`。渲染进程的日志抽屉吃
-  `run:log`，而 `TROUBLE_LINE`（`src/lib/format.ts`）匹配「失败」，所以这两句话
-  会让抽屉自己打开。另一个方向（在 `userData` 下写日志文件）被放弃：还得再给用户
-  一个读它的入口，而抽屉已经是现成的。
-- `run-handler.js`：去处从「handler 构造时」挪到「CLI 回调里按 run 创建」。原因是
-  渲染层传的 `spec` 没有运行 id，能拿到 id 的时刻只有 `onDone(id, result)`；用这个
-  id，`run:log` 的 `{ id }` 与 `run:exit` 载荷里的 `id` 就是同一个。
-- 没注入 `warn` 的调用方仍然落到 `console.warn`，而且三句话仍走同一个闭包。
-
-**断言**（`tools/run-diagnostics-smoke.mjs`，+6 条）：
-
-- 退出推送抛错 → 渲染进程的 `run:log` 收到 `signal-failed` 那句话（不再只进 stderr）；
-- 该行登记在 CLI 给的 id 下（不是渲染层的 `spec.runId`），且没有第二份；
-- 收尾 rejection → `settle-failed` 那句同样进 `run:log`；
-- 不注入 `warn` → 同一句话仍然只去 `console.warn` 这一个地方；
-- `main.js` 源码确实把 `warn` 接到了 `run:log`——行为断言只能证明 handler **能**
-  这样接，证明不了应用**真的**这样接，而这正是前两轮漏掉的那一半。
-
-**实测**：删掉 `main.js` 的 `warn: runLog` → 1 条变红；让 handler 不给 `warn`
-传 id → 2 条变红（id 与 settle 那两格）。
-
-### P1 — `REF_LIMIT` 的截断：命名 bases 必须活在前 40 名内
-
-`inspect` 对 ref 排序后取前 40。注释说「named bases first」，但没有断言：夹具只有
-三个分支，`refs.slice(0, 40)` 也能全绿，而 60 个分支的真实仓库里 `main` 可能被
-截掉，界面于是把两个本可比的分支说成不可比。
-
-`tools/git-service-smoke.mjs` 新增一个 60 分支的仓库：`b00`…`b57` 按字母序排在
-`main` / `master` 之前，另配一个真实 upstream（bare remote + `push -u`）。断言
-`refs` 仍是 60 个、`upstream` 是 `origin/main`、`main` / `master` / `origin/main`
-都在 `relations` 里，而 `b57` 不在、`relations` 恰好 40 个。
-
-**实测**：把排序改回 `[...new Set(refs)].slice(0, REF_LIMIT)` → 3 条变红
-（三个命名 base 全部被挤出）。`git-service.js` 一行未改——这轮是给既有行为补断言。
-
-### 文档 — 第 16 轮搬进 hardening-log
-
-`next-iteration.md` 只留最近两轮正文；本轮加入第 18 轮后，第 16 轮按既定规则
-搬进 [`hardening-log.md`](hardening-log.md)。
 
 ---
 
@@ -287,7 +256,8 @@ provider 目录、上游 CI 的 PR 策略），正文搬去了
 必须扣 Key」那条链，第 16 轮把「两段都冲突时两段都要说完」补上，第 17 轮把
 「一次运行结束时的三句话归到一个去处」钉住，第 18 轮把这个去处接到 `run:log`
 并给 `REF_LIMIT` 的命名 bases 补上截断断言，第 20 轮把 `log` / `warn` 两个可注入点
-收成一个 `sink`，并给 `removeEntry` 的失败补上夹具；剩下的按优先级排在这里，下一轮挑。标注「**未动**」的条目是
+收成一个 `sink`，并给 `removeEntry` 的失败补上夹具，第 23 轮把 `revealPath` 读起
+`shell.openPath` 的返回值、给 `readdir` 抛错补上夹具；剩下的按优先级排在这里，下一轮挑。标注「**未动**」的条目是
 最近一轮看过、确认仍然成立但没有改的——不是新发现。
 
 - **P2**：README 的 Status 段落里有**一次实测值**（`1200 findings` / `405ms` /
@@ -344,6 +314,10 @@ provider 目录、上游 CI 的 PR 策略），正文搬去了
 - **P3**：`finding.tsx` 的 `RunFailureNote`（只显示 tooltip）与 `RunFailureNotice`
   （可见文本）名字相近，看代码的人容易认错。文件 `src/components/finding.tsx`。
 - **P3**：`RunFailureNotice` 的「CLI 原始原因可选中」目前没有对应的 UI 断言。
+- **P2**：`revealPath` 的 UNC 路径（`\\\\server\\share\\…`）会在「父等于自身」时
+  停止，但这条路径**没有在真实共享上验证过**，也没有断言。第 23 轮把它写进了
+  `install-info.js` 的注释，没有加夹具。文件 `install-info.js` /
+  `tools/install-info-smoke.mjs`。
 
 
 ### 一处与上轮简报不同的做法（留给下一个人）
