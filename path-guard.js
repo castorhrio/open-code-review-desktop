@@ -14,12 +14,32 @@ const path = require("path");
 //
 // `path.relative` already handles "..", sibling prefixes (`/repo` vs `/repo2`)
 // and different Windows drives, so the rule is expressed through it instead of
-// comparing string prefixes. On Windows the comparison is done on lower-cased
-// absolute paths; the relative path handed back to callers is unaffected.
+// comparing string prefixes.
+//
+// The case fold below is written out on purpose, but it is *not* what makes the
+// Windows answer right: `path.win32.relative` already lower-cases both sides
+// itself (asserted in `tools/path-guard-smoke.mjs`, together with the fact that
+// the answer is the same with the flag off). What fixed the bug was dropping the
+// string prefix, then, not a case rule. The fold stays because it states the
+// rule in this module rather than in an undocumented internal of the path
+// module; if that internal ever changed, this line is the one that would still
+// fold. Don't read it as "the flag is what makes Windows work".
 //
 // The path API and the case rule are injectable so the Windows answer can be
 // checked on Linux with `path.win32` — otherwise the one platform the bug
 // happened on would be the one platform a smoke test cannot run on.
+//
+// `caseInsensitive` therefore defaults to `process.platform` **as it was when
+// this module loaded**, not to a read inside `isInside`:
+//   - whether the filesystem folds case is a property of the machine the app is
+//     running on, and it does not change while the process lives, so re-reading
+//     `process.platform` per call would be a global read on every path
+//     comparison for no new information;
+//   - the default is what production gets; the parameter is what a caller (and
+//     `tools/path-guard-smoke.mjs`) can override. The smoke test must pass it
+//     explicitly together with `pathApi: path.win32` — a Windows answer asserted
+//     without it would be asserting the host's rule, i.e. the Linux answer while
+//     running on Linux, and the case bug would be back in the untested column.
 function isInside(
   root,
   candidate,

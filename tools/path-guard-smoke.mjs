@@ -7,7 +7,9 @@
 // happily open. They also had to be kept in sync by hand, which is how the two
 // answers drifted. `path-guard.js` is now the one implementation, and this
 // suite asserts the four basic answers, the Windows case answer (via
-// `path.win32`, so it runs on Linux), and that both call sites actually use it.
+// `path.win32`, so it runs on Linux), the two path shapes a hand-rolled prefix
+// comparison gets wrong without anyone noticing — a UNC share root and the
+// `\\?\` long-path prefix — and that both call sites actually use it.
 //
 // Run with `npm run audit:path`.
 import { createRequire } from "node:module";
@@ -61,6 +63,90 @@ const check = (name, ok, detail = "") => {
     !isInside("C:\\Repo", "C:\\Repo2\\sub", win)
   );
   check("Windows: a different drive is outside", !isInside("C:\\Repo", "D:\\repo", win));
+  // Recorded because it is easy to get the credit wrong: `path.win32.relative`
+  // lower-cases both sides itself, so the Windows case answer above comes from
+  // the path API and not from the `caseInsensitive` flag. The two checks below
+  // are what keep that honest — one pins the internal the answer currently rests
+  // on, the other pins that the flag is not silently load-bearing (the fold in
+  // `path-guard.js` is), so a future switch away from `relative` cannot leave
+  // "Windows works" green while the case bug is back.
+  check(
+    "`path.win32.relative` lower-cases both sides itself",
+    path.win32.relative("C:\\Repo", "c:\\repo\\sub") === "sub",
+    JSON.stringify(path.win32.relative("C:\\Repo", "c:\\repo\\sub"))
+  );
+  check(
+    "...so the Windows case answer does not depend on the flag being passed",
+    isInside("C:\\Repo", "c:\\repo\\sub", { pathApi: path.win32, caseInsensitive: false }) === true,
+    "the flag states the rule; `path.relative` is what currently lower-cases"
+  );
+}
+
+/* ---- UNC roots and the `\\?\` long-path prefix ----
+ * A prefix rule (`root + sep` / `startsWith(root)`) gets these wrong in ways
+ * nobody notices, because both shapes normalise differently from a drive path:
+ * `path.win32.resolve` turns a share root into `\\server\share\` (trailing
+ * separator) and leaves `\\?\` in place. That is exactly why the rule is
+ * expressed through `path.relative` instead of by comparing strings, and the two
+ * normalisations are asserted below rather than assumed — if a future Node
+ * changed them, the rule's answer is what this block is about, not the
+ * normalisation, so the check would say which of the two moved.
+ */
+{
+  const win = { pathApi: path.win32, caseInsensitive: true };
+  check(
+    "Windows: a UNC share root contains its subdirectory",
+    isInside("\\\\server\\share\\repo", "\\\\server\\share\\repo\\sub", win)
+  );
+  check(
+    "Windows: a UNC path is compared case-insensitively too, host and share included",
+    isInside("\\\\SERVER\\Share\\Repo", "\\\\server\\share\\repo\\sub", win)
+  );
+  check(
+    "Windows: a UNC sibling sharing the root as a string prefix is outside",
+    !isInside("\\\\server\\share\\repo", "\\\\server\\share\\repo2\\sub", win)
+  );
+  check(
+    "Windows: a different host with the same share path is outside",
+    !isInside("\\\\server\\share\\repo", "\\\\other\\share\\repo\\sub", win),
+    "the answer comes back absolute, which the last clause catches"
+  );
+  check(
+    "Windows: a different share on the same host is outside",
+    !isInside("\\\\server\\a", "\\\\server\\b", win)
+  );
+  check(
+    "Windows: a `..` escape out of a UNC root is outside",
+    !isInside("\\\\server\\share\\repo", "\\\\server\\share\\repo\\..\\other", win)
+  );
+  check(
+    "Windows: the \\\\?\\ long-path root contains its subdirectory regardless of case",
+    isInside("\\\\?\\C:\\Repo", "\\\\?\\C:\\repo\\sub", win)
+  );
+  check(
+    "Windows: a \\\\?\\ sibling sharing the prefix is outside",
+    !isInside("\\\\?\\C:\\Repo", "\\\\?\\C:\\Repo2\\sub", win)
+  );
+
+  // The two normalisations, written down because they are the reason the string
+  // prefix rule could look correct and still be wrong.
+  check(
+    "`path.win32.resolve` gives a share root a trailing separator",
+    path.win32.resolve("\\\\server\\share") === "\\\\server\\share\\",
+    JSON.stringify(path.win32.resolve("\\\\server\\share"))
+  );
+  check(
+    "...and leaves the \\\\?\\ long-path prefix in place",
+    path.win32.resolve("\\\\?\\C:\\Repo") === "\\\\?\\C:\\Repo",
+    JSON.stringify(path.win32.resolve("\\\\?\\C:\\Repo"))
+  );
+  check(
+    "...and the rule survives both: neither shape is judged by string prefix",
+    isInside("\\\\server\\share", "\\\\server\\share\\x", win) &&
+      isInside("\\\\?\\C:\\Repo", "\\\\?\\C:\\Repo\\sub", win) &&
+      !isInside("\\\\server\\share", "\\\\server\\share2\\x", win),
+    "resolve() adding a separator is why the UNC root case is the sharp one"
+  );
 }
 
 /* ---- the call sites use the shared rule, not their own spelling ---- */

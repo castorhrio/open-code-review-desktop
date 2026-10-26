@@ -638,6 +638,72 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
       JSON.stringify({ line: pin && pin.line, total: after.pins.length, missing: afterCoverage.missing })
     );
   }
+  // The other direction of the same count check: a place declared *twice*. The
+  // value check cannot see this — both copies equal the constant, so a suite
+  // that only compared values (the state before round 60) stayed green while one
+  // sentence was being checked twice and another maybe not at all. Built by
+  // copying the real doc and inserting one more `sha …` line inside the pin
+  // block, so the extra declaration is the only difference between the two.
+  const blockPinLine = blockPin ? docLines[blockPin.line - 1] : "";
+  const duplicatedDoc = blockPin
+    ? [
+        ...docLines.slice(0, blockPin.line),
+        blockPinLine,
+        ...docLines.slice(blockPin.line),
+      ].join("\n")
+    : "";
+  const duplicatedPins = findDocPins(duplicatedDoc).pins;
+  const duplicatedCoverage = pinPlaceCoverage(duplicatedPins);
+  check(
+    "declaring the pin block's SHA twice fails the count and names the duplicated place",
+    blockPin !== undefined &&
+      duplicatedPins.length === 4 &&
+      duplicatedCoverage.counts["pin 块"] === 2 &&
+      duplicatedCoverage.duplicated.length === 1 &&
+      duplicatedCoverage.duplicated[0] === "pin 块" &&
+      duplicatedCoverage.missing.length === 0 &&
+      !duplicatedCoverage.complete,
+    JSON.stringify(duplicatedCoverage)
+  );
+  check(
+    "...and every one of the four values still equals the constant, so only the count can go red",
+    duplicatedPins.length === 4 && describePinDisagreements(duplicatedPins, PINNED_SHA).length === 0,
+    JSON.stringify(describePinDisagreements(duplicatedPins, PINNED_SHA))
+  );
+  // The fixture is one inserted line, not a reworded document: if the copy
+  // differed anywhere else, the red above could be explained by that instead.
+  const duplicatedLines = duplicatedDoc.split(/\r?\n/);
+  check(
+    "...and the copy differs from the doc by exactly one inserted line",
+    blockPin !== undefined &&
+      duplicatedLines.length === docLines.length + 1 &&
+      duplicatedLines[blockPin.line - 1] === blockPinLine &&
+      duplicatedLines[blockPin.line] === blockPinLine &&
+      duplicatedLines
+        .filter((_, index) => index !== blockPin.line)
+        .every((line, index) => line === docLines[index]),
+    JSON.stringify({ docLines: docLines.length, copyLines: duplicatedLines.length })
+  );
+  // Duplicated and missing are two answers, not one: a place can be declared
+  // twice while another is gone, and reporting only "incomplete" would hide
+  // which of the two shapes was actually found (and send the reader to the wrong
+  // line). Built directly from pin shapes rather than from a mutated doc, because
+  // both shapes have to appear in the same answer.
+  const halfAndHalf = pinPlaceCoverage([
+    { where: "pin 块", sha: PINNED_SHA },
+    { where: "pin 块", sha: PINNED_SHA },
+    { where: "本轮 HEAD 核对 行", sha: PINNED_SHA },
+  ]);
+  check(
+    "...and a doubled place plus a missing one are reported as two separate answers",
+    halfAndHalf.duplicated.length === 1 &&
+      halfAndHalf.duplicated[0] === "pin 块" &&
+      halfAndHalf.missing.length === 1 &&
+      halfAndHalf.missing[0] === "正文固定 SHA" &&
+      !halfAndHalf.complete,
+    JSON.stringify(halfAndHalf)
+  );
+
   const channel = match ? /通路：(git|api|npm|none)/.exec(match[2]) : null;
   check(
     "the fixed line says which road checked the HEAD this round",

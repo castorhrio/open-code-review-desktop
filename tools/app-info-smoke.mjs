@@ -159,6 +159,52 @@ const base = {
       info.canUninstall === false,
     JSON.stringify(info)
   );
+  // `installInfo` is the one optional half of the input: `main.js` only has it
+  // when the install facts could be read, so "missing" is a real answer and not
+  // a caller mistake. `undefined` (the key present, the value absent) and `null`
+  // (the read failed) must both give the same shape — no `packaged`/`installDir`
+  // keys at all — rather than a half-filled block the settings page would render
+  // as "installed with no directory". Asserted on the key set, because
+  // `...undefined` and `...null` are only one character apart in the source.
+  const installKeys = ["packaged", "portable", "installDir", "userData", "executable", "canUninstall"];
+  const withoutInstall = (value) => formatAppInfo({ ...base, binary: { path: "/x" }, installInfo: value });
+  const undefInstall = withoutInstall(undefined);
+  check(
+    "installInfo: undefined drops every install field and keeps the rest",
+    undefInstall.binary === "/x" &&
+      installKeys.every((key) => !(key in undefInstall)) &&
+      undefInstall.configPath === base.configPath &&
+      undefInstall.appVersion === base.appVersion,
+    JSON.stringify(Object.keys(undefInstall).sort())
+  );
+  const nullInstall = withoutInstall(null);
+  check(
+    "installInfo: null is the same answer as undefined, not a thrown error",
+    nullInstall.binary === "/x" && installKeys.every((key) => !(key in nullInstall)),
+    JSON.stringify(Object.keys(nullInstall).sort())
+  );
+  check(
+    "...and the two absent shapes are key-for-key identical",
+    JSON.stringify(Object.keys(undefInstall).sort()) ===
+      JSON.stringify(Object.keys(nullInstall).sort()),
+    JSON.stringify([Object.keys(undefInstall).sort(), Object.keys(nullInstall).sort()])
+  );
+  check(
+    "...and a partial install block is passed through as given, without filling the gaps",
+    (() => {
+      const partial = formatAppInfo({
+        ...base,
+        binary: { path: "/x" },
+        installInfo: { packaged: false },
+      });
+      return (
+        partial.packaged === false &&
+        installKeys.slice(1).every((key) => !(key in partial))
+      );
+    })(),
+    "a caller that knows only half the facts must not receive invented ones"
+  );
+
   const shaped = Object.keys(info).sort();
   check(
     "the answer has the four app fields, the binary pair and the install facts",

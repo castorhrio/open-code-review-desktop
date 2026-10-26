@@ -12,6 +12,34 @@
 4. **不要**静默忽略上游 release：每轮把结论追加到下面「上游状态」，哪怕结论是
    「无新内容」。
 
+## 上游状态（最近检查：2026-10-27，第 61 轮）
+
+第 61 轮复核：**通路可达，结论仍是「无新内容」**。
+`git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
+refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
+（与第 49–60 轮同一个 commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
+`dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`。desktop 的 `^1.13.3` 无需改动，
+**无移植项**。
+
+本轮只动测试面与注释，把第 60 轮新引入的两个表面的边界钉死，另收 `app:info` 的可选输入：
+
+- `tools/path-guard-smoke.mjs` 补 UNC 与长路径（`\\?\`）用例：同主机同共享的子目录在
+  里面、大小写不同仍在里面、共享名前缀相同的兄弟在外、**换主机**在外、换共享在外、UNC 根上
+  的 `..` 逃逸在外。顺带记下一个容易领错功的发现：`path.win32.relative` 自身就把两边折成
+  小写，所以「Windows 不区分大小写」这条答案由 `path.relative` 给出，**不是**
+  `caseInsensitive` 旗标给的（旗标作为显式规则保留，但它不是修好这个 bug 的原因）。第 60 轮
+  注释里「On Windows the comparison is done on lower-cased absolute paths」容易被读成相反
+  的意思，已在 `path-guard.js` 改成实话，并补两条断言钉住「折大小写来自 `path.relative`」
+  与「把旗标关掉答案仍为 true」——否则将来换掉 `relative` 时，`caseInsensitive` 会变成
+  一条谁都不敢碰的空开关，而大小写答案静默跟着坏。
+- `tools/upstream-watch-smoke.mjs` 补 `pinPlaceCoverage` 的 `duplicated` 方向：复制真文档、
+  在 pin 块里**再插一行**同样的 SHA，要求 `duplicated === ["pin 块"]`、`missing` 为空、
+  `complete === false`；并断言四份声明的值**仍然全等于常量**（所以只有计数能看见它，这正是
+  第 60 轮之前的绿）、复制件与原文只差这一行、以及「某处写两遍 + 某处丢了」是两个分开的
+  答案而不是一句「不完整」。
+- `tools/app-info-smoke.mjs` 补 `installInfo` 缺失用例：`undefined` 与 `null` 都不得留下任何
+  install 字段、两者键集逐字相同，且半个 install 块按原样透传（不替调用方补默认值）。
+
 ## 上游状态（最近检查：2026-10-27，第 60 轮）
 
 第 60 轮复核：**三条通路都可达，结论仍是「无新内容」**。
@@ -251,7 +279,7 @@ desktop 的 `^1.13.3` 无需改动。第 47–48 轮欠的 `git fetch upstream -
 `audit:service` / `audit:config` / `audit:git` 仍是先变红的那一道，本轮这三条全绿。
 本轮的改动（发版 fallback 的搬移函数）与上游 CLI 无关。
 
-**自最近一次有内容变更（`v1.13.3` / `375f64c`）以来，第 27–59 轮复核均无新内容。**
+**自最近一次有内容变更（`v1.13.3` / `375f64c`）以来，第 27–61 轮复核均无新内容。**
 第 27–46、49–51、53、55、57–59 轮每轮都核对了 `git fetch upstream --tags`（或
 `git ls-remote` / GitHub API）以及 GitHub API 的 commits / tags / releases，三处一致：
 顶端仍是 `375f64c`，最新仍是 `v1.13.3`；第 47–48、52–54 轮只有 npm registry 一条通路
@@ -331,7 +359,7 @@ pin 或 ls-remote 给出的 SHA 短于 40 位时一律判「跳过」并说明�
 没变**，所以每轮的结论仍要写进上面「上游状态」——跳过时至少留下 `[UPSTREAM-DEBT]` 与
 「核对通路账」里的一行欠账。
 
-**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 60 轮：`git ls-remote` 可达，`refs/heads/main` 与 pin 一致；tag 与 npm 一致，GitHub API 与 git 一致；通路：git）**
+**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 61 轮：`git ls-remote` 可达，`refs/heads/main` 与 pin 一致；tag 与 pin 指向同一 commit；通路：git）**
 
 ### 核对通路账
 
@@ -357,12 +385,13 @@ pin 或 ls-remote 给出的 SHA 短于 40 位时一律判「跳过」并说明�
 | 58 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；tag 与 npm 一致 | — |
 | 59 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；API 与 npm 一致；pin 三处声明纳入断言 | — |
 | 60 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；pin 三处覆盖断言、路径越界统一、`app:info` 抽纯函数 | — |
+| 61 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；UNC / 长路径、pin 重复声明、`installInfo` 缺失三处测试收口 | — |
 
 「最近一次对照」只写**那一项最近被人工重新核对**的轮次。该列没有列出本轮，表示本轮
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
 对应行并把轮次与日期改成本轮。
 
-**第 46–60 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
+**第 46–61 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
 npm 通路可达，第 56 轮 git 超时但 API 可达），所以下表四行的「最近一次对照」停在第 45 轮是
 **没有理由重看**，不是忘了看：
 它记录的是「最后一次有人逐行读上游源码」的轮次，而不是「最后一次确认上游没变」的轮次。
