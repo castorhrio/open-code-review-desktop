@@ -1644,6 +1644,62 @@ check(
     svc.withholdReasonFor(svc.MATCH_ORDER),
   ])
 );
+/* ...and the other direction: the three rules that answer a question `ocr` asks
+ * still hand the Key out.
+ *
+ * The check above asks `withholdReasonFor` what each rule means, and the order
+ * shape asks the real `savedKeyFor` for an empty Key. Neither would notice the
+ * mapping being widened to "withhold anything that is not one constant": the
+ * reason table would still say "" for three rules while the lookup refused them
+ * somewhere else, and the settings form would open empty for every saved service
+ * — a Key that has to be retyped, every time, with no error to explain it.
+ *
+ * So each of the three rules is driven through the value-only caller with a real
+ * config file: the entry carries a URL, so the endpoint question cannot be what
+ * withholds it, and the only thing that can answer is the rule.
+ */
+const savedKeyForConfig = (config, name) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-saved-key-for-"));
+  const file = path.join(dir, "config.json");
+  fs.writeFileSync(file, JSON.stringify(config));
+  try {
+    return svc.savedKeyFor(name, "", file, "");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+};
+const exactConfig = { providers: { deepseek: { url: DEEPSEEK_URL, api_key: "sk-exact" } } };
+check(
+  "an exactly spelled entry hands its Key to the value-only caller",
+  savedKeyForConfig(exactConfig, "deepseek") === "sk-exact",
+  savedKeyForConfig(exactConfig, "deepseek")
+);
+const activeConfig = {
+  provider: "DeepSeek",
+  providers: {
+    deepseek: { url: DEEPSEEK_URL, api_key: "sk-lower" },
+    DeepSeek: { url: DEEPSEEK_URL, api_key: "sk-active" },
+  },
+};
+check(
+  "an entry the config's own provider names hands its Key out too",
+  svc.entryByName(activeConfig, "DEEPSEEK")?.rule === svc.MATCH_ACTIVE &&
+    savedKeyForConfig(activeConfig, "DEEPSEEK") === "sk-active",
+  `${svc.entryByName(activeConfig, "DEEPSEEK")?.rule} / ${savedKeyForConfig(activeConfig, "DEEPSEEK")}`
+);
+const registryConfig = {
+  provider: "corp-gateway",
+  providers: {
+    DeepSEEK: { url: DEEPSEEK_URL, api_key: "sk-first" },
+    deepseek: { url: DEEPSEEK_URL, api_key: "sk-third" },
+  },
+};
+check(
+  "and an entry wearing the registry's spelling hands its Key out",
+  svc.entryByName(registryConfig, "DEEPSEEK")?.rule === svc.MATCH_REGISTRY &&
+    savedKeyForConfig(registryConfig, "DEEPSEEK") === "sk-third",
+  `${svc.entryByName(registryConfig, "DEEPSEEK")?.rule} / ${savedKeyForConfig(registryConfig, "DEEPSEEK")}`
+);
 // A name nothing is called has no entry and no rule — the settings page asks
 // this for a form that was never saved.
 check(

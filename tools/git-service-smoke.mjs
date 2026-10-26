@@ -133,6 +133,56 @@ const badRef = await gitSvc.readFile(dir, "a.go", { ref: "no-such-ref" });
 check("an unresolvable ref fails instead of falling back", badRef.ok === false, badRef.ok ? "it succeeded" : "");
 check("...and is reported as an unresolvable ref", badRef.reason === "bad-ref", badRef.reason || "");
 
+/* ---- the same two reasons, asked where they are decided, in both directions ----
+ * The checks above reach `missing` through a file that exists on disk but not in
+ * the ref, and `bad-ref` through a ref that does not resolve. Neither says what
+ * the *other* reason must not say: a `bad-ref` answer that also claims the path
+ * is missing — or a `missing` answer that also claims the ref is unresolvable —
+ * carries the right `reason` and still sends the reader to fix the wrong thing.
+ *
+ * The path below exists nowhere (not on disk, not in the ref), which is the
+ * other spelling of "missing" (`path ... does not exist in 'HEAD'` rather than
+ * `exists on disk, but not in 'HEAD'`). Both are git's own sentences, which is
+ * exactly why `gitEnv()` pins `LC_ALL=C` / `LANG=C` in git-service.js: under a
+ * localised git these two checks turn into `failed`, and the stub table below is
+ * what pins the patterns themselves independently of the locale. So this block
+ * and that table are the two halves of one contract — a real git proves the
+ * sentences are produced, the table proves what happens when they are not.
+ */
+const noSuchPath = await gitSvc.readFileAtRef(dir, "不存在/的路径", "HEAD", 1, 5, 0);
+check(
+  "a path that exists nowhere is missing at a valid ref",
+  noSuchPath.ok === false && noSuchPath.reason === "missing",
+  `${noSuchPath.reason || "ok"} / ${noSuchPath.error || ""}`
+);
+check(
+  "...and the answer echoes the ref and the path it is about",
+  noSuchPath.ref === "HEAD" && noSuchPath.path === "不存在/的路径",
+  `${noSuchPath.ref} / ${noSuchPath.path}`
+);
+check(
+  "...and it does not blame the ref, which resolved fine",
+  !/无法解析/.test(noSuchPath.error || ""),
+  noSuchPath.error || ""
+);
+
+const badRefByPath = await gitSvc.readFileAtRef(dir, "a.go", "not-a-real-ref", 1, 5, 0);
+check(
+  "an unresolvable ref is bad-ref even when the path is fine",
+  badRefByPath.ok === false && badRefByPath.reason === "bad-ref",
+  `${badRefByPath.reason || "ok"} / ${badRefByPath.error || ""}`
+);
+check(
+  "...and that answer echoes the ref and the path too",
+  badRefByPath.ref === "not-a-real-ref" && badRefByPath.path === "a.go",
+  `${badRefByPath.ref} / ${badRefByPath.path}`
+);
+check(
+  "...and it does not claim the path is missing, which it is not",
+  !/找不到/.test(badRefByPath.error || ""),
+  badRefByPath.error || ""
+);
+
 /* ---- a wording that matches nothing is a plain failure ----
  * The reasons above are read out of git's own stderr, and git's wording is
  * not the app's to control: a localised git, or a newer git, says it

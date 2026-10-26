@@ -312,6 +312,65 @@ check(
   );
 }
 
+/* ---- saving an entry without switching the active service ----
+ * `setActive: false` is the "edit this entry, but keep running the old service"
+ * path, and the two skipped pairs are the whole difference: no `provider`, and
+ * no global `model` either (the model belongs to the selected service, and the
+ * selected service is not changing). The exact sequence is pinned, not just the
+ * absence of the pointer, because a `model` that slipped through would rewrite
+ * the model of the service the user is still on — a silent change of what the
+ * next run uses, which no per-field assertion would see.
+ *
+ * The config starts on another service on purpose: "did not switch" is only
+ * observable when there is something to stay on.
+ */
+{
+  const stub = makeStub({ providers: { other: { api_key: "sk-other" } } });
+  stub.state.provider = "other";
+  const h = make(stub);
+  const res = await h.save(null, {
+    provider: "DeepSeek",
+    isCustom: false,
+    apiKey: "sk-idle",
+    model: "deepseek-chat",
+    setActive: false,
+    effort: "high",
+    language: "zh",
+    maxTokens: "8192",
+  });
+  check("a save that must not switch the active service succeeds", res.ok === true, res.error);
+  const keys = stub.setPairs.map(([key]) => key);
+  check(
+    "its write order is the entry's fields, then the globals — no pointer, no global model",
+    JSON.stringify(keys) ===
+      JSON.stringify([
+        "providers.DeepSeek.api_key",
+        "providers.DeepSeek.model",
+        "effort",
+        "language",
+        "max_tokens",
+      ]),
+    JSON.stringify(keys)
+  );
+  check(
+    "and the active service is still the one from before the save",
+    stub.state.provider === "other",
+    JSON.stringify({ provider: stub.state.provider, providers: stub.state.providers })
+  );
+  check(
+    "with the edited entry really written, model included",
+    stub.state.providers.DeepSeek?.api_key === "sk-idle" &&
+      stub.state.providers.DeepSeek?.model === "deepseek-chat" &&
+      stub.state.providers.other?.api_key === "sk-other",
+    JSON.stringify(stub.state.providers)
+  );
+  check(
+    "and no global model was written for a service that was not selected",
+    stub.state.model === undefined,
+    JSON.stringify({ model: stub.state.model })
+  );
+}
+
 /* ---- a refused Key leaves the active service where it was ----
  * The point of the order, stated as the thing the user would notice: when the
  * Key write is the one the CLI refuses, the config must still be on the service
