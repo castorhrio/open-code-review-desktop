@@ -12,7 +12,24 @@
 4. **不要**静默忽略上游 release：每轮把结论追加到下面「上游状态」，哪怕结论是
    「无新内容」。
 
-## 上游状态（最近检查：2026-10-27，第 52 轮）
+## 上游状态（最近检查：2026-10-27，第 53 轮）
+
+第 53 轮复核：`git ls-remote https://github.com/alibaba/open-code-review.git
+refs/heads/main refs/tags/v1.13.3` 可达（退出码 0），`refs/heads/main` = `375f64c`
+（与第 49–52 轮同一个 SHA），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
+`dd92520`；`npm view @alibaba-group/open-code-review version dist-tags` = `1.13.3` /
+`latest: 1.13.3`。两条通路一致，**无新 commit、无新 release/tag**，desktop 的
+`^1.13.3` 无需改动。
+
+本轮改动：`tools/release-guard-smoke.mjs` 给「读 `release.mjs` 源码」这一处已知例外
+补了显式标注与反向保险（`release.mjs` 一旦出现正则字面量，检查会先红并要求扩展
+`stripComments`），并给 `DIST_SKIP` 加了覆盖性断言（白名单里的名字必须仍是 win 构建
+实际产出的名字）；`ocr-service.js` 的 `binaryPath()` 拆出 `binaryResolution()`，附
+`package` / `local` / `global` 来源，`app:info` 与运行日志都能读到。三处都不触碰
+上游 CLI 参数、输出解析或配置读写；`audit:service` / `audit:config` / `audit:git`
+本轮全绿。**无移植项。**
+
+## 上游状态（第 52 轮，2026-10-27）
 
 第 52 轮复核：`git ls-remote https://github.com/alibaba/open-code-review.git
 refs/heads/main refs/tags/v1.13.3` 本轮 40s 超时（`timeout` 返回 124，与第 47–48、51
@@ -109,6 +126,10 @@ npm run audit:git       # `git show` 的分类与按 ref 读文件
 上游 HEAD 的 `resolver.go`，改的是 `MATCH_RULES` 和这段模拟，不是把断言放宽。
 
 **但 audit 变红不等于覆盖完整**：下面这几处只有人工对照，改坏了不会让任何 audit 变红。
+
+「最近一次对照」只写**那一项最近被人工重新核对**的轮次。该列没有列出本轮，表示本轮
+复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
+对应行并把轮次与日期改成本轮。
 
 | 对照点 | 上游文件 | 人工看什么 | 最近一次对照（轮次 / 日期） |
 | --- | --- | --- | --- |

@@ -17,6 +17,15 @@ import { UpdateStatusLine } from "@/components/UpdateBanner";
 // configured stays visible so the picker can never hide the entry you are on.
 const POPULAR = ["deepseek", "openai", "anthropic", "gemini", "kimi", "z-ai", "dashscope", "siliconflow-cn", "openrouter", "ollama-cloud"];
 
+// The CLI is searched in three places, in order. Naming the level that answered
+// is what turns "the wrong binary ran" from a path-shape puzzle into a fact the
+// settings page states: the same path can come from any of the three.
+const BINARY_SOURCE_LABEL: Record<string, string> = {
+  package: "CLI 自带平台包",
+  local: "随程序安装的本地包",
+  global: "全局 npm 安装",
+};
+
 export function SettingsPanel() {
   const { config, providers, saveConfig, unsetProvider, testLlm, info, update, checkUpdate, installUpdate, setUpdateEnabled, openReleases, llmTest, reloadConfig } = useStore();
   const [picked, setPicked] = useState("");
@@ -757,6 +766,7 @@ export function SettingsPanel() {
             <InfoRow label="程序版本" value={`v${info?.appVersion ?? ""}`} />
             <InfoRow label="ocr CLI" value={info?.version ? `v${info.version}` : "未找到可执行文件"} />
             <InfoRow label="可执行文件" value={info?.binary || "—"} mono />
+            <InfoRow label="可执行文件来源" value={(info?.binarySource && BINARY_SOURCE_LABEL[info.binarySource]) || "—"} />
             <InfoRow label="安装目录" value={info?.installDir || "（免安装版运行在临时目录）"} mono />
             <InfoRow label="配置目录" value={info?.configPath || "—"} mono />
           </dl>

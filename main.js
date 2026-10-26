@@ -144,7 +144,8 @@ function buildMenu() {
 /* ---------------- ipc: app ---------------- */
 
 ipcMain.handle("app:info", async () => {
-  const bin = ocr.binaryPath();
+  const binary = ocr.binaryResolution();
+  const bin = binary.path;
   let version = "";
   if (bin) {
     const res = await ocr.exec(["version"]);
@@ -152,6 +153,7 @@ ipcMain.handle("app:info", async () => {
   }
   return {
     binary: bin,
+    binarySource: binary.source,
     version: version.replace(/^open-code-review\s*/, ""),
     configPath: ocr.CONFIG_PATH,
     docsUrl: DOCS_URL,

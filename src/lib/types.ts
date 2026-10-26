@@ -347,6 +347,9 @@ export interface ProviderEntry {
 
 export interface AppInfo {
   binary: string | null;
+  /** Which search level found the CLI: the package's own resolver, the copy
+   * beside the app, or a global npm install. Null when none was found. */
+  binarySource: "package" | "local" | "global" | null;
   version: string;
   configPath: string;
   docsUrl: string;

@@ -24,10 +24,25 @@ const check = (name, ok, detail = "") => {
   if (!ok) failures.push(name);
 };
 
-if (!svc.binaryPath()) {
+const resolution = svc.binaryResolution();
+if (!resolution.path) {
   console.error("No ocr binary found. Run npm install first.");
   process.exit(2);
 }
+// The path alone cannot say *which* of the three searches answered, and that is
+// the first question when an upstream package layout changes. Pin the answer's
+// shape here so `app:info` and the run log keep a value to print.
+check(
+  "binary resolution names the search level that found the CLI",
+  resolution.path === svc.binaryPath() &&
+    [svc.BINARY_SOURCE_PACKAGE, svc.BINARY_SOURCE_LOCAL, svc.BINARY_SOURCE_GLOBAL].includes(resolution.source),
+  JSON.stringify(resolution)
+);
+check(
+  "...and asks the same question twice without re-answering it differently",
+  JSON.stringify(svc.binaryResolution()) === JSON.stringify(resolution),
+  JSON.stringify(svc.binaryResolution())
+);
 
 /* ---- a throwaway git repo with a branch, so every mode has something ---- */
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-service-"));

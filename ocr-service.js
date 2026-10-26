@@ -7,6 +7,7 @@ const path = require("path");
 const { spawn } = require("child_process");
 
 let cachedBinary = null;
+let cachedBinarySource = null;
 
 // Mirrors @alibaba-group/open-code-review's own platform map. Keeping a copy
 // here means the fallback search below works even if the CLI package's layout
@@ -62,8 +63,33 @@ function globalRoots() {
   ].filter(Boolean);
 }
 
-function binaryPath() {
-  if (cachedBinary) return cachedBinary;
+// Which of the three searches found the binary. The path alone cannot say
+// whether the CLI's own resolver answered or whether we fell through to a
+// copy beside the app / a global npm install — and when the upstream package
+// layout moves, that is the first question. It is reported as a value
+// (`binaryResolution`) so `app:info` and the run log can say it instead of a
+// reader inferring it from the path's shape.
+const BINARY_SOURCE_PACKAGE = "package";
+const BINARY_SOURCE_LOCAL = "local";
+const BINARY_SOURCE_GLOBAL = "global";
+
+function rememberBinary(file, source) {
+  cachedBinary = ensureExecutable(file);
+  cachedBinarySource = source;
+  return { path: cachedBinary, source };
+}
+
+/**
+ * Resolve the CLI binary and say which search level answered.
+ *
+ * Answers `{ path, source }`: `source` is one of `package` (the CLI's
+ * `resolveNativeBinary`), `local` (the platform package beside this file) or
+ * `global` (a global npm install); both fields are `null` when nothing was
+ * found. `binaryPath()` is kept as the path-only view for the callers that
+ * spawn the binary and do not care where it came from.
+ */
+function binaryResolution() {
+  if (cachedBinary) return { path: cachedBinary, source: cachedBinarySource };
   const name = PLATFORM_PACKAGES[`${process.platform}-${process.arch}`];
 
   // 1) Let the CLI resolve its own platform package — it knows its layout best.
@@ -71,8 +97,7 @@ function binaryPath() {
     const { resolveNativeBinary } = require("@alibaba-group/open-code-review/scripts/platform");
     const resolved = resolveNativeBinary();
     if (resolved && resolved.path && fs.existsSync(resolved.path)) {
-      cachedBinary = ensureExecutable(resolved.path);
-      return cachedBinary;
+      return rememberBinary(resolved.path, BINARY_SOURCE_PACKAGE);
     }
   } catch (_) {}
 
@@ -80,8 +105,7 @@ function binaryPath() {
   if (name) {
     const dir = platformPackageDir(name);
     if (dir) {
-      cachedBinary = ensureExecutable(path.join(dir, "bin", BINARY_FILENAME));
-      return cachedBinary;
+      return rememberBinary(path.join(dir, "bin", BINARY_FILENAME), BINARY_SOURCE_LOCAL);
     }
   }
 
@@ -90,12 +114,15 @@ function binaryPath() {
     for (const root of globalRoots()) {
       const guess = path.join(root, name, "bin", BINARY_FILENAME);
       if (fs.existsSync(guess)) {
-        cachedBinary = ensureExecutable(guess);
-        return cachedBinary;
+        return rememberBinary(guess, BINARY_SOURCE_GLOBAL);
       }
     }
   }
-  return null;
+  return { path: null, source: null };
+}
+
+function binaryPath() {
+  return binaryResolution().path;
 }
 
 const CONFIG_PATH = path.join(os.homedir(), ".opencodereview", "config.json");
@@ -1450,7 +1477,7 @@ function settleActivity(progress, tool, state, ms, reason) {
 }
 
 function startRun(spec, onLine, onExit, onProgress) {
-  const bin = binaryPath();
+  const { path: bin, source: binSource } = binaryResolution();
   // Returning null lets the IPC caller report the failure synchronously instead
   // of firing an exit event before the run id reaches the renderer.
   if (!bin) return null;
@@ -1459,6 +1486,12 @@ function startRun(spec, onLine, onExit, onProgress) {
   // Surface the exact invocation: it is the wrapper's whole job, and without it
   // a surprising run cannot be diagnosed. API keys never appear here.
   onLine(id, `[cmd] ocr ${args.join(" ")}`);
+  // Which search level answered is the one fact the invocation cannot show:
+  // the same path shape can come from the CLI's resolver, the copy beside the
+  // app, or a global install. It is logged rather than only exposed in
+  // `app:info`, because a run that behaves differently from the one on the
+  // settings page is usually a different binary.
+  onLine(id, `[bin] ${bin} (${binSource})`);
   const child = spawn(bin, args, { cwd: spec.repo, windowsHide: true });
   running.set(id, child);
 
@@ -1642,6 +1675,10 @@ async function rulesCheck(repo, filePath, ruleFile) {
 
 module.exports = {
   binaryPath,
+  binaryResolution,
+  BINARY_SOURCE_PACKAGE,
+  BINARY_SOURCE_LOCAL,
+  BINARY_SOURCE_GLOBAL,
   CONFIG_PATH,
   readConfigView,
   entryByName,

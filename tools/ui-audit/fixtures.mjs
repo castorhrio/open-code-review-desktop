@@ -393,6 +393,7 @@ const CONFIG = {
 
 const INFO = {
   binary: "C:\\Users\\x\\AppData\\Local\\Programs\\Open Code Review\\resources\\app\\node_modules\\@alibaba-group\\ocr-win32-x64\\bin\\opencodereview.exe",
+  binarySource: "local",
   version: "1.12.13",
   configPath: CONFIG.path,
   docsUrl: "https://github.com/alibaba/open-code-review",

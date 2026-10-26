@@ -6,9 +6,18 @@
 // makes before any of that and the order it executes afterwards. Both live in
 // `release-guard.mjs`: `capture` is injected so the guard can be fed a git that
 // answers anything, and `executeRelease` takes its runners as arguments so the
-// plan can be executed against doubles that only record. Nothing here reads
-// `release.mjs`'s source — a check on how the file is written goes red on a
-// rewrite that behaves identically.
+// plan can be executed against doubles that only record.
+//
+// ONE DELIBERATE EXCEPTION, LABELLED SO IT IS NOT COPIED: the call site of the
+// platform refusal (`parsePlatform(process.platform)`, the `console.error`/exit
+// pair beside it) and the order it, the version read and the plan appear in are
+// asserted on `release.mjs`'s *text*. That script starts packaging the moment it
+// is imported, so the call site — not the function, which is called above — is
+// the one part no fixture can reach; without it, deleting the guard leaves every
+// other check green while the refusal becomes dead code. It is the only
+// source-text assertion in this file. A comment-stripping pass keeps header
+// prose from satisfying it, and a reverse check (below) refuses a regex literal,
+// which that stripper cannot model.
 //
 //   - a detached HEAD is the quiet one: every later step succeeds, and the
 //     release commit lands on a commit no branch points at, so the next
@@ -96,7 +105,9 @@ const SYMBOLIC = "git symbolic-ref --short HEAD";
 const STATUS = "git status --porcelain";
 
 /**
- * Source with comments removed and string literals left alone.
+ * Source with comments removed. String literals are left alone by default;
+ * with `blankStrings`, each character inside one becomes a space, leaving code
+ * only — which is what the regex-literal check below needs.
  *
  * Used for the two facts about `tools/release.mjs` that only its own text can
  * answer: the call site of the platform refusal, and the order the three input
@@ -104,18 +115,23 @@ const STATUS = "git status --porcelain";
  * block comment would survive entirely, so the header's prose could stand in for
  * code that is not there. Quote tracking keeps a `//` inside a string (a path, a
  * usage line) from being mistaken for a comment.
+ *
+ * This is NOT a JavaScript lexer: it models strings and comments, not regular
+ * expression literals. That is safe only while `release.mjs` has none, which the
+ * check at the bottom of the source-reading block enforces mechanically.
  */
-function stripComments(source) {
+function stripComments(source, { blankStrings = false } = {}) {
   let out = "";
   let i = 0;
   let quote = "";
+  const emitChar = (ch) => (blankStrings ? " " : ch);
   while (i < source.length) {
     const ch = source[i];
     const next = source[i + 1];
     if (quote) {
-      out += ch;
+      out += emitChar(ch);
       if (ch === "\\") {
-        out += next ?? "";
+        out += emitChar(next ?? "");
         i += 2;
         continue;
       }
@@ -125,7 +141,7 @@ function stripComments(source) {
     }
     if (ch === '"' || ch === "'" || ch === "`") {
       quote = ch;
-      out += ch;
+      out += emitChar(ch);
       i += 1;
       continue;
     }
@@ -291,7 +307,8 @@ function stripComments(source) {
   // sentence in the header cannot satisfy it on the guard's behalf.
   {
     const ROOT = path.resolve(import.meta.dirname, "..");
-    const script = stripComments(fs.readFileSync(path.join(ROOT, "tools", "release.mjs"), "utf8"));
+    const raw = fs.readFileSync(path.join(ROOT, "tools", "release.mjs"), "utf8");
+    const script = stripComments(raw);
     check(
       "the release script refuses the machine before it plans anything",
       /parsePlatform\(\s*process\.platform\s*\)/.test(script),
@@ -330,6 +347,21 @@ function stripComments(source) {
       "...and the check would fail if the version were read first",
       !(versionFirst[1] > versionFirst[0] && versionFirst[2] > versionFirst[1]),
       JSON.stringify(versionFirst)
+    );
+
+    // Reverse insurance for every source-text assertion above. `stripComments`
+    // is not a lexer: it knows strings and comments, not regex literals. A
+    // `/…/` containing `//` or `/*` would make it swallow the rest of a line or
+    // file, and the checks above would go green for text that is not code (or
+    // red for text that is). With strings blanked, any `/` left can only be a
+    // regex literal or a division — and division is not used in this script —
+    // so this fails loudly and says which fix it wants, instead of letting the
+    // stripper misread a future edit.
+    const codeOnly = stripComments(raw, { blankStrings: true });
+    check(
+      "the release script has no regex literal, which stripComments cannot model",
+      !codeOnly.includes("/"),
+      codeOnly.includes("/") ? `slash at ${codeOnly.indexOf("/")}; extend stripComments before trusting the source checks above` : ""
     );
   }
 }
@@ -1004,6 +1036,21 @@ function stripComments(source) {
   const SETUP = "open-code-review-desktop-0.1.14-setup.exe";
   const PORTABLE = "open-code-review-desktop-0.1.14-portable.exe";
   const LATEST = "latest.yml";
+  // What `electron-builder --win` may leave in its output dir for this
+  // project's two targets (package.json: nsis + portable): the app dir, the two
+  // YAML files electron-builder writes about the build (the debug one only when
+  // its logger is on), the update feed, and each target's artefact. `DIST_SKIP`
+  // is a claim about two of *these* names, so it only means something while
+  // they are still produced.
+  const WIN_OUTPUT = [
+    "win-unpacked",
+    "builder-debug.yml",
+    "builder-effective-config.yaml",
+    LATEST,
+    SETUP,
+    `${SETUP}.blockmap`,
+    PORTABLE,
+  ];
 
   /* the ordinary fallback: a previous release/win-unpacked is in the way */
   {
@@ -1183,6 +1230,19 @@ function stripComments(source) {
       "the skip list is still exactly the temp output dir's own two entries",
       DIST_SKIP.join(" | ") === "win-unpacked | builder-debug.yml",
       DIST_SKIP.join(" | ")
+    );
+    // Coverage, not another copy of the list: every name `DIST_SKIP` protects
+    // has to be a name the win build still writes. Without this, the list can
+    // outlive the artefact it names — electron-builder renames or drops
+    // `builder-debug.yml`, the skip rule protects nothing, and the check above
+    // stays green while `win-unpacked` (the one entry the move depends on) is
+    // silently no longer skipped. The expected set is the build fact; the skip
+    // list is the intent; this asserts the intent still has a referent.
+    const staleSkips = DIST_SKIP.filter((name) => !WIN_OUTPUT.includes(name));
+    check(
+      "every name the skip list protects is still a name the win build writes",
+      staleSkips.length === 0,
+      staleSkips.length ? `stale: ${staleSkips.join(" | ")}` : ""
     );
   }
 
