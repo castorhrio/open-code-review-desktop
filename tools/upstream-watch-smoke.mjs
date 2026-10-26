@@ -31,8 +31,27 @@ const check = (name, ok, detail = "") => {
   if (!ok) failures.push(name);
 };
 
-const fullSha = (short) => short + "0".repeat(40 - short.length);
-const PINNED_SHA = fullSha(PINNED_UPSTREAM.sha);
+const PINNED_SHA = PINNED_UPSTREAM.sha;
+// A full-length commit that is not the pinned one. Written out rather than
+// derived from the pin, so "moved" cannot become "pinned" by editing one string.
+const OTHER_SHA = "abcdef0" + "0".repeat(33);
+// The pinned commit with a different tail: the same 7-character prefix a human
+// would read in the prose, and a different commit.
+const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + "f".repeat(33);
+
+/* ---- the pin itself ---- */
+{
+  check(
+    "the pin is a whole 40-character commit, not the readable 7-character prefix",
+    /^[0-9a-f]{40}$/i.test(PINNED_SHA),
+    PINNED_SHA
+  );
+  check(
+    "the pin still names the release the doc's table was written against",
+    PINNED_UPSTREAM.tag === "v1.13.3" && /^v\d+\.\d+\.\d+$/.test(PINNED_UPSTREAM.tag),
+    PINNED_UPSTREAM.tag
+  );
+}
 
 /* ---- reading `git ls-remote` output ---- */
 {
@@ -58,26 +77,56 @@ const PINNED_SHA = fullSha(PINNED_UPSTREAM.sha);
     parseLsRemote("not-a-sha\trefs/heads/main\n") === null,
     JSON.stringify(parseLsRemote("not-a-sha\trefs/heads/main\n"))
   );
+  check(
+    "a short SHA is refused as well: it cannot say *which* commit it is",
+    parseLsRemote(`${PINNED_SHA.slice(0, 7)}\trefs/heads/main\n`) === null,
+    JSON.stringify(parseLsRemote(`${PINNED_SHA.slice(0, 7)}\trefs/heads/main\n`))
+  );
 }
 
 /* ---- the three verdicts ---- */
 {
   const pinned = upstreamDrift({ ok: true, sha: PINNED_SHA });
   check(
-    "a HEAD starting with the pinned SHA is pinned",
-    pinned.state === "pinned" && pinned.pinned === PINNED_UPSTREAM.sha,
+    "the pinned commit is pinned",
+    pinned.state === "pinned" && pinned.pinned === PINNED_SHA,
     JSON.stringify(pinned)
   );
   check(
     "the pin comparison ignores SHA case",
-    upstreamDrift({ ok: true, sha: fullSha("375F64C") }).state === "pinned",
-    JSON.stringify(upstreamDrift({ ok: true, sha: fullSha("375F64C") }))
+    upstreamDrift({ ok: true, sha: PINNED_SHA.toUpperCase() }).state === "pinned",
+    JSON.stringify(upstreamDrift({ ok: true, sha: PINNED_SHA.toUpperCase() }))
   );
-  const moved = upstreamDrift({ ok: true, sha: fullSha("abcdef0") });
+  const moved = upstreamDrift({ ok: true, sha: OTHER_SHA });
   check(
     "any other SHA is moved, and keeps the whole SHA for the sentence",
-    moved.state === "moved" && moved.sha === fullSha("abcdef0") && moved.pinned === PINNED_UPSTREAM.sha,
+    moved.state === "moved" && moved.sha === OTHER_SHA && moved.pinned === PINNED_SHA,
     JSON.stringify(moved)
+  );
+  // The one case a short pin would get wrong *and silently*: a new commit that
+  // shares the recorded prefix. Under prefix matching this is "pinned", i.e. the
+  // doc's four rows would stay unread with a green sentence on top of them.
+  const samePrefix = upstreamDrift({ ok: true, sha: SAME_PREFIX_SHA });
+  check(
+    "a SHA that only shares the pin's first 7 characters is moved, not pinned",
+    samePrefix.state === "moved" && samePrefix.sha === SAME_PREFIX_SHA,
+    JSON.stringify(samePrefix)
+  );
+  check(
+    "...and a short pin is refused as skipped instead of being prefix-matched",
+    upstreamDrift({ ok: true, sha: PINNED_SHA, pinned: PINNED_SHA.slice(0, 7) }).state === "skipped",
+    JSON.stringify(upstreamDrift({ ok: true, sha: PINNED_SHA, pinned: PINNED_SHA.slice(0, 7) }))
+  );
+  const shortPin = upstreamDrift({ ok: true, sha: PINNED_SHA, pinned: PINNED_SHA.slice(0, 7) });
+  check(
+    "...and says why: a prefix is not a commit",
+    shortPin.reason.includes("40") && shortPin.reason.includes("同一个 commit"),
+    shortPin.reason
+  );
+  check(
+    "a short SHA from the runner is skipped too, never judged as pinned",
+    upstreamDrift({ ok: true, sha: PINNED_SHA.slice(0, 7) }).state === "skipped",
+    JSON.stringify(upstreamDrift({ ok: true, sha: PINNED_SHA.slice(0, 7) }))
   );
   check(
     "a failed ls-remote is skipped, never 'unchanged'",
@@ -97,9 +146,9 @@ const PINNED_SHA = fullSha(PINNED_UPSTREAM.sha);
     JSON.stringify(upstreamDrift({ ok: true, sha: null }))
   );
   check(
-    "a caller-supplied pin drives the comparison instead of the module constant",
-    upstreamDrift({ ok: true, sha: fullSha("abcdef0"), pinned: "abcdef0" }).state === "pinned",
-    JSON.stringify(upstreamDrift({ ok: true, sha: fullSha("abcdef0"), pinned: "abcdef0" }))
+    "a caller-supplied full pin drives the comparison instead of the module constant",
+    upstreamDrift({ ok: true, sha: OTHER_SHA, pinned: OTHER_SHA }).state === "pinned",
+    JSON.stringify(upstreamDrift({ ok: true, sha: OTHER_SHA, pinned: OTHER_SHA }))
   );
 }
 
@@ -113,14 +162,14 @@ const PINNED_SHA = fullSha(PINNED_UPSTREAM.sha);
   );
   const pinned = formatDrift(upstreamDrift({ ok: true, sha: PINNED_SHA }));
   check(
-    "the pinned sentence names the SHA and says no rows need re-reading",
-    pinned.includes(PINNED_UPSTREAM.sha) && pinned.includes("一致"),
+    "the pinned sentence names the whole SHA and says no rows need re-reading",
+    pinned.includes(PINNED_SHA) && pinned.includes("一致"),
     pinned
   );
-  const moved = formatDrift(upstreamDrift({ ok: true, sha: fullSha("abcdef0") }));
+  const moved = formatDrift(upstreamDrift({ ok: true, sha: OTHER_SHA }));
   check(
     "the moved sentence is prominent, names the new SHA, and says it is not a failure",
-    moved.includes("已前进") && moved.includes("abcdef0") && moved.includes("不是失败"),
+    moved.includes("已前进") && moved.includes("abcdef0") && moved.includes(OTHER_SHA) && moved.includes("不是失败"),
     moved
   );
   const labels = ROWS_TO_REREAD.map((row) => row.match(/^[^（—]+/)[0].trim());
@@ -134,13 +183,28 @@ const PINNED_SHA = fullSha(PINNED_UPSTREAM.sha);
     ROWS_TO_REREAD.length === 4 && new Set(ROWS_TO_REREAD).size === 4,
     JSON.stringify(ROWS_TO_REREAD)
   );
+  // The prefix-collision sentence must not be mistakable for the quiet one.
+  const movedSamePrefix = formatDrift(upstreamDrift({ ok: true, sha: SAME_PREFIX_SHA }));
+  check(
+    "the same-prefix sentence does not read as a typo: it says the two prefixes match",
+    movedSamePrefix.includes("已前进") &&
+      movedSamePrefix.includes(SAME_PREFIX_SHA) &&
+      movedSamePrefix.includes("前 7 位相同"),
+    movedSamePrefix.split("\n")[0]
+  );
+  check(
+    "...and the plain moved sentence does not carry that aside",
+    !moved.includes("前 7 位相同"),
+    moved.split("\n")[0]
+  );
 }
 
 /* ---- the command never fails a caller ---- */
 {
   const cases = [
     ["pinned", () => ({ status: 0, stdout: `${PINNED_SHA}\trefs/heads/main\n` }), "pinned"],
-    ["moved", () => ({ status: 0, stdout: `${fullSha("abcdef0")}\trefs/heads/main\n` }), "moved"],
+    ["moved", () => ({ status: 0, stdout: `${OTHER_SHA}\trefs/heads/main\n` }), "moved"],
+    ["same prefix", () => ({ status: 0, stdout: `${SAME_PREFIX_SHA}\trefs/heads/main\n` }), "moved"],
     ["non-zero exit", () => ({ status: 128, stderr: "fatal: unable to access" }), "skipped"],
     ["thrown spawn", () => {
       throw new Error("spawn git ENOENT");
@@ -164,7 +228,7 @@ const PINNED_SHA = fullSha(PINNED_UPSTREAM.sha);
       );
     }
   }
-  const moved = runUpstreamWatch(() => ({ status: 0, stdout: `${fullSha("abcdef0")}\trefs/heads/main\n` }));
+  const moved = runUpstreamWatch(() => ({ status: 0, stdout: `${OTHER_SHA}\trefs/heads/main\n` }));
   check("the command's text is the formatted verdict", moved.text === formatDrift(moved.verdict), moved.text);
 }
 
@@ -172,7 +236,9 @@ const PINNED_SHA = fullSha(PINNED_UPSTREAM.sha);
 {
   const doc = fs.readFileSync(SYNC_DOC, "utf8");
   // One line, fixed shape: the reader should not have to skim a paragraph to
-  // learn whether the current round was actually checked.
+  // learn whether the current round was actually checked. It carries the whole
+  // 40-character commit for the same reason the pin does — a 7-character prefix
+  // cannot tell two commits apart.
   const match = doc.match(/本轮 HEAD 核对：`([0-9a-f]{7,40})`（([^）]+)）/);
   check(
     "the sync doc carries a fixed '本轮 HEAD 核对' line with a SHA and a qualifier",
@@ -180,9 +246,14 @@ const PINNED_SHA = fullSha(PINNED_UPSTREAM.sha);
     match ? `${match[1]}（${match[2]}）` : "missing"
   );
   check(
-    "that line's SHA is the SHA the sentinel compares against",
-    match !== null && match[1].toLowerCase().startsWith(PINNED_UPSTREAM.sha.toLowerCase()),
-    match ? `${match[1]} vs ${PINNED_UPSTREAM.sha}` : "missing"
+    "that line's SHA is exactly the SHA the sentinel compares against",
+    match !== null && match[1].toLowerCase() === PINNED_SHA.toLowerCase(),
+    match ? `${match[1]} vs ${PINNED_SHA}` : "missing"
+  );
+  check(
+    "the doc's fixed line is a whole commit too, not a prefix",
+    match !== null && match[1].length === 40,
+    match ? `${match[1].length} chars` : "missing"
   );
   const tableAt = doc.indexOf("| 对照点 | 上游文件 |");
   check(

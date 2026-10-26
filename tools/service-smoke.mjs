@@ -153,9 +153,26 @@ check(
   // path it answers with sits *outside* node_modules on purpose: the level
   // reported has to come from what the resolver said, not from the shape of a
   // path we planted where the third search looks.
+  //
+  // It also counts its own calls, and answers nothing from the second call on:
+  // the tree holds no platform package and no global root, so a second search
+  // would come back empty. That is how "the hit is remembered" becomes a value
+  // instead of a hope — if `binaryResolution()` searched again, `again` would be
+  // `{ path: null, source: null }` and the counter would read 2.
+  const calls = path.join(tree, "resolver-calls.txt");
+  fs.writeFileSync(calls, "");
   fs.writeFileSync(
     path.join(pkg, "scripts", "platform.js"),
-    "exports.resolveNativeBinary = () => ({ path: " + JSON.stringify(bin) + " });\n"
+    [
+      'const fs = require("fs");',
+      "let calls = 0;",
+      "exports.resolveNativeBinary = () => {",
+      "  calls += 1;",
+      "  fs.appendFileSync(" + JSON.stringify(calls) + ', "call\\n");',
+      "  return calls === 1 ? { path: " + JSON.stringify(bin) + " } : null;",
+      "};",
+      "",
+    ].join("\n")
   );
   const answer = await resolveIn(tree, "only-tree");
   check(
@@ -167,6 +184,21 @@ check(
     "...and asking again answers the same thing, not a second-guess",
     JSON.stringify(answer.again) === JSON.stringify(answer.first),
     JSON.stringify(answer.again)
+  );
+  // A hit is cached: the second question is answered from what the first search
+  // said, not by asking the CLI's resolver again. Without the cache this reads
+  // `again = { path: null, source: null }` (the stub answers nothing on the
+  // second call) and `calls = 2`, so both halves of the check can fail.
+  const resolverCalls = fs.readFileSync(calls, "utf8").split("\n").filter((line) => line.trim()).length;
+  check(
+    "a hit is remembered: two binaryResolution() calls ask the search exactly once",
+    resolverCalls === 1 && answer.again.source === "package" && answer.again.path === bin,
+    JSON.stringify({ resolverCalls, again: answer.again })
+  );
+  check(
+    "...and the second answer is the cached one, so the source does not change under a run",
+    answer.again.source === answer.first.source,
+    JSON.stringify({ first: answer.first.source, again: answer.again.source })
   );
   fs.rmSync(tree, { recursive: true, force: true });
 }
