@@ -108,6 +108,12 @@ const makeStub = ({ providers = {}, customProviders = {}, registry = ["deepseek"
   };
   const calls = [];
   const setPairs = [];
+  // Counts *calls* to `setConfig`, not pairs. "Nothing was written" is asserted
+  // with `calls`/`setPairs` elsewhere, and both stay empty for a `setConfig([])`
+  // — a write layer that was asked for an empty sequence and wrote nothing. The
+  // refusal's contract is stronger than that: the pairs never leave the handler,
+  // so the write layer is not consulted at all.
+  let setCalls = 0;
   const unsetCalls = [];
   const registryCalls = [];
   const lookupCalls = [];
@@ -165,6 +171,7 @@ const makeStub = ({ providers = {}, customProviders = {}, registry = ["deepseek"
     ...real,
     exec,
     setConfig: async (pairs) => {
+      setCalls += 1;
       setPairs.push(...pairs);
       const out = [];
       for (const [key, value] of pairs) {
@@ -210,6 +217,9 @@ const makeStub = ({ providers = {}, customProviders = {}, registry = ["deepseek"
     state,
     calls,
     setPairs,
+    get setCalls() {
+      return setCalls;
+    },
     unsetCalls,
     registryCalls,
     lookupCalls,
@@ -666,6 +676,81 @@ check(
       stub.state.custom_providers["my.Gateway"]?.url === "https://gw.example/v1" &&
       stub.state.providers["my.gateway"]?.api_key === "sk-dead",
     JSON.stringify(stub.state)
+  );
+}
+
+/* ---- a refused save never reaches the write layer ----
+ * The refusal checks above assert `stub.calls.length === 0`, which is the `exec`
+ * seam: no `config set` reached the CLI. That leaves one shape uncovered — a
+ * handler that called `ocr.setConfig([])` and let the write layer write nothing
+ * would make zero exec calls, keep `setPairs` empty, and still have crossed the
+ * boundary the refusal exists to hold. `setCalls` counts the call itself, so
+ * "refused" means *refused before asking*, which is also what makes the refusal
+ * cheap enough to run on every keystroke of the form.
+ *
+ * Both clash sources are checked: the built-in one (`DeepSeek` vs `deepseek` in
+ * `providers`) and the custom one (`my.Gateway` vs `my.gateway` in
+ * `custom_providers`), because the two are decided by the same function but by
+ * different sections, and a refactor that moved one of them after the write
+ * would leave the other looking fine.
+ */
+{
+  const stub = makeStub({ providers: { deepseek: { api_key: "sk-stale" } } });
+  const h = make(stub);
+  const res = await h.save(null, {
+    provider: "DeepSeek",
+    isCustom: false,
+    apiKey: "sk-new",
+    model: "deepseek-chat",
+    setActive: true,
+  });
+  check("a built-in spelling clash is a refusal", res.ok === false, JSON.stringify({ ok: res.ok, error: res.error }));
+  check(
+    "and it never asks the write layer for anything, not even an empty sequence",
+    stub.setCalls === 0 && stub.setPairs.length === 0 && stub.calls.length === 0,
+    `${stub.setCalls} setConfig call(s), ${stub.setPairs.length} pair(s), ${stub.calls.length} exec call(s)`
+  );
+  check(
+    "so the entry it refused over still has its own Key and the config is unchanged",
+    stub.state.providers.deepseek?.api_key === "sk-stale" &&
+      stub.state.providers.DeepSeek === undefined &&
+      stub.state.provider === "",
+    JSON.stringify(stub.state)
+  );
+  check("and the refusal still carries the sentence for the page", String(res.error).includes("deepseek"), res.error);
+}
+{
+  const stub = makeStub({ customProviders: { "my.gateway": { api_key: "sk-stale" } } });
+  const h = make(stub);
+  const res = await h.save(null, {
+    provider: "my.Gateway",
+    isCustom: true,
+    apiKey: "sk-new",
+    setActive: true,
+  });
+  check("a custom spelling clash is a refusal too", res.ok === false, JSON.stringify({ ok: res.ok, error: res.error }));
+  check(
+    "and it also stops before the write layer",
+    stub.setCalls === 0 && stub.setPairs.length === 0 && stub.calls.length === 0,
+    `${stub.setCalls} setConfig call(s), ${stub.setPairs.length} pair(s), ${stub.calls.length} exec call(s)`
+  );
+  check(
+    "with the clashing custom entry untouched",
+    stub.state.custom_providers["my.gateway"]?.api_key === "sk-stale" && stub.state.provider === "",
+    JSON.stringify(stub.state)
+  );
+}
+// ...and the counter is not simply always zero: a save that is *not* refused
+// must reach the write layer exactly once, or every assertion above would pass
+// on a handler that never wrote anything at all.
+{
+  const stub = makeStub();
+  const h = make(stub);
+  const res = await h.save(null, { provider: "DeepSeek", isCustom: false, apiKey: "sk-new", setActive: true });
+  check(
+    "a save with no clash does reach the write layer, exactly once",
+    res.ok === true && stub.setCalls === 1 && stub.setPairs.length > 0,
+    `${res.ok} / ${stub.setCalls} call(s) / ${stub.setPairs.length} pair(s)`
   );
 }
 

@@ -171,7 +171,12 @@ const make = ({
     plan.ok === false && refusal(plan).includes("设置 → 应用") && !refusal(plan).includes("免安装版"),
     refusal(plan)
   );
-  check("「打开安装目录」 is refused", tools.installDirPlan().ok === false);
+  const devDirPlan = tools.installDirPlan();
+  check(
+    "「打开安装目录」 is refused, and the portable story is what this shape gets",
+    devDirPlan.ok === false && refusal(devDirPlan).includes("免安装版运行时解压在临时目录"),
+    refusal(devDirPlan)
+  );
 }
 
 /* ---------------- shape 4: installed, uninstaller missing ---------------- */
@@ -202,7 +207,21 @@ const make = ({
   const dirPlan = tools.installDirPlan();
   check(
     "「打开安装目录」 refuses a directory that is not there",
-    dirPlan.ok === false && refusal(dirPlan).includes("没有安装目录"),
+    dirPlan.ok === false && refusal(dirPlan).includes("安装目录已经不存在"),
+    refusal(dirPlan)
+  );
+  // The sentence for this shape must not borrow the portable story: `installDir`
+  // is non-empty here (the info still names the root it was installed into), so
+  // "免安装版运行时解压在临时目录" would describe a packaging mode this copy is
+  // not in, and send the user looking for the wrong cause.
+  check(
+    "and it does not tell an installed copy the portable story",
+    !refusal(dirPlan).includes("免安装版"),
+    refusal(dirPlan)
+  );
+  check(
+    "while it still names the directory that went missing",
+    refusal(dirPlan).includes(gone) && dirPlan.path === gone,
     refusal(dirPlan)
   );
 }
@@ -709,7 +728,11 @@ for (const platform of ["darwin", "linux"]) {
     exists: (p) => p !== installed,
   });
   const plan = tools.installDirPlan();
-  check("a directory the injected exists calls missing is refused", plan.ok === false && refusal(plan).includes("没有安装目录"), JSON.stringify(plan));
+  check(
+    "a directory the injected exists calls missing is refused as missing, not as portable",
+    plan.ok === false && refusal(plan).includes("安装目录已经不存在") && !refusal(plan).includes("免安装版"),
+    JSON.stringify(plan)
+  );
   check("and its uninstaller is not looked for", tools.uninstallerPath(installed) === "");
   check("so 「卸载」 is not offered either", tools.uninstallPlan().ok === false);
 }
@@ -748,8 +771,10 @@ for (const platform of ["darwin", "linux"]) {
   check("main.js no longer defines uninstallerPath itself", !/function uninstallerPath\s*\(/.test(main));
   check("main.js no longer defines revealPath itself", !/function revealPath\s*\(/.test(main));
   check(
-    "the four refusal sentences live in install-info.js only",
-    ["当前形态没有安装目录", "免安装版没有卸载器", "没有找到卸载程序", "路径不存在："].every((s) => !main.includes(s))
+    "the five refusal sentences live in install-info.js only",
+    ["当前形态没有安装目录", "安装目录已经不存在", "免安装版没有卸载器", "没有找到卸载程序", "路径不存在："].every(
+      (s) => !main.includes(s)
+    )
   );
   check("main.js still routes 打开安装目录 and 卸载 through the module", /install\.installDirPlan\(\)/.test(main) && /install\.uninstallPlan\(\)/.test(main));
   // A refusal is only worth anything if it reaches the screen: the handler must

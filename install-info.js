@@ -93,10 +93,22 @@ function createInstall({
   // answers with below. It used to be just `{ ok: false, error }`, so the one
   // failure the renderer can do nothing about (there is no directory to open)
   // arrived in a different shape from every other "open a directory" failure.
+  //
+  // Two different facts used to share one sentence here: `!dir` ("this shape has
+  // no install directory" — portable, or a `npm run dev` copy, where nothing is
+  // missing) and `dir` that `exists()` denies ("the directory this copy was
+  // installed into is gone" — moved, deleted, or an uninstall that left the app
+  // running). Telling the second case about a portable build's temp extraction
+  // sends the user looking for a non-existent packaging mode instead of the
+  // directory they may be able to restore or reinstall to. So each says what it
+  // knows: the shape has no directory, or the directory it names is not there.
   function installDirPlan() {
     const dir = installInfo().installDir;
-    if (!dir || !exists(dir)) {
+    if (!dir) {
       return { ok: false, error: "当前形态没有安装目录（免安装版运行时解压在临时目录）", action: OPEN_DIR, path: dir };
+    }
+    if (!exists(dir)) {
+      return { ok: false, error: `安装目录已经不存在：${dir}（可能已被移动或删除）`, action: OPEN_DIR, path: dir };
     }
     return { ok: true, dir };
   }

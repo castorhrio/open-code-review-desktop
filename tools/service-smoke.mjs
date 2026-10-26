@@ -1742,6 +1742,112 @@ check(
   activeKeyAnswer.key === "sk-provider-spelling" && activeKeyAnswer.reason === "",
   `${activeKeyAnswer.reason} | ${activeKeyAnswer.key}`
 );
+/* ---- the rule order is a projection of the upstream resolver ----
+ * Everything above asserts *our* precedence: exact before active before
+ * registry before order. That is the shape of a closed test — it keeps passing
+ * if `ocr` starts opening a different entry than the one we rank first, because
+ * the only implementation being compared is ours. The justification for
+ * MATCH_ACTIVE sitting above MATCH_REGISTRY is not a preference, it is a fact
+ * about upstream v1.13.3, `internal/llm/resolver.go`: `tryProviderConfig` tests
+ * the name against the registry (case-insensitive) and then reads
+ * `cfg.Providers[cfg.Provider]` — the *raw* string from config.json, not the
+ * registry's spelling. Two entries whose names differ only by case are two map
+ * keys, so which one gets opened is decided by the file's own spelling.
+ *
+ * So this section does not assert the order at all. It recomputes the answer
+ * the way upstream does — a raw map read with no case folding and no fallback —
+ * and asserts that `entryByName` names the same entry, Key included. If upstream
+ * starts folding case here, starts preferring the registry's spelling, or grows
+ * a fallback for a miss, the simulation below stops agreeing with the real CLI
+ * and this check goes red *before* a user gets a Key from an entry no run opens.
+ *
+ * When it goes red, read `internal/llm/resolver.go` at upstream HEAD before
+ * touching anything: the fix belongs in MATCH_RULES (and in this simulation,
+ * which is meant to be a dumb transcription of upstream, not a second opinion),
+ * and it is a behaviour change for the settings page — not a test to relax.
+ * `docs/OCR-UPSTREAM-SYNC.md` lists this file as a manual comparison point for
+ * the same reason: `audit:service` can only go red on the shapes simulated here.
+ */
+const UPSTREAM_RESOLVER = Object.freeze({
+  // The upstream revision this probe was transcribed from. A newer version is
+  // not wrong by itself; re-read `lookup` there and move both sides together.
+  tag: "v1.13.3",
+  file: "internal/llm/resolver.go",
+  lookup: "cfg.Providers[cfg.Provider]",
+});
+// Upstream's read, transcribed: `providers[String(provider)]` with no case
+// folding and no fallback to the registry's spelling. `null` is the miss that
+// upstream refuses with "provider X is set but not configured in providers
+// section" — the shape where no run opens an entry at all.
+const upstreamOpens = (config) => (config.providers || {})[String(config.provider || "")] || null;
+const RESOLVER_PROBE_SHAPES = [
+  {
+    // The shape that decides the order: `provider` names one spelling, the
+    // registry names the other, and the two entries carry different Keys.
+    label: "the config's provider and the registry disagree on spelling",
+    config: ACTIVE_VS_REGISTRY_KEY_SHAPE,
+    name: "DEEPSEEK",
+  },
+  {
+    // The same two entries with `provider` on the registry's spelling: upstream
+    // opens the other one, so our answer has to move with it rather than stay
+    // on "whatever the registry printed".
+    label: "the config's provider is the registry's spelling",
+    config: {
+      provider: "deepseek",
+      providers: { DeepSeek: { api_key: "sk-upper" }, deepseek: { api_key: "sk-lower" } },
+    },
+    name: "DEEPSEEK",
+  },
+  {
+    // `provider` names another service, so `cfg.Providers[cfg.Provider]` misses
+    // and upstream refuses the config: no run opens an entry. The file also
+    // spells the name a variant way (`DeepSeek`, neither the config's provider
+    // nor the registry's `deepseek`), so no rule but file order applies — and the
+    // rules must not name an entry either. This is the half of the contract a
+    // rule moved upwards would break loudly.
+    label: "the provider names another service, so upstream opens nothing",
+    config: { provider: "corp-gateway", providers: { DeepSeek: { api_key: "sk-only" } } },
+    name: "DEEPSEEK",
+  },
+];
+// One shape is deliberately *not* in the probe: `provider` empty (or naming some
+// other service) while the file spells the name the registry way. Upstream opens
+// nothing there — the run is refused before any entry is read — but the form is
+// editing that service, so the registry rule answers and its saved Key is
+// reused. The probe's question is "which entry does a run open", and that shape
+// has no run; it is pinned as the deliberate case in THIRD_SPELLING_SHAPE below.
+
+const activeIndex = (svc.MATCH_RULES || []).findIndex((item) => item.rule === svc.MATCH_ACTIVE);
+const registryIndex = (svc.MATCH_RULES || []).findIndex((item) => item.rule === svc.MATCH_REGISTRY);
+check(
+  `${UPSTREAM_RESOLVER.tag} ${UPSTREAM_RESOLVER.file} reads ${UPSTREAM_RESOLVER.lookup}, so the active rule is asked before the registry rule`,
+  activeIndex > -1 && registryIndex > -1 && activeIndex < registryIndex,
+  `active@${activeIndex}, registry@${registryIndex}`
+);
+for (const { label, config, name } of RESOLVER_PROBE_SHAPES) {
+  const opened = upstreamOpens(config);
+  const answered = svc.entryByName(config, name);
+  if (!opened) {
+    check(
+      `upstream opens nothing (${label}), so the answer names no entry`,
+      Boolean(answered) && answered.namesEntry === false && answered.entry === null,
+      answered ? `${answered.rule}/${answered.namesEntry}` : "no answer at all"
+    );
+    continue;
+  }
+  check(
+    `the answer names the entry upstream opens (${label})`,
+    Boolean(answered) &&
+      answered.namesEntry === true &&
+      answered.entry !== null &&
+      answered.entry.api_key === opened.api_key,
+    `${answered ? answered.rule : "no answer"} <- upstream ${opened.api_key}${
+      answered && answered.entry ? `, ours ${answered.entry.api_key}` : ""
+    }`
+  );
+}
+
 // The endpoint the CLI's own table gives the built-in service. Declared before
 // the shapes that use it: the third-spelling and order entries carry a URL on
 // purpose, so the endpoint question cannot be what withholds a Key here and the
