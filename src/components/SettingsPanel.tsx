@@ -38,6 +38,16 @@ export function SettingsPanel() {
   // the answer itself (reason + wording + tone), not re-derived in the renderer
   // — the wording is written where the reasons are, so the two cannot drift.
   const [savedKey, setSavedKey] = useState<Awaited<ReturnType<typeof api.savedKey>> | null>(null);
+  // Whether that answer came back at all, and if it did not, *why not*. Four
+  // states, not two: "the main process has not answered yet" and "the main
+  // process could not answer" are both "we do not know", and neither may be
+  // rendered as "there is no Key" — the sentence this field used to fall back
+  // to. That fallback was the optimistic one: it told the user their saved Key
+  // would be reused (or that they had none) while the lookup that decides that
+  // had not even run. A lookup that failed is not evidence either way, so it
+  // gets its own sentence, and it says the fix: ask again. ("idle" is the
+  // fourth: there is no service to ask about yet.)
+  const [savedKeyState, setSavedKeyState] = useState<"idle" | "loading" | "ok" | "failed">("idle");
 
   useEffect(() => {
     if (!config) return;
@@ -125,19 +135,29 @@ export function SettingsPanel() {
   useEffect(() => {
     if (!config || !name) {
       setSavedKey(null);
+      setSavedKeyState("idle");
       return;
     }
     let live = true;
+    setSavedKeyState("loading");
     api
       .savedKey({ name, url: endpoint })
       .then((res) => {
-        if (live) setSavedKey(res);
+        if (live) {
+          setSavedKey(res);
+          setSavedKeyState("ok");
+        }
       })
-      // A lookup that could not run is not a reason to claim a Key is reusable:
-      // fall back to the plain "nothing saved" wording rather than to the
-      // optimistic one.
+      // A lookup that could not run is not a reason to claim a Key is reusable —
+      // and not a reason to claim there is none, either. The old fallback threw
+      // the answer away and rendered the plain "nothing saved" wording, which
+      // sent the user to type a Key that may well be sitting in the config
+      // already. The failure gets its own state and its own sentence.
       .catch(() => {
-        if (live) setSavedKey(null);
+        if (live) {
+          setSavedKey(null);
+          setSavedKeyState("failed");
+        }
       });
     return () => {
       live = false;
@@ -335,7 +355,19 @@ export function SettingsPanel() {
                 <Field
                   label="API Key"
                   hint={
-                    savedKey && savedKey.reason ? (
+                    savedKeyState === "failed" ? (
+                      // The lookup did not answer. Saying "there is no Key" here
+                      // would send the user to type one that may already be in the
+                      // config; saying "your Key is reused" would promise
+                      // something nothing has checked. Say what is true: the
+                      // answer is missing, and 刷新 asks again (the button
+                      // re-reads the config, which re-runs this lookup).
+                      <span className="text-warn">
+                        无法确认是否已有可用的 Key：主进程没有回答这次查询。点「刷新」重试，或把 Key 直接填进来。
+                      </span>
+                    ) : savedKeyState === "loading" ? (
+                      "正在确认是否已有可用的 Key…"
+                    ) : savedKey && savedKey.reason ? (
                       <span className={savedKey.hint.tone === "warn" ? "text-warn" : undefined}>{savedKey.hint.text}</span>
                     ) : entry.hasKey ? (
                       `已保存：${entry.keyPreview || "（由命令取键）"}　留空表示保持不变`

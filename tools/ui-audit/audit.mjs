@@ -3092,6 +3092,28 @@ await shoot(page, "96-report-run-failure-budget", {
   },
 });
 
+// The Key field when the lookup that decides "may I leave the Key blank?"
+// never answers. The renderer used to drop the answer and fall back to the
+// sentence it always used to show — "已保存：…　留空表示保持不变" — which is a
+// promise nothing has checked: the lookup is exactly the thing that says
+// whether the saved Key will be used for this endpoint. So the failure has to
+// show as a failure: the form does not know, and 刷新 asks again.
+//
+// The other wrong answer is just as bad and just as easy to fall into: "该服务
+// 还没有 Key" sends the user to type one that may already be in the config.
+await shoot(page, "99-settings-savedkey-ipc-fail", {
+  query: "?savedkey=ipc-fail",
+  after: nav("设置"),
+  expect: async (page) => {
+    const text = await page.locator("main").innerText();
+    const out = [];
+    if (!/无法确认是否已有可用的 Key/.test(text)) out.push("a lookup that did not answer is not shown as a failure");
+    if (/留空表示保持不变/.test(text)) out.push("the form still promises the saved Key will be reused after a failed lookup");
+    if (/该服务还没有 Key/.test(text)) out.push("the form still claims there is no Key after a failed lookup");
+    return out;
+  },
+});
+
 await browser.close();
 server.close();
 

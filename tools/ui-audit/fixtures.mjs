@@ -1059,6 +1059,12 @@ window.api = (() => {
   // template literal.)
   savedKey: async () => {
     const reason = q.get("savedkey") || "";
+    // ?savedkey=ipc-fail is the lookup that never came back: the channel
+    // rejected instead of answering. The form has to say it does not know —
+    // not "your saved Key will be reused" and not "you have no Key". Both of
+    // those were what the renderer fell back to, and the first one is a promise
+    // nothing has checked.
+    if (reason === "ipc-fail") throw new Error("config:savedKey did not answer");
     const hints = ${JSON.stringify(SAVED_KEY_HINTS)};
     return {
       ok: true,

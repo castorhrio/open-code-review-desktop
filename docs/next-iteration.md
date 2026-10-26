@@ -6,7 +6,7 @@
 
 ---
 
-## 上游状态（最近检查：2026-10-26，第 9 轮复核）
+## 上游状态（最近检查：2026-10-26，第 10 轮复核）
 
 上游 `alibaba/open-code-review` 自 desktop 锁定的 `v1.13.0` 之后发布了
 **3 个补丁版本**：`v1.13.1` / `v1.13.2` / `v1.13.3`（共 18 个 commit）。
@@ -21,13 +21,18 @@
 | 3 | 2026-10-26 | `375f64c`（日期未变） | `v1.13.3`（2026-10-22 发布） | 无新内容（API 核对） |
 | 4 | 2026-10-26 | `375f64c` | `v1.13.3` | 无新内容（这次 `git fetch upstream --tags` 成功，与本地 ref 一致） |
 | 5 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（`git fetch` 成功 + API 双核对） |
+| 10 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（GitHub API 三核对：commits / tags / releases） |
 
-结论：连续 8 轮没有需要移植的新功能 / 修复 / 破坏性变更，desktop 的封装（CLI flag、
+结论：连续 9 轮没有需要移植的新功能 / 修复 / 破坏性变更，desktop 的封装（CLI flag、
 输出解析、配置暴露点）无需改动。若某轮顶端 commit 仍为 `375f64c`，本表不新增行。
 
 第 9 轮的核对方式与第 2/3 轮相同：`git fetch upstream --tags` 在这台机器的沙箱里
 挂住（无输出直到超时），改用 GitHub API 核对——`commits?sha=main` 顶端仍是
 `375f64c`（2026-10-20），`tags` 仍是 `v1.13.3` / `v1.13.2` / `v1.13.1`。
+
+第 10 轮仍是 API 核对（`commits` / `tags` / `releases` 三条都查了，`releases` 确认
+`v1.13.3` 仍是最新 release），结论与前几轮一致：没有新提交，没有新 tag，也没有新
+release。desktop 的封装面不动。
 
 只是拉 tag 时会看到几条 `would clobber existing tag`（本仓也用 `v0.1.x` 编号，
 与上游 tag 撞名）：那是本地 remote 的 tag 同步提示，不影响 `upstream/main` 的
@@ -558,6 +563,72 @@ savedKey: (name, url) => ipcRenderer.invoke("config:savedKey", { name, url }),
 
 ---
 
+## 本轮 desktop 侧加固（与上游无关，第 10 轮）
+
+上游顶端仍是 `375f64c` / `v1.13.3`（第 10 轮复核，GitHub API 三核对），无需移植。
+本轮继续上一轮那条线：**Key 提示必须诚实**——主进程说「有 / 没有 / 为什么没有」，
+渲染层照抄，中间任何一个环节拿不到答案时，**不许替它编一个**。
+
+### P0 — `MATCH_ORDER` 下 Key 必须被扣：把不变量钉成断言
+
+`entryByName` 的四条匹配规则里，只有 `order`（按文件顺序猜的）不是 CLI 会问的问题：
+那个条目**没有一次运行会打开它**（`cfg.Providers[cfg.Provider]` 落空，CLI 整份拒绝
+这份配置）。所以它的 Key 不能交出去——但「扣下」这件事此前是**跨函数的口头约定**：
+调用方读 `entry` 之后还要读 `rule` 并自己判断，而没有任何断言看着这一段。
+
+- **改动**（`ocr-service.js`）：抽出 `withholdReasonFor(rule)`——「规则 → 扣 Key 原因」
+  的映射自成一家，只有 `order` 映射到 `KEY_WITHHELD_ORDER`，另外三条映射到空。
+  `savedKeyLookup` 改用它，不再自己认那条 `if`。
+- **验证**（`tools/service-smoke.mjs`）：断言
+  1. 只有文件顺序能答的形状（`provider` 指着别的服务 + 文件里两种写法都不是注册表
+     拼法）确实由 `order` 规则回答；
+  2. 该形状的 Key 被扣下，**且原因是 `order-guess`**（不是「表读不到」，也不是
+     「Key 属于另一个端点」——那两个原因会把用户送去修没坏的东西）；
+  3. 答案止步于端点之前（没有运行会打开的条目不报主机）；
+  4. 只要值的那个调用方（`savedKeyFor`）也拿不到它；
+  5. `withholdReasonFor` 对四条规则的映射逐条断言；
+  6. `order-guess` 的那句话与其余五种原因**逐条不同**（字段下的提示与测试失败后的
+     提示各比一次），而且它说的修法是「保存一次」而不是「再填一个 Key」。
+- **实测**：把 `savedKeyLookup` 里那条 `if` 删掉 → **6 条断言变红**（其中 3 条是本轮
+  新加的，3 条是原有的），且 Key 直接漏出去（`sk-first`）。
+
+### P1 — `config:read` 与 `config:savedKey`：两次 IPC，一份答案
+
+两个通道问的是**同一张内置服务表**：视图问「表读到了吗」，Key 判定问「表读到了吗、
+这属于哪个端点」。若各自读一次，它们就可能在同一时刻各说各话——横幅说「读不到
+内置服务名单」，Key 提示却说「你的 Key 可以留空」——而两句说的是同一张表。
+失败窗口正是最容易出事的地方：第一次读失败被记住，第二次要么复用那次失败、
+要么重读一次（可能成功），两次调用于是描述了不同的世界。
+
+- **结论（写进代码注释）**：表只读一次，两个答案共用它。允许的差异只有两种：
+  用户按了「刷新」，或失败窗口过期。这两种都会**同时**改变两个答案。
+- **验证**（`tools/service-smoke.mjs`）：用计数的 `runner` 断言
+  1. 视图先问、Key 判定后问 → 二进制**只 spawn 一次**；
+  2. Key 判定先问、视图后问 → 同样只 spawn 一次；
+  3. 读失败时 → 两个答案都说是失败，且**只读了一次**（失败被记住，没有第二次
+     spawn），Key 的原因是 `table-unavailable` 而不是「没有条目」。
+- **实测**：让 `savedKeyLookupByName` 自己再读一次表 → **2 条断言变红**
+  （「读了两次」）。
+
+### P1 — 渲染层 `catch` 路径的措辞不能退化成「没有 Key」
+
+`SettingsPanel.tsx` 里 `api.savedKey(...).catch(() => setSavedKey(null))`——查不到答案时
+渲染层退回自己的判断，措辞变成「已保存：…　留空表示保持不变」或「该服务还没有
+Key」。两句都是**没有人核对过的承诺**：那句「留空表示保持不变」正是那个查询要回答
+的问题，而查询失败了；那句「还没有 Key」会把用户送去填一个可能早就存在着的 Key。
+这正是上一轮消灭的那类误导，只是换了一条路回来。
+
+- **改动**（`SettingsPanel.tsx`）：`savedKey` 的状态从「有 / 没有」扩成
+  `idle / loading / ok / failed` 四态——`loading` 说「正在确认是否已有可用的 Key…」，
+  `failed` 说「无法确认是否已有可用的 Key：主进程没有回答这次查询。点「刷新」重试，
+  或把 Key 直接填进来。」**不复用**「没有 Key」那句，也不承诺「留空即沿用」。
+- **验证**（`tools/ui-audit`）：新夹具 `?savedkey=ipc-fail` 让 stub 的
+  `api.savedKey` 直接 reject；新 shot `99-settings-savedkey-ipc-fail` 断言设置页
+  显示的是「无法确认」，且**没有**「留空表示保持不变」、**没有**「该服务还没有 Key」。
+- **实测**：把 `catch` 改回「丢掉答案、按老路渲染」→ 该 shot **FAIL**（两条问题）。
+
+---
+
 
 ## 待移植 / 待验证
 
@@ -632,8 +703,10 @@ desktop 的「工具调用 N（失败 M）」直接读 CLI 的 `tool_calls.failu
 
 第 5 轮收了「模型名按形态对齐上游」与「`MAX_ENTRIES` 全局裁剪」，第 6 轮收了
 「按名字选配置段」，第 7 轮收了 `entryByName` 的变体取舍，第 8 轮把 Key 归属判定搬进
-主进程，第 9 轮把这条判定真正接到屏幕上并收掉端点那一端；剩下的按优先级排在这里，
-下一轮挑。标注「**未动**」的条目是最近一轮看过、确认仍然成立但没有改的——不是新发现。
+主进程，第 9 轮把这条判定真正接到屏幕上并收掉端点那一端，第 10 轮把「`order` 规则
+必须扣下 Key」「两个通道只读一次表」「查不到答案不许替它编」这三条钉成断言；剩下的按
+优先级排在这里，下一轮挑。标注「**未动**」的条目是最近一轮看过、确认仍然成立但没有
+改的——不是新发现。
 
 - **P1**：`entryByName` 的「精确命中优先」与上游的「按名字选段」在**同名跨段**时
   不一致。`tryProviderConfig` 先查注册表决定读 `providers` 还是 `custom_providers`，
@@ -641,7 +714,8 @@ desktop 的「工具调用 N（失败 M）」直接读 CLI 的 `tool_calls.failu
   custom_providers[name]`，所以一个**自定义名**同时被手改进 `providers` 段时，desktop
   会拿 `providers` 那条（CLI 不会读的）里的 Key。第 6 轮的 `readConfigView` 已经按段
   读，`entryByName` 还没跟上——它缺的是注册表，所以要么把注册表传进去，要么让调用方
-  先判段。文件 `ocr-service.js`。——**本轮发现，未动**。
+  先判段。文件 `ocr-service.js`。——**仍未动**（第 10 轮只把 `order` 规则扣 Key 这条
+  钉住，没有碰选段）。
 - **P1**：「条目没有写端点」与「Key 属于另一个端点」现在共用 `url-mismatch` 一句话
   （「已保存的 Key 属于另一个端点」）。对前者这句话其实不准确——那条记录谁也没写
   端点，Key 不属于任何端点。修法有两条：加第 7 种原因（措辞表、语气表、UI 夹具、
@@ -651,7 +725,11 @@ desktop 的「工具调用 N（失败 M）」直接读 CLI 的 `tool_calls.failu
   查表（`config.endpoints[name]`），没有自己的规则，但**万一**有人把优先级写回去，
   `tools/service-smoke.mjs` 看不见（它测的是主进程那两端）。第 9 轮留下的形状是：
   渲染层不再有规则可写错，但也没有一条断言能证明这一点。文件
-  `src/components/SettingsPanel.tsx`。
+  `src/components/SettingsPanel.tsx`。——第 10 轮给渲染层补了一条 UI 断言，但补的是
+  「查不到答案时怎么说话」，**不是**「端点只查表」这一条；后者仍然没有断言看着。
+- **P2**：设置页的 `loading` 态（「正在确认是否已有可用的 Key…」）是转瞬即逝的，
+  `tools/ui-audit` 抓不到它——夹具的 `savedKey` 立刻 resolve。要钉住它得让 stub
+  挂住不答，那是另一件事。
 - **P2**：`writeAll` 的 Windows 回退分支里 `unlink(tmp)` 失败被吞掉，进程立刻退出
   会留下 `*.tmp` 垃圾。文件 `run-diagnostics.js`。——**未动**。改成把失败记进
   outcome。
@@ -664,6 +742,22 @@ desktop 的「工具调用 N（失败 M）」直接读 CLI 的 `tool_calls.failu
 
 ### 本轮做完、可以划掉的
 
+- ~~`MATCH_ORDER` 下 Key 必须被扣，但「扣下」靠调用方读 `rule` 再判断，是跨函数的口头
+  约定~~ → 第 10 轮做完：`ocr-service.js` 抽出 `withholdReasonFor(rule)`，
+  `tools/service-smoke.mjs` 逐条断言「只有文件顺序能答的形状 → 规则是 `order` → Key
+  被扣下 → 原因是 `order-guess` → 端点不报 → 只要值的调用方也拿不到」，外加它那句
+  措辞与其余五种原因逐条不同；删掉那条 `if` → 6 条断言变红（实测）。详见上面
+  「P0 — `MATCH_ORDER` 下 Key 必须被扣」。
+- ~~`config:savedKey` 与 `config:read` 两次 IPC 可能对同一张表各说各话~~ → 第 10 轮
+  做完：结论写进 `ocr-service.js` 的注释（表只读一次，允许的差异只有「刷新」与
+  「失败窗口过期」，两种都同时改变两个答案），`tools/service-smoke.mjs` 用计数的
+  `runner` 断言两个通道只 spawn 一次、失败时两个答案一起失败；让
+  `savedKeyLookupByName` 自己再读一次 → 2 条断言变红（实测）。
+- ~~渲染层 `catch` 路径把「查不到答案」说成「没有 Key」~~ → 第 10 轮做完：
+  `SettingsPanel.tsx` 的状态扩成 `idle / loading / ok / failed`，`failed` 说「无法
+  确认是否已有可用的 Key」；`tools/ui-audit` 新 shot `99-settings-savedkey-ipc-fail`
+  （夹具 `?savedkey=ipc-fail`）断言页面没有「留空表示保持不变」、没有「该服务还没有
+  Key」；把 `catch` 改回老写法 → 该 shot FAIL（实测）。
 - ~~判定链的两端（主进程的 `presetUrl` 与渲染层算的 `endpoint`）没有对到一起~~ →
   第 9 轮做完：端点只剩一条规则（`serviceEndpoint`），配置视图把它交给渲染层，
   `tools/service-smoke.mjs` 用同一份 config + 同一张表断言两端相等；把优先级调回
