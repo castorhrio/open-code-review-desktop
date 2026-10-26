@@ -1432,13 +1432,15 @@ check("and the exit says the evidence did not make it", outcomeMessage(slowExit)
   // The half a behavioural check cannot reach: `run-handler.js` only promises
   // that its sink *can* forward to `run:log`; whether the app actually injects
   // that sink is this registration. It was missing for two rounds, and the
-  // lines went to stderr with every behavioural check still green.
+  // lines went to stderr with every behavioural check still green. And it is
+  // one parameter now, so a `log:` without a `warn:` (the split that hid half
+  // the story) is a wiring the app cannot express.
   check(
-    "and the app injects the sink that forwards to the renderer's log",
+    "and the app injects the one sink that forwards to the renderer's log",
     /const\s+runLog\s*=\s*\(line,\s*id\)\s*=>\s*send\(\s*["']run:log["']\s*,\s*\{\s*id\s*,\s*line\s*\}\s*\)/.test(mainSrc2) &&
-      /warn:\s*runLog\b/.test(mainSrc2) &&
-      /log:\s*runLog\b/.test(mainSrc2),
-    "main.js does not wire log/warn to run:log"
+      /sink:\s*runLog\b/.test(mainSrc2) &&
+      !/\b(?:log|warn):\s*runLog\b/.test(mainSrc2),
+    "main.js does not wire the single sink to run:log"
   );
 }
 
@@ -1476,7 +1478,7 @@ check("and the exit says the evidence did not make it", outcomeMessage(slowExit)
       settleFailReasons.push(outcome);
       return reportOutcome(outcome, warn, options);
     },
-    warn: (line) => settleFailLog.push(line),
+    sink: (line) => settleFailLog.push(line),
   });
   failingHandler({ repo, mode: "review", runId: "settle-fail-run" });
   await new Promise((r) => setTimeout(r, 80));
@@ -1551,7 +1553,7 @@ check("and the exit says the evidence did not make it", outcomeMessage(slowExit)
       pushFailedReports.push(outcome);
       return reportOutcome(outcome, warn, options);
     },
-    warn: (line) => pushFailedLog.push(line),
+    sink: (line) => pushFailedLog.push(line),
   });
   pushFailedHandler({ repo, mode: "review", runId: "push-failed-run" });
   await new Promise((r) => setTimeout(r, 150));
@@ -1605,7 +1607,7 @@ check("and the exit says the evidence did not make it", outcomeMessage(slowExit)
     },
     send: () => {},
     timeoutMs: 40,
-    warn: (line) => lateLog.push(line),
+    sink: (line) => lateLog.push(line),
   });
   lateHandler({ repo, mode: "review", runId: "late-run" });
   await new Promise((r) => setTimeout(r, 320));
@@ -1616,20 +1618,21 @@ check("and the exit says the evidence did not make it", outcomeMessage(slowExit)
   );
 }
 
-/* ---- the app's sink: the end-of-run lines reach the renderer's log ----
+/* ---- the app's sink: every run line reaches the renderer's log ----
  * Round 17 gave the three end-of-run lines one sink, but the sink was still
  * whatever `main.js` passed — and `main.js` passed nothing, so the lines went
  * to the main process's stderr. A packaged app has no terminal, so the two
  * lines that matter most (`signal-failed`, `settle-failed`) were written and
  * never read.
  *
- * The decision now lives in `main.js`: its `warn` forwards to `run:log`, which
- * is what the renderer's log drawer listens on. The drawer opens itself on a
- * line that reads like trouble, so these two sentences finally get in front of
- * the user instead of into a console nobody has. The assertions below use the
- * same wiring `main.js` uses — `warn` calls `send("run:log", …)` — and check
- * that the line arrives under the id the CLI gave the run (the id the exit
- * payload carries), not under the renderer's spec.
+ * Round 20 removed the remaining way to get that wrong: the handler takes one
+ * `sink`, used by the CLI's own lines and by every end-of-run report. When
+ * `log` and `warn` were two parameters, a caller could wire one and forget the
+ * other, and the forgotten half fell back to `console.warn`. The assertions
+ * below use the same wiring `main.js` uses — the sink calls
+ * `send("run:log", …)` — and check that both halves arrive under the id the CLI
+ * gave the run (the id the exit payload carries), not under the renderer's
+ * spec, and that nothing also went to the console.
  */
 {
   const exitChannel = createRunExitDoor(() => {}).channel;
@@ -1638,25 +1641,31 @@ check("and the exit says the evidence did not make it", outcomeMessage(slowExit)
     if (channel === exitChannel) throw new Error("the window was already gone");
     sent.push({ channel, payload });
   };
-  const appWarn = (line, id) => appSend("run:log", { id, line });
+  const appSink = (line, id) => appSend("run:log", { id, line });
   const appStore = createStore(path.join(dir, "app-sink", "run-diagnostics.json"));
-  const appHandler = makeRunHandler({
-    ocr: {
-      startRun(spec, onLog, onDone) {
-        // The CLI's own log line and its own id, which is not the renderer's
-        // `spec.runId`.
-        onLog("cli-run-id", "reading internal/service/auth/login.go");
-        onDone("cli-run-id", { sessionId: "app-sink-session", value: limitResult });
-        return { id: spec.runId };
+  const consoleLines = [];
+  const realAppConsoleWarn = console.warn;
+  console.warn = (line) => consoleLines.push(line);
+  try {
+    const appHandler = makeRunHandler({
+      ocr: {
+        startRun(spec, onLog, onDone) {
+          // The CLI's own log line and its own id, which is not the renderer's
+          // `spec.runId`.
+          onLog("cli-run-id", "reading internal/service/auth/login.go");
+          onDone("cli-run-id", { sessionId: "app-sink-session", value: limitResult });
+          return { id: spec.runId };
+        },
       },
-    },
-    store: appStore,
-    send: appSend,
-    log: appWarn,
-    warn: appWarn,
-  });
-  appHandler({ repo, mode: "review", runId: "renderer-spec-id" });
-  await new Promise((r) => setTimeout(r, 150));
+      store: appStore,
+      send: appSend,
+      sink: appSink,
+    });
+    appHandler({ repo, mode: "review", runId: "renderer-spec-id" });
+    await new Promise((r) => setTimeout(r, 150));
+  } finally {
+    console.warn = realAppConsoleWarn;
+  }
 
   const appLines = sent.filter((m) => m.channel === "run:log");
   check(
@@ -1680,6 +1689,11 @@ check("and the exit says the evidence did not make it", outcomeMessage(slowExit)
     !appLines.some((m) => m.payload.id === "renderer-spec-id"),
     JSON.stringify(appLines)
   );
+  check(
+    "and an injected sink leaves the console fallback with nothing to say",
+    consoleLines.length === 0,
+    JSON.stringify(consoleLines)
+  );
 
   // And the sink is a collaborator, not a hard-coded channel: a caller that
   // injects one sees the CLI's lines, and `send` sees no `run:log` at all.
@@ -1694,7 +1708,7 @@ check("and the exit says the evidence did not make it", outcomeMessage(slowExit)
     },
     store: {},
     send: (channel, payload) => injectedSend.push({ channel, payload }),
-    log: (line, id) => injectedLog.push({ line, id }),
+    sink: (line, id) => injectedLog.push({ line, id }),
   });
   injectedLogHandler({ repo, mode: "review", runId: "renderer-spec-id" });
   check(
@@ -1707,7 +1721,8 @@ check("and the exit says the evidence did not make it", outcomeMessage(slowExit)
   );
 
   // The other sentence with no payload to ride on: the settle itself rejected,
-  // so the exit was never sent. It has to reach the same place.
+  // so the exit was never sent. It has to reach the same sink — through the one
+  // parameter, not a second one the caller has to remember.
   const failSent = [];
   const failSend = (channel, payload) => failSent.push({ channel, payload });
   const settleFailHandler = makeRunHandler({
@@ -1720,7 +1735,7 @@ check("and the exit says the evidence did not make it", outcomeMessage(slowExit)
     store: { record: () => {} },
     send: failSend,
     settleRunExit: () => Promise.reject(new Error("the settle was wired to nothing")),
-    warn: (line, id) => failSend("run:log", { id, line }),
+    sink: (line, id) => failSend("run:log", { id, line }),
   });
   settleFailHandler({ repo, mode: "review", runId: "renderer-spec-id" });
   await new Promise((r) => setTimeout(r, 80));
@@ -1734,9 +1749,9 @@ check("and the exit says the evidence did not make it", outcomeMessage(slowExit)
   // And the default is still one sink: a caller that injects nothing gets
   // `console.warn` for the same lines, never a mix of one line to the console
   // and another to nowhere.
-  const consoleLines = [];
+  const fallbackConsoleLines = [];
   const realConsoleWarn = console.warn;
-  console.warn = (line) => consoleLines.push(line);
+  console.warn = (line) => fallbackConsoleLines.push(line);
   try {
     const defaultSinkHandler = makeRunHandler({
       ocr: {
@@ -1756,8 +1771,8 @@ check("and the exit says the evidence did not make it", outcomeMessage(slowExit)
   }
   check(
     "without an injected sink the same line still has one place to go",
-    consoleLines.some((line) => line === `[run-diagnostics] ${settleFailedMessage()}`),
-    JSON.stringify(consoleLines)
+    fallbackConsoleLines.some((line) => line === `[run-diagnostics] ${settleFailedMessage()}`),
+    JSON.stringify(fallbackConsoleLines)
   );
 }
 
@@ -1786,7 +1801,7 @@ check("and the exit says the evidence did not make it", outcomeMessage(slowExit)
     reportOutcome: () => {
       throw new Error("the outcome reporter broke too");
     },
-    warn: (line) => lines.push(line),
+    sink: (line) => lines.push(line),
   });
   throwingHandler({ repo, mode: "review", runId: "throwing-report-run" });
   await new Promise((r) => setTimeout(r, 80));
@@ -1823,7 +1838,7 @@ check("and the exit says the evidence did not make it", outcomeMessage(slowExit)
     store: { record: () => {} },
     send: () => {},
     settleRunExit: () => Promise.reject(new Error("the settle broke with the real reporter")),
-    warn: sinkBroke,
+    sink: sinkBroke,
   });
   realReporterHandler({ repo, mode: "review", runId: "real-report-run" });
   await new Promise((r) => setTimeout(r, 80));
