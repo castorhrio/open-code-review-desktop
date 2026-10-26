@@ -1261,7 +1261,11 @@ function feedProgressLine(progress, line) {
     return line;
   }
   if ((m = line.match(SUMMARY_RE))) {
-    progress.comments = Number(m[2]) || progress.comments;
+    // The CLI's total is the number that counts, zero included. `|| progress
+    // .comments` read a summary of "0 comment(s)" as "nothing to say" and kept
+    // the running tally instead — which is how a run whose batches were all
+    // refused ended up displaying comments it does not have.
+    progress.comments = Number(m[2]);
     const elapsed = (m[4] || "").trim().replace(/\s+elapsed$/i, "");
     pushActivity(progress, { kind: "note", text: `已完成 ${m[1]} 个文件，产出 ${m[2]} 条评论${elapsed ? ` · 耗时 ${elapsed}` : ""}` });
     return line;
@@ -1298,7 +1302,12 @@ function feedProgressLine(progress, line) {
   const duration = /\(([^)]+)\)/.exec(args);
   progress.tools += 1;
   progress.byTool[tool] = (progress.byTool[tool] || 0) + 1;
-  if (tool === "code_comment") progress.comments += 1;
+  // A `code_comment` call that failed filed nothing. Since v1.13.3 (upstream
+  // 375f64c) a batch whose entries are all unusable is answered with an error
+  // instead of a success, so its closing line is `✗ code_comment failed: none of
+  // the 'comments' entries could be filed…` — and counting that as one produced
+  // comment put "已产出 1 条评论" on a run that will show an empty result.
+  if (tool === "code_comment" && mark !== "✗") progress.comments += 1;
   // A failed call's closing line is the only place its reason exists — "✗
   // code_search failed: git grep failed: exit status 128: …". Settling the row
   // without it left a red dot that could not say why, on the screen the user

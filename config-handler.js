@@ -145,6 +145,23 @@ function makeConfigHandlers(options) {
 
   const save = async (_e, form) => {
     const pairs = [];
+    // The order of these pairs is part of the answer, not an accident of how the
+    // lines were typed. `ocr.setConfig` sends them one after another and stops at
+    // the first refusal, so whatever comes first is what a half-finished save has
+    // already done. Two rules follow from that:
+    //
+    // 1. Every write about the entry (`providers.<name>.*`) goes out before the
+    //    pair that points the run at it (`provider`). Reversed, a Key the CLI
+    //    refuses would leave `provider` already switched to an entry with no Key,
+    //    and the next run would fail as "the Key is wrong" when nothing was wrong
+    //    with the Key — the same silent half-success `removeEntry` answers with an
+    //    error.
+    // 2. `model` follows `provider`, because it is the model of the *selected*
+    //    service: written first, a refusal of `provider` would leave a model
+    //    chosen for a service the config is not on.
+    //
+    // `tools/config-handler-smoke.mjs` pins the resulting sequence exactly; a
+    // reordering here is a change of behaviour and has to show up as a red check.
     const name = (form.provider || "").trim();
     if (!name) return { ok: false, error: "未选择 provider", steps: [] };
 

@@ -218,6 +218,134 @@ check(
   );
 }
 
+/* ---- the save writes the entry before it points the run at it ----
+ * `ocr.setConfig` sends the pairs one after another and stops at the first
+ * refusal, so the order is what a half-finished save has already done. The
+ * dangerous order is `provider` first: a Key the CLI then refuses would leave
+ * the config already pointed at an entry with no Key, and the next run would
+ * fail as "the Key is wrong". Nothing about that shows in a per-pair check —
+ * every pair is present either way — so the sequence itself is pinned here.
+ */
+{
+  const stub = makeStub();
+  const h = make(stub);
+  const res = await h.save(null, {
+    provider: "DeepSeek",
+    isCustom: false,
+    apiKey: "sk-order",
+    model: "deepseek-chat",
+    setActive: true,
+    effort: "high",
+    language: "zh",
+    maxTokens: "8192",
+  });
+  check("a save with the globals filled succeeds", res.ok === true, res.error);
+  const keys = stub.setPairs.map(([key]) => key);
+  check(
+    "the built-in write order is: the entry's fields, then the pointer, then the model",
+    JSON.stringify(keys) ===
+      JSON.stringify([
+        "providers.DeepSeek.api_key",
+        "providers.DeepSeek.model",
+        "provider",
+        "model",
+        "effort",
+        "language",
+        "max_tokens",
+      ]),
+    JSON.stringify(keys)
+  );
+  check(
+    "so nothing about the pointer goes out before the entry is written",
+    keys.indexOf("provider") === 2 && keys.slice(0, 2).every((key) => key.startsWith("providers.DeepSeek.")),
+    JSON.stringify(keys)
+  );
+}
+
+/* ---- and the custom entry's own fields go first too ---- */
+{
+  const stub = makeStub({ customProviders: { "my.gateway": {} } });
+  const h = make(stub);
+  const res = await h.save(null, {
+    provider: "my.gateway",
+    isCustom: true,
+    url: "https://gw.example/v1",
+    protocol: "openai",
+    apiKey: "sk-order",
+    model: "gpt-x",
+    setActive: true,
+  });
+  check("a custom save succeeds", res.ok === true, res.error);
+  const keys = stub.setPairs.map(([key]) => key);
+  check(
+    "a custom write sends url, protocol, Key and model before the pointer",
+    JSON.stringify(keys) ===
+      JSON.stringify([
+        "providers.my.gateway.url",
+        "providers.my.gateway.protocol",
+        "providers.my.gateway.api_key",
+        "providers.my.gateway.model",
+        "provider",
+        "model",
+      ]),
+    JSON.stringify(keys)
+  );
+}
+
+/* ---- a refused Key leaves the active service where it was ----
+ * The point of the order, stated as the thing the user would notice: when the
+ * Key write is the one the CLI refuses, the config must still be on the service
+ * it was on before the save. With `provider` first, this fixture would end with
+ * `state.provider === "DeepSeek"` and no Key under it — an active service that
+ * nothing configured, which the next run reads as a bad Key.
+ */
+{
+  const stub = makeStub({ providers: { other: { api_key: "sk-other" } } });
+  stub.state.provider = "other";
+  const ocr = {
+    ...stub.ocr,
+    // The stub's own routing, with one write refused: the same sequence
+    // `ocr-service.js` runs, stopping where the CLI would.
+    setConfig: async (pairs) => {
+      stub.setPairs.push(...pairs);
+      const out = [];
+      for (const [key, value] of pairs) {
+        const res =
+          key === "providers.DeepSeek.api_key"
+            ? { code: 1, stdout: "", stderr: 'invalid value for "api_key": empty' }
+            : await stub.ocr.exec(["config", "set", key, String(value)]);
+        out.push({ key, ok: res.code === 0, message: (res.stderr || res.stdout).trim() });
+        if (res.code !== 0) break;
+      }
+      return out;
+    },
+  };
+  const h = makeConfigHandlers({ ocr, tempRoot: dir });
+  const res = await h.save(null, {
+    provider: "DeepSeek",
+    isCustom: false,
+    apiKey: "sk-refused",
+    model: "deepseek-chat",
+    setActive: true,
+  });
+  check("a save whose Key write is refused is not a success", res.ok === false, JSON.stringify(res));
+  check(
+    "and the active service is still the one from before the save",
+    stub.state.provider === "other",
+    JSON.stringify({ provider: stub.state.provider, providers: stub.state.providers })
+  );
+  check(
+    "with the refused write named in the error",
+    String(res.error).includes("providers.DeepSeek.api_key"),
+    res.error
+  );
+  check(
+    "and the entry was not half written under the new spelling",
+    stub.state.providers.DeepSeek === undefined && stub.state.custom_providers.DeepSeek === undefined,
+    JSON.stringify({ providers: stub.state.providers, custom: stub.state.custom_providers })
+  );
+}
+
 /* ---- a blank Key means "leave the saved one alone" ----
  * The form shows an empty Key field when one is already saved. Saving with it
  * blank must not push `api_key: ""`: empty is not the user asking to clear the

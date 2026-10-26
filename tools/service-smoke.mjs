@@ -304,6 +304,73 @@ check(
 check("milestone log keeps the scope and summary lines", milestones.some((l) => /changed, reviewing/.test(l)) && milestones.some((l) => /Summary:/.test(l)), milestones.join(" | "));
 check("per-tool chatter stays out of the milestone log", !milestones.some((l) => /[▶✔✗•]/.test(l)), milestones.join(" | "));
 check("skipping a phase is not counted as an excluded file", prog.excluded === 0, String(prog.excluded));
+/* ---- a refused `code_comment` batch is not a comment ----
+ * Upstream v1.13.3 (`375f64c`) changed the empty-batch case from success to
+ * error: a batch whose entries are all unusable (`message` where `content`
+ * belongs, no `path`) now comes back as
+ *   Error: none of the 'comments' entries could be filed; each entry needs a
+ *   non-empty 'content' and a 'path'…
+ * so the CLI's closing line for it is `✗ code_comment`, not `✔`. The counter
+ * used to add one for every closing line, which turned a refused batch into a
+ * produced comment: the run screen said "已产出 1 条评论" for a run with none.
+ *
+ * Both halves are replay: a `✔` line is a batch that filed its findings, a `✗`
+ * line is a batch that filed nothing. The second transcript is what v1.13.3
+ * actually prints for the empty batch.
+ */
+const EMPTY_BATCH_MSG =
+  "Error: none of the 'comments' entries could be filed; each entry needs a non-empty 'content' and a 'path' (or the reviewed file's path). Re-send the finding with those fields.";
+{
+  const refused = svc.createProgress();
+  for (const line of [
+    "[ocr] 1 file(s) changed, reviewing 1 in C:/Users/x/work/payments-api",
+    "[ocr]   ▶ code_comment",
+    `[ocr]   ✗ code_comment failed: ${EMPTY_BATCH_MSG}`,
+  ]) {
+    svc.feedProgressLine(refused, line);
+  }
+  check(
+    "a refused code_comment batch is not counted as a comment",
+    refused.comments === 0,
+    String(refused.comments)
+  );
+  check("but it is still a tool call", refused.tools === 1, String(refused.tools));
+  const row = refused.activity[refused.activity.length - 1];
+  check(
+    "and its row says failed, with the CLI's reason attached",
+    row.state === "failed" && String(row.args).includes("none of the 'comments' entries could be filed"),
+    JSON.stringify(row)
+  );
+
+  // The other half of the same line: a batch that did file something is still
+  // one comment on the tally (the summary, when it arrives, replaces the total).
+  const filed = svc.createProgress();
+  for (const line of [
+    "[ocr]   ▶ code_comment",
+    "[ocr]   ✔ code_comment (0s)",
+  ]) {
+    svc.feedProgressLine(filed, line);
+  }
+  check("a filed batch still counts", filed.comments === 1, String(filed.comments));
+
+  // And the summary is the total, zero included. `Number(m[2]) || comments` read
+  // a "0 comment(s)" summary as "no news" and kept the running tally, so a run
+  // whose only batch was refused still displayed a comment after it finished.
+  const zeroed = svc.createProgress();
+  for (const line of [
+    "[ocr]   ▶ code_comment",
+    "[ocr]   ✔ code_comment (0s)",
+    "[ocr] Summary: 1 file(s) reviewed, 0 comment(s), ~81601 token(s) used, 3m48s elapsed",
+  ]) {
+    svc.feedProgressLine(zeroed, line);
+  }
+  check(
+    "a summary of zero comments replaces the running tally",
+    zeroed.comments === 0,
+    `${zeroed.comments} -> ${JSON.stringify(zeroed.activity.slice(-1))}`
+  );
+}
+
 // The feed is capped and the rows are React keys, so a long run must keep
 // producing distinct ids once the cap is reached — an id derived from the array
 // length silently collided there.

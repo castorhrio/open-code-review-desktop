@@ -10,7 +10,7 @@
 
 ---
 
-## 上游状态（最近检查：2026-10-26，第 20 轮复核）
+## 上游状态（最近检查：2026-10-26，第 21 轮复核）
 
 上游 `alibaba/open-code-review` 自 desktop 锁定的 `v1.13.0` 之后发布了
 **3 个补丁版本**：`v1.13.1` / `v1.13.2` / `v1.13.3`（共 18 个 commit）。
@@ -43,6 +43,7 @@ desktop 的依赖已升到 `^1.13.3`（`package.json` / `package-lock.json`）�
 | 18 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（`git fetch upstream --tags` 成功 + GitHub API 三核对：commits / tags / releases） |
 | 19 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（`git fetch upstream --tags` 成功 + GitHub API 三核对：commits / tags / releases） |
 | 20 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（`git fetch upstream --tags` + GitHub API 三核对：commits / releases；顶端 commit 与 tag 均未变） |
+| 21 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（`git fetch upstream --tags` + GitHub API 三核对：commits / tags / releases；顶端 commit 与 tag 均未变） |
 
 结论：第 2–12、14–20 轮都没有需要移植的新功能 / 修复 / 破坏性变更，desktop 的
 封装（CLI flag、输出解析、配置暴露点）无需改动；第 13 轮没有留下复核记录。
@@ -117,6 +118,32 @@ curl -s 'https://api.github.com/repos/alibaba/open-code-review/tags?per_page=5'
   续跑不会再重跑这些文件。desktop 的「续跑」按钮直接走 CLI 会话，无需改。
 
 ---
+
+## 第 21 轮 desktop 侧加固（与上游无关）
+
+上游本轮无新提交（顶端仍是 `375f64c` / `v1.13.3`，见上面第 21 轮复核）。
+
+### P0 — 保存的写序钉住：先把条目写完，再让运行指向它
+
+`save` 把若干 `config set` 依次发出去，第一个被拒就停。所以顺序决定了「保存到一半」
+已经做了什么：`provider` 若先发，后面 Key 被拒时配置已经指向一个没有 Key 的条目，
+下一次运行会以「Key 不对」失败——而 Key 本身没错。`config-handler.js` 现在把这层
+理由写在生成 pair 的地方；`tools/config-handler-smoke.mjs` 用两条精确序列断言
+（内置服务 / 自定义服务）加一条后果断言（Key 被拒后 `provider` 仍停在原服务、
+新拼写下没有半成品条目）。
+
+**实测**：把 `provider` 挪到最前面 → 6 条变红。
+
+### P1 — 被拒的 `code_comment` 批次不再算成一条评论
+
+上游 `v1.13.3`（`375f64c`）把空批次从「成功」改成「错误」，CLI 的收尾行于是从
+`✔ code_comment` 变成 `✗ code_comment failed: Error: none of the 'comments'
+entries could be filed; …`。`ocr-service.js` 的计数器对每条收尾行都 `+1`，于是
+一个什么都没写进去的批次会让运行页显示「已产出 1 条评论」。现在只有 `✔` 计入；
+`SUMMARY_RE` 的 `Number(m[2]) || progress.comments` 也改成直接取 CLI 的总数——
+「0 comment(s)」是结论，不是「没有新消息」。
+
+**实测**：去掉 `mark !== "✗"` → 1 条变红；改回 `|| progress.comments` → 1 条变红。
 
 ## 第 20 轮 desktop 侧加固（与上游无关）
 
