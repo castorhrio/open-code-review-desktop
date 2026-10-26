@@ -85,6 +85,7 @@
       "update-service.js",
       "security.js",
       "run-diagnostics.js",
+      "run-handler.js",
       "package.json",
       "out/**",
       "assets/**",

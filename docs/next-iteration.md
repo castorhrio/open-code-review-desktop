@@ -740,6 +740,11 @@ B 是 A 的祖先时是空的——**审 0 个文件，却报成一次干净的�
   4. `main.js` 把出口交给 `settleRunExit`（`send` 与 `payload` 都在）。
 - **实测**：`main.js` 里加一句 `send("run:exit", …)` → 第 3 条变红；把门改成造出来
   就是开的 → 第 1、2 条变红。
+- **后来（第 13 轮）**：那三段「handler 体的形状」现在住在 `run-handler.js` 里，由
+  `makeRunHandler({ ocr, store, send })` 造出来，`main.js` 只剩一行注册。原因是第 2–4
+  条都只能读源码：换个别名、包一层 helper、把门改成**每个 settle 一扇**，正则都仍然
+  通过。现在检查直接跑这个 handler（stub 的 `ocr`，一次运行答两次 `onDone`），数真正
+  发出去的出口信号——把门挪回 `settleRunExit` 旁边 → 2 条断言变红。
 - **顺带**：`tools/bridge-contract.mjs` 的「preload 听的通道主进程都发过」原来只认
   `send("字面量")`，通道名进常量之后会被误判成「没人发这个通道」。现在常量会被解析
   出来一起算——实测把通道改名，preload 与主进程**两侧**的检查同时变红。

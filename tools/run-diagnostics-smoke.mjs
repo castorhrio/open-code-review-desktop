@@ -38,6 +38,7 @@ const {
   SIGNAL_FAILED,
   flushNow,
 } = require("../run-diagnostics.js");
+const { makeRunHandler } = require("../run-handler.js");
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-run-diagnostics-"));
 const file = path.join(dir, "nested", "run-diagnostics.json");
@@ -1080,12 +1081,14 @@ check("and the exit says the evidence did not make it", outcomeMessage(slowExit)
     !mainSrc.includes(strayDoor.channel),
     "main.js mentions it"
   );
-  const settleStart = mainSrc.indexOf("settleRunExit({");
-  const settleText = settleStart === -1 ? "" : mainSrc.slice(settleStart, settleStart + 1200);
+  // The settle (and with it the door) is not `main.js`'s business any more: the
+  // handler that owns them is `run-handler.js`, checked by running it below.
+  // What is left to hold here is that nothing in `main.js` can send an exit at
+  // all — no channel name, no door, no settle.
   check(
-    "the main process hands the exit to settleRunExit",
-    settleStart !== -1 && /\bsend,/.test(settleText) && /\bpayload:/.test(settleText),
-    settleStart === -1 ? "no settleRunExit call" : settleText.slice(0, 80)
+    "the main process cannot settle a run itself",
+    !/settleRunExit\s*\(/.test(mainSrc) && !/createRunExitDoor\s*\(/.test(mainSrc),
+    "main.js settles or makes a door"
   );
 }
 
@@ -1097,11 +1100,13 @@ check("and the exit says the evidence did not make it", outcomeMessage(slowExit)
  * `finish()` already guards one outcome per run, so the guard that matters is
  * the one that does not depend on that staying true.
  *
- * Now the caller that starts a run makes the door (`main.js` does, in the
+ * Now the caller that starts a run makes the door (`run-handler.js` does, in the
  * handler that starts the CLI) and `settleRunExit` opens and uses *that* one, so
  * the second settle finds a door that has spoken. The assertions below hold one
- * door across two settles — the shape main.js produces for one run — and check
- * that the second one is silent rather than a second "the run ended".
+ * door across two settles — the shape the app produces for one run — and check
+ * that the second one is silent rather than a second "the run ended". The wiring
+ * the app actually registers is then started with a stub CLI further down, which
+ * is the assertion that does not depend on how the handler is spelled.
  */
 {
   const oneDoorStore = createStore(path.join(dir, "one-door", "run-diagnostics.json"));
@@ -1136,20 +1141,162 @@ check("and the exit says the evidence did not make it", outcomeMessage(slowExit)
   );
   check("the door knows it has spoken", runDoor.isOpen() === true && runDoor.hasSent() === true);
 
-  // The per-run door is only real if the main process makes exactly one, inside
-  // the handler that starts the run, and hands it over. Read out of `main.js`
-  // rather than described here: a second door, or a settle that drops `exit`,
-  // would quietly go back to one door per call.
-  const runHandlerAt = mainSrc.indexOf('ipcMain.handle("review:run"');
-  const runHandler = runHandlerAt === -1 ? "" : mainSrc.slice(runHandlerAt);
-  const doors = [...mainSrc.matchAll(/createRunExitDoor\s*\(/g)].length;
-  check("the main process makes exactly one door", doors === 1, `${doors} doors`);
+  // And it has to be real for the wiring the app actually uses, not just for a
+  // door handed to `settleRunExit` by hand. `main.js` used to hold the handler
+  // body, so the only thing a check could say about it was its source text
+  // (match `const exit = createRunExitDoor(send)`); renaming the constant, or
+  // making one door per *settle*, would have kept that green. The body lives in
+  // `run-handler.js` now, so this starts a run with a stub CLI, answers it, and
+  // counts the exit signals that go out.
+  const handlerStore = createStore(path.join(dir, "handler", "run-diagnostics.json"));
+  const handlerSends = [];
+  const runs = [];
+  const exitChannel = createRunExitDoor(() => {}).channel;
+  const sessionByRun = { "handler-run": "handler-session", "handler-run-2": "handler-session-2" };
+  const handler = makeRunHandler({
+    ocr: {
+      startRun(spec, onLog, onDone, onProgress) {
+        runs.push({ spec, onLog, onDone, onProgress });
+        return { id: spec.runId };
+      },
+    },
+    store: handlerStore,
+    send: (channel, payload) =>
+      handlerSends.push({
+        channel,
+        payload,
+        // Read at send time: "the exit went out" only means something if the
+        // evidence it is announcing was already on disk.
+        evidence:
+          channel === exitChannel
+            ? handlerStore.read(repo, sessionByRun[payload.id])?.warnings?.length === 1
+            : null,
+      }),
+  });
+  const handlerExits = () => handlerSends.filter((m) => m.channel === exitChannel);
+  const spec = { repo, mode: "review", runId: "handler-run" };
+  handler(spec);
+  check("the handler starts the run it was given", runs.length === 1 && runs[0].spec === spec, `${runs.length} runs`);
+
+  runs[0].onLog("handler-run", "reading internal/service/auth/login.go");
+  runs[0].onProgress("handler-run", { file: "a.go", done: 1, total: 2 });
   check(
-    "and makes it in the handler that starts the run",
-    runHandlerAt !== -1 && /const exit = createRunExitDoor\(send\)/.test(runHandler),
-    runHandlerAt === -1 ? "no review:run handler" : "the door is made elsewhere"
+    "and streams the CLI's log and progress to the renderer",
+    handlerSends.some((m) => m.channel === "run:log" && m.payload.line?.includes("login.go")) &&
+      handlerSends.some((m) => m.channel === "run:progress" && m.payload.progress?.done === 1),
+    JSON.stringify(handlerSends.map((m) => m.channel))
   );
-  check("and hands that door to settleRunExit", /\bexit,/.test(runHandler), "settleRunExit is called without `exit`");
+
+  runs[0].onDone("handler-run", { sessionId: "handler-session", value: limitResult });
+  // The record is queued behind the store's write, so wait for the exit rather
+  // than assume the tick it lands in.
+  {
+    const deadline = Date.now() + 3000;
+    while (Date.now() < deadline && handlerExits().length < 1) await new Promise((r) => setTimeout(r, 10));
+  }
+  check("the run's exit says the run ended", handlerExits().length === 1, `${handlerExits().length} exit signals`);
+  check(
+    "...only after the evidence it announces was on disk",
+    handlerExits()[0]?.evidence === true,
+    JSON.stringify(handlerExits()[0]?.payload)
+  );
+  check(
+    "with the result the CLI gave and the outcome of the record",
+    handlerExits()[0]?.payload?.result?.value === limitResult &&
+      handlerExits()[0]?.payload?.id === "handler-run" &&
+      handlerExits()[0]?.payload?.diagnostics?.reason === "written",
+    JSON.stringify(handlerExits()[0]?.payload)
+  );
+
+  // The second outcome for the same run — a service that reported twice, a
+  // retry added later — must not tell the renderer the run ended twice. This is
+  // the assertion the regex could not make: it goes red the moment the door is
+  // made per *settle* instead of per *run*.
+  runs[0].onDone("handler-run", { sessionId: "handler-session", value: limitResult });
+  await new Promise((r) => setTimeout(r, 150));
+  check(
+    "a second outcome for the same run is not a second \"the run ended\"",
+    handlerExits().length === 1,
+    `${handlerExits().length} exit signals`
+  );
+
+  // One handler, many runs: the door belongs to the run, so the next run gets
+  // its own -- the guard above must not swallow a real second run's exit.
+  handler({ repo, mode: "review", runId: "handler-run-2" });
+  runs[1].onDone("handler-run-2", { sessionId: "handler-session-2", value: limitResult });
+  {
+    const deadline = Date.now() + 3000;
+    while (Date.now() < deadline && handlerExits().length < 2) await new Promise((r) => setTimeout(r, 10));
+  }
+  check(
+    "a second run from the same handler gets its own exit",
+    handlerExits().length === 2 && handlerExits()[1]?.payload?.id === "handler-run-2",
+    `${handlerExits().length} exit signals`
+  );
+  check(
+    "and its evidence landed too",
+    handlerExits()[1]?.evidence === true,
+    JSON.stringify(handlerExits()[1]?.payload)
+  );
+
+  // The collaborators are injected, so the check above is a check of this
+  // wiring and not of a second implementation: a spy must be able to see the
+  // door, the settle, and the message builder the handler used.
+  const stubDoors = [];
+  const stubSettles = [];
+  const stubStore = { record: () => {} };
+  const stubSend = () => {};
+  const injected = makeRunHandler({
+    ocr: {
+      startRun(spec2, onLog, onDone) {
+        onDone("injected-run", { sessionId: "injected-session", value: limitResult });
+      },
+    },
+    store: stubStore,
+    send: stubSend,
+    createRunExitDoor: (doorSend) => {
+      const door = { channel: "stub:exit", hasSent: () => false };
+      stubDoors.push({ door, doorSend });
+      return door;
+    },
+    settleRunExit: (opts) => {
+      stubSettles.push(opts);
+      return Promise.resolve(null);
+    },
+    outcomeMessage: () => "STUB-MESSAGE",
+    reportOutcome: () => "",
+    timeoutMs: 7,
+  });
+  injected({ repo, mode: "review" });
+  await Promise.resolve();
+  check(
+    "the handler takes its door, its settle and its wording from the caller",
+    stubDoors.length === 1 &&
+      stubSettles.length === 1 &&
+      stubSettles[0].exit === stubDoors[0].door &&
+      typeof stubSettles[0].send === "function" &&
+      stubSettles[0].timeoutMs === 7,
+    `${stubDoors.length} doors / ${stubSettles.length} settles`
+  );
+  check(
+    "and builds the exit payload from the caller's wording",
+    stubSettles[0]?.payload?.({ ok: false, reason: "io-error" })?.diagnostics?.message === "STUB-MESSAGE",
+    JSON.stringify(stubSettles[0]?.payload?.({ ok: false, reason: "io-error" }))
+  );
+
+  // `main.js` is a registration now, and that is the point: it cannot make a
+  // door, cannot settle, and cannot start a run behind the handler's back.
+  const mainSrc2 = fs.readFileSync(path.join(ROOT, "main.js"), "utf8");
+  check(
+    "the main process registers the run handler from run-handler.js",
+    mainSrc2.includes('require("./run-handler")') && /makeRunHandler\(\{[^)]*\}\)/.test(mainSrc2),
+    "main.js does not use the factory"
+  );
+  check(
+    "and does not start the run itself",
+    !/ocr\.startRun\s*\(/.test(mainSrc2),
+    "main.js calls ocr.startRun"
+  );
 }
 
 // The one outcome that really loses the evidence has to reach the app as
