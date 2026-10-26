@@ -307,6 +307,11 @@ const arityMismatches = [];
 // consequence of the loop's `continue`s — each of which is a method that quietly
 // stops being checked.
 const examined = new Set();
+// What each method actually reached, from the same probe call. Kept for the
+// checks at the end of this file: "the name exists, the arguments line up, the
+// payload arrives, the channel has a handler" is all true of a method pointed at
+// a *neighbour's* channel.
+const channelOf = new Map();
 const shapeMismatches = [];
 const extraKeyMismatches = [];
 const parseFailures = [];
@@ -382,6 +387,11 @@ for (const name of declared) {
     continue;
   }
   examined.add(name);
+  // `invoked` was cleared before the call, so these are this method's own
+  // channels and nobody else's. A method that reached none is `unprobed` above
+  // and is deliberately not recorded here: the two checks would say the same
+  // thing twice.
+  channelOf.set(name, invoked.map((call) => call.channel));
   // A zero-parameter method has nothing left to compare: the call above *was* the
   // check, and it did reach a channel.
   if (!params.length) continue;
@@ -561,6 +571,88 @@ check(
   "every channel main sends has a listener in preload",
   sentToNobody.length === 0,
   sentToNobody.length ? `sent but never listened for: ${sentToNobody.join(", ")}` : ""
+);
+
+// ---------------------------------------------------------------------------
+// Which channel each method reaches, not just that the names agree.
+// ---------------------------------------------------------------------------
+// Everything above compares the two sides *per name*: the method exists on both,
+// takes the same arguments, its payload arrives under the interface's names, and
+// the channel it names has a handler. None of that says a method reaches its
+// *own* channel. `revealFile` invoking `file:open` satisfies all of it — the
+// channel exists, the handler exists, and both take the same single string, so
+// the shape probe cannot tell them apart either. The user gets a file that opens
+// when they asked where it lives, and every check here stays green.
+//
+// So the channel reached during the probe is kept, and two properties are
+// asserted. The first is general and needs no maintenance: one channel per
+// method, and no channel shared by two methods — a copy-paste or a rename that
+// stopped half-way. The second is a pinned table, and deliberately small: only
+// where a swap is invisible to every other check in this file. Pinning all 36
+// would make this file a second copy of preload.js, and the two copies would
+// disagree about formatting before they disagreed about a channel.
+const FILE_CHANNELS = {
+  readFile: "file:read",
+  openFile: "file:open",
+  revealFile: "file:reveal",
+  saveText: "file:saveText",
+  openUrl: "file:openUrl",
+};
+
+const manyChannels = [...channelOf]
+  .filter(([, channels]) => channels.length !== 1)
+  .map(([name, channels]) => `${name} reached ${channels.join(", ")}`);
+check(
+  "every method reaches exactly one channel",
+  manyChannels.length === 0,
+  manyChannels.length ? `${manyChannels.join(" | ")} — the extra payloads are never examined` : ""
+);
+
+const byChannel = new Map();
+for (const [name, channels] of channelOf)
+  for (const channel of channels) byChannel.set(channel, [...(byChannel.get(channel) || []), name]);
+const sharedChannels = [...byChannel]
+  .filter(([, names]) => names.length > 1)
+  .map(([channel, names]) => `${channel}: ${names.join(" + ")}`);
+check(
+  "and no two methods reach the same one",
+  sharedChannels.length === 0,
+  sharedChannels.length ? `${sharedChannels.join(" | ")} — one of them does not do what its name says` : ""
+);
+
+const wrongFileChannel = Object.entries(FILE_CHANNELS)
+  .map(([name, channel]) => ({ name, channel, reached: channelOf.get(name) || [] }))
+  .filter((entry) => entry.reached.length !== 1 || entry.reached[0] !== entry.channel)
+  .map((entry) => `${entry.name} -> ${entry.reached.join(", ") || "nothing"} (should be ${entry.channel})`);
+check(
+  "the file methods reach the channel their name promises",
+  wrongFileChannel.length === 0,
+  wrongFileChannel.join(" | ")
+);
+const staleFileChannels = Object.keys(FILE_CHANNELS).filter((name) => !declared.includes(name));
+check(
+  "the file channel table names only methods the interface declares",
+  staleFileChannels.length === 0,
+  staleFileChannels.length ? `not in the Bridge interface: ${staleFileChannels.join(", ")}` : ""
+);
+
+// The channels are read twice, and the two readings have to agree: as text out of
+// preload.js (the `ipcRenderer.invoke("…")` calls) and as what the probe actually
+// saw. A method that started building its channel name — a template string, a
+// lookup — would still pass the "is there a handler" check on the spelling it
+// used to have, while the channel the renderer really invokes went unchecked.
+const probedChannels = new Set([...channelOf.values()].flat());
+const unspelled = [...probedChannels].filter((c) => !invokeChannels.has(c)).sort();
+const unreached = [...invokeChannels].filter((c) => !probedChannels.has(c)).sort();
+check(
+  "the probe and preload.js name the same channels",
+  unspelled.length === 0 && unreached.length === 0,
+  [
+    unspelled.length ? `reached but not spelled in preload.js: ${unspelled.join(", ")}` : "",
+    unreached.length ? `spelled in preload.js but no method reached it: ${unreached.join(", ")}` : "",
+  ]
+    .filter(Boolean)
+    .join(" | ")
 );
 
 console.log(`\n${passed.length} ok, ${failed.length} failed`);

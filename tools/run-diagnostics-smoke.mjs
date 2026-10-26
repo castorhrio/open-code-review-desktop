@@ -39,6 +39,7 @@ const {
   SIGNAL_FAILED,
   SETTLE_FAILED,
   flushNow,
+  flushAndReport,
   flushBeforeQuit,
 } = require("../run-diagnostics.js");
 const { makeRunHandler } = require("../run-handler.js");
@@ -919,6 +920,66 @@ const stuckFlush = await flushNow({ drain: () => drainQueue(churning) }, 2000);
 check("the exit flush passes max-rounds through", stuckFlush?.reason === "max-rounds", JSON.stringify(stuckFlush));
 const slowFlush = await flushNow({ drain: () => new Promise(() => {}) }, 60);
 check("and a drain that never answers is reported as a timeout", slowFlush?.reason === "timeout", JSON.stringify(slowFlush));
+
+/* ---- the uninstall flush must not be able to cancel the uninstall ----
+ * `main.js`'s uninstall handler awaits the flush *before* spawning the
+ * uninstaller, before the delayed quit, and before it answers the settings page
+ * (which is what switches the page to 「正在卸载…」). `flushNow` answers every
+ * store failure as a value, so the only way that await can throw is a flush that
+ * is not the store's — a handler wired with something else, a `drain` that is not
+ * a function. For this path a throw is not a log line: it is an uninstall that
+ * spawned nothing, answered nothing, and cannot be retried from that page. So the
+ * handler uses `flushAndReport`, which turns any of that into the outcome that
+ * already means "the flush did not work" (`drain-failed`) and one line to the
+ * sink. `flushNow` cannot realistically reject, so the rejection is injected.
+ */
+const rejectedLog = [];
+const rejectedFlush = await flushAndReport(store, (line) => rejectedLog.push(line), {
+  flush: () => Promise.reject(new Error("the store is not a store")),
+});
+check(
+  "a flush that rejects still answers an outcome instead of throwing",
+  rejectedFlush?.ok === false && rejectedFlush?.reason === "drain-failed",
+  JSON.stringify(rejectedFlush)
+);
+check("and the log says the flush itself went wrong", rejectedLog.length === 1 && rejectedLog[0].includes("冲刷出错"), JSON.stringify(rejectedLog));
+
+const threwLog = [];
+const threwFlush = await flushAndReport(store, (line) => threwLog.push(line), {
+  flush: () => {
+    throw new Error("wired wrong");
+  },
+});
+check(
+  "a flush that throws before returning a promise answers the same way",
+  threwFlush?.reason === "drain-failed" && threwLog.length === 1,
+  `${JSON.stringify(threwFlush)} / ${JSON.stringify(threwLog)}`
+);
+
+// The sink is the other thing that can die mid-uninstall, and a line that
+// cannot be logged must not become the uninstall that did not happen.
+const deadSinkFlush = await flushAndReport(store, () => {
+  throw new Error("the log sink is gone");
+}, { flush: () => Promise.reject(new Error("the store is not a store")) });
+check("a dead log sink does not turn the answer into a rejection", deadSinkFlush?.reason === "drain-failed", JSON.stringify(deadSinkFlush));
+
+// And the wrapper must not invent news on a healthy flush: the wording is the
+// same table `before-quit` uses, so a normal uninstall says nothing at all.
+const quietFlushLog = [];
+const quietFlush = await flushAndReport({ drain: () => Promise.resolve({ ok: true, reason: "drained" }) }, (line) => quietFlushLog.push(line));
+check("a healthy flush logs nothing through the wrapper", quietFlush?.reason === "drained" && quietFlushLog.length === 0, JSON.stringify(quietFlushLog));
+const timedFlushLog = [];
+const timedFlush = await flushAndReport({ drain: () => new Promise(() => {}) }, (line) => timedFlushLog.push(line), { timeoutMs: 60 });
+check(
+  "and the real bound still reaches the log through the wrapper",
+  timedFlush?.reason === "timeout" && timedFlushLog.length === 1,
+  `${JSON.stringify(timedFlush)} / ${JSON.stringify(timedFlushLog)}`
+);
+
+// There is no Electron in this file, so the wiring itself is read from source:
+// the wrapper is only worth anything if the uninstall handler actually uses it.
+check("main.js's uninstall path flushes through the wrapper", /await flushAndReport\(runDiagnostics\)/.test(mainSrc));
+check("and it no longer awaits a bare flushNow there", !/await flushNow\(/.test(mainSrc));
 
 /* ---- a write that finishes after the bound must still be heard ----
  * `recordBounded` gives up so `run:exit` is not held by a slow disk, but the

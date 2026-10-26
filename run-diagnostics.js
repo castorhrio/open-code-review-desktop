@@ -866,6 +866,46 @@ function flushNow(store, timeoutMs = WRITE_TIMEOUT_MS) {
 }
 
 /**
+ * Flush, say what happened, and carry on — including when the flush itself
+ * breaks.
+ *
+ * `main.js`'s uninstall handler used to spell this out as
+ * `reportOutcome(await flushNow(...))`, which reads as "the flush cannot fail".
+ * It very nearly cannot: `drainBounded` answers `drain-failed` / `timeout` /
+ * `max-rounds` instead of rejecting, so the store's own failure already arrives
+ * as a value. What is left is everything *around* that promise — a caller that
+ * was wired with something that is not a store, a `drain` that is not a
+ * function, a reject from a `flush` somebody passed in — and `await` at the top
+ * of an `ipcMain.handle` turns any of those into a rejected invocation.
+ *
+ * For the uninstall path that rejection is not a log line, it is the uninstall
+ * itself: the spawn, the delayed `app.quit()` and the reply the settings page
+ * switches 「正在卸载…」 on all sit *after* the await, so a flush that threw
+ * left the user with an app that answered nothing and deleted nothing. The
+ * evidence is worth a line, not the whole action.
+ *
+ * So a throw is treated as what it means — the flush did not work — and
+ * reported with the wording that already says that (`drain-failed`), then
+ * answered as a value. The report goes through `reportOutcome`, which does not
+ * throw either; a sink that dies loses the line, not the caller's job.
+ *
+ * `options.flush` is a seam for checks: `flushNow` cannot realistically reject,
+ * so "the caller survives a rejection" can only be exercised by passing one in.
+ */
+async function flushAndReport(store, warn, options) {
+  const opts = options || {};
+  const flush = typeof opts.flush === "function" ? opts.flush : flushNow;
+  let outcome;
+  try {
+    outcome = await flush(store, opts.timeoutMs);
+  } catch (_) {
+    outcome = DRAIN_FAILED;
+  }
+  reportOutcome(outcome, warn);
+  return outcome;
+}
+
+/**
  * Record, but never hold the caller longer than `timeoutMs`.
  *
  * The bound is `WRITE_TIMEOUT_MS` (2s) by default. Past it the answer is
@@ -1125,5 +1165,6 @@ module.exports = {
   SIGNAL_FAILED,
   SETTLE_FAILED,
   flushNow,
+  flushAndReport,
   flushBeforeQuit,
 };

@@ -11,7 +11,7 @@ const ocr = require("./ocr-service");
 const git = require("./git-service");
 const { installNavigationGuards } = require("./security");
 const updater = require("./update-service");
-const { createAppStore, reportOutcome, flushNow, flushBeforeQuit } = require("./run-diagnostics");
+const { createAppStore, flushAndReport, flushBeforeQuit } = require("./run-diagnostics");
 const { makeRunHandler } = require("./run-handler");
 const { makeConfigHandlers } = require("./config-handler");
 const { createInstall } = require("./install-info");
@@ -204,7 +204,14 @@ ipcMain.handle("app:uninstall", async () => {
   // not answer in time) is logged before the uninstaller starts: it deletes the
   // profile directory right after, so this is the last moment the loss can be
   // reported at all.
-  reportOutcome(await flushNow(runDiagnostics));
+  // `flushAndReport` answers a *value* for every way the flush can end — the
+  // store's own failures already arrive that way, and a flush that threw
+  // (something outside it broke) is reported as `drain-failed` instead of
+  // rejecting. The difference matters here more than anywhere else: the spawn,
+  // the quit and the reply the settings page is waiting for all come after this
+  // await, so a rejection would be an uninstall that answers nothing and
+  // deletes nothing. The evidence is worth a line, not the whole action.
+  await flushAndReport(runDiagnostics);
   try {
     spawn(target, [], { detached: true, stdio: "ignore", windowsHide: false }).unref();
   } catch (err) {
