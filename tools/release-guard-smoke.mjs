@@ -1,9 +1,14 @@
-// Checks the release guard: the two states a release must not start from.
+// Checks the release guard: the two states a release must not start from, and
+// the plan a release walks once it has passed them.
 //
 // `tools/release.mjs` is not run here — it bumps the version, commits, and
-// packages the app, so the only thing a check may touch is the decision it makes
-// before any of that. That decision lives in `release-guard.mjs`, and `capture`
-// is injected precisely so it can be fed a git that answers anything.
+// packages the app, so the only things a check may touch are the decision it
+// makes before any of that and the order it executes afterwards. Both live in
+// `release-guard.mjs`: `capture` is injected so the guard can be fed a git that
+// answers anything, and `executeRelease` takes its runners as arguments so the
+// plan can be executed against doubles that only record. Nothing here reads
+// `release.mjs`'s source — a check on how the file is written goes red on a
+// rewrite that behaves identically.
 //
 //   - a detached HEAD is the quiet one: every later step succeeds, and the
 //     release commit lands on a commit no branch points at, so the next
@@ -11,12 +16,8 @@
 //   - a dirty tree ships someone else's half-finished work.
 //
 // Run with `npm run audit:release`.
-import fs from "node:fs";
-import path from "node:path";
+import { executeRelease, releasePrecheck, planRelease, RELEASE_GUARD_MESSAGES, RELEASE_STEPS } from "./release-guard.mjs";
 
-import { releasePrecheck, planRelease, RELEASE_GUARD_MESSAGES, RELEASE_STEPS } from "./release-guard.mjs";
-
-const ROOT = path.resolve(import.meta.dirname, "..");
 const failures = [];
 const check = (name, ok, detail = "") => {
   console.log(`${ok ? "ok      " : "FAIL    "} ${name}${detail ? `  <- ${detail}` : ""}`);
@@ -187,37 +188,120 @@ const STATUS = "git status --porcelain";
   );
 }
 
-/* ---- the script executes that plan, rather than a second copy of it ---- */
+/* ---- the plan is executed in its own order, by the runners it is given ----
+ * This block used to read `tools/release.mjs` and match its source shape: that
+ * it calls `planRelease({ version, capture })`, that it loops with
+ * `for (const step of plan.steps)`, that no step command is spelled out inline.
+ * Those are properties of how the file was written, not of what a release
+ * executes — a `while` loop or a renamed local would have turned the check red
+ * while the same commands ran in the same order.
+ *
+ * `executeRelease(plan, { run, runDist })` is the contract now, so the doubles
+ * below record what was actually executed: which runner each step went to, in
+ * which order, and that a refusal executes nothing at all. `release.mjs` keeps
+ * only the two things only it can do — build the plan from real `git` and spawn
+ * the real commands.
+ */
 {
-  const src = fs.readFileSync(path.join(ROOT, "tools/release.mjs"), "utf8");
-  const why = (ok, message) => (ok ? "" : message);
+  const clean = fakeGit({ [SYMBOLIC]: "main\n", [STATUS]: "" });
+  const plan = planRelease({ version: "0.1.14", capture: clean.capture });
 
-  const imports = /import\s*\{\s*planRelease\s*\}\s*from\s*["']\.\/release-guard\.mjs["']/.test(src);
-  check("release.mjs takes its plan from the guard", imports, why(imports, "no import of planRelease"));
+  const ran = [];
+  const packaged = [];
+  const answer = executeRelease(plan, {
+    run: (step) => ran.push(step.command),
+    runDist: (step) => packaged.push(step.command),
+  });
 
-  const callsPlan = /planRelease\(\{\s*version,\s*capture\s*\}\)/.test(src);
-  check("...and builds it before running anything", callsPlan, why(callsPlan, "the plan is imported but not built"));
-
-  const aborts = /if\s*\(!plan\.ok\)[\s\S]{0,200}process\.exit\(2\)/.test(src);
-  check("...and aborts on a refusal", aborts, why(aborts, "the refusal does not stop the script"));
-
-  const executes = /for\s*\(\s*const\s+step\s+of\s+plan\.steps\s*\)/.test(src);
+  check("executing a clean plan runs every step but the precheck", answer.ok === true && answer.ran.join(" -> ") === RELEASE_STEPS.slice(1).join(" -> "), JSON.stringify(answer));
   check(
-    "...and executes the steps in the order the plan gave them",
-    executes,
-    why(executes, "release.mjs does not iterate plan.steps")
+    "and the commands ran in the plan's order, each exactly once",
+    ran.join(" | ") === [
+      "npm version 0.1.14 --no-git-tag-version",
+      'git add package.json package-lock.json && git commit -m "chore(release): 0.1.14"',
+      "npm run audit",
+      "npm run audit:secrets",
+    ].join(" | "),
+    ran.join(" | ")
+  );
+  check(
+    "and packaging is the one step that goes through the fallback runner",
+    packaged.length === 1 && packaged[0] === "npm run dist:win",
+    JSON.stringify(packaged)
+  );
+  check(
+    "and the key scan runs after packaging, over the packages it produced",
+    answer.ran[answer.ran.length - 1] === "secret-scan" && answer.ran[answer.ran.length - 2] === "dist",
+    answer.ran.join(" -> ")
   );
 
-  // The commands must not exist in both places: a second copy in the script is
-  // the one that would drift from the one the check asserts.
-  const inlineCommands = /npm version \$\{version\}|git commit -m/.test(src);
+  // A refusal is not a shorter run: it is no run. Both refusal shapes go through
+  // the same assertion, because "the precheck answered no" is the only fact that
+  // matters — the runners are never consulted.
+  for (const [label, answers] of [
+    ["a detached HEAD", { [SYMBOLIC]: "throw" }],
+    ["a dirty tree", { [SYMBOLIC]: "main\n", [STATUS]: " M package.json\n" }],
+  ]) {
+    const g = fakeGit(answers);
+    const refused = planRelease({ version: "0.1.14", capture: g.capture });
+    const calls = [];
+    const refusedAnswer = executeRelease(refused, {
+      run: (step) => calls.push(step.command),
+      runDist: (step) => calls.push(`dist:${step.command}`),
+    });
+    check(
+      `executing the plan of ${label} runs nothing`,
+      refusedAnswer.ok === false && refusedAnswer.ran.length === 0 && calls.length === 0,
+      JSON.stringify([refusedAnswer, calls])
+    );
+  }
+
+  // A caller that only has one runner does not have to spell out the second: the
+  // packaging step falls back to `run` rather than being skipped, because a step
+  // that silently does not run is the failure mode this whole plan exists to
+  // prevent.
+  const oneRunner = [];
+  executeRelease(plan, { run: (step) => oneRunner.push(step.name) });
   check(
-    "the step commands are written in exactly one place",
-    !inlineCommands,
-    why(!inlineCommands, "release.mjs still spells out a step command")
+    "with a single runner, packaging still runs through it",
+    oneRunner.includes("dist") && oneRunner.join(" -> ") === RELEASE_STEPS.slice(1).join(" -> "),
+    oneRunner.join(" -> ")
   );
-  const inline = (src.match(/git status --porcelain/g) || []).length;
-  check("the clean-tree question is asked in exactly one place", inline === 0, `${inline} inline uses in release.mjs`);
+
+  // A runner that throws — the script's own runner exits the process on a failed
+  // command — must end the sequence. Nothing after the failed step runs, and the
+  // throw is the caller's to report.
+  const beforeThrow = [];
+  let threw = null;
+  try {
+    executeRelease(plan, {
+      run: (step) => {
+        beforeThrow.push(step.name);
+        if (step.name === "audit") throw new Error("audit failed");
+      },
+      runDist: (step) => beforeThrow.push(step.name),
+    });
+  } catch (err) {
+    threw = err;
+  }
+  check(
+    "a step that fails stops the release there",
+    threw !== null && beforeThrow.join(" -> ") === "bump -> commit -> audit",
+    `${beforeThrow.join(" -> ")} / ${threw && threw.message}`
+  );
+
+  // Refusals are answered as data, and an unreadable plan is not a pass either:
+  // `null`/`undefined` must not read as "no steps to run, so nothing to worry
+  // about".
+  for (const empty of [null, undefined, {}]) {
+    const calls = [];
+    const answerForEmpty = executeRelease(empty, { run: () => calls.push("run"), runDist: () => calls.push("dist") });
+    check(
+      `a plan that is ${JSON.stringify(empty) || "missing"} executes nothing and says so`,
+      answerForEmpty.ok === false && answerForEmpty.ran.length === 0 && calls.length === 0,
+      JSON.stringify([answerForEmpty, calls])
+    );
+  }
 }
 
 console.log(`\n${failures.length === 0 ? "all release-guard checks passed" : `${failures.length} failed`}`);

@@ -115,3 +115,46 @@ export function planRelease({ version, capture } = {}) {
   if (!pre.ok) return { ...pre, steps: [] };
   return { ...pre, steps: releaseCommands(version) };
 }
+
+/**
+ * Run a plan's steps, in the plan's order, through the two runners given.
+ *
+ * WHY THIS IS HERE AND NOT IN `tools/release.mjs`
+ * The loop that executes the plan used to live in the script, so the only way to
+ * check "the steps run in this order, and a refusal runs nothing" was to read the
+ * script's source and match its shape — `for (const step of plan.steps)`, the
+ * literal `planRelease({ version, capture })` call. Those are properties of how
+ * the file happens to be written: a `while` loop, a `.forEach`, or passing the
+ * options through a variable would each have turned the check red while the
+ * release still executed the same commands in the same order. This function is
+ * the contract instead. The smoke calls it with recording doubles and asserts
+ * what was *executed*, and `release.mjs` is left with the two things it alone can
+ * do: build the plan from `git` and supply runners that touch the real disk.
+ *
+ * `run` gets the ordinary steps and `runDist` the packaging one, because that is
+ * the only step with a fallback worth keeping out of this module (see
+ * `tools/release.mjs`: a locked `win-unpacked.tmp` sends packaging to a fresh
+ * output dir). `runDist` defaults to `run`, so a caller that has no fallback
+ * does not have to spell one out.
+ *
+ * A runner that throws ends the sequence — nothing after a failed step runs, and
+ * the throw is the caller's to turn into an exit. That is the same contract the
+ * script's own runner has by exiting the process, kept as a throw here so the
+ * double in the smoke can prove the later steps were never reached.
+ *
+ * The answer names what ran (`ran: [...]`, in order) and, on a refused plan,
+ * `{ ok: false, ran: [] }` — the refusal is the answer, not a third state the
+ * caller has to remember.
+ */
+export function executeRelease(plan, deps = {}) {
+  const run = typeof deps.run === "function" ? deps.run : () => {};
+  const runDist = typeof deps.runDist === "function" ? deps.runDist : run;
+  if (!plan || !plan.ok) return { ok: false, reason: (plan && plan.reason) || "refused", ran: [] };
+  const ran = [];
+  for (const step of plan.steps) {
+    if (step.name === "dist") runDist(step);
+    else run(step);
+    ran.push(step.name);
+  }
+  return { ok: true, ran };
+}

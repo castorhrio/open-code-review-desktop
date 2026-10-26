@@ -20,7 +20,7 @@ import { execSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-import { planRelease } from "./release-guard.mjs";
+import { executeRelease, planRelease } from "./release-guard.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const version = process.argv[2];
@@ -29,6 +29,10 @@ if (!/^\d+\.\d+\.\d+$/.test(version || "")) {
   process.exit(2);
 }
 
+// The two runners `executeRelease` calls. Everything the release *decides* lives
+// in `release-guard.mjs`; what is left here is the part that can only happen on
+// this machine — spawning the commands and, for packaging, retrying into a fresh
+// output dir when electron-builder cannot rename into the locked one.
 const run = (cmd, opts = {}) => {
   console.log(`\n$ ${cmd}`);
   const r = spawnSync(cmd, { shell: true, cwd: ROOT, stdio: "inherit", ...opts });
@@ -54,7 +58,8 @@ if (!plan.ok) {
 }
 console.log(`releasing ${version} from ${plan.branch}`);
 
-const runDist = (command) => {
+const runDist = (step) => {
+  const command = step.command;
   console.log(`\n$ ${command}`);
   const dist = spawnSync(command, { shell: true, cwd: ROOT, stdio: "inherit" });
   if (dist.status === 0) return;
@@ -73,13 +78,15 @@ const runDist = (command) => {
   fs.rmSync(from, { recursive: true, force: true });
 };
 
-// The order is the plan's, not this loop's: every step runs in the sequence the
-// guard built, and the key scan is last because it reads the packages the
-// previous step produced.
-for (const step of plan.steps) {
-  if (step.name === "dist") runDist(step.command);
-  else run(step.command);
-}
+// The order is the plan's, not this file's. `executeRelease` walks the steps the
+// guard built and calls the runner each one needs; the key scan is last because
+// it reads the packages the step before it produced. Nothing here re-spells a
+// step, so a command cannot drift from the one `audit:release` exercises.
+//
+// The plan's steps carry a name and a command; the runners below take the
+// command, so the adapter is spelled out here rather than making `run` accept a
+// shape it does not otherwise know.
+executeRelease(plan, { run: (step) => run(step.command), runDist });
 
 console.log(`\nrelease ${version} packaged under release/`);
 console.log("remaining, both human acts: git push, then publish a GitHub Release if you want installed clients to update.");
