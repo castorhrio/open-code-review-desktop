@@ -23,6 +23,8 @@ import {
   PIN_LINE_SHAPES,
   PIN_PLACES,
   ROWS_TO_REREAD,
+  ROW_SOURCES,
+  TABLE_HEADER,
   UPSTREAM_HISTORY_DOC,
   classifyGit,
   createRunner,
@@ -36,6 +38,7 @@ import {
   parseLsRemote,
   pinPlaceCoverage,
   runUpstreamWatch,
+  tableRowCoverage,
   upstreamDrift,
 } from "./upstream-watch.mjs";
 
@@ -331,16 +334,51 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
       !moved.includes(DEBT_MARKER),
     moved
   );
-  const labels = ROWS_TO_REREAD.map((row) => row.match(/^[^（—]+/)[0].trim());
+  const listedLabels = ROWS_TO_REREAD.map((row) => row.label);
   check(
     "the moved sentence lists every row that needs re-reading",
-    labels.every((label) => moved.includes(label)),
-    JSON.stringify(labels)
+    listedLabels.every((label) => moved.includes(label)),
+    JSON.stringify(listedLabels.filter((label) => !moved.includes(label)))
+  );
+  // The point of the whole round: "the pin moved" must name the files to re-read
+  // itself, not leave that to someone who remembers to open the doc. Each row's
+  // `source` is the exact string the doc's table carries, so the check is about
+  // the same fact in both places.
+  check(
+    "the moved sentence names all five upstream sources, paths included",
+    ROW_SOURCES.length === 5 && ROW_SOURCES.every((source) => moved.includes(source)),
+    JSON.stringify({
+      count: ROW_SOURCES.length,
+      missing: ROW_SOURCES.filter((source) => !moved.includes(source)),
+    })
   );
   check(
-    "exactly four source rows are listed, because the table has four core rows",
-    ROWS_TO_REREAD.length === 4 && new Set(ROWS_TO_REREAD).size === 4,
-    JSON.stringify(ROWS_TO_REREAD)
+    "every source is listed once, and none is a substring of another",
+    new Set(ROW_SOURCES).size === ROW_SOURCES.length &&
+      ROW_SOURCES.every(
+        (source) => ROW_SOURCES.filter((other) => other !== source && other.includes(source)).length === 0
+      ),
+    JSON.stringify(ROW_SOURCES)
+  );
+  // The list is printed by walking `ROWS_TO_REREAD`; if it were printed as a
+  // literal, adding a row would leave the sentence behind and the check above
+  // would still pass. Handing in a four-row list has to drop exactly the row
+  // that is missing from it.
+  const dropped = ROWS_TO_REREAD.filter((row) => row.source !== "cmd/opencodereview/llm_cmd.go");
+  const droppedText = formatDrift(upstreamDrift({ ok: true, sha: OTHER_SHA }), dropped);
+  check(
+    "...and the list is generated from the rows, not written as a literal",
+    dropped.length === ROWS_TO_REREAD.length - 1 &&
+      !droppedText.includes("cmd/opencodereview/llm_cmd.go") &&
+      droppedText.includes("下面 4 处对照点") &&
+      ROWS_TO_REREAD.some((row) => row.source === "cmd/opencodereview/llm_cmd.go") &&
+      moved.includes("下面 5 处对照点"),
+    JSON.stringify({ dropped: dropped.length, hasLlmCmd: droppedText.includes("llm_cmd.go") })
+  );
+  check(
+    "exactly five source rows are listed, one per comparison point in the doc's table",
+    ROWS_TO_REREAD.length === 5 && new Set(ROW_SOURCES).size === 5,
+    JSON.stringify(ROW_SOURCES)
   );
   // The prefix-collision sentence must not be mistakable for the quiet one.
   const movedSamePrefix = formatDrift(upstreamDrift({ ok: true, sha: SAME_PREFIX_SHA }));
@@ -767,11 +805,82 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
     latestLedger !== undefined && channel !== null && latestLedger[2] === channel[1],
     JSON.stringify({ ledger: latestLedger && latestLedger[2], fixed: channel && channel[1] })
   );
-  const labels = ROWS_TO_REREAD.map((row) => row.match(/^[^（—]+/)[0].trim());
+  // The reading list is generated from `ROWS_TO_REREAD`; the table is hand-
+  // written. Asking "does each label appear somewhere in the doc" (the previous
+  // shape of this check) passes while the table has a sixth row nobody will ever
+  // be told to re-read, and passes while a listed row has drifted into some other
+  // paragraph. So the two lists are compared as a bijection on the sources — the
+  // upstream file each row is about — and the failure names the source, not a
+  // count.
+  const tableCoverage = tableRowCoverage(doc);
   check(
-    "each row the sentinel names still exists in the table",
-    labels.every((label) => doc.includes(label)),
-    JSON.stringify(labels.filter((label) => !doc.includes(label)))
+    "the doc has the comparison table the sentinel's reading list is paired with",
+    tableCoverage.found && doc.includes(TABLE_HEADER),
+    JSON.stringify({ found: tableCoverage.found, headerLine: tableCoverage.headerLine })
+  );
+  check(
+    "the table has exactly one body row per listed source, and no row is unclaimed",
+    tableCoverage.rows.length === ROWS_TO_REREAD.length &&
+      tableCoverage.missing.length === 0 &&
+      tableCoverage.duplicated.length === 0 &&
+      tableCoverage.orphans.length === 0,
+    JSON.stringify({
+      rows: tableCoverage.rows.length,
+      listed: ROWS_TO_REREAD.length,
+      missing: tableCoverage.missing,
+      duplicated: tableCoverage.duplicated,
+      orphans: tableCoverage.orphans.map((row) => row.line),
+    })
+  );
+  check(
+    "...and each listed label is the cell text of its own row",
+    ROWS_TO_REREAD.every((row) => doc.includes(row.label)),
+    JSON.stringify(ROWS_TO_REREAD.filter((row) => !doc.includes(row.label)).map((row) => row.label))
+  );
+  // Dropping a table row is the drift this pair exists to catch: the doc loses a
+  // comparison point and the sentinel would keep naming five rows *including*
+  // one the table no longer has. Asserted on a mutated copy, deleting exactly the
+  // line of the `cmd/opencodereview/llm_cmd.go` row.
+  const droppedSource = "cmd/opencodereview/llm_cmd.go";
+  const dropRow = tableCoverage.rows.find((row) => row.sources.includes(droppedSource));
+  const withoutRow = dropRow ? docLines.filter((_, index) => index + 1 !== dropRow.line).join("\n") : "";
+  const afterDrop = tableRowCoverage(withoutRow);
+  check(
+    "deleting the llm_cmd.go table row goes red and names that source",
+    dropRow !== undefined &&
+      afterDrop.rows.length === tableCoverage.rows.length - 1 &&
+      afterDrop.missing.length === 1 &&
+      afterDrop.missing[0] === droppedSource,
+    JSON.stringify({ line: dropRow && dropRow.line, rows: afterDrop.rows.length, missing: afterDrop.missing })
+  );
+  // The other direction: a table row the reading list does not know about. Built
+  // by duplicating the resolver row and pointing it at a different upstream file,
+  // so it is a real sixth comparison point, not a separator-shaped line.
+  const orphanRow = `| 某个新对照点 | \`internal/llm/resolver_v2.go\` | 示例 | 第 99 轮 / 2026-10-27 |`;
+  const withOrphan = dropRow
+    ? [...docLines.slice(0, dropRow.line), orphanRow, ...docLines.slice(dropRow.line)].join("\n")
+    : "";
+  const afterOrphan = tableRowCoverage(withOrphan);
+  check(
+    "a table row with no counterpart in the reading list is reported as an orphan, naming its line",
+    dropRow !== undefined &&
+      afterOrphan.rows.length === tableCoverage.rows.length + 1 &&
+      afterOrphan.orphans.length === 1 &&
+      afterOrphan.orphans[0].line === dropRow.line + 1 &&
+      afterOrphan.missing.length === 0 &&
+      withOrphan.split(/\r?\n/)[afterOrphan.orphans[0].line - 1] === orphanRow,
+    JSON.stringify({ rows: afterOrphan.rows.length, orphans: afterOrphan.orphans })
+  );
+  check(
+    "...and both copies of the table differ from the doc by exactly one line",
+    dropRow !== undefined &&
+      docLines.length === withoutRow.split(/\r?\n/).length + 1 &&
+      docLines.length === withOrphan.split(/\r?\n/).length - 1,
+    JSON.stringify({
+      doc: docLines.length,
+      dropped: withoutRow.split(/\r?\n/).length,
+      orphan: withOrphan.split(/\r?\n/).length,
+    })
   );
 }
 

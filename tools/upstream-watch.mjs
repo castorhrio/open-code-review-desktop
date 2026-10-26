@@ -11,7 +11,7 @@
 // human to re-read them — and an unreachable GitHub is not an error either: it
 // prints "skipped" and exits 0, so no audit or release step is ever blocked by
 // the network. Which also means a green `upstream:check` is *not* a safety net:
-// the net is `audit:service` / `audit:config` / `audit:git` plus the four rows
+// the net is `audit:service` / `audit:config` / `audit:git` plus the five rows
 // a human re-reads. The pure functions are exported so
 // `tools/upstream-watch-smoke.mjs` can assert the answers without network.
 //
@@ -65,16 +65,106 @@ export const PINNED_UPSTREAM = Object.freeze({
   tag: "v1.13.3",
 });
 
-// Exactly the rows the sync doc's table wants re-read when upstream moves. Kept
-// here rather than in the doc so the warning and the table cannot drift apart:
-// `tools/upstream-watch-smoke.mjs` checks that each label still appears in the
-// table.
+// Exactly the rows the sync doc's comparison table wants re-read when upstream
+// moves — all five of them, each carrying the upstream file the row is about.
+//
+// Two separate promises are made here, and both used to be prose:
+//  - the moved sentence *names what to read*. It listed four rows while the
+//    doc's table had five, so the fifth (whether an empty built-in provider
+//    table is legal, `cmd/opencodereview/llm_cmd.go`) was reachable only by
+//    someone who also opened the doc and noticed the mismatch. A round that
+//    greps `[UPSTREAM-MOVED]` now gets the whole reading list;
+//  - the list and the table cannot drift: `source` is the exact upstream
+//    file/artifact string the table's 上游文件 cell contains, and
+//    `tableRowCoverage` (below) checks the two are in bijection — one row per
+//    source, one source per row. Adding a table row without adding it here, or
+//    vice versa, is a red check that names the missing source.
 export const ROWS_TO_REREAD = Object.freeze([
-  "provider 解析顺序 —— internal/llm/resolver.go（同步改 UPSTREAM_RESOLVER 与 MATCH_RULES）",
-  "`config set` 的 key 语法 —— cmd/opencodereview/config_cmd.go",
-  "内置服务表（列 / 表头 / 失败 stderr）—— `ocr llm providers`",
-  "运行期失败分类 —— failure_class 两张表",
+  {
+    label: "provider 解析顺序",
+    source: "internal/llm/resolver.go",
+    note: "同步改 UPSTREAM_RESOLVER 与 MATCH_RULES",
+  },
+  {
+    label: "`config set` 的 key 语法",
+    source: "cmd/opencodereview/config_cmd.go",
+    note: "点名到最后一个点的分段、未配置带点名直接拒绝",
+  },
+  {
+    label: "内置服务表",
+    source: "ocr llm providers",
+    note: "列 / 表头 / 失败时的 stderr 措辞",
+  },
+  {
+    label: "内置服务表**为空**是否合法",
+    source: "cmd/opencodereview/llm_cmd.go",
+    note: "表头无条件打印、空 registry 不报错；上游若改成可外挂 provider，TABLE_HOLLOW 的措辞要跟着改",
+  },
+  {
+    label: "运行期失败分类",
+    source: "failure_class",
+    note: "两张表：RunFailureClass 与每文件 FailureClass",
+  },
 ]);
+
+// The sources alone, in the order a reader meets them. Exported so a caller (and
+// the smoke test) can ask "did the sentence name all of them?" without caring
+// about the wording around each one.
+export const ROW_SOURCES = Object.freeze(ROWS_TO_REREAD.map((row) => row.source));
+
+// The comparison table's header, spelled exactly as the doc writes it. Used as
+// the anchor for `tableRowCoverage`; a reworded header makes that answer
+// `found: false`, which is red on purpose (the alternative is a table nobody can
+// find and a coverage check that silently passes over zero rows).
+export const TABLE_HEADER = "| 对照点 | 上游文件 |";
+
+// The table's body rows, each with its 1-based doc line. The separator row
+// (`| --- | --- | …`) carries no comparison point and is skipped; a row that
+// starts with `|` but has no source is reported as an orphan by
+// `tableRowCoverage`, not dropped here.
+export const comparisonTableRows = (doc) => {
+  const lines = String(doc || "").split(/\r?\n/);
+  const headerAt = lines.findIndex((line) => line.trim().startsWith(TABLE_HEADER));
+  if (headerAt === -1) return { found: false, headerLine: null, rows: [] };
+  const rows = [];
+  for (let index = headerAt + 1; index < lines.length; index += 1) {
+    const text = lines[index].trim();
+    if (!text.startsWith("|")) break;
+    if (/^\|[\s|:-]+\|$/.test(text)) continue;
+    rows.push({ line: index + 1, text });
+  }
+  return { found: true, headerLine: headerAt + 1, rows };
+};
+
+// Which table row covers which reading-list source. The point is the bijection:
+// the moved sentence is generated from `ROWS_TO_REREAD`, the table is hand-
+// written, and the two lists are the same five facts in two places. Without this
+// answer, "the sentence names every row" would be checked against the table by
+// label substring — which passes even when the table has a sixth row nobody will
+// ever be told to re-read.
+//
+// `missing`  = listed in ROWS_TO_REREAD, in no table row (the sentence names a
+//              row the table does not have, or the doc lost a row);
+// `orphans`  = a table row that names none of the sources (the table has a
+//              comparison point the moved sentence will never mention);
+// `duplicated` = a source claimed by two rows (the table repeats itself, so one
+//              of the two is being maintained for nothing).
+export const tableRowCoverage = (doc, rows = ROWS_TO_REREAD) => {
+  const table = comparisonTableRows(doc);
+  const claims = table.rows.map((row) => ({
+    ...row,
+    sources: rows.filter((entry) => row.text.includes(entry.source)).map((entry) => entry.source),
+  }));
+  const claimsFor = (source) => claims.filter((row) => row.sources.includes(source));
+  return {
+    found: table.found,
+    headerLine: table.headerLine,
+    rows: claims,
+    missing: rows.filter((entry) => claimsFor(entry.source).length === 0).map((entry) => entry.source),
+    duplicated: rows.filter((entry) => claimsFor(entry.source).length > 1).map((entry) => entry.source),
+    orphans: claims.filter((row) => row.sources.length === 0),
+  };
+};
 
 const FULL_SHA = /^[0-9a-f]{40}$/i;
 
@@ -164,7 +254,7 @@ export const upstreamDrift = ({ ok, sha, pinned = PINNED_UPSTREAM.sha, failure =
   };
 };
 
-export const formatDrift = (verdict) => {
+export const formatDrift = (verdict, rows = ROWS_TO_REREAD) => {
   const via = verdict.channel || "none";
   if (verdict.state === "skipped") {
     return `${DEBT_MARKER} 上游 HEAD 核对：跳过（${verdict.reason}；通路：${via}；本轮未核对，不等于上游没变）`;
@@ -179,11 +269,20 @@ export const formatDrift = (verdict) => {
   const from = verdict.pinned.slice(0, 7);
   const to = verdict.sha.slice(0, 7);
   const arrow = from === to ? `${from} → ${to}（前 7 位相同，区别在后面）` : `${from} → ${to}`;
+  // The reading list is printed here, not looked up in the doc: the event
+  // ("the pin moved") should carry its own consequence. `rows` is a parameter so
+  // the smoke test can hand in a shorter list and assert that the dropped source
+  // really disappears from the output — otherwise "all five are named" could
+  // pass while the sentence never read the list at all.
+  const reading = rows.map(
+    (row, index) =>
+      `   ${index + 1}. ${row.label} —— \`${row.source}\`${row.note ? `（${row.note}）` : ""}`
+  );
   return [
     `${MOVED_MARKER} 上游 HEAD 已前进：${arrow}（通路：${via}）`,
     `   新 HEAD 全 40 位：${verdict.sha}`,
-    "   这不是失败，但 docs/OCR-UPSTREAM-SYNC.md 下面四行需要重读源码，而不是只看 SHA：",
-    ...ROWS_TO_REREAD.map((row) => `   - ${row}`),
+    `   这不是失败，但下面 ${rows.length} 处对照点需要重读源码（与 docs/OCR-UPSTREAM-SYNC.md 的对照表同 ${rows.length} 行），而不是只看 SHA：`,
+    ...reading,
   ].join("\n");
 };
 

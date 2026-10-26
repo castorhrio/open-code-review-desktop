@@ -18,6 +18,38 @@ pin 块，这样它就不会某天被当成第二个权威源。
 
 ---
 
+## 上游状态（最近检查：2026-10-27，第 68 轮）
+
+第 68 轮复核：**HEAD 未变，结论仍是「无新内容」；本轮 git 通路超时，由 GitHub API 作答。**
+`git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
+refs/tags/v1.13.3` 本轮超时（退出码 124），改走 GitHub API：
+`api.github.com/repos/alibaba/open-code-review/commits/main` 给出
+`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`（与第 49–67 轮同一个
+commit），`git/ref/tags/v1.13.3` 仍指向 annotated tag 对象
+`dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`，`releases/latest` 仍是 `v1.13.3`；
+`npm view @alibaba-group/open-code-review version dist-tags` 仍是 `1.13.3` /
+`latest: 1.13.3`。desktop 的 `^1.13.3` 无需改动，**无移植项**。
+
+本轮继续「把判定搬进可测纯函数」这条线，补的是第 66–67 轮留下的两处「只有人读注释
+才能保证」的契约：
+
+- **picker 的「打桩失败 → 逐条红」成为值。** 新增 `tools/e2e-picker.cjs`：
+  `PICKER_STEP_NAMES` 是 picker 断言的完整清单，`pickerChecks(dialogIsStubbed)` 为
+  每个步骤回答一行，`pickerCheck` 对未声明的步骤直接抛错（拼错名字不会静默删断言）。
+  `e2e-flow.cjs` 不再写 `if (!dialogIsStubbed) return check(...)` 的内联分支；步骤
+  是否红由模块决定，流程末尾还新增「声明的每一步都确实被报告」的检查——删掉一处
+  `pickerCheck` 调用会变红，而不是让报告悄悄变短。`tools/e2e-picker-smoke.mjs`
+  （`npm run audit:e2e-picker`，挂在 `audit:e2e-screen` 之后）钉住三态：`true` 逐条
+  绿、`false` 逐条红且 detail 含 `PICKER_STUB`、`undefined` 同样逐条红；并断言流程
+  仍在用这份清单。
+- **`screenAfter` 的「读屏恰好一次」被计数钉住。**
+  `tools/e2e-screen-smoke.mjs` 在 reject 分支加入 reader 调用计数与「报告的 screen
+  就是 reader 那次返回值」两条断言（此前只断言了 resolve 分支 0 次），并把
+  `neverAppeared` 的两个预算改成具名变量，不再靠人读两个字面量确认它们不同。
+- **`repo:pickInside` 的顺序断言点名行号。** `audit:path` 原有的「先
+  `repoIsPickable` 再 `dialog.showOpenDialog`」检查现在显式匹配带括号的调用，并要求
+  该 handler 内恰好一次对话框调用；失败时打印两个行号，而不是只给一个布尔值。
+
 ## 上游状态（最近检查：2026-10-27，第 67 轮）
 
 第 67 轮复核：**两条通路一致，结论仍是「无新内容」**。
