@@ -21,6 +21,39 @@ const os = require("os");
 const path = require("path");
 
 /**
+ * The built-in names the registry actually vouched for, or an empty list.
+ *
+ * `presetRegistry` answers `{ ok, names }`, and "no names" arrives in two
+ * shapes that both mean "the desktop does not know the list": `ok: false` when
+ * the read failed, and `ok: true` with an empty list when it came back hollow
+ * (the CLI always has built-in names, so an empty table is a broken install,
+ * not a world of custom services). One reader for both, so `spellingClash` and
+ * `tableSilenceOf` cannot disagree about what counts as an answer.
+ */
+const registryNames = (presetList) =>
+  presetList && presetList.ok && Array.isArray(presetList.names) ? presetList.names : [];
+
+/**
+ * The two ways the built-in table can stay silent, which are not the same
+ * silence and do not have the same fix.
+ *
+ * `unreadable`: `ocr llm providers` failed. Pressing 刷新 may well answer next
+ * time, so a refusal worded from this one should offer that press as a way out.
+ * `hollow`: the command answered and the table was empty. A retry answers the
+ * same, so pointing at 刷新 sends the user round a loop; the fix is on the
+ * install (reinstall or upgrade the CLI).
+ *
+ * `""` is the third answer and the only good one: the registry named services,
+ * so the desktop knows which section the CLI will read.
+ */
+const TABLE_UNREADABLE = "unreadable";
+const TABLE_HOLLOW = "hollow";
+const tableSilenceOf = (presetList) => {
+  if (!presetList || presetList.ok !== true) return TABLE_UNREADABLE;
+  return registryNames(presetList).length > 0 ? "" : TABLE_HOLLOW;
+};
+
+/**
  * The spelling a save would split in two.
  *
  * `config set provider <name>` writes `providers.<name>.<field>` and then
@@ -63,7 +96,7 @@ const spellingClash = (view, name, presetList) => {
   // that every name is custom. Treating it as knowledge would check only
   // `custom_providers` and let a same-spelled entry in `providers` be split —
   // the same hole as an unreachable registry, and the same fix: check both.
-  const names = presetList && presetList.ok && Array.isArray(presetList.names) ? presetList.names : [];
+  const names = registryNames(presetList);
   const known = names.length > 0;
   const isPreset = known && names.some((knownName) => String(knownName).toLowerCase() === name.toLowerCase());
   // The section names are the ones the config file uses, because that is
@@ -117,11 +150,36 @@ const spellingClash = (view, name, presetList) => {
  * unfixable in one step: the user renamed the form to that spelling, the save
  * went through, and the other entry was still there.
  *
- * Pure in `clash` and `name`, so it is exported and the check can assert
- * `entries` directly — and assert that `save` hands back this very sentence,
- * which ties the two halves together without spelling out any phrase.
+ * The two-entry branch also says *why* the table was silent, because the fix
+ * differs: an unreadable table is worth one more 刷新, a hollow one is not (see
+ * `tableSilenceOf`). Both silences used to share one sentence — "这一版没能读到
+ * 那张表" — which was accurate for the failed read and misleading for the empty
+ * one, where the fix is on the install and the refresh button only loops.
+ *
+ * Pure in `clash`, `name` and the registry list, so it is exported and the
+ * check can assert `entries` directly — and assert that `save` hands back this
+ * very sentence, which ties the two halves together without spelling out any
+ * phrase.
  */
-const spellingClashMessage = (clash, name) => {
+const SPELLING_SILENCE = {
+  // `why` says which way the table did not answer; `tail` is the way out, if
+  // there is one this page can offer. Both are wrapped into the sentence below
+  // so the shared half — what the clash is and what the user has to do — has
+  // one wording instead of three.
+  [TABLE_UNREADABLE]: {
+    why: "刚才读 CLI 自己的服务表没成功，说不准这个名字算不算内置名",
+    tail: "若只是想确认它会读哪一段，可以先点刷新重试，读通了这一条通常就能直接判断；刷新还是不行，再按上面的说法逐条核对。",
+  },
+  [TABLE_HOLLOW]: {
+    why: "CLI 自己的服务表读回来是空的（CLI 一定有内置服务名，所以这多半是装得不完整），说不准这个名字算不算内置名",
+    tail: "点刷新重试也是同样的结果——请先重装或升级 OCR CLI，再回来处理这几条。",
+  },
+  "": {
+    why: "这一版没能读到那张表，说不准它会读哪一段",
+    tail: "",
+  },
+};
+const spellingClashMessage = (clash, name, presetList) => {
   const entries = [{ name: clash.name, section: clash.section }, ...(clash.others || [])];
   const listed = entries.map((entry) => `${entry.name}（在 ${entry.section} 段）`).join("、");
   if (entries.length === 1) {
@@ -130,9 +188,10 @@ const spellingClashMessage = (clash, name) => {
       message: `配置里已有 ${listed}，与表单里的 ${name} 只差大小写；CLI 按 provider 字段的原始拼写读条目，这样保存会把同一个服务分成两条，旧条目里的 Key 不会再被读到。请改用已有的拼写 ${clash.name}。`,
     };
   }
+  const silence = SPELLING_SILENCE[tableSilenceOf(presetList)] || SPELLING_SILENCE[""];
   return {
     entries,
-    message: `配置里已有 ${entries.length} 条只差大小写的条目：${listed}，都与表单里的 ${name} 只差大小写；CLI 按 provider 字段的原始拼写读条目，而且读哪一段取决于这个名字在 CLI 自己的服务表里算不算内置名——这一版没能读到那张表，说不准它会读哪一段，所以每一条都要你自己核对：请在配置文件里把不要的那一条改掉或删掉，再改用要留的那条的拼写保存。`,
+    message: `配置里已有 ${entries.length} 条只差大小写的条目：${listed}，都与表单里的 ${name} 只差大小写；CLI 按 provider 字段的原始拼写读条目，而且读哪一段取决于这个名字在 CLI 自己的服务表里算不算内置名——${silence.why}，所以每一条都要你自己核对：请在配置文件里把不要的那一条改掉或删掉，再改用要留的那条的拼写保存。${silence.tail}`,
   };
 };
 
@@ -215,9 +274,15 @@ function makeConfigHandlers(options) {
     const { presetList, view } = await loadConfig();
     const clash = spellingClash(view, name, presetList);
     if (clash) {
+      // `retryable` is the machine-readable half of the sentence's "点刷新重试":
+      // the refusal came from a *failed read*, so the same save may well go
+      // through once the table answers. A hollow table sets it to false — the
+      // retry would be answered with the same empty list — so the page can tell
+      // "try again" from "fix the install" without parsing words.
       return {
         ok: false,
-        error: spellingClashMessage(clash, name).message,
+        error: spellingClashMessage(clash, name, presetList).message,
+        retryable: tableSilenceOf(presetList) === TABLE_UNREADABLE,
         steps: [],
       };
     }
@@ -371,4 +436,12 @@ function makeConfigHandlers(options) {
   return { save, read, savedKey, unset, removeEntry, use, test };
 }
 
-module.exports = { makeConfigHandlers, buildSavePairs, spellingClash, spellingClashMessage };
+module.exports = {
+  makeConfigHandlers,
+  buildSavePairs,
+  spellingClash,
+  spellingClashMessage,
+  tableSilenceOf,
+  TABLE_UNREADABLE,
+  TABLE_HOLLOW,
+};

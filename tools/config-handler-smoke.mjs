@@ -19,7 +19,15 @@ import path from "node:path";
 const ROOT = path.resolve(import.meta.dirname, "..");
 const require = createRequire(path.join(ROOT, "package.json"));
 const real = require(path.join(ROOT, "ocr-service.js"));
-const { makeConfigHandlers, buildSavePairs, spellingClash, spellingClashMessage } = require(path.join(ROOT, "config-handler.js"));
+const {
+  makeConfigHandlers,
+  buildSavePairs,
+  spellingClash,
+  spellingClashMessage,
+  tableSilenceOf,
+  TABLE_UNREADABLE,
+  TABLE_HOLLOW,
+} = require(path.join(ROOT, "config-handler.js"));
 
 const failures = [];
 const check = (name, ok, detail = "") => {
@@ -53,7 +61,7 @@ const HOLLOW_PRESETS = { ok: true, names: [] };
  */
 const refusalOf = (res, stub, name, presetList) => {
   const clash = spellingClash(stub.ocr.readConfigView(), name, presetList);
-  const answer = clash ? spellingClashMessage(clash, name) : null;
+  const answer = clash ? spellingClashMessage(clash, name, presetList) : null;
   return {
     entries: answer ? answer.entries : [],
     saidVerbatim: Boolean(answer) && res.error === answer.message,
@@ -632,6 +640,11 @@ check(
     ]),
     JSON.stringify(refused.entries)
   );
+  // The silence here is a *failed read*, so the refusal offers the press that
+  // may fix it — and says so in a flag, not only in words, so the page can
+  // offer 重试 without parsing the sentence.
+  check("a failed registry read is marked retryable", res.retryable === true, JSON.stringify(res.retryable));
+  check("and the sentence offers the refresh as a way out", res.error.includes("刷新重试"), res.error);
   check("with the sentence `save` hands back unchanged", refused.saidVerbatim, res.error);
   check(
     "it does not point at a single spelling, because both have to be reconciled",
@@ -782,6 +795,17 @@ check(
     JSON.stringify(refused.entries)
   );
   check("with the two-entry advice, not a single spelling", !res.error.includes("请改用已有的拼写") && res.error.includes("改掉或删掉"), res.error);
+  // Same two entries, same shared sentence, but the silence is the *hollow*
+  // one: a retry answers with the same empty table, so the refusal must not
+  // offer 刷新 as the way out. That is the difference this pair pins — the
+  // earlier wording said "没能读到那张表" for both, which sent the user to a
+  // button that loops.
+  check("a hollow registry list is not marked retryable", res.retryable === false, JSON.stringify(res.retryable));
+  check(
+    "and the sentence points at the install instead of the refresh button",
+    res.error.includes("重装或升级") && !res.error.includes("可以先点刷新重试"),
+    res.error
+  );
   check(
     "neither entry is touched",
     stub.state.providers.deepseek?.api_key === "sk-old" &&
@@ -907,10 +931,44 @@ check(
     JSON.stringify(hollow)
   );
 
+  // Which of the three table states a registry answer stands for, read as a
+  // mapping. The two refusals above word themselves from this, so the mapping is
+  // pinned on its own: a `presetList` that never answered at all is the
+  // *unreadable* silence (retry may help), while an answered-but-empty table is
+  // the hollow one (retry answers the same), and only a list with names in it is
+  // knowledge.
+  check(
+    "a registry list with names is knowledge, a failed read and an empty one are not",
+    tableSilenceOf(answered) === "" &&
+      tableSilenceOf(SILENT_PRESETS) === TABLE_UNREADABLE &&
+      tableSilenceOf(HOLLOW_PRESETS) === TABLE_HOLLOW,
+    JSON.stringify([tableSilenceOf(answered), tableSilenceOf(SILENT_PRESETS), tableSilenceOf(HOLLOW_PRESETS)])
+  );
+  check(
+    "and a registry that was never consulted reads as unreadable, not as hollow",
+    tableSilenceOf(undefined) === TABLE_UNREADABLE && tableSilenceOf({ ok: true }) === TABLE_HOLLOW,
+    JSON.stringify([tableSilenceOf(undefined), tableSilenceOf({ ok: true })])
+  );
+
   // The sentence and the entries come out of one call, so the refusal cannot
   // name one entry and list another. `entries` is what the checks above read.
   const one = spellingClashMessage(builtin, "DeepSeek");
   const twoSaid = spellingClashMessage(two, "DeepSeek");
+  // Two silences, two sentences: asserting they differ keeps a later "one
+  // wording is enough" simplification from passing while sending a hollow-table
+  // user to the refresh button.
+  const saidSilent = spellingClashMessage(two, "DeepSeek", SILENT_PRESETS).message;
+  const saidHollow = spellingClashMessage(two, "DeepSeek", HOLLOW_PRESETS).message;
+  check(
+    "a failed read and an empty table are answered differently",
+    saidSilent !== saidHollow && saidSilent.includes("刷新重试") && saidHollow.includes("重装或升级"),
+    `${saidHollow}`
+  );
+  check(
+    "and both still ask for every entry to be reconciled",
+    saidSilent.includes("改掉或删掉") && saidHollow.includes("改掉或删掉"),
+    saidHollow
+  );
   check(
     "the refusal's entries are the clash's entries, first one included",
     one.entries.length === 1 && one.entries[0].name === "deepseek" && one.entries[0].section === "providers",

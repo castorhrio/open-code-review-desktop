@@ -1481,13 +1481,16 @@ check(
  * is exactly the shape a reordered chain would produce, so it is the check that
  * matters most.
  */
-const ruleFor = (config, name) => {
+const answerFor = (config, name) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-match-rule-"));
   const file = path.join(dir, "config.json");
   fs.writeFileSync(file, JSON.stringify(config));
   const raw = JSON.parse(fs.readFileSync(file, "utf8"));
   fs.rmSync(dir, { recursive: true, force: true });
-  const found = svc.entryByName(raw, name);
+  return svc.entryByName(raw, name);
+};
+const ruleFor = (config, name) => {
+  const found = answerFor(config, name);
   return found ? found.rule : null;
 };
 check(
@@ -1511,6 +1514,134 @@ check(
   (svc.MATCH_RULES || []).filter((item) => item.namesEntry === false).map((item) => item.rule).join(",") ===
     svc.MATCH_ORDER,
   JSON.stringify((svc.MATCH_RULES || []).map((item) => [item.rule, item.namesEntry]))
+);
+
+/* ---- one table, one row per rule: which rule answers, and which cannot ----
+ * The checks below walk four real config shapes and say which rule answered
+ * each. That tells the *first* rule that answered, not that the others were
+ * asked and said no — a rule reordered below another one that happens to name
+ * the same entry keeps the answer and only changes the reason, which is why the
+ * reason is asserted at all. This table closes the remaining gap: each row is
+ * written so one rule is the earliest that can answer it, and the row names
+ * every rule that *could* answer it at all.
+ *
+ * The array is asked directly (`MATCH_RULES[i].test`) with the context
+ * `entryByName` builds for it, so the reading is of the rules, not of a second
+ * implementation of the precedence. `entryByName` itself is still the source of
+ * the row's answer (`answerFor`), so a row only passes when the real answer and
+ * the per-rule reading agree.
+ *
+ * The `answers` lists are worth reading twice: once an entry exists, the only
+ * rule that can answer after it is the file-order guess (a variant spelling is
+ * in `matches` whenever `active` or the registry finds it), so `order` appears
+ * in three of the four rows without having answered any of them. That is the
+ * precedence, spelled out: `order` is what is left over.
+ */
+const matchContextFor = (config, name) => {
+  const providers = config.providers || {};
+  const wanted = String(name).toLowerCase();
+  return {
+    name,
+    providers,
+    custom: config.custom_providers || {},
+    wanted,
+    active: String(config.provider || ""),
+    matches: Object.entries(providers).filter(([key]) => key.toLowerCase() === wanted),
+  };
+};
+const rulesThatAnswer = (config, name) => {
+  const context = matchContextFor(config, name);
+  return svc.MATCH_RULES.filter((item) => item.test(context)).map((item) => item.rule);
+};
+const MATCH_TABLE = [
+  {
+    // Exact, and *only* exact: the file spells the name the way the form does.
+    // The entry sits in `custom_providers`, the one section nothing but the
+    // exact rule reads — put it in `providers` and the file-order rule would
+    // answer too, because a key that spells the name is a candidate for it.
+    rule: svc.MATCH_EXACT,
+    name: "my.Gateway",
+    config: { provider: "", custom_providers: { "my.Gateway": { api_key: "sk-custom-exact" } } },
+    answers: [svc.MATCH_EXACT],
+    key: "sk-custom-exact",
+  },
+  {
+    // Active: the form holds `DEEPSEEK`, the file spells it `DeepSeek`, and the
+    // config's own `provider` names that entry. The registry's spelling is not
+    // in the file, so the registry rule has nothing to say.
+    rule: svc.MATCH_ACTIVE,
+    name: "DEEPSEEK",
+    config: { provider: "DeepSeek", providers: { DeepSeek: { api_key: "sk-upper" } } },
+    answers: [svc.MATCH_ACTIVE, svc.MATCH_ORDER],
+    key: "sk-upper",
+  },
+  {
+    // Registry: `provider` names something else entirely, so only the file's
+    // spelling — the one `ocr llm providers` prints — points at an entry.
+    rule: svc.MATCH_REGISTRY,
+    name: "DEEPSEEK",
+    config: { provider: "corp-gateway", providers: { deepseek: { api_key: "sk-registry" } } },
+    answers: [svc.MATCH_REGISTRY, svc.MATCH_ORDER],
+    key: "sk-registry",
+  },
+  {
+    // Order, the guess: an entry exists, but `provider` names another service
+    // and the file never spells the name the registry's way, so one candidate
+    // is all that is left — and one candidate is still a guess, so no entry.
+    rule: svc.MATCH_ORDER,
+    name: "DEEPSEEK",
+    config: { provider: "corp-gateway", providers: { DeepSeek: { api_key: "sk-ordered" } } },
+    answers: [svc.MATCH_ORDER],
+    key: null,
+  },
+];
+check(
+  "the table walks the rules in the array's own order, one row each",
+  JSON.stringify(MATCH_TABLE.map((row) => row.rule)) ===
+    JSON.stringify((svc.MATCH_RULES || []).map((item) => item.rule)),
+  JSON.stringify(MATCH_TABLE.map((row) => row.rule))
+);
+for (const row of MATCH_TABLE) {
+  const answered = answerFor(row.config, row.name);
+  check(
+    `${row.rule}: the real answer is that rule, and no earlier rule could have given it`,
+    Boolean(answered) && answered.rule === row.rule && rulesThatAnswer(row.config, row.name)[0] === row.rule,
+    answered ? `${answered.rule} / ${rulesThatAnswer(row.config, row.name).join(",")}` : "no entry at all"
+  );
+  check(
+    `${row.rule}: the row names every rule that could answer, and the entry it hands back`,
+    rulesThatAnswer(row.config, row.name).join(",") === row.answers.join(",") &&
+      (row.key === null ? Boolean(answered) && answered.entry === null : Boolean(answered) && answered.entry.api_key === row.key),
+    `${rulesThatAnswer(row.config, row.name).join(",")} / ${JSON.stringify(answered && answered.entry)}`
+  );
+}
+
+/* Two shapes the file-order rule must *not* answer, pinned next to the row that
+ * says when it does. It fires on "there is at least one candidate", so an empty
+ * candidate list is a different answer — no rule at all, not a guess — and two
+ * candidates are the same guess as one: the file's order picks between them, and
+ * `entry` stays empty either way, because a guess is not something a Key may be
+ * read from. Make the order rule return its first candidate and only the second
+ * check goes red.
+ */
+check(
+  "the file-order rule needs a candidate: no variant spelling means no answer at all",
+  ruleFor({ provider: "", providers: { deepseek: { api_key: "sk-other" } } }, "CLAUDE") === null,
+  String(ruleFor({ provider: "", providers: { deepseek: { api_key: "sk-other" } } }, "CLAUDE"))
+);
+const twoCandidates = (keys) => ({
+  provider: "",
+  providers: Object.fromEntries(keys.map((key) => [key, { api_key: `sk-${key}` }])),
+});
+const orderForward = answerFor(twoCandidates(["DeepSEEK", "DeepSeek"]), "DEEPSEEK");
+const orderReversed = answerFor(twoCandidates(["DeepSeek", "DeepSEEK"]), "DEEPSEEK");
+check(
+  "two candidates are still the file-order guess in either order, and still carry no entry",
+  orderForward?.rule === svc.MATCH_ORDER &&
+    orderReversed?.rule === svc.MATCH_ORDER &&
+    orderForward.entry === null &&
+    orderReversed.entry === null,
+  `${orderForward?.rule} / ${JSON.stringify(orderForward?.entry)} | ${orderReversed?.rule} / ${JSON.stringify(orderReversed?.entry)}`
 );
 // Exact before anything else, across sections: the file already spells the name
 // this way, so no other rule gets a say — even when `provider` names an entry.
