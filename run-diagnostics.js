@@ -220,12 +220,25 @@ function outcomeLogMessage(outcome, options) {
  * — the end of a run, a late write that only finished after the bound, the exit
  * flush, the uninstall flush — so no path can quietly drop the news while
  * another one warns about it.
+ *
+ * Reporting is the *last* thing these paths do, so a reporter that throws must
+ * not become the thing that breaks them: `flushBeforeQuit` calls this and then
+ * `app.quit()`, so a throwing `warn` used to leave the app unable to close —
+ * the diagnostic about a lost write would itself cost the quit. The line did
+ * not reach any log in that case, so the answer is `""` rather than the line:
+ * "reported" is what the return value means, and claiming it here would be the
+ * same lie in a quieter place. The throw is swallowed on purpose; there is no
+ * second sink left to tell.
  */
 function reportOutcome(outcome, warn, options) {
   const message = outcomeLogMessage(outcome, options);
   if (!message) return "";
   const line = `[run-diagnostics] ${message}`;
-  (typeof warn === "function" ? warn : console.warn)(line);
+  try {
+    (typeof warn === "function" ? warn : console.warn)(line);
+  } catch (_) {
+    return "";
+  }
   return line;
 }
 

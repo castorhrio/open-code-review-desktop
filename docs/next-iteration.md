@@ -6,7 +6,7 @@
 
 ---
 
-## 上游状态（最近检查：2026-10-26，第 12 轮复核）
+## 上游状态（最近检查：2026-10-26，第 14 轮复核）
 
 上游 `alibaba/open-code-review` 自 desktop 锁定的 `v1.13.0` 之后发布了
 **3 个补丁版本**：`v1.13.1` / `v1.13.2` / `v1.13.3`（共 18 个 commit）。
@@ -28,9 +28,12 @@
 | 10 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（GitHub API 三核对：commits / tags / releases） |
 | 11 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（GitHub API 核对 commits / tags；顶端 commit 与 tag 均未变） |
 | 12 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（GitHub API 三核对：commits / tags / releases） |
+| 13 | 2026-10-26 | — | — | 未留下复核记录（该轮只补了 `run-handler.js` 的正文，没有查上游） |
+| 14 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（GitHub API 三核对：commits / tags / releases） |
 
-结论：连续 12 轮没有需要移植的新功能 / 修复 / 破坏性变更，desktop 的封装（CLI flag、
-输出解析、配置暴露点）无需改动。若某轮顶端 commit 仍为 `375f64c`，本表不新增行。
+结论：已记录的复核（第 2–12、14 轮）都没有需要移植的新功能 / 修复 / 破坏性变更，
+desktop 的封装（CLI flag、输出解析、配置暴露点）无需改动；第 13 轮没有留下复核记录。
+若某轮顶端 commit 仍为 `375f64c`，本表不新增行。
 
 > 这张表以前漏了第 6–9 轮：正文里每一轮都记着自己的核对方式与结论（见下面
 > 「第 6 轮」「第 7 轮」「第 8 轮」「第 9 轮」四节），表里却没有对应的行——**表
@@ -49,6 +52,12 @@ release。desktop 的封装面不动。
 `tags` 仍是 `v1.13.3` / `v1.13.2` / `v1.13.1`，`releases` 里最新的仍是
 `v1.13.3`（2026-10-22 发布）。**没有新提交，没有新 tag，没有新 release**，封装面
 不动。
+
+第 14 轮仍用 API 三核对：`commits?sha=main` 顶端仍是 `375f64c`（2026-10-20），
+`tags` 仍是 `v1.13.3` / `v1.13.2` / `v1.13.1`，`releases` 最新仍是 `v1.13.3`
+（2026-10-22 发布）。**没有新提交，没有新 tag，没有新 release**，封装面不动。
+第 13 轮只把 `run-handler.js` 的补记写进正文，没有留下上游复核记录；本轮按规则
+补查，结果与第 12 轮一致。
 
 只是拉 tag 时会看到几条 `would clobber existing tag`（本仓也用 `v0.1.x` 编号，
 与上游 tag 撞名）：那是本地 remote 的 tag 同步提示，不影响 `upstream/main` 的
@@ -769,6 +778,61 @@ B 是 A 的祖先时是空的——**审 0 个文件，却报成一次干净的�
   provider」）。下一个人不用重做。
 
 
+## 本轮 desktop 侧加固（与上游无关，第 14 轮）
+
+上游顶端仍是 `375f64c` / `v1.13.3`（第 14 轮复核，GitHub API 三核对），无需移植。
+本轮不做新功能，只把两处「诊断自己出错时怎么办」的边界钉住。
+
+### P0 — `reportOutcome` 自己抛错，不能把调用方一起带走
+
+`reportOutcome` 是每条收尾路径的最后一句话：`settleRunExit`、`onLate`、退出冲刷、
+卸载冲刷都经过它。它原来直接调用 `warn(...)`；`warn` 一抛（日志 sink 关了、注入的
+报告器坏了），异常就沿着调用方返回：
+
+- `flushBeforeQuit` 的 `.then` 里先 `reportOutcome(...)`、再 `app.quit()`，所以
+  「上限证据可能丢了」这条诊断会把**退出本身**卡住——应用关不掉，而原因恰是那句
+  本来要说明问题的日志。
+- `run-handler.js` 的 `settle-failed` 路径虽然有 `say(...)` 护着「报告失败」，
+  但这一半从来没被断言过；它还要保证「原始错误仍然打出来」这第二个独立报告。
+
+**改动**（`run-diagnostics.js`）：`reportOutcome` 把 `warn` 的调用包进 try/catch；
+抛了就不再声称「报告过了」，返回 `""`（返回值的含义就是「这行进了日志」）。
+
+**验证**（`tools/run-diagnostics-smoke.mjs`，+10 条）：
+
+- 会抛的 `warn` → `reportOutcome` 不抛、返回 `""`；
+- `flushBeforeQuit` 在 `warn` 会抛时仍然调用 `app.quit()`，且第一遍确实拦下了退出
+  （等冲刷）；
+- 注入会抛的 `reportOutcome` → `say` 吞掉它，`settle` 的原始错误仍然落进 `warn`，
+  没有 `unhandledRejection`；
+- 用**真实**报告器、让 `warn` 只在收尾行抛 → 原始错误行仍然收到（第二个独立报告）。
+
+**实测**：去掉 try/catch → 前两条变红，且测试在 `flushBeforeQuit` 处以
+`Error: the log sink is gone` 崩溃（未处理的 rejection）。
+
+### P0 — `MAX_ENTRIES` 轮换后的「静默」是设计，不是 bug
+
+`MAX_ENTRIES` 挤掉旧记录后，`read` 对那条会话答 `null`，与「这条会话本来就干净」
+完全一样。第 5 轮已经用两个仓库交替写钉住了「全局裁剪」，但没有断言钉住**两者的
+答案相同**；注释说了，测试只说「trimmed session reopens as no evidence」。
+
+本轮补一条断言：文件已达上限时，被挤掉的 session 与从未记录过的 session 都答
+`null`，且文件仍是 `MAX_ENTRIES` 条。这不是新行为，是把「当前就是静默」钉住——
+以后有人把它当 bug 修之前，必须先改这条断言与 `MAX_ENTRIES` 的注释。若要做
+`trimmed` 标记或 `wasTrimmed(repo, sessionId)`，那是另一轮的事，且要同时接 UI。
+
+### P1 — 简报的 P1-3（`entryByName` 调用侧）：已检查，没有第二个调用点
+
+`entryByName(` 在主进程只有一处调用：`ocr-service.js` 的 `savedKeyLookup`，它在
+第 333 行用 `withholdReasonFor(found.rule)` 决定是否扣 Key，规则到原因的映射没有被
+绕开。简报点名的 `view.model` / `view.hasKey` / `view.keyPreview` **都不经过**
+`entryByName`：`view.model` 读的是按段精确取到的 `entry`（第 724 行），
+`view.providers` / `customProviders` 是 `mapSection` 对原文件的逐条展示（第 783–784
+行）。所以「按位置猜出来的条目不当作本次运行的答案」在 Key 复用这条路上已经成立；
+展示层展示的是「文件里这条条目自己有没有 Key」，不是「本次运行会用哪条 Key」。
+本轮没有代码改动——若下一轮要把两者并成同一个答案，那是一次产品措辞决定，不是
+修 bug。
+
 ## 待移植 / 待验证
 
 ### 已完成 — `manifest.run_failure` 的中文映射与展示
@@ -845,8 +909,9 @@ desktop 的「工具调用 N（失败 M）」直接读 CLI 的 `tool_calls.failu
 主进程，第 9 轮把这条判定真正接到屏幕上并收掉端点那一端，第 10 轮把「`order` 规则
 必须扣下 Key」「两个通道只读一次表」「查不到答案不许替它编」这三条钉成断言，第 12 轮
 把「`classifyRef` 的四种答案」「运行出口只有一扇门」「服务列表也只读一次表」这三条
-钉成断言；剩下的按优先级排在这里，下一轮挑。标注「**未动**」的条目是最近一轮看过、
-确认仍然成立但没有改的——不是新发现。
+钉成断言，第 14 轮把「`reportOutcome` 自抛不得带走调用方」与「`MAX_ENTRIES` 轮换后
+的静默」钉住；剩下的按优先级排在这里，下一轮挑。标注「**未动**」的条目是最近一轮
+看过、确认仍然成立但没有改的——不是新发现。
 
 - **P2**：README 的 Status 段落里有**一次实测值**（`1200 findings` / `405ms` /
   `8s ceiling`）。实测数字会腐，腐了之后没有任何测试会红。README 承诺的应该是**能力**
@@ -895,6 +960,13 @@ desktop 的「工具调用 N（失败 M）」直接读 CLI 的 `tool_calls.failu
 
 ### 本轮做完、可以划掉的
 
+- ~~`reportOutcome` 自身抛异常时，调用方会被一起带走（退出路径因此可能关不掉）~~
+  → 第 14 轮做完：`warn` 的调用包进 try/catch，抛了返回 `""`；断言覆盖
+  `reportOutcome`、`flushBeforeQuit` 仍然退出、`settle-failed` 的原始错误仍有第二次
+  报告。去掉 try/catch → 2 条变红且测试崩溃（实测）。详见上面第 14 轮。
+- ~~`MAX_ENTRIES` 挤掉旧记录后与干净会话无法区分，且没有断言钉住这个设计~~
+  → 第 14 轮做完：断言文件达上限时，被挤掉的 session 与从未记录过的 session 都答
+  `null`，且文件仍是 `MAX_ENTRIES` 条。详见上面第 14 轮。
 - ~~`classifyRef` 的四种答案（`same` / `ancestor` / `descendant` / `diverged`）没有
   断言~~ → 第 12 轮做完：`git-service.js` 导出 `classifyRef` 并把 stdout 形状读严
   （恰好两个计数），`tools/git-service-smoke.mjs` 用 stub `spawn` 逐条钉住四种形状、

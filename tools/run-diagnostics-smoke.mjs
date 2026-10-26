@@ -39,6 +39,7 @@ const {
   SIGNAL_FAILED,
   SETTLE_FAILED,
   flushNow,
+  flushBeforeQuit,
 } = require("../run-diagnostics.js");
 const { makeRunHandler } = require("../run-handler.js");
 
@@ -596,6 +597,22 @@ check("every entry fits the small schema", raw.entries.every((e) => typeof e.rep
  * is the alternative), and it must not silently look like anything else. */
 check("a trimmed session reopens as no evidence, not as a failure", store.read(repo, "session-000") === null);
 check("while the newest record is still readable", store.read(repo, `session-${String(MAX_ENTRIES + 4).padStart(3, "0")}`)?.warnings?.length === 1);
+/* The documented design is that a trimmed session and a clean one answer the
+ * same `null`: the cap is a rotation, not a loss the app could report. That is
+ * the one place this file deliberately forgets something, so it is pinned here
+ * rather than left to the comment — someone who later reads `null` as "this
+ * session was clean" would be right, and someone who "fixes" the trim by
+ * inventing evidence must first change this assertion and the comment on
+ * `MAX_ENTRIES`. */
+check(
+  "a trimmed session and a clean one are indistinguishable by design",
+  store.read(repo, "session-000") === null &&
+    store.read(repo, "a-session-that-never-ran") === null &&
+    raw.entries.length === MAX_ENTRIES,
+  `trimmed=${JSON.stringify(store.read(repo, "session-000"))} clean=${JSON.stringify(
+    store.read(repo, "a-session-that-never-ran")
+  )} entries=${raw.entries.length}`
+);
 check(
   "the cap counts records, not repositories",
   raw.entries.filter((e) => e.repo === normalizeRepo(repo)).length === MAX_ENTRIES,
@@ -789,6 +806,58 @@ const stuckLog = [];
 reportOutcome(stuck, (line) => stuckLog.push(line));
 check("and the caller logs exactly one line about it", stuckLog.length === 1 && stuckLog[0].startsWith("[run-diagnostics]"), JSON.stringify(stuckLog));
 check("reaching the bound is not reported as success", reportOutcome({ ok: true, reason: "drained" }) === "");
+
+/* ---- the reporter itself can throw; the caller must still carry on ----
+ * The line is the last thing these paths do. `flushBeforeQuit` reports and then
+ * calls `app.quit()`, so a throwing `warn` used to take the quit with it: a
+ * diagnostic about a lost write could keep the app from closing. That is the
+ * same shape as every other "best-effort" failure here — the news may be lost,
+ * but the caller's job must not be. The return value means "the line was
+ * logged", so a throw answers `""` rather than pretending it landed.
+ */
+let outcomeReporterThrew = false;
+let outcomeReported = null;
+try {
+  outcomeReported = reportOutcome({ ok: false, reason: "io-error" }, () => {
+    throw new Error("the log sink is gone");
+  });
+} catch (_) {
+  outcomeReporterThrew = true;
+}
+check("a throwing warn does not make reportOutcome throw", !outcomeReporterThrew);
+check("and it does not claim the line was said", outcomeReported === "", JSON.stringify(outcomeReported));
+
+// The consequence that matters: `flushBeforeQuit` is the last chance to write
+// the evidence, and `app.quit()` comes after the report. The fake app below
+// answers only the one event this function uses.
+let quitCalls = 0;
+let quitPrevented = false;
+const beforeQuitHandlers = [];
+const fakeApp = {
+  on: (event, fn) => {
+    if (event === "before-quit") beforeQuitHandlers.push(fn);
+  },
+  quit: () => {
+    quitCalls += 1;
+  },
+};
+flushBeforeQuit(
+  fakeApp,
+  { drain: () => Promise.resolve({ ok: false, reason: "timeout" }) },
+  50,
+  () => {
+    throw new Error("the log sink is gone");
+  }
+);
+check("the quit path is registered", beforeQuitHandlers.length === 1, `${beforeQuitHandlers.length} handlers`);
+beforeQuitHandlers[0]({
+  preventDefault: () => {
+    quitPrevented = true;
+  },
+});
+await new Promise((resolve) => setTimeout(resolve, 20));
+check("a quit still quits when the log sink throws", quitCalls === 1, `${quitCalls} quits`);
+check("and the first pass did hold the quit for the flush", quitPrevented);
 
 // The same answer has to survive the caller's own timeout wrapper: `flushNow`
 // is what `before-quit` and the uninstall path actually await.
@@ -1356,6 +1425,82 @@ check("and the exit says the evidence did not make it", outcomeMessage(slowExit)
     JSON.stringify(settleFailLog)
   );
   check("the rejection is handled, not left to the runtime", unhandled.length === 0, unhandled.map(String).join(" | "));
+}
+
+/* ---- the last-resort report can throw too ----
+ * `reportOutcome` itself is written not to throw (see its own check above), but
+ * the handler accepts an injected one, and this is already the last resort: a
+ * throw here would hand the runtime a rejection nobody is left to handle, and
+ * would take the raw error line with it. Each report gets its own guard, so the
+ * second one is attempted even when the first broke.
+ */
+{
+  const lines = [];
+  const unhandled = [];
+  const onUnhandled = (err) => unhandled.push(err);
+  process.on("unhandledRejection", onUnhandled);
+  const throwingHandler = makeRunHandler({
+    ocr: {
+      startRun(spec, onLog, onDone) {
+        onDone("throwing-report-run", { sessionId: "throwing-report-session", value: limitResult });
+        return { id: spec.runId };
+      },
+    },
+    store: { record: () => {} },
+    send: () => {},
+    settleRunExit: () => Promise.reject(new Error("the settle itself broke")),
+    reportOutcome: () => {
+      throw new Error("the outcome reporter broke too");
+    },
+    warn: (line) => lines.push(line),
+  });
+  throwingHandler({ repo, mode: "review", runId: "throwing-report-run" });
+  await new Promise((r) => setTimeout(r, 80));
+  process.off("unhandledRejection", onUnhandled);
+
+  check(
+    "a throwing outcome report does not take the raw error line with it",
+    lines.some((line) => line.includes("the settle itself broke")),
+    JSON.stringify(lines)
+  );
+  check("and the rejected settle is still handled", unhandled.length === 0, unhandled.map(String).join(" | "));
+}
+
+/* The same path with the *real* reporter: the outcome line's sink throws, and
+ * the raw error line — a second, independent report — still has to go out.
+ * `reportOutcome` swallows its own sink's failure now; this asserts the handler
+ * then takes its second shot rather than treating the first throw as the end. */
+{
+  const lines = [];
+  const unhandled = [];
+  const onUnhandled = (err) => unhandled.push(err);
+  process.on("unhandledRejection", onUnhandled);
+  const sinkBroke = (line) => {
+    lines.push(line);
+    if (line.includes(settleFailedMessage())) throw new Error("the sink is gone");
+  };
+  const realReporterHandler = makeRunHandler({
+    ocr: {
+      startRun(spec, onLog, onDone) {
+        onDone("real-report-run", { sessionId: "real-report-session", value: limitResult });
+        return { id: spec.runId };
+      },
+    },
+    store: { record: () => {} },
+    send: () => {},
+    settleRunExit: () => Promise.reject(new Error("the settle broke with the real reporter")),
+    warn: sinkBroke,
+  });
+  realReporterHandler({ repo, mode: "review", runId: "real-report-run" });
+  await new Promise((r) => setTimeout(r, 80));
+  process.off("unhandledRejection", onUnhandled);
+
+  check(
+    "a sink that throws on the outcome line still receives the raw error line",
+    lines.some((line) => line.includes("the settle broke with the real reporter")),
+    JSON.stringify(lines)
+  );
+  check("and that rejection is handled too", unhandled.length === 0, unhandled.map(String).join(" | "));
 }
 
 /* The three end-of-run outcomes tell three different stories, and swapping any
