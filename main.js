@@ -508,16 +508,22 @@ ipcMain.handle("config:test", async (_e, req) => {
     // A saved Key is only reused for the endpoint it belongs to. A built-in
     // service is usually configured with a Key and no URL — the CLI fills the
     // endpoint in from its own table — so "which host does this Key belong to"
-    // has to consult that table (see `savedKeyForName`); asking `savedKeyFor`
+    // has to consult that table (see `savedKeyLookupByName`); asking `savedKeyFor`
     // alone treated the empty URL as a wildcard.
-    const apiKey =
-      String(form.apiKey || "").trim() || (await ocr.savedKeyForName(form.name, form.url));
+    //
+    // The lookup also answers *why* it withheld, and that is what the message is
+    // worded from: a built-in service table that could not be read leaves the
+    // form's Base URL empty too, so without the reason this branch said "还缺
+    // Base URL" — pointing the user at their own typing when the fix was one
+    // press of 刷新.
+    const typed = String(form.apiKey || "").trim();
+    const saved = typed ? { key: typed, reason: "" } : await ocr.savedKeyLookupByName(form.name, form.url);
+    const apiKey = saved.key;
     if (missing.length || !apiKey) {
-      const parts = missing.length ? `还缺 ${missing.join("、")}` : "该服务还没有已保存的 Key，请把 Key 填进来";
       return {
         ok: false,
         via: "form",
-        output: `${parts}，无法按当前填写的值测试。补齐后再点，或先保存再测已保存的配置。`,
+        output: ocr.savedKeyTestMessage({ missing, reason: saved.reason }),
       };
     }
     let home = "";

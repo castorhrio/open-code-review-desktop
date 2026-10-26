@@ -203,6 +203,23 @@ function entryByName(raw, name) {
   return { entry: matches[0][1], rule: MATCH_ORDER };
 }
 
+/**
+ * Why a saved Key was not handed out.
+ *
+ * An empty string was the old answer for every one of these, and the caller had
+ * to word all of them the same way — so "there is no Key saved for this service"
+ * (fix: type one) and "the built-in service table could not be read, so which
+ * host the Key belongs to is unknown" (fix: press 刷新 and try again) arrived at
+ * the settings page as the same sentence. The reasons exist so the sentence can
+ * be about the thing that actually went wrong.
+ */
+const KEY_WITHHELD_CONFIG = "config-unreadable"; // the config file is missing or not JSON
+const KEY_WITHHELD_NO_ENTRY = "no-entry"; // no entry is named like this in either section
+const KEY_WITHHELD_ORDER = "order-guess"; // the entry was picked by position; `ocr` never opens it
+const KEY_WITHHELD_URL = "url-mismatch"; // the Key belongs to another endpoint
+const KEY_WITHHELD_EMPTY = "no-key"; // the entry exists and matches, but holds no credential
+const KEY_WITHHELD_TABLE = "table-unavailable"; // the built-in endpoint could not be read
+
 // The Key never travels to the renderer: the settings page asks "may I reuse
 // what is already saved for this service?" and only gets a value back when the
 // endpoint being tested is the one that Key belongs to. Sending a saved Key to
@@ -210,15 +227,21 @@ function entryByName(raw, name) {
 //
 // `configPath` is a parameter so the smoke checks can point this at a throwaway
 // file instead of the user's own `~/.opencodereview/config.json`.
-function savedKeyFor(name, url, configPath = CONFIG_PATH, presetUrl = "") {
+//
+// `tableUnavailable` says the built-in service table could not be read, which
+// makes `presetUrl` a *missing* answer rather than an empty one: for a built-in
+// entry configured without a URL (the shape this app writes), the host is then
+// unknown, and unknown is not the same as "any host will do".
+function savedKeyLookup(name, url, configPath = CONFIG_PATH, presetUrl = "", { tableUnavailable = false } = {}) {
   let raw = {};
   try {
     raw = JSON.parse(fs.readFileSync(configPath, "utf8"));
   } catch (_) {
-    return "";
+    return { key: "", reason: KEY_WITHHELD_CONFIG };
   }
   const found = entryByName(raw, name);
-  if (!found) return "";
+  if (!found) return { key: "", reason: KEY_WITHHELD_NO_ENTRY };
+  const withheld = (reason) => ({ key: "", reason });
   // `order` answers a question `ocr` never asks, and that is why the answer
   // stops here. This is the shape where no spelling in the file is the one the
   // config's `provider` names *and* the file never spells the name the registry
@@ -230,7 +253,7 @@ function savedKeyFor(name, url, configPath = CONFIG_PATH, presetUrl = "") {
   // the same reason a custom provider's Key is matched exactly rather than
   // folded. The entry stays visible in `view.providers` (that is what the
   // section is for); it just does not travel through here.
-  if (found.rule === MATCH_ORDER) return "";
+  if (found.rule === MATCH_ORDER) return withheld(KEY_WITHHELD_ORDER);
   const entry = found.entry;
   const strip = (value) => String(value || "").trim().replace(/\/+$/, "");
   const saved = strip(entry.url);
@@ -246,10 +269,23 @@ function savedKeyFor(name, url, configPath = CONFIG_PATH, presetUrl = "") {
   // its `url` for every protocol that names an endpoint), so nothing is known
   // there and nothing is handed out.
   const home = saved || strip(presetUrl);
+  // The entry has no URL of its own and the table that would supply one could
+  // not be read: the host this Key belongs to is unknown, and that is a
+  // different failure from "it belongs somewhere else". Reported before the
+  // comparison, because with both sides empty the comparison is vacuous and
+  // would hand the Key out for whatever the form happens to say.
+  if (!home && tableUnavailable) return withheld(KEY_WITHHELD_TABLE);
   // No target at all is the "may I reuse what is saved?" question, not a test
   // against a host, so there is nothing to compare and nothing to leak.
-  if (target && home !== target) return "";
-  return String(entry.api_key || entry.auth_token || "");
+  if (target && home !== target) return withheld(KEY_WITHHELD_URL);
+  const key = String(entry.api_key || entry.auth_token || "");
+  if (!key) return withheld(KEY_WITHHELD_EMPTY);
+  return { key, reason: "" };
+}
+
+/** `savedKeyLookup` for callers that only need the value (the renderer never asks). */
+function savedKeyFor(name, url, configPath = CONFIG_PATH, presetUrl = "") {
+  return savedKeyLookup(name, url, configPath, presetUrl).key;
 }
 
 /**
@@ -262,11 +298,44 @@ function savedKeyFor(name, url, configPath = CONFIG_PATH, presetUrl = "") {
  * the user can always type the Key again, a Key sent to the wrong host cannot be
  * taken back.
  */
-async function savedKeyForName(name, url, configPath = CONFIG_PATH, options = {}) {
+async function savedKeyLookupByName(name, url, configPath = CONFIG_PATH, options = {}) {
   const table = await providerTable(options);
   const wanted = String(name || "").toLowerCase();
   const row = table.ok ? table.rows.find((item) => String(item.name).toLowerCase() === wanted) : null;
-  return savedKeyFor(name, url, configPath, row ? row.url : "");
+  return savedKeyLookup(name, url, configPath, row ? row.url : "", { tableUnavailable: !table.ok });
+}
+
+async function savedKeyForName(name, url, configPath = CONFIG_PATH, options = {}) {
+  return (await savedKeyLookupByName(name, url, configPath, options)).key;
+}
+
+/**
+ * The sentence the settings page shows when "test what I typed" cannot run.
+ *
+ * It lives here, beside the reasons it reads, for the same reason `withHint`
+ * does: the main process only wires it up, and a wording that has to distinguish
+ * six causes can be asserted per cause without launching Electron.
+ *
+ * `table-unavailable` comes first because it also explains a *missing* field: for
+ * a built-in service the form's Base URL is prefilled from that table, so a
+ * table that failed to read leaves the form looking incomplete when the real
+ * problem is one read. Saying "还缺 Base URL" there sends the user to type an
+ * endpoint the CLI already knows.
+ */
+function savedKeyTestMessage({ missing = [], reason = "" } = {}) {
+  const tail = "无法按当前填写的值测试。补齐后再点，或先保存再测已保存的配置。";
+  if (reason === KEY_WITHHELD_TABLE)
+    return `读不到内置服务表，无法判断这个服务已保存的 Key 属于哪个端点，也取不到内置服务的 Base URL（设置页的「刷新」会重读一次）。${tail}`;
+  if (missing.length) return `还缺 ${missing.join("、")}，${tail}`;
+  if (reason === KEY_WITHHELD_URL)
+    return `已保存的 Key 属于另一个端点，不会发到当前填写的地址；请把 Key 重新填进来，或把端点改回原值。${tail}`;
+  if (reason === KEY_WITHHELD_ORDER)
+    return `配置里没有能对上这个名字的条目（providers 段里只有写法不同的条目，且 provider 没有指向它），已保存的 Key 不会被采用；请在设置页重新保存一次该服务。${tail}`;
+  if (reason === KEY_WITHHELD_CONFIG)
+    return `读不到配置文件，无法判断是否已有 Key（首次保存后 CLI 才会创建它）。把 Key 填进来即可测试。${tail}`;
+  // `no-entry` / `no-key`: the plain answer, and what the old wording said for
+  // every case.
+  return `该服务还没有已保存的 Key，请把 Key 填进来，${tail}`;
 }
 
 // Endpoint and credential are different questions. A URL in the config or in
@@ -1300,6 +1369,15 @@ module.exports = {
   llmTestEnv,
   savedKeyFor,
   savedKeyForName,
+  savedKeyLookup,
+  savedKeyLookupByName,
+  savedKeyTestMessage,
+  KEY_WITHHELD_CONFIG,
+  KEY_WITHHELD_NO_ENTRY,
+  KEY_WITHHELD_ORDER,
+  KEY_WITHHELD_URL,
+  KEY_WITHHELD_EMPTY,
+  KEY_WITHHELD_TABLE,
   preview,
   startRun,
   cancelRun,
