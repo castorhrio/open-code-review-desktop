@@ -12,48 +12,48 @@
 4. **不要**静默忽略上游 release：每轮把结论写进下面「当前状态」，并把上一轮的正文搬到
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。
 
-## 当前状态（第 70 轮，2026-10-27）
+## 当前状态（第 71 轮，2026-10-27）
 
-第 70 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 两条通路都可达。**
+第 71 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 两条通路都可达。**
 `git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
 refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
-（与第 49–69 轮同一个 commit），`--tags` 里最高版本仍是 `v1.13.3`；
+（与第 49–70 轮同一个 commit），`--tags` 里最高版本仍是 `v1.13.3`；
 `npm view @alibaba-group/open-code-review version dist-tags` 仍是 `1.13.3` /
 `latest: 1.13.3`。desktop 的 `^1.13.3` 无需改动，**无移植项**。
 
-本轮不加上游面，做的是「承诺要么能被机器验证、要么就得说清楚」这件事：
+本轮不加新功能面，把上一轮最后两处「承诺还没有断言」的地方收口：
 
-- **设置页不再可能因为 CLI 不回话而空白。** `app:info` 是设置页打开时唯一等着的那个
-  IPC，而它以前直接 `await ocr.exec(["version"])`：二进制被杀软占用、放在网络盘上，
-  或者 spawn 之后再也不 `close`，这个 promise 就永远 pending——页面一片空白，而且不
-  解释。现在这条取数路径有两层预算：`ocr-service.js` 的
-  `exec(args, cwd, env, { timeoutMs })` 到点 `kill()` 子进程（进程也不该留着），
-  `app-info.js` 的 `readVersionOutput` 在外层再等 `timeoutMs + 500ms` 的宽限，
-  **即使 `exec` 根本不理会那个预算**也照样有答案。取不到版本不是错误：`formatAppInfo`
-  把它读成 `version: ""`，页面仍拿到一个字段齐全的对象（二进制、配置路径、安装事实
-  都在）。`exec` 是注入参数，所以「服务挂死」这个形状在 `audit:appinfo` 里造得出来，
-  不必真去坏一台机器。
-- **「哪条命令可以恒绿」这件事自己进了断言。** 本文档此前把「退出码恒为 0、只报告不
-  失败」写在 `audit:upstream` 名下，而 `audit:upstream` 跑的正是这套断言本身——一句话
-  把下面所有 pin / 对照表 / 通路账的检查说成了装饰。现在这句话只属于哨兵
-  `upstream:check`，并由 `tools/upstream-watch-smoke.mjs` 钉住三件事：
-  `package.json` 里 `audit:upstream` → `tools/upstream-watch-smoke.mjs`、
-  `upstream:check` → `tools/upstream-watch.mjs`（两个脚本名只差一个词，正是会被换错的
-  地方）；这句话必须点名 `upstream:check`、不许把它归给 `audit:upstream`；**并且真的把
-  本文件当子进程再跑一次**（`OCR_UPSTREAM_WATCH_SELFTEST=1` 注入一条必红的检查），要求
-  子进程 `exit 1` 且 stderr 点名那条注入的失败——否则「failures 非空」可以在没走到
-  `process.exit` 的情况下继续打印 ok。
-- **通路账的轮次连续性也进了断言。** 此前只读末行，从中间删掉一行不会红，而「连续几轮
-  没核对 HEAD」正是这张表要回答的问题；现在要求轮次是连续整数、每轮恰好一行、不重复。
-- **P0-2 复核结论：`readFileAtRef` 的措辞漂移已经有断言，本轮不写码。**
-  `tools/git-service-smoke.mjs` 用桩 `spawn` 把九种 stderr 逐个喂进真函数：三种
-  `bad-ref` 措辞、三种 `missing` 措辞、两种「谁也不认识的改写」，以及一条中文 stderr
-  （`致命错误：无效的对象名称`）——后者必须落到 `failed`，且句子含 `退出码 128`。
-  把分类抽成 `classifyShowFailure` 只是换一个更容易测的入口，断言面不会变宽，故不改。
-- **`spellingClashMessage` 第三个分支补上了 entries 断言。** 该分支（两段 + 服务表已
-  回答）此前只断言了「不说什么」，没断言「说了哪几条」——一句只点名 `deepseek` 的句子
-  能通过全部否定断言。现在 `entries` 逐条相等（含各自 section 与顺序），并断言它既不
-  声称两段都在 `providers`、也不带任何可点的尾巴。
+- **`timedOut` 的归属定案：`formatAppInfo` 接受它，然后丢掉它（选 b）。** 上一轮
+  的 `readVersionOutput` 会回答「是不是我们这边等到期了」，而 `main.js` 当时用解构
+  `const { versionStdout, versionStderr } = ...` 顺手把它扔了——一个没人决定、也没人
+  能测的丢弃。现在注册里改成 `const probe = await readVersionOutput(...)` +
+  `formatAppInfo({ binary, ...probe, ... })`，**字段取舍只发生在 `app-info.js` 一处**，
+  并且它是显式接收 `timedOut` 再 `void` 掉。选 b 而不是给 payload 加
+  `versionTimedOut`：设置页对「版本」只有一句话，而「CLI 到底找没找到」已经由
+  `binary` / `binarySource` 两列回答——多一个 boolean 就是一个没有任何渲染器读的
+  字段，只能被断言「存在」，不能承重。`tools/app-info-smoke.mjs` 因此钉三件事：
+  (1) `exec` 抛错 → 空输出且 `timedOut:false`；(2) `exec` 自己报 `timedOut:true` →
+  一路透传到外层；(3) `exec` 无视预算但**迟到返回** → 到点即答 `timedOut:true`
+  且迟到的 stdout 被丢弃。外加两条反向断言：把带 `timedOut:true` 的探测结果喂给
+  `formatAppInfo`，payload 里不许出现 `timedOut` / `versionTimedOut`，且 key 集合
+  与「正常作答」的回答逐字相同；`main.js`（去掉注释后）不许再出现 `timedOut`
+  这个词——出现就意味着决策点又被搬回注册里。
+- **`repo:pick` 与 `repo:pickInside` 共用同一道闸门。** `repo:pick` 以前把
+  `result.filePaths[0]` 直接回给渲染器，而渲染器把它当仓库存下来
+  （`pickRepo` 里 `if (dir) setRepo(dir)`），之后所有相对路径都对着渲染器的 cwd 解析
+  ——一个来自 `localStorage` 的陈旧 `last-repo` 就能把整个应用指到用户没选过的目录。
+  现在这条路径走 `pickedRepoOrEmpty`（`path-guard.js`，与 `repoIsPickable` 同一判据）：
+  不合格就答 `""`，与「用户点了取消」同一个答案，因为渲染器对二者的读法本来就一样
+  （都表示「别动我现在打开的仓库」），而第三种形状在渲染器里没有地方显示。路径
+  **原样返回，不 `resolve()`**：这个函数只决定这条答案能不能上路。`audit:path` 补三态
+  ——相对路径 → `""`、`C:repo`（盘符相对）→ `""`、`\\server\share\repo`（UNC 绝对）
+  → 原样保留——并加一条源码断言：`repo:pick` 的注册体里必须是
+  `pickedRepoOrEmpty(result.filePaths[0])`，不许再出现 `return result.filePaths[0]`。
+- **`audit:upstream` 的自跑子进程现在会承认「我根本没跑起来」。** `spawnSync` 失败
+  （`ENOENT`、脚本读不了）报的是 `status: null`，此前与「跑了、红了、`status === 1`」
+  在报告里长得一样。现在先断 `child.status !== null`，detail 里带 `child.error.message`，
+  让「没跑起来」和「跑起来红了」分开。P1-2（history 47–61 旧正文归档）与 P2 各项留给
+  下一轮。
 
 ## 上游真变了怎么办（命令驱动，而不是「记得看一眼」）
 ```bash
@@ -123,7 +123,7 @@ pin 或 ls-remote 给出的 SHA 短于 40 位时一律判「跳过」并说明�
 没变**，所以每轮的结论仍要写进上面「当前状态」——跳过时至少留下 `[UPSTREAM-DEBT]` 与
 「核对通路账」里的一行欠账。
 
-**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 70 轮：`git ls-remote` 退出码 0，`refs/heads/main` 与 pin 一致；tag 与 npm 均为 `1.13.3`；通路：git）**
+**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 71 轮：`git ls-remote` 退出码 0，`refs/heads/main` 与 pin 一致；tag 与 npm 均为 `1.13.3`；通路：git）**
 
 ### 核对通路账
 
@@ -159,14 +159,15 @@ pin 或 ls-remote 给出的 SHA 短于 40 位时一律判「跳过」并说明�
 | 68 | 2026-10-27 | api | `375f64c` / `v1.13.3`，无新内容；git 超时、API 作答；npm `1.13.3`；picker 判定纯函数、读屏计数、顺序断言点名行号 | — |
 | 69 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；moved 分支自报 5 处对照点、清单与对照表双射断言 | — |
 | 70 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；`app:info` 版本探测加预算、恒绿归属纠正并加 exit 码自测 | — |
+| 71 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；`timedOut` 语义定案（丢弃并断言）、`repo:pick` 走同一道闸门、自跑子进程断言 | — |
 
 「最近一次对照」只写**那一项最近被人工重新核对**的轮次。该列没有列出本轮，表示本轮
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
 对应行并把轮次与日期改成本轮。
 
-**第 46–70 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
+**第 46–71 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
 npm 通路可达，第 56 轮 git 超时但 API 可达，第 63–64 轮本文件无通路记录，第 68 轮 git
-超时但 API 可达，第 69–70 轮 git 可达），所以下表 5 行的
+超时但 API 可达，第 69–71 轮 git 可达），所以下表 5 行的
 「最近一次对照」停在第 45 轮是
 **没有理由重看**，不是忘了看：
 它记录的是「最后一次有人逐行读上游源码」的轮次，而不是「最后一次确认上游没变」的轮次。

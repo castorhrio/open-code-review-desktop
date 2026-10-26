@@ -30,6 +30,7 @@ const {
   isInside,
   relativeInside,
   repoIsPickable,
+  pickedRepoOrEmpty,
   pickInsideAnswer,
   pickInsidePayload,
   pickFileOptions,
@@ -634,6 +635,37 @@ const check = (name, ok, detail = "") => {
       repoIsPickable("/repo", { pathApi: path.posix }) === true,
     "the same string must not be judged by the Windows and POSIX rules alike"
   );
+  /* `repo:pick` answered with `result.filePaths[0]` itself, so a path that is
+   * not absolute could reach the renderer, which stores it as the repo and then
+   * resolves every later relative path against its own working directory. The
+   * gate is the same predicate as `repo:pickInside`'s precondition; the answer
+   * is `""`, which is what a cancelled dialog gives and what the renderer reads
+   * as "keep the repo you have". Three shapes, none of which the folder dialog
+   * can really produce — which is exactly why they need a test. */
+  check(
+    "pick: a non-absolute answer is refused as \"\" (the same answer a cancel gives)",
+    pickedRepoOrEmpty("relative/repo") === "" &&
+      pickedRepoOrEmpty("") === "" &&
+      pickedRepoOrEmpty(null) === "" &&
+      pickedRepoOrEmpty(undefined) === "" &&
+      pickedRepoOrEmpty(42) === "",
+    JSON.stringify(["relative/repo", "", null, undefined, 42].map((value) => [value, pickedRepoOrEmpty(value)]))
+  );
+  check(
+    "pick: an absolute answer travels as given, not resolved or rewritten",
+    pickedRepoOrEmpty("/repo") === "/repo" && pickedRepoOrEmpty("/repo/../repo") === "/repo/../repo",
+    "the picker's answer must be the string the user chose"
+  );
+  check(
+    "pick: Windows drive-relative is refused while a UNC path is kept",
+    pickedRepoOrEmpty("C:repo", win) === "" &&
+      pickedRepoOrEmpty("C:repo\\sub", win) === "" &&
+      pickedRepoOrEmpty("\\\\server\\share\\repo", win) === "\\\\server\\share\\repo",
+    JSON.stringify([
+      ["C:repo", pickedRepoOrEmpty("C:repo", win)],
+      ["\\\\server\\share\\repo", pickedRepoOrEmpty("\\\\server\\share\\repo", win)],
+    ])
+  );
   const forbidden = () => {
     throw new Error("must not be called");
   };
@@ -781,6 +813,13 @@ const check = (name, ok, detail = "") => {
   // boundary while every answer it receives came from the decision. A hand-built
   // `{ kind: ... }` in the registration would put the throw back on a path the
   // renderer can reach (and would re-spell the shapes this module owns).
+  const pickAt = mainSrc.indexOf('ipcMain.handle("repo:pick",');
+  const pickSrc = mainSrc.slice(pickAt, mainSrc.indexOf('ipcMain.handle("repo:pickInside"'));
+  check(
+    "repo:pick hands the dialog's path to the shared gate, not straight to the renderer",
+    pickAt !== -1 && /pickedRepoOrEmpty\(result\.filePaths\[0\]\)/.test(pickSrc) && !/return result\.filePaths\[0\]/.test(pickSrc),
+    `repo:pick at line ${pickAt === -1 ? "missing" : String(mainSrc.slice(0, pickAt).split("\n").length)} — an unguarded answer becomes the repo the whole app resolves against`
+  );
   const payloadCalls = mainSrc.match(/pickInsidePayload\(/g) || [];
   check(
     "repo:pickInside never hands pickInsidePayload a hand-built answer",

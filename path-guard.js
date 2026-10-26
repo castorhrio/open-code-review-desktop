@@ -188,6 +188,28 @@ const PICK_INSIDE_MESSAGES = Object.freeze({
 // gets; the parameter exists for the test, not for a caller to override.
 const repoIsPickable = (repo, { pathApi = path } = {}) => usable(repo) && pathApi.isAbsolute(repo);
 
+// `repo:pick`'s answer, and the one thing it used to do without asking anybody:
+// the folder dialog's first path went straight back to the renderer. A path that
+// is not absolute cannot come from that dialog either, so this is the same
+// "somebody handed us a string we must not act on" case as `repo:pickInside`'s
+// precondition — but here the consequence is different and worth naming:
+//
+//  - the renderer stores the answer as the repo (`pickRepo` in `src/store.tsx`
+//    does `if (dir) setRepo(dir)`), and every later read resolves a relative
+//    path against the *renderer's* working directory, so a stale `last-repo`
+//    from `localStorage` or a wrong variable would silently point the whole app
+//    at a directory the user never picked;
+//  - `""` is the value a cancelled dialog already answers, and the renderer
+//    reads it as "nothing was picked, keep the repo I have". So a refusal and a
+//    cancel share one answer on purpose: neither may replace the open repo, and
+//    a third shape (`null`? an error object?) would be a new branch in a
+//    renderer that has no place to show it.
+//
+// The path is returned **as given**, not `resolve()`d: this function decides
+// whether the answer may travel, it does not rewrite what the user chose.
+const pickedRepoOrEmpty = (picked, { pathApi = path } = {}) =>
+  repoIsPickable(picked, { pathApi }) ? picked : "";
+
 function pickInsideAnswer(repo, picked, { relativeInside: relative } = {}) {
   if (!repoIsPickable(repo)) {
     return { kind: PICK_INSIDE_KINDS.noRepo, error: PICK_INSIDE_MESSAGES[PICK_INSIDE_KINDS.noRepo] };
@@ -339,6 +361,7 @@ module.exports = {
   isInside,
   relativeInside,
   repoIsPickable,
+  pickedRepoOrEmpty,
   pickInsideAnswer,
   pickInsidePayload,
   pickFileOptions,

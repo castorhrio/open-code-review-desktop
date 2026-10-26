@@ -1183,6 +1183,17 @@ if (process.env[SELF_TEST_ENV] !== "1") {
     env: { ...process.env, [SELF_TEST_ENV]: "1" },
     encoding: "utf8",
   });
+  // A spawn that never ran (`ENOENT`, an unreadable script) reports `status:
+  // null` — the same "not 1" as a child that ran and failed. Without this the
+  // self-run's whole point ("the exit code came from a real process") is taken
+  // on faith, and the reason it did not run is only in `error`.
+  check(
+    "...and the self-run really spawned: the child process started and exited on its own",
+    child.status !== null,
+    child.error
+      ? `spawn failed: ${child.error.message}`
+      : `status=${child.status} signal=${child.signal || "none"}`
+  );
   check(
     "a failing check makes this command exit non-zero",
     child.status === 1,

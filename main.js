@@ -16,7 +16,13 @@ const { makeRunHandler } = require("./run-handler");
 const { makeUninstallHandler } = require("./uninstall-handler");
 const { makeConfigHandlers } = require("./config-handler");
 const { createInstall } = require("./install-info");
-const { repoIsPickable, pickInsideAnswer, pickInsidePayload, pickFileOptions } = require("./path-guard");
+const {
+  repoIsPickable,
+  pickedRepoOrEmpty,
+  pickInsideAnswer,
+  pickInsidePayload,
+  pickFileOptions,
+} = require("./path-guard");
 const { providersAnswer } = require("./provider-handler");
 const { formatAppInfo, readVersionOutput } = require("./app-info");
 
@@ -157,14 +163,18 @@ function buildMenu() {
 // `{ timeoutMs }` becomes the service's fourth argument.
 ipcMain.handle("app:info", async () => {
   const binary = ocr.binaryResolution();
-  const { versionStdout, versionStderr } = await readVersionOutput({
+  // The probe's whole answer travels, `timedOut` included: which fields reach
+  // the settings page is decided in `formatAppInfo`, and it accepts that flag in
+  // order to drop it (see `app-info.js`). Picking `versionStdout`/`versionStderr`
+  // off the answer here — which is what this registration used to do — made the
+  // drop an accident of a destructuring pattern that no test could see.
+  const probe = await readVersionOutput({
     binary,
     exec: (args, options) => ocr.exec(args, undefined, undefined, options),
   });
   return formatAppInfo({
     binary,
-    versionStdout,
-    versionStderr,
+    ...probe,
     configPath: ocr.CONFIG_PATH,
     docsUrl: DOCS_URL,
     appVersion: app.getVersion(),
@@ -220,6 +230,10 @@ ipcMain.handle("app:providers", async () =>
 
 /* ---------------- ipc: repo ---------------- */
 
+// The gate on this picker is `pickedRepoOrEmpty`, not the dialog: a cancelled
+// dialog and a path the rest of the app must not act on are the same answer to
+// the renderer ("" = "keep the repo you have"), and the sentence about *why* a
+// non-absolute path is refused lives next to the predicate in `path-guard.js`.
 ipcMain.handle("repo:pick", async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     title: "选择要审查的仓库目录",
@@ -227,7 +241,7 @@ ipcMain.handle("repo:pick", async () => {
     properties: ["openDirectory"],
   });
   if (result.canceled || !result.filePaths.length) return "";
-  return result.filePaths[0];
+  return pickedRepoOrEmpty(result.filePaths[0]);
 });
 
 ipcMain.handle("repo:pickInside", async (_e, repo) => {

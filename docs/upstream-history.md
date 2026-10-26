@@ -18,6 +18,49 @@ pin 块，这样它就不会某天被当成第二个权威源。
 
 ---
 
+## 上游状态（最近检查：2026-10-27，第 70 轮）
+
+第 70 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 两条通路都可达。**
+`git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
+refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
+（与第 49–69 轮同一个 commit），`--tags` 里最高版本仍是 `v1.13.3`；
+`npm view @alibaba-group/open-code-review version dist-tags` 仍是 `1.13.3` /
+`latest: 1.13.3`。desktop 的 `^1.13.3` 无需改动，**无移植项**。
+
+本轮不加上游面，做的是「承诺要么能被机器验证、要么就得说清楚」这件事：
+
+- **设置页不再可能因为 CLI 不回话而空白。** `app:info` 是设置页打开时唯一等着的那个
+  IPC，而它以前直接 `await ocr.exec(["version"])`：二进制被杀软占用、放在网络盘上，
+  或者 spawn 之后再也不 `close`，这个 promise 就永远 pending——页面一片空白，而且不
+  解释。现在这条取数路径有两层预算：`ocr-service.js` 的
+  `exec(args, cwd, env, { timeoutMs })` 到点 `kill()` 子进程（进程也不该留着），
+  `app-info.js` 的 `readVersionOutput` 在外层再等 `timeoutMs + 500ms` 的宽限，
+  **即使 `exec` 根本不理会那个预算**也照样有答案。取不到版本不是错误：`formatAppInfo`
+  把它读成 `version: ""`，页面仍拿到一个字段齐全的对象（二进制、配置路径、安装事实
+  都在）。`exec` 是注入参数，所以「服务挂死」这个形状在 `audit:appinfo` 里造得出来，
+  不必真去坏一台机器。
+- **「哪条命令可以恒绿」这件事自己进了断言。** 本文档此前把「退出码恒为 0、只报告不
+  失败」写在 `audit:upstream` 名下，而 `audit:upstream` 跑的正是这套断言本身——一句话
+  把下面所有 pin / 对照表 / 通路账的检查说成了装饰。现在这句话只属于哨兵
+  `upstream:check`，并由 `tools/upstream-watch-smoke.mjs` 钉住三件事：
+  `package.json` 里 `audit:upstream` → `tools/upstream-watch-smoke.mjs`、
+  `upstream:check` → `tools/upstream-watch.mjs`（两个脚本名只差一个词，正是会被换错的
+  地方）；这句话必须点名 `upstream:check`、不许把它归给 `audit:upstream`；**并且真的把
+  本文件当子进程再跑一次**（`OCR_UPSTREAM_WATCH_SELFTEST=1` 注入一条必红的检查），要求
+  子进程 `exit 1` 且 stderr 点名那条注入的失败——否则「failures 非空」可以在没走到
+  `process.exit` 的情况下继续打印 ok。
+- **通路账的轮次连续性也进了断言。** 此前只读末行，从中间删掉一行不会红，而「连续几轮
+  没核对 HEAD」正是这张表要回答的问题；现在要求轮次是连续整数、每轮恰好一行、不重复。
+- **P0-2 复核结论：`readFileAtRef` 的措辞漂移已经有断言，本轮不写码。**
+  `tools/git-service-smoke.mjs` 用桩 `spawn` 把九种 stderr 逐个喂进真函数：三种
+  `bad-ref` 措辞、三种 `missing` 措辞、两种「谁也不认识的改写」，以及一条中文 stderr
+  （`致命错误：无效的对象名称`）——后者必须落到 `failed`，且句子含 `退出码 128`。
+  把分类抽成 `classifyShowFailure` 只是换一个更容易测的入口，断言面不会变宽，故不改。
+- **`spellingClashMessage` 第三个分支补上了 entries 断言。** 该分支（两段 + 服务表已
+  回答）此前只断言了「不说什么」，没断言「说了哪几条」——一句只点名 `deepseek` 的句子
+  能通过全部否定断言。现在 `entries` 逐条相等（含各自 section 与顺序），并断言它既不
+  声称两段都在 `providers`、也不带任何可点的尾巴。
+
 ## 上游状态（最近检查：2026-10-27，第 69 轮）
 
 第 69 轮复核：**HEAD 未变，结论仍是「无新内容」；git 通路本轮可达。**

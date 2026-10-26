@@ -10,6 +10,7 @@
 // Run with `npm run audit:appinfo`.
 import { createRequire } from "node:module";
 import path from "node:path";
+import fs from "node:fs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const require = createRequire(path.join(ROOT, "package.json"));
@@ -423,6 +424,64 @@ const base = {
     "the service's own timedOut flag survives the probe",
     serviceTimedOut.timedOut === true && serviceTimedOut.versionStdout === "",
     JSON.stringify(serviceTimedOut)
+  );
+
+  // Third state: an `exec` that ignores its budget and answers *late*. The
+  // deadline wins, the late output is dropped, and `timedOut` is the answer even
+  // though the service never set it itself — "we stopped waiting" is the fact,
+  // and a version that arrives after the page asked is not a version this
+  // handler can use.
+  const late = await readVersionOutput({
+    binary: { path: "/opt/app/ocr" },
+    exec: () =>
+      new Promise((resolve) =>
+        setTimeout(() => resolve({ code: 0, stdout: "open-code-review 1.13.3\n", stderr: "" }), 140)
+      ),
+    timeoutMs: 40,
+    graceMs: 40,
+  });
+  check(
+    "a service that ignores its budget but answers late still says timedOut, and its late output is dropped",
+    late.timedOut === true && late.versionStdout === "" && late.versionStderr === "",
+    JSON.stringify(late)
+  );
+
+  // ...and the flag stops at `formatAppInfo`. The decision is (b): the payload
+  // does *not* carry it. The settings page has one sentence for "the version"
+  // and a separate `binary`/`binarySource` pair for "was the CLI found at all",
+  // so "found but silent" already has an honest answer there; a
+  // `versionTimedOut` field would be a payload key no renderer reads, i.e. a
+  // promise that can only ever be asserted to exist. Asserted as an absence on
+  // an input that *does* carry `timedOut: true`, plus the same key set as a
+  // probe that answered, because an absence is only meaningful against a
+  // concrete set.
+  const answeredInfo = formatAppInfo({ ...base, binary: { path: "/opt/app/ocr", source: "local" }, ...normal });
+  const timedOutInfo = formatAppInfo({ ...base, binary: { path: "/opt/app/ocr", source: "local" }, ...hung });
+  check(
+    "formatAppInfo drops the probe's timedOut flag instead of shipping it",
+    !("timedOut" in timedOutInfo) && !("versionTimedOut" in timedOutInfo),
+    JSON.stringify(Object.keys(timedOutInfo).sort())
+  );
+  check(
+    "...and a timed-out answer has exactly the key set of one that answered",
+    JSON.stringify(Object.keys(timedOutInfo).sort()) === JSON.stringify(Object.keys(answeredInfo).sort()),
+    JSON.stringify([Object.keys(timedOutInfo).sort(), Object.keys(answeredInfo).sort()])
+  );
+  // The drop is a decision in `app-info.js` only while `main.js` does not choose
+  // fields off the probe. Reading the registration is the only way to see that
+  // (it is Electron-only code), and the assertion is deliberately about the
+  // *name*: a `timedOut` in `main.js` is a second decision point coming back.
+  // Comments are stripped first: the registration explains this decision in
+  // prose, and a check that also forbade the *word* would make the comment the
+  // thing to delete.
+  const mainSrc = fs
+    .readFileSync(path.join(ROOT, "main.js"), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/.*$/gm, "");
+  check(
+    "app:info hands the whole probe answer to formatAppInfo, and never names timedOut itself",
+    /\.\.\.probe/.test(mainSrc) && !/timedOut/.test(mainSrc),
+    "main.js"
   );
 
   // The defaults have to be usable, and the grace has to be *after* the budget:

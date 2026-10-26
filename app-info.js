@@ -36,6 +36,15 @@ function formatAppInfo({
   binary,
   versionStdout = "",
   versionStderr = "",
+  // `readVersionOutput` also answers *whether this side stopped waiting*, and
+  // that flag is accepted and dropped here on purpose (see the comment above
+  // `version:` below). Naming it is what makes the drop a decision: an unnamed
+  // extra key and a deliberately discarded one look identical in the source,
+  // and `main.js` hands this function the whole probe answer (`...probe`) so
+  // that `app:info` never picks fields off it. `tools/app-info-smoke.mjs` pins
+  // the absence in the payload — including the key set — so the day someone
+  // decides the page should say "CLI 未在 N 秒内回话", it turns red here first.
+  timedOut = false,
   configPath = "",
   docsUrl = "",
   appVersion = "",
@@ -43,12 +52,20 @@ function formatAppInfo({
   installInfo = {},
 } = {}) {
   const binaryPath = binary && binary.path ? binary.path : null;
+  void timedOut;
   return {
     binary: binaryPath,
     // "not found" has one answer here: no path, no source. Copying a stale
     // `source` next to a null `path` would let the page say "package" while
     // also saying it could not find the package.
     binarySource: binaryPath ? (binary && binary.source) || null : null,
+    // One sentence, one answer: "the version, or nothing". A probe that timed
+    // out and a CLI that printed nothing both land on `""`, and the page still
+    // has `binary`/`binarySource` to tell "not found" apart from "found but
+    // silent" — which is the whole reason `binary` is reported separately. A
+    // `versionTimedOut` boolean would be a payload field no renderer reads
+    // (`src/lib/types.ts`'s `AppInfo` has no place for it), so it stops here
+    // rather than shipping as a field that is only ever asserted to exist.
     version: readVersion(binaryPath, versionStdout, versionStderr),
     configPath,
     docsUrl,
