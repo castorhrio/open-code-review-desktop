@@ -21,6 +21,13 @@
 // (`retryDistIntoFallback` — clear the stale output dir, retry the build into it,
 // move the result out), which is the path a same-version retry takes.
 //
+// And the machine: every command in the release packages a Windows build and the
+// fallback moves `win-unpacked`, so `parsePlatform` refuses any other platform
+// before the version is even read — with the two commands that do work there,
+// because "unsupported platform" sends the reader looking for a flag that does not
+// exist. The call site in `release.mjs` is the one thing that has to be read as a
+// source line rather than called: importing that script starts packaging.
+//
 // And the answer a *failed* release gives: `stepFailure` (a non-zero status
 // becomes a throw carrying it), `err.failed` / `err.ran` (which step stopped it,
 // which ones completed) and `runRelease` (the lines and exit status the script
@@ -30,6 +37,9 @@
 // The move of the fallback's output into `release/` is pinned from both sides:
 // what the skip list names stays behind, and what it has never heard of is moved
 // (the fallback dir is deleted at the end, so anything not moved is destroyed).
+// Both answers are *sorted*: the walk is over `readdirSync`, whose order nothing
+// promises, and the release log prints these lists — so the order has to be the
+// code's, and a directory that answers in another order has its own fixture.
 //
 // The last block walks the same move against a *real* temp root
 // (`fs.mkdtempSync`): a fake disk proves the order of the calls, a real one
@@ -43,6 +53,7 @@ import path from "node:path";
 import { clearStaleDistOutput, DIST_SKIP, fallbackOutputDir, relocateDistOutput, retryDistIntoFallback } from "./release-dist.mjs";
 import {
   executeRelease,
+  parsePlatform,
   parseVersion,
   releaseAbort,
   releasePrecheck,
@@ -50,6 +61,7 @@ import {
   runRelease,
   stepFailure,
   RELEASE_GUARD_MESSAGES,
+  RELEASE_PLATFORM,
   RELEASE_STEPS,
   RELEASE_USAGE,
 } from "./release-guard.mjs";
@@ -131,6 +143,106 @@ const STATUS = "git status --porcelain";
     /drop the leading "v": 0\.1\.14/.test(parseVersion(["v0.1.14"]).error || ""),
     parseVersion(["v0.1.14"]).error
   );
+}
+
+/* ---- the machine is refused before the version is even read ----
+ * Everything `tools/release.mjs` does is Windows-shaped: `npm run dist:win`,
+ * `electron-builder --win` into a fresh dir, `win-unpacked` moved into `release/`.
+ * That was true and unstated, which meant a mac or a linux box got a release that
+ * failed somewhere in the middle — after the bump and the commit — with a message
+ * from electron-builder about a target it does not have. `parsePlatform` is the
+ * refusal, and it is a value so the sentence can be read here.
+ *
+ * It is *not* a `process.platform` switch over the command names: the move and the
+ * fallback are `win-unpacked` all the way down, so a switch would produce a script
+ * that looks cross-platform and moves the wrong directory on the platforms it
+ * claimed to support.
+ */
+{
+  check("this release path names the one platform it packages for", RELEASE_PLATFORM === "win32", RELEASE_PLATFORM);
+
+  const windows = parsePlatform("win32");
+  check("a Windows machine may cut this release", windows.ok === true && windows.reason === "ready" && windows.platform === "win32", JSON.stringify(windows));
+  check("...and carries no error line, so the script prints nothing", windows.error === undefined, JSON.stringify(windows));
+  check(
+    "...and surrounding whitespace is not a reason to refuse",
+    JSON.stringify(parsePlatform(" win32\n")) === JSON.stringify(windows),
+    JSON.stringify(parsePlatform(" win32\n"))
+  );
+
+  for (const other of ["darwin", "linux", "freebsd", "android", "win32-x64", "WIN32", "Windows"]) {
+    const answer = parsePlatform(other);
+    check(`${other} is refused`, answer.ok === false && answer.reason === "unsupported-platform", JSON.stringify(answer));
+    // The sentence has to say *what to do instead*. "unsupported platform" on its
+    // own sends the reader looking for a flag that does not exist, and the two
+    // commands that do work on that machine are the whole actionable content.
+    check(
+      "...naming the machine and the two commands that do work there",
+      typeof answer.error === "string" &&
+        answer.error.includes(`"${other}"`) &&
+        /Windows-only/.test(answer.error) &&
+        /dist:mac/.test(answer.error) &&
+        /dist:linux/.test(answer.error),
+      answer.error
+    );
+    check(
+      "...and saying why (the command and the app dir it moves), not only that it is refused",
+      /dist:win/.test(answer.error) && /win-unpacked/.test(answer.error),
+      answer.error
+    );
+    // A wrong machine is not a wrong invocation: printing the usage sentence here
+    // would tell the reader to fix an argument that is perfectly fine.
+    check("...without the version usage line, because the argument was not the problem", !answer.error.includes(RELEASE_USAGE), answer.error);
+  }
+
+  // A platform that is empty or not a string is not evidence of Windows. It is
+  // what a caller gets after a bad read of `process.platform` — answering "ready"
+  // there would let the release start on no information at all. (`undefined` is
+  // *not* in this list: it is how you ask for the default argument, i.e. for the
+  // real machine, which is the check right below.)
+  for (const missing of [null, "", "   ", 42, {}, ["win32"]]) {
+    const answer = parsePlatform(missing);
+    check(
+      `${JSON.stringify(missing) || String(missing)} is refused rather than read as this platform`,
+      answer.ok === false && answer.reason === "unsupported-platform",
+      JSON.stringify(answer)
+    );
+    check("...with a sentence that does not put a hole where the machine should be", !/""/.test(answer.error) && /unknown platform/.test(answer.error), answer.error);
+  }
+
+  // The default is the real machine, and it answers the same thing the explicit
+  // argument does — otherwise the script's `parsePlatform(process.platform)` and
+  // the checks above would be testing two different functions.
+  check(
+    "the default platform is the machine this check is running on",
+    parsePlatform().platform === process.platform && parsePlatform().ok === (process.platform === "win32"),
+    JSON.stringify(parsePlatform())
+  );
+
+  // The one check that reads a source file rather than calling a function, and it
+  // is deliberate: `tools/release.mjs` starts packaging the moment it is imported,
+  // so the *call site* of this refusal is the only part no fixture can reach.
+  // Without it, deleting the guard from the script leaves every check above green
+  // while the refusal becomes dead code. Comment lines are stripped first, so the
+  // sentence in the header cannot satisfy it on the guard's behalf.
+  {
+    const ROOT = path.resolve(import.meta.dirname, "..");
+    const script = fs
+      .readFileSync(path.join(ROOT, "tools", "release.mjs"), "utf8")
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("//"))
+      .join("\n");
+    check(
+      "the release script refuses the machine before it plans anything",
+      /parsePlatform\(\s*process\.platform\s*\)/.test(script),
+      "tools/release.mjs does not call parsePlatform(process.platform)"
+    );
+    check(
+      "...printing the module's own sentence, so the words have one home",
+      /console\.error\(\s*platform\.error\s*\)/.test(script) && /process\.exit\(\s*2\s*\)/.test(script),
+      "tools/release.mjs does not print platform.error and exit 2"
+    );
+  }
 }
 
 /* ---- a detached HEAD is refused, before anything is written ---- */
@@ -567,6 +679,40 @@ const STATUS = "git status --porcelain";
     JSON.stringify(packaging.ran)
   );
 
+  // Every step in turn, failed: "answered with a non-zero status and how far it
+  // got" has to hold at each position, not only where a human happened to write a
+  // fixture. The `ran` prefix is what the release log reads back at that moment —
+  // a position that answered the wrong prefix would send the reader to the wrong
+  // half of the disk, and one that named the *failed* step would send them there
+  // believing it had completed.
+  for (const [index, name] of plan.steps.map((step) => [plan.steps.indexOf(step), step.name])) {
+    const before = plan.steps.slice(0, index).map((step) => step.name);
+    const progress = before.length ? `after: ${before.join(" -> ")}` : "with no step completed";
+    const answer = runRelease(plan, failsAt(name, 5));
+    check(
+      `a failure at ${name} is answered with that step's exit status`,
+      answer.ok === false && answer.reason === "failed" && answer.code === 5,
+      JSON.stringify([answer.ok, answer.reason, answer.code])
+    );
+    check(
+      `...naming the steps that had completed before ${name}, and not ${name} itself`,
+      answer.ran.join(" -> ") === before.join(" -> ") && !answer.ran.includes(name),
+      JSON.stringify(answer.ran)
+    );
+    check(
+      `...and saying where it stopped (${progress})`,
+      answer.error.includes(`at step ${name}`) && answer.error.includes(progress),
+      answer.error
+    );
+    // Nothing after the failure is ever claimed: the key scan over a half-built
+    // release is the one consequence the reader would not think to check.
+    check(
+      `...so no step after ${name} is reported as having run`,
+      !answer.ran.includes("secret-scan") || name === "secret-scan",
+      JSON.stringify(answer.ran)
+    );
+  }
+
   // A successful release is the same shape with `ok: true`, so the caller has one
   // branch to read rather than two.
   const finished = runRelease(plan, { run: () => {}, runDist: () => {} });
@@ -798,9 +944,13 @@ const STATUS = "git status --porcelain";
     check("the fallback move completes with a previous app dir in the way", moveError === null, moveError && moveError.message);
     if (!answer) answer = { moved: [], skipped: [], replaced: null };
 
+    // Sorted, not in the directory's own order: the walk is over `readdirSync`,
+    // whose order nothing promises, so the answer is a sorted set. This table
+    // happens to be listed alphabetically, which is why the block after this one
+    // exists — an unsorted expectation would pass here and fail on release day.
     check(
       "the fallback moves every artefact into release/",
-      answer.moved.join(" | ") === [SETUP, PORTABLE, LATEST].join(" | "),
+      answer.moved.join(" | ") === [LATEST, PORTABLE, SETUP].sort().join(" | "),
       answer.moved.join(" | ")
     );
     // Only `builder-debug.yml` is *left behind*: `win-unpacked` was moved as a
@@ -840,6 +990,57 @@ const STATUS = "git status --porcelain";
       "...so it is gone and release/ holds the old and the new artefacts",
       !d.resolve(FROM).exists && Object.keys(d.lookup(TO)).length === 5,
       JSON.stringify(Object.keys(d.lookup(TO) || {}))
+    );
+  }
+
+  /* the answer's order is the code's, not the directory's */
+  {
+    // `fs.readdirSync` answers in whatever order the filesystem holds — the table
+    // below is listed deliberately *not* alphabetically, which is the shape a real
+    // directory can have and the one the block above cannot produce (it is
+    // alphabetical there, so an unsorted `moved` would have passed).
+    //
+    // This is the difference between a release log that says the same thing on
+    // every machine and one whose order changes between runs: the list is printed.
+    const d = fakeDisk({
+      "release-0.1.14": {
+        [SETUP]: null,
+        "win-unpacked": { "open-code-review-desktop.exe": null },
+        [LATEST]: null,
+        "builder-debug.yml": null,
+        [PORTABLE]: null,
+      },
+      release: {},
+    });
+    const answeredIn = d.fs.readdirSync(FROM);
+    let answer = null;
+    let threw = null;
+    try {
+      answer = relocateDistOutput({ from: FROM, to: TO, fs: d.fs, path: posix });
+    } catch (err) {
+      threw = err;
+    }
+    check("the fallback move completes whatever order the directory answers in", threw === null, threw && threw.message);
+    if (!answer) answer = { moved: [], skipped: [] };
+    check(
+      "...and the moved list comes back sorted, not in the directory's own order",
+      answer.moved.join(" | ") === [LATEST, PORTABLE, SETUP].sort().join(" | "),
+      answer.moved.join(" | ")
+    );
+    check(
+      "...which really is a different order from the one the directory gave, so this is not a coincidence",
+      answeredIn.join(" | ") !== answer.moved.join(" | "),
+      answeredIn.join(" | ")
+    );
+    check(
+      "...and nothing was moved twice or skipped by the sort",
+      answer.moved.length === new Set(answer.moved).size && answer.moved.length === 3,
+      JSON.stringify(answer.moved)
+    );
+    check(
+      "...while the one entry the temp dir owns is still the only one left behind",
+      answer.skipped.join(" | ") === "builder-debug.yml",
+      answer.skipped.join(" | ")
     );
   }
 
@@ -1103,9 +1304,11 @@ const STATUS = "git status --porcelain";
       path: posix,
     });
 
+    // Sorted like the move's answer: `clearStaleDistOutput` reports top-level
+    // entries, and the filesystem does not promise an order for them.
     check(
       "the retry clears exactly the stale entries and says how many",
-      answer.cleared.removed.join(" | ") === ["win-unpacked", SETUP].join(" | "),
+      answer.cleared.removed.join(" | ") === [SETUP, "win-unpacked"].sort().join(" | "),
       JSON.stringify(answer.cleared)
     );
     check(
@@ -1362,7 +1565,9 @@ const STATUS = "git status --porcelain";
         answer,
         retryError,
         fallbackExistedAtBuild,
-        clearedEntries: answer ? [...answer.cleared.removed].sort() : [],
+        // Deliberately *not* re-sorted here: the answer has to come back sorted
+        // from the function, otherwise the release log's order is the disk's.
+        clearedEntries: answer ? answer.cleared.removed : [],
         appLanded: fs.existsSync(path.join(root, "release", "win-unpacked", "open-code-review-desktop.exe")),
         staleGone: !fs.existsSync(path.join(root, "release", "win-unpacked", "stale.exe")),
         setupLanded: fs.existsSync(path.join(root, "release", SETUP)),
@@ -1379,8 +1584,8 @@ const STATUS = "git status --porcelain";
       JSON.stringify(seen.fallbackExistedAtBuild)
     );
     check(
-      "...having named the two stale entries it removed first",
-      seen.clearedEntries.join(" | ") === ["win-unpacked", SETUP].sort().join(" | "),
+      "...having named the two stale entries it removed first, in sorted order",
+      seen.clearedEntries.join(" | ") === [SETUP, "win-unpacked"].sort().join(" | "),
       JSON.stringify(seen.clearedEntries)
     );
     check(

@@ -22,6 +22,10 @@
 // `tools/release.mjs` passes). Both checks read their answer out of *git's exit
 // status*, not out of its wording, so this file has no message to parse.
 //
+// The first thing the script refuses is the machine: this path packages a Windows
+// build (`dist:win`, `win-unpacked`) and says so rather than half-porting itself
+// to a platform it was never written for — see `parsePlatform`.
+//
 // The same split is what a *failed* release needs. Its runners throw instead of
 // exiting (`stepFailure`), this module decides what a throw means
 // (`releaseAbort`: the lines to print, the exit status, how far it got), and
@@ -61,6 +65,57 @@ export function parseVersion(argv = []) {
     return { ok: false, reason: "invalid", error: `${RELEASE_USAGE} — "${raw}" is not x.y.z${hint}` };
   }
   return { ok: true, reason: "ready", version: raw };
+}
+
+/**
+ * The platform this release path can actually cut, and the refusal for every
+ * other one.
+ *
+ * Everything below is Windows-shaped and not by oversight: `releaseCommands`
+ * hardcodes `npm run dist:win`, `retryDistIntoFallback` hardcodes
+ * `electron-builder --win` and the `win-unpacked` app dir, and the fallback
+ * exists for a locked path on *this* machine. macOS and Linux releases are cut by
+ * `npm run dist:mac` / `npm run dist:linux` on a machine of that kind, with
+ * different artefacts, a different app dir and no Nsis installer. Half-porting
+ * this script (a `process.platform` switch over the command names) would leave
+ * the move and the fallback still pretending the output is `win-unpacked`, i.e.
+ * a script that looks cross-platform and is not — the worst of both.
+ *
+ * So the machine is refused where it can be refused: before the precheck, before
+ * the bump, before anything on disk changes. The sentence names the machine *and*
+ * the two commands that do work there, because "unsupported platform" on its own
+ * sends the reader looking for a flag that does not exist.
+ *
+ * `platform` is a parameter rather than `process.platform` read inside, so the
+ * check can ask what a mac would be told without owning a mac — the same reason
+ * `capture` is injected above.
+ */
+export const RELEASE_PLATFORM = "win32";
+
+/** The refusal sentence for a machine this path was never written for. */
+function unsupportedPlatformError(platform) {
+  const named = typeof platform === "string" && platform ? `"${platform}"` : "an unknown platform";
+  return (
+    `this release path is Windows-only — it runs \`npm run dist:win\` and moves ` +
+    `release/win-unpacked into place, so ${named} cannot cut a release with it; ` +
+    `run \`npm run dist:mac\` or \`npm run dist:linux\` by hand instead`
+  );
+}
+
+/**
+ * Whether this machine may cut a release with `tools/release.mjs`.
+ *
+ * Answers the same shape as `parseVersion` — `{ ok, reason, platform }`, plus the
+ * line to print on a refusal — because the script refuses both inputs the same
+ * way (`console.error(error)`, exit 2) and a caller should not have to remember
+ * two shapes. An empty or non-string platform is refused rather than read as
+ * "this one": a `process.platform` that is somehow missing is not evidence of
+ * Windows.
+ */
+export function parsePlatform(platform = process.platform) {
+  const value = typeof platform === "string" ? platform.trim() : "";
+  if (value === RELEASE_PLATFORM) return { ok: true, reason: "ready", platform: value };
+  return { ok: false, reason: "unsupported-platform", platform: value, error: unsupportedPlatformError(value) };
 }
 
 /** The refusal for a HEAD that is not on a branch. */

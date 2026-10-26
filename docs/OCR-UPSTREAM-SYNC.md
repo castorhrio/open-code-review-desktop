@@ -12,7 +12,20 @@
 4. **不要**静默忽略上游 release：每轮把结论追加到下面「上游状态」，哪怕结论是
    「无新内容」。
 
-## 上游状态（最近检查：2026-10-27，第 50 轮）
+## 上游状态（最近检查：2026-10-27，第 51 轮）
+
+第 51 轮复核：`git ls-remote https://github.com/alibaba/open-code-review.git` 可达，
+`refs/heads/main` 仍是 `375f64c`（与第 50 轮同一个 SHA），`npm view
+@alibaba-group/open-code-review version dist-tags` = `1.13.3` / `latest: 1.13.3`。
+两条通路一致，**无新 commit、无新 release**；`git ls-remote --tags` 本轮超时（`timeout`
+返回 124，与第 47–48 轮同因），tag 一处没有独立核对，但 `main` 顶端 SHA 未变即为「无新
+commit」，`latest` 未变即为「无新发布」。desktop 的 `^1.13.3` 无需改动。
+
+本轮改动全部在发版链（`tools/release.mjs` / `release-guard.mjs` / `release-dist.mjs`），
+与上游 CLI、配置读写、`git show` 分类都无关：`audit:service` / `audit:config` /
+`audit:git` 本轮仍全绿，且没有新的上游暴露点需要移植。**结论：无新内容，无移植项。**
+
+## 上游状态（第 50 轮，2026-10-27）
 
 第 50 轮复核：`git ls-remote https://github.com/alibaba/open-code-review.git` 可达，
 `refs/heads/main` 仍是 `375f64c`，`git fetch upstream --tags` 后

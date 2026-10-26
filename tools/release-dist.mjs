@@ -16,7 +16,10 @@
 // takes the filesystem and the path module as arguments, so
 // `tools/release-guard-smoke.mjs` can drive it against a table of fake
 // directories and assert what was moved, what was deliberately left behind, and
-// in which order — including the three facts that are easy to lose in a rewrite:
+// that both answers are *sorted* — the walk is over `readdirSync`, whose order
+// nothing promises, so the answer is a sorted set rather than whatever the
+// filesystem happened to hand back. The three facts that are easy to lose in a
+// rewrite:
 //
 //   - a previous `release/win-unpacked` is removed *before* the new one is
 //     renamed into its place (renaming onto a non-empty directory fails on
@@ -37,6 +40,15 @@
 // The answer names what happened (`moved`, `skipped`, `replaced`) so the release
 // log can say it, and so a caller cannot mistake "it returned" for "everything
 // landed".
+//
+// EVERY NAME IN HERE IS WINDOWS': `--win`, `win-unpacked`, and the two artefacts
+// electron-builder's win target writes. That is not a parameter because nothing
+// here would be a parameter on a mac or a linux box — the packaging target, the
+// app dir and the locked-path story all differ. What keeps the hardcoding honest
+// is that the release entry point refuses to run anywhere else (`parsePlatform`
+// in `release-guard.mjs`, before a single step is planned), so this code is
+// unreachable on a platform it was not written for instead of half-working
+// there.
 //
 // `retryDistIntoFallback` is the same path one level up: clear the stale fallback
 // dir, build into it, move the result out. It lives here for the same reason —
@@ -106,9 +118,16 @@ export function relocateDistOutput({ from, to, fs: fsApi = fs, path: pathApi = p
   if (replaced) fsApi.rmSync(target, { recursive: true, force: true });
   fsApi.renameSync(fresh, target);
 
+  // `readdirSync` answers in whatever order the directory holds — alphabetical on
+  // some filesystems, nothing in particular on others — so walking it directly
+  // made `moved` / `skipped` a claim about the disk instead of about this
+  // function. Sorted, the answer (and the release log that prints it) comes out
+  // the same on every run and every machine, and the check can assert it. The
+  // copy is defensive: a double may hand back the array it keeps.
+  const entries = fsApi.readdirSync(from).slice().sort();
   const moved = [];
   const skipped = [];
-  for (const name of fsApi.readdirSync(from)) {
+  for (const name of entries) {
     if (DIST_SKIP.includes(name)) {
       skipped.push(name);
       continue;
@@ -146,9 +165,13 @@ export function fallbackOutputDir(version) {
  * fails on a name it cannot rename over. Clearing first turns "one attempt, one
  * output dir" from a hope into a step.
  *
- * Answers the entries that went, so the release log can say how much was stale
- * rather than only that it did something. A path that is missing is a no-op;
- * `force` covers the case where it is already gone by the time `rm` runs.
+ * Answers the *top-level* entries that went, sorted, so the release log can say
+ * how much was stale rather than only that it did something. It is not a count of
+ * every file below them (a stale `win-unpacked` is one entry and several hundred
+ * files), which is why the log says "top-level" — an honest smaller claim beats a
+ * recursive walk that would only make the number bigger. A path that is missing
+ * is a no-op; `force` covers the case where it is already gone by the time `rm`
+ * runs.
  *
  * The file-shaped case is pinned against a real file (a `readdirSync` that
  * answers `ENOTDIR`, not a double that throws on request) in
@@ -163,7 +186,10 @@ export function clearStaleDistOutput({ dir, fs: fsApi = fs } = {}) {
   // `readdirSync` is the only call here that cares which it is. Failing to read
   // its entries must not become failing to clear it.
   try {
-    removed = fsApi.readdirSync(dir);
+    // Sorted for the same reason as the move below: `readdirSync`'s order is the
+    // filesystem's, and this answer ends up in a log line that people compare
+    // between runs. A double may hand back the array it keeps, so it is copied.
+    removed = fsApi.readdirSync(dir).slice().sort();
   } catch (_) {
     removed = [];
   }
@@ -176,14 +202,15 @@ export function clearStaleDistOutput({ dir, fs: fsApi = fs } = {}) {
  * result into `release/`.
  *
  * `run` is injected (it spawns `electron-builder` and, in `tools/release.mjs`,
- * exits the process when the command fails), and so are `fs`/`path`, so
- * `tools/release-guard-smoke.mjs` can assert the three facts that make this path
- * safe: the dir is cleared *before* the build starts, nothing is moved when the
+ * throws a `stepFailure` when the command exits non-zero), and so are `fs`/`path`,
+ * so `tools/release-guard-smoke.mjs` can assert the three facts that make this
+ * path safe: the dir is cleared *before* the build starts, nothing is moved when the
  * build throws, and the move is handed exactly the dirs this attempt owns.
  *
  * A build that fails is not caught here: the caller's runner has already decided
- * what a failed command means (exit, in the release script), and catching it
- * would turn a failed retry into a silent "nothing to move".
+ * what a failed command means (a throw carrying the exit status, which
+ * `runRelease` turns into the release's answer), and catching it would turn a
+ * failed retry into a silent "nothing to move".
  */
 export function retryDistIntoFallback({
   version,

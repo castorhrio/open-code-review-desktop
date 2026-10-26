@@ -2,6 +2,15 @@
 //
 //   node tools/release.mjs 0.1.12
 //
+// WINDOWS ONLY, ON PURPOSE
+// Every command below packages a Windows build — `npm run dist:win`, then
+// `electron-builder --win` into a fresh dir when the locked `win-unpacked.tmp`
+// cannot be renamed — and the fallback moves `win-unpacked` and the two Windows
+// artefacts into `release/`. macOS and Linux releases are cut by
+// `npm run dist:mac` / `npm run dist:linux` on a machine of that kind. So the
+// script refuses a non-Windows machine up front (`parsePlatform`) instead of
+// growing a `process.platform` switch that would still move `win-unpacked`.
+//
 // WHAT THIS DOES NOT DO, ON PURPOSE
 // - It does not push. The release commit stays local until a human pushes it;
 //   publishing commits and publishing GitHub Releases are shared-state acts.
@@ -28,9 +37,19 @@ import { execSync, spawnSync } from "node:child_process";
 import path from "node:path";
 
 import { fallbackOutputDir, retryDistIntoFallback } from "./release-dist.mjs";
-import { parseVersion, planRelease, runRelease, stepFailure } from "./release-guard.mjs";
+import { parsePlatform, parseVersion, planRelease, runRelease, stepFailure } from "./release-guard.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
+
+// The machine comes first: a wrong version is a typo that the next run fixes,
+// while a wrong machine means not one command below can produce the artefacts
+// this path exists to produce. Refused with the two commands that do work there,
+// before the precheck and before anything on disk changes.
+const platform = parsePlatform(process.platform);
+if (!platform.ok) {
+  console.error(platform.error);
+  process.exit(2);
+}
 
 // The version decides the commit message, the output dir and every artefact's
 // name, so it is refused here rather than three steps later by `npm version`.
@@ -87,7 +106,12 @@ const runDist = (step) => {
   // the move never reaches), so nothing is moved for a build that produced
   // nothing.
   const { cleared, landed } = retryDistIntoFallback({ version, root: ROOT, run });
-  if (cleared.removed.length) console.log(`\ncleared ${cleared.removed.length} stale entr${cleared.removed.length === 1 ? "y" : "ies"} from ${cleared.dir}/`);
+  // "top-level" is not padding: a stale `win-unpacked` is one entry and several
+  // hundred files, and the number here is entries (`clearStaleDistOutput`'s
+  // answer), not everything that was deleted.
+  if (cleared.removed.length) {
+    console.log(`\ncleared ${cleared.removed.length} stale top-level entr${cleared.removed.length === 1 ? "y" : "ies"} from ${cleared.dir}/`);
+  }
   console.log(
     `\nrelocated ${landed.moved.length + 1} into release/` +
       ` (left behind: ${landed.skipped.join(", ") || "nothing"})` +
