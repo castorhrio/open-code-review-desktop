@@ -869,6 +869,83 @@ desktop 恰恰读不到那张表，所以它没有资格替用户选一条。
 
 ---
 
+## 第 17 轮 desktop 侧加固（与上游无关）
+
+上游本轮无新提交（顶端仍是 `375f64c` / `v1.13.3`，见 `next-iteration.md` 的复核表），
+不移植。本轮做一件事：**把「一次运行结束时的那几句话」钉到同一个去处**，并复核
+简报里 P0-1 / P1-1 两条。
+
+### P0 — 一次运行的结束，只有一个去处
+
+`run-handler.js` 这条路上有三句关于「这次运行怎么结束的」的话，严重程度不同，
+去处却有两个：
+
+| 句子 | 谁说的 | 讲的是什么 |
+| --- | --- | --- |
+| `settle-failed` | handler 自己的 `catch` | 收尾根本没做完，退出信号可能没发 |
+| `signal-failed` | `settleRunExit` 里面 | 证据在盘上，只是推送失败 |
+| 迟到的写盘结果 | `onLate` | 写盘在越过上限之后才落地 |
+
+三句里**只有第一句**走 handler 的 `warn`（也就是注入的那个去处）。后两句走的是
+`settleRunExit` 自己的 `warn`——而 **handler 以前根本没给它**：
+`settleRunExit` 把 `opts.warn` 透传给 `reportOutcome`，没给就退回 `console.warn`。
+于是：
+
+- 注入一个 `warn` 的调用方只看得到**一半**；
+- 另一半进了主进程的 stderr。它不会进渲染进程的日志抽屉（抽屉吃的是
+  `run:log`），开发时在终端里看得见，打包成 GUI 应用后没有窗口可看。
+
+改动很小：`run-handler.js` 把同一个 `log`（注入的 `warn`，没有就
+`console.warn`）交给 `settleRunExit` 的 `warn` 与 `onLate`。三句话从此一个去处。
+
+**断言**（`tools/run-diagnostics-smoke.mjs`，+7 条，走 handler 而不是直接调
+`settleRunExit`）：
+
+- 退出推送抛错 → 报的是 `signal-failed`（那句「退出信号推送失败」），**不是**
+  `settle-failed`（那是另一件事：收尾根本没做完）；
+- handler 自己的最后一道报告没有触发；
+- 那个去处里**只有这一句**（一句不多），推送也只发生了一次；
+- 证据在推送失败之前就已经在盘上；
+- 越过上限之后才落地的写盘，结果也进同一个去处。
+
+**实测**：把 `warn` 的接线去掉 → 3 条变红（`signal-failed` 那句与迟到的写盘结果
+都不在去处里）；把 handler 的 `try/catch` 改回 `.catch(() => {})` → 5 条变红
+（简报的验收条件是「至少 2 条」）。
+
+> 第 20 轮把这一步再收了一格：`log` 与 `warn` 两个可注入点合成一个 `sink`，
+> 「只接一半」不再是这个模块能表达的状态。见 `next-iteration.md` 第 20 轮。
+
+### 复核 — 简报的 P0-1 与 P1-1，已经钉住了，不用再做
+
+- **P0-1（`makeRunHandler` 的端到端断言）**：`tools/run-diagnostics-smoke.mjs`
+  里已经有「the settle that never finishes」一节——它就是用 `makeRunHandler` 造
+  handler、让 `startRun` 回调 `onDone`，然后断言 `reportOutcome` 收到的是
+  `settle-failed`、日志里是 `settleFailedMessage()` 那句、退出信号**没有**发出去
+  （门没开），以及那个拒绝被处理掉（没有 unhandledRejection）。简报担心的
+  「只钉了 `settleRunExit` 本身」是旧状态：那一节是端到端的。本轮补的是它
+  **没覆盖的那一格**——推送失败走 `signal-failed` 而不是 `settle-failed`
+  （见上），以及这两句话的**去处**。
+- **P1-1（`savedKey` 的参数形状）**：`tools/bridge-contract.mjs` 的探针按接口
+  声明的字段名逐个打标记，检查它们到达主进程时还在原来的名字下。实测把
+  `preload.js` 的 `savedKey` 改回两个位置参数
+  （`(name, url) => invoke(..., { name, url })`）→ **2 条变红**（参数个数 + 值的
+  去处）。不需要再加断言。
+
+### 已关闭（第 18 轮）— `signal-failed` / `settle-failed` 现在进日志抽屉
+
+本轮把三句话**归到一个去处**，但这个去处当时仍然是 `console.warn`。这两句是
+唯一**没有退出信号可搭**的话（推送失败时根本没有退出信号，收尾失败时收尾本身
+没做完），所以它们到不了渲染进程的日志抽屉——store 的结果在退出信号**送达**时
+是跟着 payload 走的，渲染进程会写进日志，而这两句没有 payload。
+
+「界面可能仍显示运行中」这句话本该由日志抽屉自己打开（`TROUBLE_LINE` 匹配
+「失败」），所以缺的不是措辞，是去处。改法有两个：接 `run:log`（进抽屉，会让
+抽屉自己弹出来），或者写主进程的日志文件。**第 18 轮定了：接 `run:log`**——
+`main.js` 注入 `warn`，两句话进渲染进程的日志抽屉；写日志文件的方向放弃，
+理由见 `next-iteration.md` 第 18 轮。
+
+---
+
 ## 已经划掉的待办（历史）
 
 这些条目在写下时是开放的，现在都收掉了。留着它们是为了让「当时认为
