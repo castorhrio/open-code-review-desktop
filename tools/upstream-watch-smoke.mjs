@@ -15,6 +15,7 @@ import path from "node:path";
 
 import {
   DEBT_MARKER,
+  MOVED_MARKER,
   PINNED_UPSTREAM,
   ROWS_TO_REREAD,
   classifyGit,
@@ -40,10 +41,43 @@ const PINNED_SHA = PINNED_UPSTREAM.sha;
 const OTHER_SHA = "abcdef0" + "0".repeat(33);
 // The pinned commit with a different tail. The first 7 characters are derived
 // from the pin on purpose — that is the collision shape under test; the other 33
-// are written out as `f`, so this is a prefix collision rather than the pin
-// itself. (An earlier comment claimed the whole value was written out, which was
-// not what the code did.)
-const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + "f".repeat(33);
+// are written out here, with no `f` in them, so the fixture cannot collapse into
+// the pin by construction. (An earlier version used `"f".repeat(33)` and a
+// comment claiming the whole value was written out; both were one edit away from
+// a fixture that silently stopped testing anything — see the guards below.)
+const SAME_PREFIX_TAIL = "0123456789abcde0123456789abcde012";
+const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
+
+/* ---- the fixtures themselves, before anything is concluded from them ---- */
+{
+  // A fixture that equals the pin turns "moved, not pinned" into "pinned": the
+  // check would still be green while testing nothing. Pin changes are exactly
+  // when this drifts (the tail is written out, so a new pin whose tail matched
+  // it would collapse the two), hence an explicit guard rather than a comment.
+  check(
+    "the prefix-collision fixture is a different commit from the pin",
+    SAME_PREFIX_SHA !== PINNED_SHA,
+    `${SAME_PREFIX_SHA} vs ${PINNED_SHA}`
+  );
+  check(
+    "...and it is still a 40-character commit that shares the pin's first 7",
+    /^[0-9a-f]{40}$/.test(SAME_PREFIX_SHA) &&
+      SAME_PREFIX_SHA.slice(0, 7) === PINNED_SHA.slice(0, 7) &&
+      SAME_PREFIX_SHA.slice(7) === SAME_PREFIX_TAIL &&
+      SAME_PREFIX_TAIL.length === 33,
+    JSON.stringify({ sha: SAME_PREFIX_SHA, tail: SAME_PREFIX_TAIL })
+  );
+  check(
+    "...and the written-out tail differs from the pin's, so the collision is real",
+    PINNED_SHA.slice(7) !== SAME_PREFIX_TAIL,
+    JSON.stringify({ pinTail: PINNED_SHA.slice(7), fixtureTail: SAME_PREFIX_TAIL })
+  );
+  check(
+    "the 'moved' fixture is a whole commit and is not the pin either",
+    OTHER_SHA !== PINNED_SHA && /^[0-9a-f]{40}$/.test(OTHER_SHA),
+    `${OTHER_SHA} vs ${PINNED_SHA}`
+  );
+}
 
 /* ---- the pin itself ---- */
 {
@@ -248,6 +282,23 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + "f".repeat(33);
   );
   const moved = formatDrift(upstreamDrift({ ok: true, sha: OTHER_SHA }));
   check(
+    "the moved sentence starts with its own marker, so a grep separates it from both quiet states",
+    moved.startsWith(MOVED_MARKER) &&
+      !moved.includes(DEBT_MARKER) &&
+      MOVED_MARKER !== DEBT_MARKER,
+    moved.split("\n")[0]
+  );
+  check(
+    "...and the pinned and skipped sentences never carry the moved marker",
+    !pinned.includes(MOVED_MARKER) && !skipped.includes(MOVED_MARKER),
+    JSON.stringify({ pinned: pinned.split("\n")[0], skipped: skipped.split("\n")[0] })
+  );
+  check(
+    "the three answers are three distinct marker shapes: debt / moved / none",
+    [skipped.startsWith(DEBT_MARKER), moved.startsWith(MOVED_MARKER), !pinned.startsWith("[")].every(Boolean),
+    JSON.stringify([skipped.split("\n")[0], moved.split("\n")[0], pinned.split("\n")[0]])
+  );
+  check(
     "the moved sentence is prominent, names the new SHA and the road, and says it is not a failure",
     moved.includes("已前进") &&
       moved.includes("abcdef0") &&
@@ -272,7 +323,8 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + "f".repeat(33);
   const movedSamePrefix = formatDrift(upstreamDrift({ ok: true, sha: SAME_PREFIX_SHA }));
   check(
     "the same-prefix sentence does not read as a typo: it says the two prefixes match",
-    movedSamePrefix.includes("已前进") &&
+    movedSamePrefix.startsWith(MOVED_MARKER) &&
+      movedSamePrefix.includes("已前进") &&
       movedSamePrefix.includes(SAME_PREFIX_SHA) &&
       movedSamePrefix.includes("前 7 位相同"),
     movedSamePrefix.split("\n")[0]
@@ -307,10 +359,16 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + "f".repeat(33);
       JSON.stringify({ state: result.verdict.state, code: result.code })
     );
     // The debt marker is the ledger: a skipped run must be greppable, and a
-    // checked run must not falsely look like debt.
+    // checked run must not falsely look like debt. Same for a moved run — one
+    // grep of the whole session's output then separates the three states.
     check(
       `${name}: ${expected === "skipped" ? "carries" : "does not carry"} the debt marker`,
       result.text.includes(DEBT_MARKER) === (expected === "skipped"),
+      result.text
+    );
+    check(
+      `${name}: ${expected === "moved" ? "carries" : "does not carry"} the moved marker`,
+      result.text.includes(MOVED_MARKER) === (expected === "moved"),
       result.text
     );
     if (name === "thrown spawn") {

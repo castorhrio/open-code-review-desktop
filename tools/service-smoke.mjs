@@ -76,10 +76,14 @@ const PLATFORM_PACKAGE = `@alibaba-group/ocr-${process.platform}-${process.arch}
 // the service looks for.
 const BINARY_FILE = process.platform === "win32" ? "opencodereview.exe" : "opencodereview";
 
-// The child answers the three things a caller reads: the resolution, the same
-// question asked a second time (a cache that remembered a miss as a hit, or
-// re-answered differently, shows up here), and the path-only view. `mode` is how
-// the machine is blinded to everything outside the tree under test.
+// The child answers the things a caller reads: the resolution, the same question
+// asked a second time (a cache that remembered a miss as a hit, or re-answered
+// differently, shows up here), the path-only view, and *how many probes each of
+// the two questions caused*. The per-call probe counts are what make caching a
+// fact instead of a hope: a total `probes > 0` cannot tell "searched once and
+// remembered" from "searched twice", and a cached miss looks exactly like a
+// correct null. `mode` is how the machine is blinded to everything outside the
+// tree under test.
 const RESOLVE_CHILD = `
 const target = process.argv[1];
 const mode = process.argv[2];
@@ -96,6 +100,7 @@ if (mode === "hide-all") svc.fileExists = () => {
   return false;
 };
 const first = svc.binaryResolution();
+const probesAfterFirst = probes;
 const again = svc.binaryResolution();
 process.stdout.write(
   JSON.stringify({
@@ -103,6 +108,8 @@ process.stdout.write(
     again,
     path: svc.binaryPath(),
     probes,
+    probesAfterFirst,
+    probesAfterAgain: probes,
     constants: [svc.BINARY_SOURCE_PACKAGE, svc.BINARY_SOURCE_LOCAL, svc.BINARY_SOURCE_GLOBAL],
   })
 );
@@ -158,11 +165,25 @@ check(
 // this can name the API freely.
 {
   const source = fs.readFileSync(path.join(ROOT, "ocr-service.js"), "utf8");
-  const directCalls = source.match(/fs\.existsSync\s*\(/g) || [];
+  // `\b` so a longer identifier ending in the same letters cannot be counted as
+  // this call; the second counter is the same call without the `fs.` qualifier,
+  // which is what a destructured `const { existsSync } = fs` would produce. That
+  // covers the two shapes we have actually written. An *aliased* call
+  // (`const probe = fs.existsSync; probe(p)`) is not detectable this way — for
+  // that one the net is the `probes` counters below, which go to 0 if the
+  // searches stop going through the replaceable `fileExists`.
+  const directCalls = source.match(/\bfs\.existsSync\s*\(/g) || [];
+  const bareCalls = source.match(/\bexistsSync\s*\(/g) || [];
+  const destructured = /\{[^}]*\bexistsSync\b[^}]*\}\s*=/.test(source);
   check(
     "the service asks the filesystem whether something exists in exactly one place",
     directCalls.length === 1,
     `${directCalls.length} direct fs.existsSync call(s)`
+  );
+  check(
+    "...and no unqualified or destructured existsSync call escapes that one place",
+    bareCalls.length === directCalls.length && !destructured,
+    JSON.stringify({ fsQualified: directCalls.length, anyCall: bareCalls.length, destructured })
   );
   check(
     "...and that place is the exported `fileExists` the isolation replaces",
@@ -239,6 +260,15 @@ check(
     answer.probes > 0,
     `${answer.probes} probe(s)`
   );
+  // The other half of the cache rule: a hit answers the *second* question too,
+  // with no second walk of the three searches. Together with the miss case below
+  // (which must probe again) this pins both directions of the cache, so neither
+  // "remember everything, including nothing" nor "never remember" can pass.
+  check(
+    "...and a hit means the second question costs no probe at all",
+    answer.probesAfterFirst > 0 && answer.probesAfterAgain === answer.probesAfterFirst,
+    JSON.stringify({ afterFirst: answer.probesAfterFirst, afterAgain: answer.probesAfterAgain })
+  );
   fs.rmSync(tree, { recursive: true, force: true });
 }
 
@@ -308,7 +338,7 @@ check(
     JSON.stringify(answer.path)
   );
   check(
-    "a miss is not cached as an answer: asking again still searches and still says none",
+    "a miss is not cached as an answer: asking again still says none",
     answer.again.path === null && answer.again.source === null,
     JSON.stringify(answer.again)
   );
@@ -316,6 +346,17 @@ check(
     "...and 'none' came from probing through the replaceable entry, not from skipping the search",
     answer.probes > 0,
     `${answer.probes} probe(s)`
+  );
+  // This is the assertion the "install the binary, reopen the settings page"
+  // story rests on: a cached `null` would keep the page saying "not found" for
+  // the rest of the process's life, and it would look exactly like a correct
+  // answer. The count has to grow *on the second question*, not merely be
+  // non-zero — one probe can also come from a search that ran once and then
+  // remembered the empty result.
+  check(
+    "...and asking again really searches again: the probe count grows on the second call",
+    answer.probesAfterFirst > 0 && answer.probesAfterAgain > answer.probesAfterFirst,
+    JSON.stringify({ afterFirst: answer.probesAfterFirst, afterAgain: answer.probesAfterAgain })
   );
   fs.rmSync(tree, { recursive: true, force: true });
 }

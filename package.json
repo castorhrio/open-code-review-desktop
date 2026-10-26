@@ -5,6 +5,9 @@
   "private": true,
   "description": "Desktop wrapper for the open-code-review (ocr) CLI",
   "author": "xyris",
+  "engines": {
+    "node": ">=18"
+  },
   "main": "main.js",
   "scripts": {
     "start": "npm run build && electron .",

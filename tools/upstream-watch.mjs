@@ -15,12 +15,15 @@
 // a human re-reads. The pure functions are exported so
 // `tools/upstream-watch-smoke.mjs` can assert the answers without network.
 //
-// Two things were added after the first five rounds of unanswered checks:
+// Three things were added after the first five rounds of unanswered checks:
 //  - the command tries `git ls-remote` and then the GitHub API, and says which
 //    one answered (`通路：git` / `通路：api`). Historically a timed-out git was
 //    reported as "skipped" even though the API could answer the same question;
 //  - a skipped run now starts with `[UPSTREAM-DEBT]`, so "this round did not
-//    actually check the HEAD" is a greppable fact instead of prose.
+//    actually check the HEAD" is a greppable fact instead of prose;
+//  - a moved run starts with `[UPSTREAM-MOVED]`, so the three answers are three
+//    greps: `[UPSTREAM-DEBT]` = not checked, `[UPSTREAM-MOVED]` = checked and
+//    changed, no marker = checked and unchanged.
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -34,6 +37,14 @@ export const UPSTREAM_API =
 // the rounds whose network debt was never paid; it is a machine marker, not a
 // human word, so it survives translation and prose edits.
 export const DEBT_MARKER = "[UPSTREAM-DEBT]";
+
+// Prefix of a moved sentence. The three answers are three states a reader has to
+// tell apart in a pile of output — "did not check", "checked, unchanged",
+// "checked, moved". The first has a marker; this gives the third one too, so a
+// single grep separates them instead of trusting the shape of the prose. A
+// pinned sentence (the quiet, common case) carries no marker on purpose: silence
+// should mean "nothing to do", and any marker is louder than silence.
+export const MOVED_MARKER = "[UPSTREAM-MOVED]";
 
 // A commit is 40 hex characters, and so is this pin — deliberately *not* the
 // readable 7-character prefix the prose below uses.
@@ -67,6 +78,12 @@ export const ROWS_TO_REREAD = Object.freeze([
 
 const FULL_SHA = /^[0-9a-f]{40}$/i;
 
+// One predicate for the one question ("is this a whole commit?"), because it is
+// asked four times and a rule that only three of four call sites follow is how
+// the short-SHA hole opened in the first place. The refusal reasons below quote
+// this same 40-character rule.
+export const isFullSha = (value) => FULL_SHA.test(String(value == null ? "" : value).trim());
+
 // Reads the SHA for `UPSTREAM_REF` out of `git ls-remote` output. A malformed
 // line is ignored rather than trusted: a bad answer here would be reported as a
 // moved HEAD (or worse, as "pinned"), and the whole point is that this sentence
@@ -74,7 +91,7 @@ const FULL_SHA = /^[0-9a-f]{40}$/i;
 export const parseLsRemote = (stdout, ref = UPSTREAM_REF) => {
   for (const line of String(stdout || "").split(/\r?\n/)) {
     const [sha, name] = line.trim().split(/\s+/);
-    if (name === ref && FULL_SHA.test(sha || "")) return sha;
+    if (name === ref && isFullSha(sha)) return sha;
   }
   return null;
 };
@@ -84,7 +101,7 @@ export const parseLsRemote = (stdout, ref = UPSTREAM_REF) => {
 // a reason to trust a shorter answer.
 export const parseApiCommit = (json) => {
   const sha = json && typeof json.sha === "string" ? json.sha.trim() : "";
-  return FULL_SHA.test(sha) ? sha : null;
+  return isFullSha(sha) ? sha : null;
 };
 
 // Turns a `spawnSync` result into the same shape the API road produces. Kept
@@ -122,7 +139,7 @@ export const upstreamDrift = ({ ok, sha, pinned = PINNED_UPSTREAM.sha, failure =
   if (!sha) {
     return { state: "skipped", reason: "ls-remote 输出里没有 refs/heads/main", channel: "none" };
   }
-  if (!FULL_SHA.test(String(pinned))) {
+  if (!isFullSha(pinned)) {
     return {
       state: "skipped",
       reason: `pin 不是完整 40 位 SHA（${pinned}）：短于 40 位只能判「前几位相同」，不能判「同一个 commit」`,
@@ -130,7 +147,7 @@ export const upstreamDrift = ({ ok, sha, pinned = PINNED_UPSTREAM.sha, failure =
       channel: "none",
     };
   }
-  if (!FULL_SHA.test(String(sha))) {
+  if (!isFullSha(sha)) {
     return {
       state: "skipped",
       reason: `ls-remote 的 SHA 不是完整 40 位（${sha}）`,
@@ -163,7 +180,7 @@ export const formatDrift = (verdict) => {
   const to = verdict.sha.slice(0, 7);
   const arrow = from === to ? `${from} → ${to}（前 7 位相同，区别在后面）` : `${from} → ${to}`;
   return [
-    `!! 上游 HEAD 已前进：${arrow}（通路：${via}）`,
+    `${MOVED_MARKER} 上游 HEAD 已前进：${arrow}（通路：${via}）`,
     `   新 HEAD 全 40 位：${verdict.sha}`,
     "   这不是失败，但 docs/OCR-UPSTREAM-SYNC.md 下面四行需要重读源码，而不是只看 SHA：",
     ...ROWS_TO_REREAD.map((row) => `   - ${row}`),
