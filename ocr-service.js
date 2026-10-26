@@ -24,6 +24,25 @@ const PLATFORM_PACKAGES = {
 
 const BINARY_FILENAME = process.platform === "win32" ? "opencodereview.exe" : "opencodereview";
 
+// The service's one filesystem-existence probe. Every candidate check below goes
+// through it — binary resolution, and the spawn-failure classifier that says
+// whether the binary or the working directory is the missing one.
+//
+// It exists so the smoke test can blind the filesystem by replacing *this*
+// function instead of monkey-patching `fs.existsSync`: a patch of a specific API
+// silently stops applying the day this file starts probing some other way. The
+// callers read it back off `module.exports` rather than a closed-over binding,
+// so assigning `svc.fileExists` really does change what the searches use.
+// Keeping it the only place the service asks "does this exist" is pinned by a
+// source-level assertion in `tools/service-smoke.mjs`.
+function fileExists(p) {
+  return fs.existsSync(p);
+}
+
+function candidateExists(p) {
+  return module.exports.fileExists(p);
+}
+
 // The CLI's postinstall chmods the binary, but that mode does not survive a
 // Windows-authored package or a zip round-trip. Re-asserting it here keeps the
 // macOS/Linux builds from failing with a bare EACCES on first run.
@@ -48,7 +67,7 @@ function platformPackageDir(name) {
     process.resourcesPath ? path.join(process.resourcesPath, "app", "node_modules", name) : "",
   ];
   for (const dir of candidates) {
-    if (dir && fs.existsSync(path.join(dir, "bin", BINARY_FILENAME))) return dir;
+    if (dir && candidateExists(path.join(dir, "bin", BINARY_FILENAME))) return dir;
   }
   return null;
 }
@@ -96,7 +115,7 @@ function binaryResolution() {
   try {
     const { resolveNativeBinary } = require("@alibaba-group/open-code-review/scripts/platform");
     const resolved = resolveNativeBinary();
-    if (resolved && resolved.path && fs.existsSync(resolved.path)) {
+    if (resolved && resolved.path && candidateExists(resolved.path)) {
       return rememberBinary(resolved.path, BINARY_SOURCE_PACKAGE);
     }
   } catch (_) {}
@@ -113,7 +132,7 @@ function binaryResolution() {
   if (name) {
     for (const root of globalRoots()) {
       const guess = path.join(root, name, "bin", BINARY_FILENAME);
-      if (fs.existsSync(guess)) {
+      if (candidateExists(guess)) {
         return rememberBinary(guess, BINARY_SOURCE_GLOBAL);
       }
     }
@@ -1138,8 +1157,8 @@ function argList(spec, preview) {
  */
 function spawnFailure(err, bin, cwd) {
   if (err.code !== "ENOENT") return err.message;
-  if (bin && !fs.existsSync(bin)) return `未找到 ocr 可执行文件：${bin}`;
-  if (cwd && !fs.existsSync(cwd)) return `仓库目录已经不存在：${cwd}`;
+  if (bin && !candidateExists(bin)) return `未找到 ocr 可执行文件：${bin}`;
+  if (cwd && !candidateExists(cwd)) return `仓库目录已经不存在：${cwd}`;
   return err.message;
 }
 
@@ -1674,6 +1693,7 @@ async function rulesCheck(repo, filePath, ruleFile) {
 }
 
 module.exports = {
+  fileExists,
   binaryPath,
   binaryResolution,
   BINARY_SOURCE_PACKAGE,

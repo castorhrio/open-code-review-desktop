@@ -12,6 +12,28 @@
 4. **不要**静默忽略上游 release：每轮把结论追加到下面「上游状态」，哪怕结论是
    「无新内容」。
 
+## 上游状态（最近检查：2026-10-27，第 57 轮）
+
+第 57 轮复核：**三条通路都可达，结论仍是「无新内容」**。
+`git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main` =
+`375f64cd6f67a48a135da83cfcf59c52669a09cb`（与第 49–56 轮同一个 commit）；
+`api.github.com/repos/alibaba/open-code-review/commits/main` 给出同一 SHA；
+`npm view @alibaba-group/open-code-review version dist-tags` = `1.13.3` /
+`latest: 1.13.3`，release 仍是 `v1.13.3`。desktop 的 `^1.13.3` 无需改动，**无移植项**。
+
+本轮把「网络欠账」从十段散文变成可 grep 的账：
+
+- `tools/upstream-watch.mjs` 的 `skipped` 分支现在输出固定的 `[UPSTREAM-DEBT]` 前缀，
+  并写明 `通路：none`；核对成功时写明 `通路：git` 或 `通路：api`。
+- git 通路不通时自动改走 `api.github.com` 的 `commits/main`，两条路都失败才判 `skipped`
+  并同时带上两条路的原因——第 56 轮正是「git 超时、API 可用」却被记成跳过的那一类。
+- `tools/upstream-watch-smoke.mjs` 钉住三件事：`skipped` 必须带欠账标记、成功必须带
+  通路名、下面「核对通路账」表的每一行都必须与 `npm`（只能证明 release，不能证明
+  HEAD → 必须欠账）/ `git` / `api`（能证明 HEAD → 不欠账）的规则一致。
+- 顺带把二进制探测收敛到唯一入口：`ocr-service.js` 只剩一处 `fs.existsSync`（在
+  导出的 `fileExists` 里），`tools/service-smoke.mjs` 改为覆写 `svc.fileExists` 并用
+  `probes` 计数证明搜索确实走了这个入口，隔离不再依赖某个具体 fs API。
+
 ## 上游状态（最近检查：2026-10-27，第 56 轮）
 
 第 56 轮复核：**`git ls-remote` 不可达，但 GitHub API 可达，结论仍然是「无新内容」**。
@@ -151,11 +173,12 @@ desktop 的 `^1.13.3` 无需改动。第 47–48 轮欠的 `git fetch upstream -
 `audit:service` / `audit:config` / `audit:git` 仍是先变红的那一道，本轮这三条全绿。
 本轮的改动（发版 fallback 的搬移函数）与上游 CLI 无关。
 
-**自最近一次有内容变更（`v1.13.3` / `375f64c`）以来，第 27–56 轮复核均无新内容。**
-第 27–46、49–51、56 轮每轮都核对了 `git fetch upstream --tags`（或 `git ls-remote` / GitHub API）
-以及 GitHub API 的 commits / tags / releases，三处一致：顶端仍是 `375f64c`，最新仍是
-`v1.13.3`；第 47–48、52–54 轮只有 npm registry 一条通路可达（见上），那几轮的
-「上游 commit 未核对」是网络欠账，**不等于**上游变了。
+**自最近一次有内容变更（`v1.13.3` / `375f64c`）以来，第 27–57 轮复核均无新内容。**
+第 27–46、49–51、53、55、57 轮每轮都核对了 `git fetch upstream --tags`（或
+`git ls-remote` / GitHub API）以及 GitHub API 的 commits / tags / releases，三处一致：
+顶端仍是 `375f64c`，最新仍是 `v1.13.3`；第 47–48、52–54 轮只有 npm registry 一条通路
+可达，第 56 轮 git 超时但 API 回答（见上），那几轮的「上游 commit 未核对」是网络欠账，
+**不等于**上游变了。
 desktop 的 CLI flag、输出解析、配置暴露点都无需改动。（`git fetch` 期间只有本仓同名的
 `v0.1.x` 发布 tag 因已存在被拒，与上游无关。）
 
@@ -170,10 +193,14 @@ npm run audit:git       # `git show` 的分类与按 ref 读文件
 ```
 任一条变红就是「需要评估的上游变更」：先看红在哪条断言，再对照上面的 CLI/配置暴露点判断。
 
-另有 `npm run upstream:check`：只比对 `refs/heads/main` 与本文件固定的整串
+另有 `npm run upstream:check`：先比对 `refs/heads/main` 与本文件固定的整串
 40 位 SHA `375f64cd6f67a48a135da83cfcf59c52669a09cb`（正文里写 `375f64c` 只是为了好读）。
-相等打印一行；前进打印醒目提示并列出上表四行（**不失败**，仍要人读源码）；网络不通
-明确打印「跳过」，退出码恒为 0，因此可以挂在任何流程里而不会把网络问题当成上游变更。
+相等打印一行并注明 `通路：git`；git 不通时自动改走 `api.github.com/commits/main`，
+成功则注明 `通路：api`（两条路问的是同一个 commit）。前进打印醒目提示并列出上表四行
+（**不失败**，仍要人读源码）；两条路都失败才明确打印「跳过」，前缀固定为
+`[UPSTREAM-DEBT]`、并写明两条路各自的原因，退出码恒为 0，因此可以挂在任何流程里而不会
+把网络问题当成上游变更。**grep `[UPSTREAM-DEBT]` 就是这张欠账表**；每轮的 `通路` 也应
+写进上面「核对通路账」。
 
 **pin 存全 40 位是有意的**：pin 若只存 7 位前缀，`375f64c…` 换成另一个同样以
 `375f64c` 开头的 commit 会被判成「与对照表一致，无需重读」——那是这条句子唯一不能错的
@@ -193,17 +220,41 @@ pin 或 ls-remote 给出的 SHA 短于 40 位时一律判「跳过」并说明�
 
 **`audit:upstream` 退出码恒为 0，只报告不失败——恒绿不是安全网。** 上游漂移的唯一安全网
 是 `audit:service` / `audit:config` / `audit:git` 这三条，加上人工重读本节表格的 4 行；
-哨兵打印「跳过」（GitHub 不可达）时同样是绿的，**绿只说明这条命令跑过，不说明上游没变**，
-所以每轮的结论仍要写进上面「上游状态」。
+哨兵打印「跳过」（git 与 API 都不可达）时同样是绿的，**绿只说明这条命令跑过，不说明上游
+没变**，所以每轮的结论仍要写进上面「上游状态」——跳过时至少留下 `[UPSTREAM-DEBT]` 与
+「核对通路账」里的一行欠账。
 
-**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 56 轮：`git ls-remote` 超时，改用 `api.github.com` 的 `commits/main` 给出同一 commit，release 仍是 `v1.13.3`）**
+**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 57 轮：`git ls-remote` 可达，`refs/heads/main` 与 pin 一致；release 仍 `v1.13.3`；通路：git）**
+
+### 核对通路账
+
+「连续 N 轮没核对 HEAD」应当是一眼能数出来的账，而不是散在各轮散文里。`npm` 只能
+证明「没有新 release」，证明不了默认分支的 commit；`git` 与 GitHub API 能回答 commit。
+所以本表的规则只有一条：**通路是 `npm` 或 `none` 的轮次必须欠 HEAD 那一项（带
+`[UPSTREAM-DEBT]`），`git` / `api` 的轮次必须不带**。`tools/upstream-watch-smoke.mjs`
+逐行检查这条规则，并检查末行轮次 / 通路与上面「本轮 HEAD 核对」行一致。
+
+| 轮次 | 日期 | 通路 | 结论 | 欠账 |
+| --- | --- | --- | --- | --- |
+| 47 | 2026-10-27 | npm | 仅核对 release（`1.13.3`），HEAD 未核对 | `[UPSTREAM-DEBT]` HEAD |
+| 48 | 2026-10-27 | npm | 仅核对 release，HEAD 未核对 | `[UPSTREAM-DEBT]` HEAD |
+| 49 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容（欠账已清） | — |
+| 50 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；补「空服务表」对照行 | — |
+| 51 | 2026-10-27 | git | `375f64c`，无新内容；tag 通路超时，release 由 npm 核对 | — |
+| 52 | 2026-10-27 | npm | 仅核对 release，HEAD 未核对 | `[UPSTREAM-DEBT]` HEAD |
+| 53 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容 | — |
+| 54 | 2026-10-27 | npm | 仅核对 release，HEAD 未核对 | `[UPSTREAM-DEBT]` HEAD |
+| 55 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容 | — |
+| 56 | 2026-10-27 | api | `375f64c` / `v1.13.3`，无新内容；git 超时，API 作答 | — |
+| 57 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；API 与 npm 一致 | — |
 
 「最近一次对照」只写**那一项最近被人工重新核对**的轮次。该列没有列出本轮，表示本轮
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
 对应行并把轮次与日期改成本轮。
 
-**第 46–56 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`，其中第 47–48、52–54、56 轮只有
-npm 通路可达），所以下表四行的「最近一次对照」停在第 45 轮是**没有理由重看**，不是忘了看：
+**第 46–57 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
+npm 通路可达，第 56 轮 git 超时但 API 可达），所以下表四行的「最近一次对照」停在第 45 轮是
+**没有理由重看**，不是忘了看：
 它记录的是「最后一次有人逐行读上游源码」的轮次，而不是「最后一次确认上游没变」的轮次。
 换言之：**停在第 45 轮 = 未重看，不等于欠账**；欠账只有一种——`375f64c` 前进之后没人
 重读对应源码。第 50 轮那行（内置服务表为空是否合法）是榜样的写法：它记的是被重读的

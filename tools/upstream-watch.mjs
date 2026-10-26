@@ -13,13 +13,27 @@
 // the network. Which also means a green `upstream:check` is *not* a safety net:
 // the net is `audit:service` / `audit:config` / `audit:git` plus the four rows
 // a human re-reads. The pure functions are exported so
-// `tools/upstream-watch-smoke.mjs` can assert the three answers without network.
+// `tools/upstream-watch-smoke.mjs` can assert the answers without network.
+//
+// Two things were added after the first five rounds of unanswered checks:
+//  - the command tries `git ls-remote` and then the GitHub API, and says which
+//    one answered (`通路：git` / `通路：api`). Historically a timed-out git was
+//    reported as "skipped" even though the API could answer the same question;
+//  - a skipped run now starts with `[UPSTREAM-DEBT]`, so "this round did not
+//    actually check the HEAD" is a greppable fact instead of prose.
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 export const UPSTREAM_URL = "https://github.com/alibaba/open-code-review.git";
 export const UPSTREAM_REF = "refs/heads/main";
+export const UPSTREAM_API =
+  "https://api.github.com/repos/alibaba/open-code-review/commits/main";
+
+// Prefix of every skipped sentence. Grep for it across a session's output to see
+// the rounds whose network debt was never paid; it is a machine marker, not a
+// human word, so it survives translation and prose edits.
+export const DEBT_MARKER = "[UPSTREAM-DEBT]";
 
 // A commit is 40 hex characters, and so is this pin — deliberately *not* the
 // readable 7-character prefix the prose below uses.
@@ -65,6 +79,34 @@ export const parseLsRemote = (stdout, ref = UPSTREAM_REF) => {
   return null;
 };
 
+// The GitHub API answers the same question with `{"sha": "…"}`. Validated with
+// the same 40-character rule: the API is a different road to the same fact, not
+// a reason to trust a shorter answer.
+export const parseApiCommit = (json) => {
+  const sha = json && typeof json.sha === "string" ? json.sha.trim() : "";
+  return FULL_SHA.test(sha) ? sha : null;
+};
+
+// Turns a `spawnSync` result into the same shape the API road produces. Kept
+// pure and exported because the interesting cases (timeout, non-zero exit,
+// empty output) cannot be produced from the real network in a smoke test.
+export const classifyGit = (result) => {
+  if (!result) return { ok: false, failure: "git ls-remote 没有返回结果", channel: "none" };
+  if (result.error) {
+    return {
+      ok: false,
+      failure: result.error.message || "git ls-remote 报错",
+      channel: "none",
+    };
+  }
+  if (result.status !== 0) {
+    return { ok: false, failure: `git ls-remote 退出码非 0（${result.status}）`, channel: "none" };
+  }
+  const sha = parseLsRemote(result.stdout);
+  if (!sha) return { ok: false, failure: "ls-remote 输出里没有 refs/heads/main", channel: "none" };
+  return { ok: true, sha, channel: "git" };
+};
+
 // The three answers: `pinned` (same as the doc), `moved` (re-read the rows),
 // `skipped` (no answer this run — explicitly *not* "unchanged").
 //
@@ -73,32 +115,45 @@ export const parseLsRemote = (stdout, ref = UPSTREAM_REF) => {
 // different commit that happens to share the recorded prefix, and a wrong
 // "pinned" is invisible: nobody re-reads a row that says nothing changed.
 // `skipped` at least says the round did not really check.
-export const upstreamDrift = ({ ok, sha, pinned = PINNED_UPSTREAM.sha, failure = "" }) => {
-  if (!ok) return { state: "skipped", reason: failure || "git ls-remote 不可达" };
-  if (!sha) return { state: "skipped", reason: "ls-remote 输出里没有 refs/heads/main" };
+export const upstreamDrift = ({ ok, sha, pinned = PINNED_UPSTREAM.sha, failure = "", channel = "" }) => {
+  if (!ok) {
+    return { state: "skipped", reason: failure || "git ls-remote 不可达", channel: "none" };
+  }
+  if (!sha) {
+    return { state: "skipped", reason: "ls-remote 输出里没有 refs/heads/main", channel: "none" };
+  }
   if (!FULL_SHA.test(String(pinned))) {
     return {
       state: "skipped",
       reason: `pin 不是完整 40 位 SHA（${pinned}）：短于 40 位只能判「前几位相同」，不能判「同一个 commit」`,
       pinned,
+      channel: "none",
     };
   }
   if (!FULL_SHA.test(String(sha))) {
-    return { state: "skipped", reason: `ls-remote 的 SHA 不是完整 40 位（${sha}）`, sha, pinned };
+    return {
+      state: "skipped",
+      reason: `ls-remote 的 SHA 不是完整 40 位（${sha}）`,
+      sha,
+      pinned,
+      channel: "none",
+    };
   }
   return {
     state: String(sha).toLowerCase() === String(pinned).toLowerCase() ? "pinned" : "moved",
     sha,
     pinned,
+    channel: channel || "git",
   };
 };
 
 export const formatDrift = (verdict) => {
+  const via = verdict.channel || "none";
   if (verdict.state === "skipped") {
-    return `上游 HEAD 核对：跳过（${verdict.reason}；本轮未核对，不等于上游没变）`;
+    return `${DEBT_MARKER} 上游 HEAD 核对：跳过（${verdict.reason}；通路：${via}；本轮未核对，不等于上游没变）`;
   }
   if (verdict.state === "pinned") {
-    return `上游 HEAD 核对：${verdict.pinned}（与对照表一致，无需重读）`;
+    return `上游 HEAD 核对：${verdict.pinned}（与对照表一致，无需重读；通路：${via}）`;
   }
   // When the two commits share the readable 7-character prefix, the arrow alone
   // would print `375f64c → 375f64c` — technically "moved" but read as a typo. Say
@@ -108,32 +163,74 @@ export const formatDrift = (verdict) => {
   const to = verdict.sha.slice(0, 7);
   const arrow = from === to ? `${from} → ${to}（前 7 位相同，区别在后面）` : `${from} → ${to}`;
   return [
-    `!! 上游 HEAD 已前进：${arrow}`,
+    `!! 上游 HEAD 已前进：${arrow}（通路：${via}）`,
     `   新 HEAD 全 40 位：${verdict.sha}`,
     "   这不是失败，但 docs/OCR-UPSTREAM-SYNC.md 下面四行需要重读源码，而不是只看 SHA：",
     ...ROWS_TO_REREAD.map((row) => `   - ${row}`),
   ].join("\n");
 };
 
-const defaultRunner = () =>
+const gitRunner = () =>
   spawnSync("git", ["ls-remote", UPSTREAM_URL, UPSTREAM_REF], {
     encoding: "utf8",
     timeout: 30000,
     windowsHide: true,
   });
 
+// The second road to the same SHA. `git` is tried first because it needs no
+// rate limit and no token; the API is here because five rounds were recorded as
+// "git timed out" while `api.github.com` answered the same question.
+const apiRunner = async () => {
+  try {
+    const response = await fetch(UPSTREAM_API, {
+      headers: {
+        "User-Agent": "open-code-review-desktop-upstream-watch",
+        Accept: "application/vnd.github+json",
+      },
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!response.ok) {
+      return { ok: false, failure: `GitHub API HTTP ${response.status}`, channel: "none" };
+    }
+    const sha = parseApiCommit(await response.json());
+    if (!sha) {
+      return { ok: false, failure: "GitHub API 没有给出完整 40 位 SHA", channel: "none" };
+    }
+    return { ok: true, sha, channel: "api" };
+  } catch (error) {
+    return {
+      ok: false,
+      failure: `GitHub API ${error && error.message ? error.message : "不可达"}`,
+      channel: "none",
+    };
+  }
+};
+
+export const defaultRunner = async () => {
+  const git = classifyGit(gitRunner());
+  if (git.ok) return git;
+  const api = await apiRunner();
+  if (api.ok) return api;
+  return { ok: false, failure: `git: ${git.failure}；api: ${api.failure}`, channel: "none" };
+};
+
 // `code` is always 0: a moved HEAD and an unreachable network are both answers,
 // not failures, and this command must stay safe to call from any script.
-export const runUpstreamWatch = (run = defaultRunner) => {
+export const runUpstreamWatch = async (run = defaultRunner) => {
   let result;
   try {
-    result = run();
+    result = await run();
   } catch (error) {
-    return { verdict: upstreamDrift({ ok: false, failure: error && error.message }), code: 0 };
+    const verdict = upstreamDrift({ ok: false, failure: error && error.message });
+    return { verdict, text: formatDrift(verdict), code: 0 };
   }
-  const ok = Boolean(result) && !result.error && result.status === 0;
-  const failure = result && result.error ? result.error.message : "git ls-remote 退出码非 0";
-  const verdict = upstreamDrift({ ok, sha: ok ? parseLsRemote(result.stdout) : null, failure });
+  const ok = Boolean(result) && result.ok === true;
+  const verdict = upstreamDrift({
+    ok,
+    sha: ok ? result.sha : null,
+    failure: result && result.failure,
+    channel: result && result.channel,
+  });
   return { verdict, text: formatDrift(verdict), code: 0 };
 };
 
@@ -141,7 +238,7 @@ const isEntryPoint =
   process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
 
 if (isEntryPoint) {
-  const { text, code } = runUpstreamWatch();
+  const { text, code } = await runUpstreamWatch();
   console.log(text);
   process.exitCode = code;
 }

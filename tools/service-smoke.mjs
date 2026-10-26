@@ -54,11 +54,15 @@ check(
  * So each search is driven alone, on a throwaway tree that holds only what that
  * search looks for. `ocr-service.js` is copied into the tree and required from
  * there, so its module-level cache starts empty and `__dirname` is the tree
- * (which is what the second search reads); `fs.existsSync` is then narrowed to
- * the tree, because otherwise a global npm install on the machine running this
- * would decide which branch answers and the check would be about that machine
- * instead of about the order. All of it runs in a child process, so neither the
- * narrowed `existsSync` nor the copied module can leak into the checks below.
+ * (which is what the second search reads); the service's own `fileExists` probe
+ * is then narrowed to the tree, because otherwise a global npm install on the
+ * machine running this would decide which branch answers and the check would be
+ * about that machine instead of about the order. Blinding `svc.fileExists`
+ * rather than `fs.existsSync` keeps the isolation working no matter which
+ * filesystem API the service uses internally, and `probes` in the child's answer
+ * makes a probe that quietly stopped going through it show up as 0. All of it
+ * runs in a child process, so neither the narrowed probe nor the copied module
+ * can leak into the checks below.
  *
  * The source names are compared against **literals**, never against the exported
  * constants: a constant compared with itself stays green when it is misspelt,
@@ -77,14 +81,20 @@ const BINARY_FILE = process.platform === "win32" ? "opencodereview.exe" : "openc
 // re-answered differently, shows up here), and the path-only view. `mode` is how
 // the machine is blinded to everything outside the tree under test.
 const RESOLVE_CHILD = `
-const fs = require("fs");
 const target = process.argv[1];
 const mode = process.argv[2];
 const root = process.argv[3];
-const realExists = fs.existsSync;
-if (mode === "only-tree") fs.existsSync = (p) => String(p).startsWith(root) && realExists(p);
-if (mode === "hide-all") fs.existsSync = () => false;
 const svc = require(target);
+const realExists = svc.fileExists;
+let probes = 0;
+if (mode === "only-tree") svc.fileExists = (p) => {
+  probes += 1;
+  return String(p).startsWith(root) && realExists(p);
+};
+if (mode === "hide-all") svc.fileExists = () => {
+  probes += 1;
+  return false;
+};
 const first = svc.binaryResolution();
 const again = svc.binaryResolution();
 process.stdout.write(
@@ -92,6 +102,7 @@ process.stdout.write(
     first,
     again,
     path: svc.binaryPath(),
+    probes,
     constants: [svc.BINARY_SOURCE_PACKAGE, svc.BINARY_SOURCE_LOCAL, svc.BINARY_SOURCE_GLOBAL],
   })
 );
@@ -138,6 +149,29 @@ check(
     svc.BINARY_SOURCE_GLOBAL === "global",
   [svc.BINARY_SOURCE_PACKAGE, svc.BINARY_SOURCE_LOCAL, svc.BINARY_SOURCE_GLOBAL].join(",")
 );
+
+// The isolation above only means something if `svc.fileExists` is the probe the
+// searches really use. If a future edit adds a direct filesystem call, the child
+// would keep finding things outside the tree (or stop finding anything) without
+// any of the checks below going red — so make the single-entry rule itself the
+// assertion. The regex counts *calls*, not mentions, so the comments explaining
+// this can name the API freely.
+{
+  const source = fs.readFileSync(path.join(ROOT, "ocr-service.js"), "utf8");
+  const directCalls = source.match(/fs\.existsSync\s*\(/g) || [];
+  check(
+    "the service asks the filesystem whether something exists in exactly one place",
+    directCalls.length === 1,
+    `${directCalls.length} direct fs.existsSync call(s)`
+  );
+  check(
+    "...and that place is the exported `fileExists` the isolation replaces",
+    typeof svc.fileExists === "function" &&
+      source.includes("function fileExists(") &&
+      source.includes("module.exports.fileExists("),
+    JSON.stringify({ exported: typeof svc.fileExists })
+  );
+}
 
 // 1) The CLI resolves its own platform package.
 {
@@ -200,6 +234,11 @@ check(
     answer.again.source === answer.first.source,
     JSON.stringify({ first: answer.first.source, again: answer.again.source })
   );
+  check(
+    "...and the resolver's hit was confirmed through the replaceable probe, not a private one",
+    answer.probes > 0,
+    `${answer.probes} probe(s)`
+  );
   fs.rmSync(tree, { recursive: true, force: true });
 }
 
@@ -214,6 +253,11 @@ check(
     "with no resolver to ask, the package beside the app answers as `local`",
     answer.first.source === "local" && answer.first.path === bin && answer.path === bin,
     JSON.stringify(answer.first)
+  );
+  check(
+    "...and the search went through the replaceable probe",
+    answer.probes > 0,
+    `${answer.probes} probe(s)`
   );
   fs.rmSync(tree, { recursive: true, force: true });
 }
@@ -237,6 +281,11 @@ check(
     "a copy under a global npm root answers as `global`",
     answer.first.source === "global" && answer.first.path === bin && answer.path === bin,
     JSON.stringify(answer.first)
+  );
+  check(
+    "...and the search went through the replaceable probe",
+    answer.probes > 0,
+    `${answer.probes} probe(s)`
   );
   fs.rmSync(tree, { recursive: true, force: true });
 }
@@ -262,6 +311,11 @@ check(
     "a miss is not cached as an answer: asking again still searches and still says none",
     answer.again.path === null && answer.again.source === null,
     JSON.stringify(answer.again)
+  );
+  check(
+    "...and 'none' came from probing through the replaceable entry, not from skipping the search",
+    answer.probes > 0,
+    `${answer.probes} probe(s)`
   );
   fs.rmSync(tree, { recursive: true, force: true });
 }
