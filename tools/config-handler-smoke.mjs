@@ -401,6 +401,58 @@ check(
   );
 }
 
+/* ---- `use` switches only what it was asked to switch ----
+ * The settings page calls this when the user activates a service from history.
+ * Writing a `model` pair without a model in the request would overwrite the
+ * saved one with `""` — an activation that silently erases a choice the user
+ * made earlier.
+ */
+{
+  const stub = makeStub({ providers: { deepseek: { api_key: "sk-saved", model: "deepseek-chat" } } });
+  const h = make(stub);
+  const res = await h.use(null, { name: "deepseek" });
+  check(
+    "activating a service points the CLI at it",
+    res.ok === true && stub.setPairs.some(([key, value]) => key === "provider" && value === "deepseek"),
+    JSON.stringify(stub.setPairs)
+  );
+  check(
+    "without a model in the request, no model pair is written",
+    !stub.setPairs.some(([key]) => key === "model"),
+    JSON.stringify(stub.setPairs)
+  );
+  check("and the saved model is left as it was", stub.state.providers.deepseek?.model === "deepseek-chat", JSON.stringify(stub.state.providers));
+}
+{
+  const stub = makeStub({ providers: { deepseek: { api_key: "sk-saved", model: "deepseek-chat" } } });
+  const h = make(stub);
+  const res = await h.use(null, { name: "deepseek", model: "deepseek-reasoner" });
+  check(
+    "activating with a model does write that model",
+    res.ok === true && stub.setPairs.some(([key, value]) => key === "model" && value === "deepseek-reasoner"),
+    JSON.stringify(stub.setPairs)
+  );
+}
+
+/* ---- a built-in entry can be cleared even without a Key ----
+ * Built-ins cannot be deleted (`config unset` rejects them), so `removeEntry`
+ * clears both fields instead. An entry that has only a model is still an entry
+ * the user asked to un-configure; skipping the clear because there is no Key
+ * would leave the model pointing at a service they just tried to remove.
+ */
+{
+  const stub = makeStub({ providers: { deepseek: { model: "deepseek-chat" } } });
+  const h = make(stub);
+  const res = await h.removeEntry(null, { name: "deepseek" });
+  check("a built-in entry with only a model still clears", res.ok === true && res.cleared === true, JSON.stringify(res));
+  check(
+    "and both fields are written empty, not skipped for a missing Key",
+    stub.setPairs.some(([key, value]) => key === "providers.deepseek.api_key" && value === "") &&
+      stub.setPairs.some(([key, value]) => key === "providers.deepseek.model" && value === ""),
+    JSON.stringify(stub.setPairs)
+  );
+}
+
 /* ---- the withheld-Key answer is passed through, not flattened ----
  * `order-guess` means an entry exists under a spelling no run opens. The old
  * field hint said "该服务还没有 Key" for this, which sends the user to type a

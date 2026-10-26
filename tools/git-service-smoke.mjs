@@ -70,6 +70,12 @@ await git(["checkout", "-q", "main"]);
 // The working copy now differs from every commit — the state in which reading
 // the working tree instead of the snapshot silently shows the wrong code.
 fs.writeFileSync(path.join(dir, "a.go"), DIRTY);
+// A file that exists only in the working tree. Asking for it at a ref must fail
+// with `missing`; if the read falls back to the working tree, it succeeds and
+// shows code the reviewed snapshot does not contain. The file has to really
+// exist, or the test only proves that two missing things are missing.
+const WORKTREE_ONLY = "// only in the working tree, never committed\n";
+fs.writeFileSync(path.join(dir, "only-in-worktree.txt"), WORKTREE_ONLY);
 
 const read = (opts) => gitSvc.readFile(dir, "a.go", { startLine: 1, endLine: 10, pad: 2, ...opts });
 const text = (res) => (res.lines || []).map((l) => l.content).join("\n");
@@ -104,6 +110,24 @@ const missing = await gitSvc.readFile(dir, "only-in-worktree.txt", { ref: "HEAD"
 check("a file that is not in the ref fails instead of falling back", missing.ok === false, missing.ok ? "it succeeded" : "");
 check("...and says which ref was missing it", missing.reason === "missing", missing.reason || "");
 check("...and names the ref in the message", /HEAD/.test(missing.error || ""), missing.error || "");
+check(
+  "...and returns no lines from the working tree",
+  Array.isArray(missing.lines) ? missing.lines.length === 0 : missing.lines === undefined,
+  JSON.stringify(missing.lines)
+);
+check(
+  "...so the working tree copy is nowhere in the answer",
+  !JSON.stringify(missing).includes("only in the working tree"),
+  JSON.stringify(missing)
+);
+// The same file *is* readable when no ref is asked for: the working tree is an
+// explicit choice, not something a failed ref read substitutes for.
+const worktreeOnly = await gitSvc.readFile(dir, "only-in-worktree.txt", { startLine: 1, endLine: 10, pad: 2 });
+check(
+  "and the same file reads from the working tree when no ref is asked for",
+  worktreeOnly.ok && text(worktreeOnly).includes(WORKTREE_ONLY.trim()),
+  worktreeOnly.error || ""
+);
 
 const badRef = await gitSvc.readFile(dir, "a.go", { ref: "no-such-ref" });
 check("an unresolvable ref fails instead of falling back", badRef.ok === false, badRef.ok ? "it succeeded" : "");
