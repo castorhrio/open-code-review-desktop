@@ -36,9 +36,12 @@ const VERSION = 1;
  *
  * A trimmed session reopens as `null` — the same answer a clean run gives. That
  * is the price of the cap and it is deliberate: the alternative is an unbounded
- * file in the profile directory that grows forever. What must not happen is the
- * trim looking like a *loss* the app could have reported; it is a rotation, and
- * the newest records are exactly the ones a user is likely to reopen.
+ * file in the profile directory that grows forever. The trimmed session itself
+ * cannot say it was rotated, but the run that *caused* the rotation can: the
+ * write answers how many records it dropped (`trimmed`), and the end-of-run
+ * path logs it. The newest records are exactly the ones a user is likely to
+ * reopen, so an older one losing its evidence is a rotation worth a line —
+ * silence would make the cap look like a clean history.
  */
 const MAX_ENTRIES = 200;
 const LIMIT_WARNING = "review_limit_reached";
@@ -150,6 +153,12 @@ const OUTCOME_MESSAGES = {
   timeout: "上限证据写得太慢，运行结束没有等它；写盘仍在继续",
   "max-rounds": "上限证据的写队列在退出前始终没停，可能仍有写入没落盘",
   "drain-failed": "上限证据的退出冲刷出错，可能仍有写入没落盘",
+  // `{n}` is filled by `outcomeMessage` from the write's `trimmed` count. A
+  // rotation is not a failed write — the new evidence landed — but the oldest
+  // sessions' evidence is gone, and they will reopen looking clean. That is
+  // exactly the confusion this store exists to prevent, so it reads like
+  // trouble and opens the log drawer.
+  trimmed: "本次运行的上限证据已写入，但存储已满，最旧的 {n} 条记录被轮换掉，更早的会话将无法再看到上限提示",
 };
 /**
  * The wording for one failure that is *not* about the evidence at all.
@@ -188,12 +197,19 @@ const LATE_OUTCOME_MESSAGES = {
   timeout: "上限证据最后仍然没写完；重开会话后可能看不到这条提示",
   "max-rounds": "上限证据的写队列始终没停，可能仍有写入没落盘",
   "drain-failed": "上限证据在运行结束后冲刷出错，可能仍有写入没落盘",
+  trimmed: "上限证据在运行结束后写入，但存储已满，最旧的 {n} 条记录被轮换掉，更早的会话将无法再看到上限提示",
 };
 
 function outcomeMessage(outcome, options) {
   const reason = outcome && outcome.reason;
   if (!reason) return "";
   const table = options && options.late ? LATE_OUTCOME_MESSAGES : OUTCOME_MESSAGES;
+  const trimmed = Number(outcome.trimmed) || 0;
+  // A rotation is a successful write with a footnote: the reason is `written`,
+  // which is otherwise silent, so the count is what makes it speak.
+  if (trimmed > 0 && reason === OK_WRITTEN.reason) {
+    return table.trimmed.replace("{n}", String(trimmed));
+  }
   return table[reason] || "";
 }
 
@@ -702,9 +718,11 @@ function createStore(file, options = {}) {
   /**
    * Record only when the run has truncation evidence; clean runs are not kept.
    *
-   * Returns a promise of `{ ok, reason }` (see the vocabulary at the top of this
-   * file). The promise settles after the write, so a caller that needs to know
-   * before the renderer can ask for the session's diagnostics can await it.
+   * Returns a promise of `{ ok, reason, trimmed? }` (see the vocabulary at the
+   * top of this file). `trimmed` is present only when this write pushed records
+   * out of the capped file, and says how many. The promise settles after the
+   * write, so a caller that needs to know before the renderer can ask for the
+   * session's diagnostics can await it.
    */
   function record(repo, sessionId, result) {
     return serialize(async () => {
@@ -727,7 +745,12 @@ function createStore(file, options = {}) {
       entries.push({ repo: normalizeRepo(repo, options), session_id: sessionId, warnings, budget_exceeded: budget });
       // Insertion order is the age order; keeping the tail drops the oldest and
       // keeps the newest, without a timestamp that can tie inside one millisecond.
-      return (await writeAll(entries.slice(-MAX_ENTRIES))) ? OK_WRITTEN : IO_ERROR;
+      // The count travels with the outcome so the log can say that this run's
+      // evidence landed but an older session's no longer will.
+      const kept = entries.slice(-MAX_ENTRIES);
+      const trimmed = entries.length - kept.length;
+      if (!(await writeAll(kept))) return IO_ERROR;
+      return trimmed > 0 ? { ok: true, reason: "written", trimmed } : OK_WRITTEN;
     });
   }
 

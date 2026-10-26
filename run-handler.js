@@ -81,7 +81,11 @@ function makeRunHandler(options) {
         // Past the bound the renderer is told the run is over and the write
         // stays queued, so it still lands (and a quit still waits for it).
         //
-        // Only a lost `io-error` is real news. `no-session` is a known shape —
+        // A lost `io-error` is real news, and so is a rotation: the write
+        // landed, but it pushed the oldest records out of the capped file, and
+        // those sessions will reopen looking clean. Both are worded by
+        // `reportOutcome` from the same tables, so settling is all this file
+        // has to do for either. `no-session` is a known shape —
         // the CLI answered with truncation evidence but printed no session id
         // at all (it is not a scan run: `ocr scan` publishes a session id like
         // every other mode) — so there is no session to reopen, the warning

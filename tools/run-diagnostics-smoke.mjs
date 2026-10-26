@@ -668,6 +668,60 @@ check(
   `${capRaw.entries[0]?.session_id} .. ${capRaw.entries[capRaw.entries.length - 1]?.session_id}`
 );
 
+/* ---- a rotation has to be said out loud ----
+ * The cap is a design choice, and a trimmed session reopens as `null` — the
+ * same answer a clean run gives. That is deliberate for the session, but the
+ * run that *caused* the rotation still knows what it did: its own evidence is
+ * on disk, and the write dropped the oldest record to make room. Returning that
+ * count is what lets the end-of-run path log a rotation instead of letting it
+ * happen in silence and leaving an old session looking clean for no stated
+ * reason.
+ */
+const rotationStore = createStore(path.join(dir, "rotation", "run-diagnostics.json"));
+let rotationPrevious = null;
+for (let i = 0; i < MAX_ENTRIES; i++) {
+  rotationPrevious = await rotationStore.record(repo, `rotation-${String(i).padStart(3, "0")}`, limitResult);
+}
+const rotationOutcome = await rotationStore.record(repo, `rotation-${String(MAX_ENTRIES).padStart(3, "0")}`, limitResult);
+check(
+  "the write that fills the cap reports success without a rotation",
+  rotationPrevious?.ok === true && rotationPrevious.reason === "written" && rotationPrevious.trimmed === undefined,
+  JSON.stringify(rotationPrevious)
+);
+check(
+  "the write that crosses the cap says how many records it rotated",
+  rotationOutcome?.ok === true && rotationOutcome.reason === "written" && rotationOutcome.trimmed === 1,
+  JSON.stringify(rotationOutcome)
+);
+const rotationLine = outcomeLogMessage(rotationOutcome);
+check("and the log line names the count", rotationLine.includes("1"), rotationLine);
+check("and says the records were rotated, not lost", rotationLine.includes("轮换"), rotationLine);
+check(
+  "while the run that caused it still has its own evidence",
+  rotationStore.read(repo, `rotation-${String(MAX_ENTRIES).padStart(3, "0")}`)?.warnings?.length === 1
+);
+check(
+  "and the rotated session is the one that now reads as clean",
+  rotationStore.read(repo, "rotation-000") === null
+);
+// The whole path, not only the formatter: settling the run that rotates the
+// file has to put the line in the log the app actually writes to.
+const rotationLog = [];
+await settleRunExit({
+  store: rotationStore,
+  repo,
+  sessionId: "rotation-settle",
+  result: limitResult,
+  timeoutMs: 2000,
+  warn: (line) => rotationLog.push(line),
+  send: () => {},
+});
+check(
+  "settling a run that rotates reports the rotation",
+  rotationLog.length === 1 && rotationLog[0].includes("轮换") && rotationLog[0].includes("1"),
+  JSON.stringify(rotationLog)
+);
+
 /* ---- two writes must not lose each other ----
  * Every write is a whole-file read-modify-write, and it now awaits a real disk
  * write in the middle of it. Two runs finishing close together (one per window,
@@ -1584,6 +1638,9 @@ const DRAWER = {
   "io-error": "trouble",
   "signal-failed": "trouble",
   "settle-failed": "trouble",
+  // A rotation is not a failed write, but it is the one event that makes an old
+  // truncated session look clean afterwards. It belongs in the open drawer.
+  trimmed: "trouble",
   timeout: "quiet",
   "max-rounds": "quiet",
   "drain-failed": "quiet",
@@ -1608,6 +1665,18 @@ for (const [table, messages] of Object.entries({ OUTCOME_MESSAGES, LATE_OUTCOME_
 // written for: it used to end on 「运行中」, which matched nothing.
 check("「signal-failed」 reads like trouble to the log drawer", opensDrawer(signalFailedMessage()), signalFailedMessage());
 check("「settle-failed」 reads like trouble to the log drawer", opensDrawer(settleFailedMessage()), settleFailedMessage());
+// The table carries the `{n}` template; the line the app logs carries the
+// count. Check the formatted one too, because it is the one the drawer sees.
+check(
+  "a formatted rotation line still reads like trouble to the log drawer",
+  opensDrawer(rotationLine),
+  rotationLine
+);
+check(
+  "and the wording says whose evidence is gone",
+  rotationLine.includes("更早的会话") && rotationLine.includes("无法"),
+  rotationLine
+);
 // And no stale declarations: everything classified above still has to be a
 // reason one of the tables answers, or the classification outlives it wording.
 for (const reason of Object.keys(DRAWER)) {
