@@ -12,6 +12,22 @@
 4. **不要**静默忽略上游 release：每轮把结论追加到下面「上游状态」，哪怕结论是
    「无新内容」。
 
+## 上游状态（最近检查：2026-10-27，第 55 轮）
+
+第 55 轮复核：**网络可达，第 54 轮的欠账已清**。`git ls-remote
+https://github.com/alibaba/open-code-review.git refs/heads/main refs/tags/v1.13.3`
+退出码 0，`refs/heads/main` = `375f64c`（与第 49–54 轮同一个 SHA），
+`refs/tags/v1.13.3` = `dd92520`（annotated tag 对象，指向同一 commit）；
+`npm view @alibaba-group/open-code-review version dist-tags` = `1.13.3` /
+`latest: 1.13.3`。两条通路一致，**无新 commit、无新 release/tag**，desktop 的
+`^1.13.3` 无需改动。
+
+本轮只做一件事：把「本轮到底核对过没有」从散文变成脚本会说的话。新增
+`tools/upstream-watch.mjs`（`npm run upstream:check`）比对 `refs/heads/main` 与固定
+`375f64c`——一致打印一行，前进打印醒目提示并列出下面四行，网络不通明确打印「跳过」
+且退出码仍为 0。对应断言在 `tools/upstream-watch-smoke.mjs`（`audit:upstream`），
+并钉住对照表上方那行固定格式的 SHA 与脚本常量一致。**无移植项。**
+
 ## 上游状态（最近检查：2026-10-27，第 54 轮）
 
 第 54 轮复核：**GitHub 本轮不可达**。`git ls-remote
@@ -117,7 +133,7 @@ desktop 的 `^1.13.3` 无需改动。第 47–48 轮欠的 `git fetch upstream -
 `audit:service` / `audit:config` / `audit:git` 仍是先变红的那一道，本轮这三条全绿。
 本轮的改动（发版 fallback 的搬移函数）与上游 CLI 无关。
 
-**自最近一次有内容变更（`v1.13.3` / `375f64c`）以来，第 27–54 轮复核均无新内容。**
+**自最近一次有内容变更（`v1.13.3` / `375f64c`）以来，第 27–55 轮复核均无新内容。**
 第 27–46、49–51 轮每轮都核对了 `git fetch upstream --tags`（或 `git ls-remote`）以及
 GitHub API 的 commits / tags / releases，三处一致：顶端仍是 `375f64c`，最新仍是
 `v1.13.3`；第 47–48、52–54 轮只有 npm registry 一条通路可达（见上），那几轮的
@@ -136,6 +152,10 @@ npm run audit:git       # `git show` 的分类与按 ref 读文件
 ```
 任一条变红就是「需要评估的上游变更」：先看红在哪条断言，再对照上面的 CLI/配置暴露点判断。
 
+另有 `npm run upstream:check`：只比对 `refs/heads/main` 与本文件固定的 `375f64c`。
+相等打印一行；前进打印醒目提示并列出上表四行（**不失败**，仍要人读源码）；网络不通
+明确打印「跳过」，退出码恒为 0，因此可以挂在任何流程里而不会把网络问题当成上游变更。
+
 ### 能自动变红的地方，和不能的地方
 
 `audit:service` 里的 `UPSTREAM_RESOLVER`（`tools/service-smoke.mjs`）是唯一一处**把上游语义
@@ -146,11 +166,13 @@ npm run audit:git       # `git show` 的分类与按 ref 读文件
 
 **但 audit 变红不等于覆盖完整**：下面这几处只有人工对照，改坏了不会让任何 audit 变红。
 
+**本轮 HEAD 核对：`375f64c`（已核对：`git ls-remote` 的 `refs/heads/main` 与 tag `v1.13.3` 均可达）**
+
 「最近一次对照」只写**那一项最近被人工重新核对**的轮次。该列没有列出本轮，表示本轮
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
 对应行并把轮次与日期改成本轮。
 
-**第 46–54 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`，其中第 47–48、52–54 轮只有
+**第 46–55 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`，其中第 47–48、52–54 轮只有
 npm 通路可达），所以下表四行的「最近一次对照」停在第 45 轮是**没有理由重看**，不是忘了看：
 它记录的是「最后一次有人逐行读上游源码」的轮次，而不是「最后一次确认上游没变」的轮次。
 换言之：**停在第 45 轮 = 未重看，不等于欠账**；欠账只有一种——`375f64c` 前进之后没人
