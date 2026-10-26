@@ -1538,38 +1538,66 @@ check(
   Boolean(activeWins) && activeWins.entry.api_key === "sk-upper",
   activeWins ? activeWins.entry.api_key : "no entry at all"
 );
+// The endpoint the CLI's own table gives the built-in service. Declared before
+// the shapes that use it: the third-spelling and order entries carry a URL on
+// purpose, so the endpoint question cannot be what withholds a Key here and the
+// rule itself is the only thing under test.
+const DEEPSEEK_URL = "https://api.deepseek.com";
 // And when `provider` names a spelling no entry has, the registry's spelling is
 // what answers — not the first entry in the file, which is listed first on
 // purpose so that a reordered chain answers `order` here instead.
-const thirdSpellingRule = ruleFor(
-  {
-    provider: "DEEPSEEK",
-    providers: {
-      DeepSEEK: { api_key: "sk-first" },
-      DeepSeek: { api_key: "sk-second" },
-      deepseek: { api_key: "sk-third" },
-    },
+//
+// This is the *third* spelling: `provider` holds `DEEPSEEK`, which is neither a
+// key of the section (`DeepSEEK`, `DeepSeek`, `deepseek`) nor the registry's
+// spelling (`deepseek`) — the shape a hand-edited file or an upper-cased form
+// leaves behind. Two things are asked of it below, and they are separate
+// questions: which rule answers (a chain-order question) and what happens to the
+// Key (a `savedKeyLookup` question). Only the pair tells the settings page the
+// truth, so both are asserted directly.
+const THIRD_SPELLING_SHAPE = {
+  provider: "DEEPSEEK",
+  providers: {
+    DeepSEEK: { url: DEEPSEEK_URL, api_key: "sk-first" },
+    DeepSeek: { url: DEEPSEEK_URL, api_key: "sk-second" },
+    deepseek: { url: DEEPSEEK_URL, api_key: "sk-third" },
   },
-  "DEEPSEEK"
-);
+};
+const thirdSpellingRule = ruleFor(THIRD_SPELLING_SHAPE, "DEEPSEEK");
 check(
   "with the provider naming no entry, the registry's spelling answers — not file order",
   thirdSpellingRule === svc.MATCH_REGISTRY,
   thirdSpellingRule
 );
+// The disposition, spelled out: the registry's spelling answers, the Key comes
+// from *that* entry (not the first in the file, not the one `provider` resembles
+// — `DeepSeek`), and nothing upstream withholds it. This is deliberate and it is
+// not the same answer as the order shapes below: `provider: "DEEPSEEK"` makes
+// `cfg.Providers["DEEPSEEK"]` miss, so `ocr` refuses the config and no entry is
+// opened — but the form is editing the service the registry printed, so reusing
+// that service's saved Key is what the user asked for. A run on this file fails
+// whatever the form holds, so no Key is sent to a host it does not belong to.
+const thirdSpellingAnswer = savedKeyResult(THIRD_SPELLING_SHAPE, "DEEPSEEK", "", "", { tableUnavailable: false });
+check(
+  "and the Key that comes out is the registry entry's, with nothing withheld",
+  thirdSpellingAnswer.key === "sk-third" && thirdSpellingAnswer.reason === "",
+  `${thirdSpellingAnswer.reason} | ${thirdSpellingAnswer.key}`
+);
+check(
+  "and it is neither the first entry in the file nor the one the provider resembles",
+  thirdSpellingAnswer.key !== "sk-first" && thirdSpellingAnswer.key !== "sk-second",
+  thirdSpellingAnswer.key
+);
 // File order is the last resort, and it is reported as such rather than dressed
-// up as an answer: the entry is still returned (the settings page lists it), but
-// `rule` says the position decided it, which is what withholds the Key.
+// up as an answer: no entry comes back at all, and `rule` says the position
+// decided it, which is what withholds the Key. The settings page lists entries
+// from the raw sections (`view.providers`), so nothing needed the entry here —
+// the only use `entry` had was the forbidden one.
 const orderOnly = ruleFor(
   { provider: "corp-gateway", providers: { DeepSEEK: { api_key: "sk-first" }, DeepSeek: { api_key: "sk-second" } } },
   "deepseek"
 );
 check("file order reports itself instead of pretending to answer", orderOnly === svc.MATCH_ORDER, orderOnly);
 
-// The endpoint the CLI's own table gives the built-in service. Declared here
-// because the order-rule checks below need an entry that names a host (so the
-// order rule is the only thing that can withhold its Key).
-const DEEPSEEK_URL = "https://api.deepseek.com";
 // The rule that is not an answer must not hand out a Key — and the *reason* has
 // to say so, because the reason is what the settings page words itself from.
 //
@@ -1606,6 +1634,15 @@ check(
   "the shape only file order can answer is answered by file order",
   Boolean(orderFound) && orderFound.rule === svc.MATCH_ORDER,
   orderFound ? orderFound.rule : "no entry at all"
+);
+// The structural half: an order answer carries no entry, so a caller that reads
+// `entry` without reading `rule` has nothing to hand out (it gets `null`, not
+// the first match's Key). Both order shapes are checked, because the two are
+// reached by different paths in the file and only one of them was pinned before.
+check(
+  "and it comes back without an entry, so `entry` alone cannot leak a Key",
+  orderFound && orderFound.entry === null,
+  orderFound ? JSON.stringify(orderFound.entry) : "no answer at all"
 );
 const orderAnswer = savedKeyResult(ORDER_SHAPE, "deepseek", "", "", { tableUnavailable: false });
 check(
@@ -1650,6 +1687,11 @@ check(
   "one entry and no provider field is file order, not an exact match",
   Boolean(singleFound) && singleFound.rule === svc.MATCH_ORDER,
   singleFound ? singleFound.rule : "no entry at all"
+);
+check(
+  "and this one carries no entry either, single candidate or not",
+  singleFound && singleFound.entry === null,
+  singleFound ? JSON.stringify(singleFound.entry) : "no answer at all"
 );
 const singleAnswer = savedKeyResult(SINGLE_ORDER_SHAPE, "DEEPSEEK", "", "", { tableUnavailable: false });
 check(

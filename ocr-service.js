@@ -145,7 +145,9 @@ const mapSection = (section) =>
  */
 // What decided which entry answers. Three of the four rules answer a question
 // `ocr` itself asks; the last one (`order`) answers one it never asks, so the
-// caller is told which rule it got instead of only which entry.
+// caller is told which rule it got instead of only which entry — and that one
+// comes back with no entry at all (`entry: null`), because a caller holding an
+// entry and a rule will eventually act on the entry alone.
 //
 // The four are *ordered by if/else*, so "the rules are mutually exclusive" is a
 // property of this function's shape and not of anything a caller can see. Both
@@ -206,16 +208,29 @@ function entryByName(raw, name) {
   //
   // File order (`MATCH_ORDER`) is left only for the narrower shape above, where
   // even the registry's spelling is absent, and it is *not* an answer the app may
-  // act on: the entry is returned for display, and `savedKeyFor` withholds its
-  // Key (see there). `tools/service-smoke.mjs` pins all three shapes so none can
+  // act on: it comes back with `entry: null` and `savedKeyFor` withholds the Key
+  // (see there). `tools/service-smoke.mjs` pins all three shapes so none can
   // become another by accident.
+  //
+  // `entry: null` is the *structural* half of that: a rule and an entry travelled
+  // back together, and "the entry is here for display, just do not use it" was a
+  // promise a caller had to keep by reading `rule` first. A caller that reached
+  // for `entry` alone got a Key from an entry no run opens — the right Key for
+  // the right entry, out of a config the CLI refuses. Nothing is displayed from
+  // here anyway (`view.providers` is built from the raw sections, line by line),
+  // so the entry had exactly one possible use and it was the one use forbidden.
+  // Now that use fails loudly: `null.api_key` throws instead of handing out a
+  // secret, and the smoke checks assert the `null` for both order shapes.
   if (matches.some(([key]) => key === active)) {
     return { entry: matches.find(([key]) => key === active)[1], rule: MATCH_ACTIVE };
   }
   if (matches.some(([key]) => key === wanted)) {
     return { entry: matches.find(([key]) => key === wanted)[1], rule: MATCH_REGISTRY };
   }
-  return { entry: matches[0][1], rule: MATCH_ORDER };
+  // No entry: `order` is a guess, and nothing downstream may act on it. See the
+  // comment block above — this is the whole point of returning `null` rather
+  // than the first match.
+  return { rule: MATCH_ORDER, entry: null };
 }
 
 /**
@@ -247,10 +262,14 @@ const strip = (value) => String(value || "").trim().replace(/\/+$/, "");
  * `entryByName` answers with a *rule* as well as an entry, and one of the four
  * rules is not an answer the CLI ever asks: the entry was picked by position
  * in the file, so no run opens it. That rule has to turn into "the Key is
- * withheld" here, where the Key is decided — not in each caller. A caller that
- * read only `entry` and not `rule` would hand out the Key of an entry nothing
- * opens, and nothing would notice: the Key is still the right Key for the right
- * entry, it simply belongs to a config the CLI refuses.
+ * withheld" here, where the Key is decided — not in each caller. The Key would
+ * still be the right Key for the right entry; it simply belongs to a config the
+ * CLI refuses, so reusing it tells the user a service is configured when `ocr`
+ * will refuse to run on it.
+ *
+ * `entryByName` already withholds the *entry* for that rule (`entry: null`), so
+ * this module has two independent halves of the same promise: nothing to read
+ * the Key from, and a reason that says why. Both are asserted.
  *
  * So the mapping is a function of its own, and the smoke checks ask it what
  * every rule means. The three rules that answer a question `ocr` asks mean
@@ -340,6 +359,9 @@ function savedKeyLookup(name, url, configPath = CONFIG_PATH, presetUrl = "", { t
   // only looked at the entry would leak the Key of an entry no run opens.
   const orderReason = withholdReasonFor(found.rule);
   if (orderReason) return withheld(orderReason);
+  // `order` is the only rule that comes back without an entry, and it returned
+  // above — so `found.entry` here is an answer `ocr` really asks for, and the
+  // rule check cannot be skipped without hitting `null` first.
   const entry = found.entry;
   const target = strip(url);
   // Which host the Key belongs to is *not* only the entry's own `url`: a
