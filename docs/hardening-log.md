@@ -1,6 +1,6 @@
 # desktop 加固日志（历史归档）
 
-第 2–15 轮的加固正文，和已经划掉的待办条目，都搬到了这里。
+第 2–16 轮的加固正文，和已经划掉的待办条目，都搬到了这里。
 **现在该看的是 [`next-iteration.md`](next-iteration.md)**：上游状态、
 本轮待办、最近两轮的正文都在那里。
 
@@ -806,6 +806,66 @@ says so`、`the answer stops before the endpoint…` 等），它们逐条断言
 - 以后要改的话（例如给 `read` 加 `rotated: true`，或加 `wasTrimmed(repo, sessionId)`），
   必须同时改第 14 轮钉住「两者答案相同」的那条断言，并且接到界面上——否则一个
   200 次运行之后的用户重开早期会话，仍会看到「干净」。
+
+---
+
+## 第 16 轮 desktop 侧加固（与上游无关）
+
+上游本轮无新提交（顶端仍是 `375f64c` / `v1.13.3`），所以下面每一件都是
+desktop 自己的事。
+
+### P0 — 拼写冲突的拒绝：两段都冲突时，两段都要说完
+
+`8afdb58` 把「拒绝的时候说清旧条目在哪一段」钉住了——拒绝的话里带上了段名。
+但它只说了**一段**。
+
+两段都冲突是真的存在的：注册表（`ocr llm providers`）读不到时，desktop 不知道
+CLI 会读 `providers` 还是 `custom_providers`，于是两段都查。两段各有一条同拼写
+条目时，旧的拒绝只点名了先查到的那一条：
+
+> 配置里已有 deepseek（在 providers 段），与表单里的 DeepSeek 只差大小写；……
+> 请改用已有的拼写 deepseek。
+
+用户照着做——把表单改成 `deepseek`——保存过去了（精确命中就不再冲突），而
+`custom_providers` 段里那条**还在**，还带着一把 Key。CLI 读哪一段取决于这个名字
+在它自己的服务表里算不算内置名（`tryProviderConfig` → `LookupProvider`），
+desktop 恰恰读不到那张表，所以它没有资格替用户选一条。
+
+现在 `spellingClash` 收下全部同拼写条目（`others`），拒绝的话把两条都点名，
+并说清「这一版没能读到那张表，说不准它会读哪一段」，请把不要的那一条在配置
+文件里改掉或删掉，再改用要留的那条的拼写保存。只有一条时的话一个字未改。
+
+**断言**：旧行为是 bug，不是契约——`8afdb58` 钉的「另一段不出现」本轮明确改掉。
+新的断言用「点名次数」而不是固定措辞（`custom_providers` 里含 `providers`，
+`includes` 分不开两段）：
+
+- 两段都冲突 → 两段各被点名一次，两个条目名都出现；
+- 两段都冲突 → 拒绝的话里**不再**出现「请改用已有的拼写」（那正是把用户送到
+  错误那一条的话），并要求把另一条「改掉或删掉」；
+- 只有一段有 → 另一段**不得**出现（否则就成了一句「另一段也查过了」的废话）。
+
+去掉修复 → 4 条变红；多点名一段 → 1 条变红（均实测）。
+
+### 复核 — 简报里 P1 的两条，已经钉住了，不用再做
+
+- **`git-service.js` 的 `bad-ref` / `missing` 分类**：`tools/git-service-smoke.mjs`
+  已经用**真实 git** 造过这两种失败（`git show no-such-ref:a.go`、
+  `git show HEAD:only-in-worktree.txt`），断言 `reason` 分别是 `bad-ref` /
+  `missing`；中文 locale 下还有同样两条（`LC_ALL=C` 是让它们成立的原因）。
+  正则失配会直接变红，不会静默降级到 `failed`。
+- **`SETTLE_FAILED` 路径**：`tools/run-diagnostics-smoke.mjs` 已经钉了
+  「settle 抛错 → 报 `SETTLE_FAILED` → 日志里是那句说「退出信号可能没有发出」
+  的话 → 退出信号确实没发（settle 握着那扇门）这件事被说出来，而不是安静地
+  过去」，还有 `outcomeLogMessage` 与 `outcomeMessage` 的分工。
+
+两条都是「已经有了」，本轮不重复做。
+
+### 文档 — `next-iteration.md` 拆成「现状」与「归档」两份
+
+第 2–14 轮的加固正文和已经划掉的待办搬进了 [`hardening-log.md`](hardening-log.md)，
+本文件只留上游状态表、待办和最近两轮。理由是这张表以前漏过四行，而表和十几轮
+正文挤在一处正是漏行的温床。搬完之后那张表是上游复核的**唯一**记录，所以
+「每轮都新增一行，哪怕结论是无新内容」写进了表头。
 
 ---
 

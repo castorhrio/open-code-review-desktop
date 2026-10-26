@@ -34,7 +34,9 @@ const diagnostics = require("./run-diagnostics");
  * @param {Function} [options.outcomeMessage]
  * @param {Function} [options.reportOutcome]
  * @param {number} [options.timeoutMs]
- * @param {Function} [options.warn]  where the last-resort report goes (default: console.warn)
+ * @param {Function} [options.warn]  where the last-resort report goes, called as
+ *                                   (line, id) so the caller can file the line
+ *                                   under the run it belongs to (default: console.warn)
  * @param {object} [options.settleFailedOutcome] the outcome to report when the settle rejects
  */
 function makeRunHandler(options) {
@@ -55,15 +57,19 @@ function makeRunHandler(options) {
   // handler's went to the injected `warn`, the settle's went to the console —
   // because the settle reports through the `warn` it is *given*, and the handler
   // gave it none. A caller that injected a sink therefore saw half the story,
-  // and the other half went wherever `console.warn` goes (nowhere, in a
-  // packaged app). The per-outcome ones that ride along with the exit payload
+  // and the other half went wherever `console.warn` writes, which in a packaged
+  // app is nowhere. The per-outcome ones that ride along with the exit payload
   // are unaffected: the wording there is the renderer's to show.
+  //
+  // The sink is made per run, inside the CLI's callback below, because these
+  // lines have no exit payload to ride on and the only id they can be filed
+  // under is the one the CLI hands back with the result — `spec` is the
+  // renderer's spec and carries no run id. `main.js` points the sink at
+  // `run:log`, so the line lands in the renderer's log drawer, which opens
+  // itself on a line that reads like trouble. A caller that injects nothing
+  // still gets the console fallback, and still through this one closure: none
+  // of the three lines may drift back to a `console.warn` of its own.
   const warn = typeof opts.warn === "function" ? opts.warn : undefined;
-  // `console.warn` is looked up when the line is written, not when the handler
-  // is made: the sink is a fallback, and a fallback that captured the function
-  // early would keep writing to a console that something else had already
-  // replaced.
-  const log = warn || ((line) => console.warn(line));
   const SETTLE_FAILED = opts.settleFailedOutcome || diagnostics.SETTLE_FAILED;
 
   return function runReview(spec) {
@@ -79,6 +85,13 @@ function makeRunHandler(options) {
       spec,
       (id, line) => send("run:log", { id, line }),
       (id, result) => {
+        // The three end-of-run lines are filed under the id the CLI gave this
+        // run — the same id `settleRunExit` puts on the exit payload — so a
+        // sink that forwards them to `run:log` writes them into the same run's
+        // log. `console.warn` is looked up when the line is written, not when
+        // the handler is made: a fallback that captured the function early
+        // would keep writing to a console something else had already replaced.
+        const log = warn ? (line) => warn(line, id) : (line) => console.warn(line);
         // The CLI does not persist warnings, so this is the only moment the
         // round-limit signal exists. Record before the exit event reaches the
         // renderer, which may refresh history immediately: the write is queued

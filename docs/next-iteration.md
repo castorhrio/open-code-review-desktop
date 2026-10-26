@@ -4,13 +4,13 @@
 规则见 [`OCR-UPSTREAM-SYNC.md`](OCR-UPSTREAM-SYNC.md)：每轮至少检查一次上游，
 有更新就记在这里，不要静默忽略。
 
-本文件只留**现状**：上游状态表、待办、最近两轮的正文。第 2–15 轮的加固正文和
+本文件只留**现状**：上游状态表、待办、最近两轮的正文。第 2–16 轮的加固正文和
 已经划掉的待办搬到了 [`hardening-log.md`](hardening-log.md)——表和十几轮正文
 挤在一个文件里，正是那张表漏过四行的温床。
 
 ---
 
-## 上游状态（最近检查：2026-10-26，第 17 轮复核）
+## 上游状态（最近检查：2026-10-26，第 18 轮复核）
 
 上游 `alibaba/open-code-review` 自 desktop 锁定的 `v1.13.0` 之后发布了
 **3 个补丁版本**：`v1.13.1` / `v1.13.2` / `v1.13.3`（共 18 个 commit）。
@@ -40,8 +40,9 @@ desktop 的依赖已升到 `^1.13.3`（`package.json` / `package-lock.json`）�
 | 15 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（GitHub API 三核对：commits / tags / releases） |
 | 16 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（GitHub API 三核对：commits / tags / releases） |
 | 17 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（`git fetch upstream --tags` 成功 + GitHub API 三核对：commits / tags / releases） |
+| 18 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（`git fetch upstream --tags` 成功 + GitHub API 三核对：commits / tags / releases） |
 
-结论：第 2–12、14–17 轮都没有需要移植的新功能 / 修复 / 破坏性变更，desktop 的
+结论：第 2–12、14–18 轮都没有需要移植的新功能 / 修复 / 破坏性变更，desktop 的
 封装（CLI flag、输出解析、配置暴露点）无需改动；第 13 轮没有留下复核记录。
 顶端 commit 仍是 `375f64c`（2026-10-20，`fix(tool): report an empty code_comment
 batch instead of success (#1773)`），最新 tag / release 仍是 `v1.13.3`。
@@ -115,6 +116,61 @@ curl -s 'https://api.github.com/repos/alibaba/open-code-review/tags?per_page=5'
 
 ---
 
+## 第 18 轮 desktop 侧加固（与上游无关）
+
+上游本轮无新提交（顶端仍是 `375f64c` / `v1.13.3`，见上面第 18 轮复核），不移植。
+本轮做两件事：把第 17 轮留下的**产品决定**落地（三句收尾话的去处），并把
+`REF_LIMIT` 的截断钉成断言。
+
+### P0 — 三句收尾话的去处：`run:log`，不是 stderr
+
+第 17 轮把 `settle-failed` / `signal-failed` / 迟到写盘结果归到了同一个 `warn`，
+但 `main.js` 根本没有注入 `warn`——那个「一个去处」就是主进程的 `console.warn`，
+打包成 GUI 应用后没有终端可看。本轮选定解法一：**接 `run:log`**。
+
+- `main.js`：`warn: runLog`，其中
+  `runLog = (line, id) => send("run:log", { id, line })`。渲染进程的日志抽屉吃
+  `run:log`，而 `TROUBLE_LINE`（`src/lib/format.ts`）匹配「失败」，所以这两句话
+  会让抽屉自己打开。另一个方向（在 `userData` 下写日志文件）被放弃：还得再给用户
+  一个读它的入口，而抽屉已经是现成的。
+- `run-handler.js`：去处从「handler 构造时」挪到「CLI 回调里按 run 创建」。原因是
+  渲染层传的 `spec` 没有运行 id，能拿到 id 的时刻只有 `onDone(id, result)`；用这个
+  id，`run:log` 的 `{ id }` 与 `run:exit` 载荷里的 `id` 就是同一个。
+- 没注入 `warn` 的调用方仍然落到 `console.warn`，而且三句话仍走同一个闭包。
+
+**断言**（`tools/run-diagnostics-smoke.mjs`，+6 条）：
+
+- 退出推送抛错 → 渲染进程的 `run:log` 收到 `signal-failed` 那句话（不再只进 stderr）；
+- 该行登记在 CLI 给的 id 下（不是渲染层的 `spec.runId`），且没有第二份；
+- 收尾 rejection → `settle-failed` 那句同样进 `run:log`；
+- 不注入 `warn` → 同一句话仍然只去 `console.warn` 这一个地方；
+- `main.js` 源码确实把 `warn` 接到了 `run:log`——行为断言只能证明 handler **能**
+  这样接，证明不了应用**真的**这样接，而这正是前两轮漏掉的那一半。
+
+**实测**：删掉 `main.js` 的 `warn: runLog` → 1 条变红；让 handler 不给 `warn`
+传 id → 2 条变红（id 与 settle 那两格）。
+
+### P1 — `REF_LIMIT` 的截断：命名 bases 必须活在前 40 名内
+
+`inspect` 对 ref 排序后取前 40。注释说「named bases first」，但没有断言：夹具只有
+三个分支，`refs.slice(0, 40)` 也能全绿，而 60 个分支的真实仓库里 `main` 可能被
+截掉，界面于是把两个本可比的分支说成不可比。
+
+`tools/git-service-smoke.mjs` 新增一个 60 分支的仓库：`b00`…`b57` 按字母序排在
+`main` / `master` 之前，另配一个真实 upstream（bare remote + `push -u`）。断言
+`refs` 仍是 60 个、`upstream` 是 `origin/main`、`main` / `master` / `origin/main`
+都在 `relations` 里，而 `b57` 不在、`relations` 恰好 40 个。
+
+**实测**：把排序改回 `[...new Set(refs)].slice(0, REF_LIMIT)` → 3 条变红
+（三个命名 base 全部被挤出）。`git-service.js` 一行未改——这轮是给既有行为补断言。
+
+### 文档 — 第 16 轮搬进 hardening-log
+
+`next-iteration.md` 只留最近两轮正文；本轮加入第 18 轮后，第 16 轮按既定规则
+搬进 [`hardening-log.md`](hardening-log.md)。
+
+---
+
 ## 第 17 轮 desktop 侧加固（与上游无关）
 
 上游本轮无新提交（顶端仍是 `375f64c` / `v1.13.3`，见上面第 17 轮复核），不移植。
@@ -174,76 +230,18 @@ P0-1 / P1-1 两条。
   （`(name, url) => invoke(..., { name, url })`）→ **2 条变红**（参数个数 + 值的
   去处）。不需要再加断言。
 
-### 仍然开放 — `signal-failed` / `settle-failed` 在真实应用里仍然读不到
+### 已关闭（第 18 轮）— `signal-failed` / `settle-failed` 现在进日志抽屉
 
-本轮把三句话**归到一个去处**，但这个去处今天仍然是 `console.warn`。这两句是
+本轮把三句话**归到一个去处**，但这个去处当时仍然是 `console.warn`。这两句是
 唯一**没有退出信号可搭**的话（推送失败时根本没有退出信号，收尾失败时收尾本身
 没做完），所以它们到不了渲染进程的日志抽屉——store 的结果在退出信号**送达**时
 是跟着 payload 走的，渲染进程会写进日志，而这两句没有 payload。
 
 「界面可能仍显示运行中」这句话本该由日志抽屉自己打开（`TROUBLE_LINE` 匹配
 「失败」），所以缺的不是措辞，是去处。改法有两个：接 `run:log`（进抽屉，会让
-抽屉自己弹出来），或者写主进程的日志文件。**这是产品决定**，下一轮再定。
-
----
-
-## 第 16 轮 desktop 侧加固（与上游无关）
-
-上游本轮无新提交（顶端仍是 `375f64c` / `v1.13.3`），所以下面每一件都是
-desktop 自己的事。
-
-### P0 — 拼写冲突的拒绝：两段都冲突时，两段都要说完
-
-`8afdb58` 把「拒绝的时候说清旧条目在哪一段」钉住了——拒绝的话里带上了段名。
-但它只说了**一段**。
-
-两段都冲突是真的存在的：注册表（`ocr llm providers`）读不到时，desktop 不知道
-CLI 会读 `providers` 还是 `custom_providers`，于是两段都查。两段各有一条同拼写
-条目时，旧的拒绝只点名了先查到的那一条：
-
-> 配置里已有 deepseek（在 providers 段），与表单里的 DeepSeek 只差大小写；……
-> 请改用已有的拼写 deepseek。
-
-用户照着做——把表单改成 `deepseek`——保存过去了（精确命中就不再冲突），而
-`custom_providers` 段里那条**还在**，还带着一把 Key。CLI 读哪一段取决于这个名字
-在它自己的服务表里算不算内置名（`tryProviderConfig` → `LookupProvider`），
-desktop 恰恰读不到那张表，所以它没有资格替用户选一条。
-
-现在 `spellingClash` 收下全部同拼写条目（`others`），拒绝的话把两条都点名，
-并说清「这一版没能读到那张表，说不准它会读哪一段」，请把不要的那一条在配置
-文件里改掉或删掉，再改用要留的那条的拼写保存。只有一条时的话一个字未改。
-
-**断言**：旧行为是 bug，不是契约——`8afdb58` 钉的「另一段不出现」本轮明确改掉。
-新的断言用「点名次数」而不是固定措辞（`custom_providers` 里含 `providers`，
-`includes` 分不开两段）：
-
-- 两段都冲突 → 两段各被点名一次，两个条目名都出现；
-- 两段都冲突 → 拒绝的话里**不再**出现「请改用已有的拼写」（那正是把用户送到
-  错误那一条的话），并要求把另一条「改掉或删掉」；
-- 只有一段有 → 另一段**不得**出现（否则就成了一句「另一段也查过了」的废话）。
-
-去掉修复 → 4 条变红；多点名一段 → 1 条变红（均实测）。
-
-### 复核 — 简报里 P1 的两条，已经钉住了，不用再做
-
-- **`git-service.js` 的 `bad-ref` / `missing` 分类**：`tools/git-service-smoke.mjs`
-  已经用**真实 git** 造过这两种失败（`git show no-such-ref:a.go`、
-  `git show HEAD:only-in-worktree.txt`），断言 `reason` 分别是 `bad-ref` /
-  `missing`；中文 locale 下还有同样两条（`LC_ALL=C` 是让它们成立的原因）。
-  正则失配会直接变红，不会静默降级到 `failed`。
-- **`SETTLE_FAILED` 路径**：`tools/run-diagnostics-smoke.mjs` 已经钉了
-  「settle 抛错 → 报 `SETTLE_FAILED` → 日志里是那句说「退出信号可能没有发出」
-  的话 → 退出信号确实没发（settle 握着那扇门）这件事被说出来，而不是安静地
-  过去」，还有 `outcomeLogMessage` 与 `outcomeMessage` 的分工。
-
-两条都是「已经有了」，本轮不重复做。
-
-### 文档 — `next-iteration.md` 拆成「现状」与「归档」两份
-
-第 2–14 轮的加固正文和已经划掉的待办搬进了 [`hardening-log.md`](hardening-log.md)，
-本文件只留上游状态表、待办和最近两轮。理由是这张表以前漏过四行，而表和十几轮
-正文挤在一处正是漏行的温床。搬完之后那张表是上游复核的**唯一**记录，所以
-「每轮都新增一行，哪怕结论是无新内容」写进了表头。
+抽屉自己弹出来），或者写主进程的日志文件。**第 18 轮定了：接 `run:log`**——
+`main.js` 注入 `warn`，两句话进渲染进程的日志抽屉；写日志文件的方向放弃，
+理由见上面第 18 轮。
 
 ---
 
@@ -289,7 +287,8 @@ provider 目录、上游 CI 的 PR 策略），正文搬去了
 钉成断言，第 14 轮把「`reportOutcome` 自抛不得带走调用方」与「`MAX_ENTRIES` 轮换后
 的静默」钉住，第 15 轮把「拼写冲突时说的是哪一段」钉住并复核了「`MATCH_ORDER`
 必须扣 Key」那条链，第 16 轮把「两段都冲突时两段都要说完」补上，第 17 轮把
-「一次运行结束时的三句话归到一个去处」钉住；剩下的按优先级排在这里，下一轮挑。标注「**未动**」的条目是
+「一次运行结束时的三句话归到一个去处」钉住，第 18 轮把这个去处接到 `run:log`
+并给 `REF_LIMIT` 的命名 bases 补上截断断言；剩下的按优先级排在这里，下一轮挑。标注「**未动**」的条目是
 最近一轮看过、确认仍然成立但没有改的——不是新发现。
 
 - **P2**：README 的 Status 段落里有**一次实测值**（`1200 findings` / `405ms` /
@@ -301,12 +300,6 @@ provider 目录、上游 CI 的 PR 策略），正文搬去了
   `audit:e2e` 每个脚本前面都各带一次 `npm run build`，一次完整 audit 要 build 五次。
   合并成一次（让 `audit` 脚本先 build 一次，后面的检查都假设 `out/` 存在）能省掉
   四次构建。文件 `package.json`。——**未动**。
-- **P1**：`git-service.js` 的 `inspect` 用 `ranked.slice(0, REF_LIMIT)`（40）截断，
-  **被截掉的 ref 在 `relations` 里没有条目**。`REF_LIMIT` 的注释说「named bases
-  first」，但没有断言钉住「`upstream` / `main` / `master` 一定在前 40 名内」——
-  仓库有 60 个分支时 `main` 可能被截掉，界面就会把两个可比分支说成不可比。
-  文件 `git-service.js` / `tools/git-service-smoke.mjs`。——**未动**（第 15 轮简报
-  提出，本轮只做了拼写冲突那一件）。
 - **P1**：`config-handler.js` 的 `save` 先写 `providers.<name>.<field>`，**后**写
   `provider`。这个顺序依赖上游「写字段不必先选中服务」的行为；上游若改成要求先
   `config set provider <name>` 才能写条目，desktop 会半途失败——`steps` 里有
@@ -344,13 +337,6 @@ provider 目录、上游 CI 的 PR 策略），正文搬去了
   outcome。
 - **P3**：`finding.tsx` 的 `RunFailureNote`（只显示 tooltip）与 `RunFailureNotice`
   （可见文本）名字相近，看代码的人容易认错。文件 `src/components/finding.tsx`。
-- **P3**：`settleRunExit` 的 `signal-failed` 分支——这一行到底写到哪里、用户在
-  renderer 已销毁时能不能看见。第 17 轮**查清楚了**：它写进主进程的
-  `console.warn`（stderr），不会进渲染进程的日志抽屉（抽屉吃的是 `run:log`），
-  打包成 GUI 应用后无处可看。`settle-failed` 同理。store 的结果在退出信号
-  **送达**时是跟着 payload 走、用户看得见的，只有这两句没有 payload 可搭。
-  改法有两个（接 `run:log` 进抽屉 / 写主进程日志文件），**是产品决定**，
-  下一轮再定。文件 `run-handler.js` / `run-diagnostics.js`。
 - **P3**：`RunFailureNotice` 的「CLI 原始原因可选中」目前没有对应的 UI 断言。
 
 

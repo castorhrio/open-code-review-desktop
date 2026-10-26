@@ -1422,6 +1422,16 @@ check("and the exit says the evidence did not make it", outcomeMessage(slowExit)
     !/ocr\.startRun\s*\(/.test(mainSrc2),
     "main.js calls ocr.startRun"
   );
+  // The half a behavioural check cannot reach: `run-handler.js` only promises
+  // that its sink *can* forward to `run:log`; whether the app actually injects
+  // that sink is this registration. It was missing for two rounds, and the
+  // lines went to stderr with every behavioural check still green.
+  check(
+    "and the app injects the sink that forwards to the renderer's log",
+    /const\s+runLog\s*=\s*\(line,\s*id\)\s*=>\s*send\(\s*["']run:log["']\s*,\s*\{\s*id\s*,\s*line\s*\}\s*\)/.test(mainSrc2) &&
+      /warn:\s*runLog\b/.test(mainSrc2),
+    "main.js does not wire warn to run:log"
+  );
 }
 
 /* ---- the settle that never finishes ----
@@ -1595,6 +1605,117 @@ check("and the exit says the evidence did not make it", outcomeMessage(slowExit)
     "a write that lands after the bound is reported to the run's sink",
     lateLog.some((line) => line.includes("上限证据在运行结束后写盘失败")),
     JSON.stringify(lateLog)
+  );
+}
+
+/* ---- the app's sink: the end-of-run lines reach the renderer's log ----
+ * Round 17 gave the three end-of-run lines one sink, but the sink was still
+ * whatever `main.js` passed — and `main.js` passed nothing, so the lines went
+ * to the main process's stderr. A packaged app has no terminal, so the two
+ * lines that matter most (`signal-failed`, `settle-failed`) were written and
+ * never read.
+ *
+ * The decision now lives in `main.js`: its `warn` forwards to `run:log`, which
+ * is what the renderer's log drawer listens on. The drawer opens itself on a
+ * line that reads like trouble, so these two sentences finally get in front of
+ * the user instead of into a console nobody has. The assertions below use the
+ * same wiring `main.js` uses — `warn` calls `send("run:log", …)` — and check
+ * that the line arrives under the id the CLI gave the run (the id the exit
+ * payload carries), not under the renderer's spec.
+ */
+{
+  const exitChannel = createRunExitDoor(() => {}).channel;
+  const sent = [];
+  const appSend = (channel, payload) => {
+    if (channel === exitChannel) throw new Error("the window was already gone");
+    sent.push({ channel, payload });
+  };
+  const appWarn = (line, id) => appSend("run:log", { id, line });
+  const appStore = createStore(path.join(dir, "app-sink", "run-diagnostics.json"));
+  const appHandler = makeRunHandler({
+    ocr: {
+      startRun(spec, onLog, onDone) {
+        // The CLI's own id, which is not the renderer's `spec.runId`.
+        onDone("cli-run-id", { sessionId: "app-sink-session", value: limitResult });
+        return { id: spec.runId };
+      },
+    },
+    store: appStore,
+    send: appSend,
+    warn: appWarn,
+  });
+  appHandler({ repo, mode: "review", runId: "renderer-spec-id" });
+  await new Promise((r) => setTimeout(r, 150));
+
+  const appLines = sent.filter((m) => m.channel === "run:log");
+  check(
+    "a failed exit push reaches the renderer's log, not only stderr",
+    appLines.some((m) => m.payload.line === `[run-diagnostics] ${signalFailedMessage()}`),
+    JSON.stringify(sent)
+  );
+  check(
+    "and it is filed under the id the CLI gave the run",
+    appLines.length === 1 && appLines[0].payload.id === "cli-run-id",
+    JSON.stringify(appLines)
+  );
+  check(
+    "with no second copy under the renderer's spec id",
+    !appLines.some((m) => m.payload.id === "renderer-spec-id"),
+    JSON.stringify(appLines)
+  );
+
+  // The other sentence with no payload to ride on: the settle itself rejected,
+  // so the exit was never sent. It has to reach the same place.
+  const failSent = [];
+  const failSend = (channel, payload) => failSent.push({ channel, payload });
+  const settleFailHandler = makeRunHandler({
+    ocr: {
+      startRun(spec, onLog, onDone) {
+        onDone("cli-settle-fail-id", { sessionId: "app-sink-settle-fail", value: limitResult });
+        return { id: spec.runId };
+      },
+    },
+    store: { record: () => {} },
+    send: failSend,
+    settleRunExit: () => Promise.reject(new Error("the settle was wired to nothing")),
+    warn: (line, id) => failSend("run:log", { id, line }),
+  });
+  settleFailHandler({ repo, mode: "review", runId: "renderer-spec-id" });
+  await new Promise((r) => setTimeout(r, 80));
+  const failLines = failSent.filter((m) => m.channel === "run:log");
+  check(
+    "a settle that never finished reaches the renderer's log too",
+    failLines.some((m) => m.payload.line === `[run-diagnostics] ${settleFailedMessage()}` && m.payload.id === "cli-settle-fail-id"),
+    JSON.stringify(failSent)
+  );
+
+  // And the default is still one sink: a caller that injects nothing gets
+  // `console.warn` for the same lines, never a mix of one line to the console
+  // and another to nowhere.
+  const consoleLines = [];
+  const realConsoleWarn = console.warn;
+  console.warn = (line) => consoleLines.push(line);
+  try {
+    const defaultSinkHandler = makeRunHandler({
+      ocr: {
+        startRun(spec, onLog, onDone) {
+          onDone("cli-default-id", { sessionId: "app-sink-default", value: limitResult });
+          return { id: spec.runId };
+        },
+      },
+      store: { record: () => {} },
+      send: () => {},
+      settleRunExit: () => Promise.reject(new Error("the settle was wired to nothing")),
+    });
+    defaultSinkHandler({ repo, mode: "review", runId: "renderer-spec-id" });
+    await new Promise((r) => setTimeout(r, 80));
+  } finally {
+    console.warn = realConsoleWarn;
+  }
+  check(
+    "without an injected sink the same line still has one place to go",
+    consoleLines.some((line) => line === `[run-diagnostics] ${settleFailedMessage()}`),
+    JSON.stringify(consoleLines)
   );
 }
 

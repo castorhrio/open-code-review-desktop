@@ -318,7 +318,22 @@ ipcMain.handle("review:preview", (_e, spec) => ocr.preview(spec));
 // run, one exit) is a behaviour, and a behaviour can only be checked by running
 // it. This registration is all that is left — and this file still does not name
 // the exit channel, so the exit cannot be sent from anywhere but the door.
-const runReview = makeRunHandler({ ocr, store: runDiagnostics, send });
+//
+// The `warn` sink is the decision about the three end-of-run lines that have no
+// exit payload to ride on (`signal-failed`, `settle-failed`, and a write that
+// lands after the bound): they go to `run:log`, so the renderer's log drawer is
+// the one place they are read. It opens itself on a line that reads like
+// trouble, and the `id` is the one the CLI gave the run — the same id the exit
+// payload carries — so the line is filed under the run it belongs to. The
+// alternative (a file under `userData`) would need a second way to read it;
+// stderr is not a place, since a packaged app has no terminal to read it from.
+const runLog = (line, id) => send("run:log", { id, line });
+const runReview = makeRunHandler({
+  ocr,
+  store: runDiagnostics,
+  send,
+  warn: runLog,
+});
 ipcMain.handle("review:run", (_e, spec) => runReview(spec));
 
 ipcMain.handle("review:cancel", (_e, id) => ocr.cancelRun(id));

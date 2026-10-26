@@ -381,6 +381,93 @@ fs.rmSync(notARepo, { recursive: true, force: true });
   );
 }
 
+/* ---- named bases survive the cap ----
+ * `inspect` classifies at most `REF_LIMIT` refs, and the ranking puts `main` /
+ * `master` / the configured upstream first so the cap "can never drop the ref a
+ * user most likely wants to compare against". That priority had no assertion:
+ * the fixture above has three branches, so everything fit and a plain
+ * `refs.slice(0, 40)` would have passed every check while a real repository
+ * with 60 branches silently lost `main` — the UI then says the two branches
+ * cannot be compared (no relation), which is wrong, not merely incomplete.
+ *
+ * The branches below are named so that alphabetical order puts all of them
+ * *before* `main`: without the named-first priority, the first 40 refs would be
+ * `b00`..`b39` and `main` / `master` / `origin/main` would all be dropped. With
+ * it, the three are inside the cap and the last alphabetical branch is not.
+ */
+{
+  const manyDir = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-git-many-"));
+  const remoteDir = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-git-many-remote-"));
+  const manyGit = (args) =>
+    new Promise((resolve, reject) => {
+      const child = spawn("git", args, { cwd: manyDir, windowsHide: true });
+      let out = "";
+      let err = "";
+      child.stdout.on("data", (d) => (out += d));
+      child.stderr.on("data", (d) => (err += d));
+      child.on("error", reject);
+      child.on("close", (code) => {
+        if (code !== 0) reject(new Error(`git ${args.join(" ")} failed (${code}): ${err || out}`));
+        else resolve(out.trim());
+      });
+    });
+
+  try {
+    await manyGit(["init", "-q"]);
+    await manyGit(["config", "user.email", "t@example.com"]);
+    await manyGit(["config", "user.name", "Test"]);
+    await manyGit(["checkout", "-q", "-b", "main"]);
+    fs.writeFileSync(path.join(manyDir, "a.txt"), "one\n", "utf8");
+    await manyGit(["add", "."]);
+    await manyGit(["commit", "-q", "-m", "initial"]);
+    await manyGit(["branch", "master"]);
+    // 58 more branches, all sorting before `main` / `master`.
+    for (let i = 0; i < 58; i++) await manyGit(["branch", `b${String(i).padStart(2, "0")}`]);
+    // A real upstream: bare remote, main pushed and tracked, so `@{upstream}`
+    // resolves to `origin/main` the way it does in a working clone.
+    await new Promise((resolve, reject) => {
+      const child = spawn("git", ["init", "-q", "--bare", remoteDir], { cwd: manyDir, windowsHide: true });
+      child.on("error", reject);
+      child.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`git init --bare failed (${code})`))));
+    });
+    await manyGit(["remote", "add", "origin", remoteDir]);
+    await manyGit(["push", "-q", "-u", "origin", "main"]);
+
+    const many = await gitSvc.inspect(manyDir);
+    const relations = many.relations || {};
+    check("all 60 branches are still reported to the UI", many.refs.length === 60, `${many.refs.length} refs`);
+    check("the configured upstream is recognised", many.upstream === "origin/main", many.upstream || "(none)");
+    check(
+      "the cap keeps main even when 58 branches sort before it",
+      relations.main === "same",
+      JSON.stringify(Object.keys(relations))
+    );
+    check(
+      "the cap keeps master too",
+      relations.master === "same",
+      JSON.stringify(Object.keys(relations))
+    );
+    check(
+      "and it keeps the configured upstream",
+      relations["origin/main"] === "same",
+      JSON.stringify(Object.keys(relations))
+    );
+    check(
+      "while an ordinary branch past the cap is left out",
+      !("b57" in relations),
+      JSON.stringify(Object.keys(relations))
+    );
+    check(
+      "so the cap still bounds how many refs are classified",
+      Object.keys(relations).length === 40,
+      `${Object.keys(relations).length} relations`
+    );
+  } finally {
+    fs.rmSync(manyDir, { recursive: true, force: true });
+    fs.rmSync(remoteDir, { recursive: true, force: true });
+  }
+}
+
 /* ---- the reasons survive a non-English desktop ----
  * `bad-ref` and `missing` are read out of git's stderr *sentences*, and git
  * translates them: with a Chinese locale it says "无效的对象名称" / "路径 ... 不存在",
