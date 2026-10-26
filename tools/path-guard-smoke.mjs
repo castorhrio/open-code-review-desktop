@@ -11,6 +11,13 @@
 // comparison gets wrong without anyone noticing — a UNC share root and the
 // `\\?\` long-path prefix — and that both call sites actually use it.
 //
+// Round 64 adds the *other* question the same picker asks: not "is this inside?"
+// but "what is this, relative to the root?". `relativeInside` answers it, and the
+// block below pins its three-way contract — `""` for the repo itself, a
+// forward-slash `relPath` for a subdirectory, `null` for anything outside —
+// because collapsing the first and the third would silently turn "outside the
+// repo" into "the whole repo".
+//
 // Run with `npm run audit:path`.
 import { createRequire } from "node:module";
 import fs from "node:fs";
@@ -19,7 +26,7 @@ import path from "node:path";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const require = createRequire(path.join(ROOT, "package.json"));
-const { isInside } = require(path.join(ROOT, "path-guard.js"));
+const { isInside, relativeInside } = require(path.join(ROOT, "path-guard.js"));
 const gitSvc = require(path.join(ROOT, "git-service.js"));
 
 const failures = [];
@@ -261,14 +268,129 @@ const check = (name, ok, detail = "") => {
   );
 }
 
+/* ---- the second question: what is this relative to the root? ----
+ * `repo:pickInside` used to answer it by hand — `path.relative(root, picked)
+ * .split(path.sep).join("/") || ""` behind an `isInside` guard — so the picker
+ * kept three answers in step by hand (inside? / what path? / what does a refusal
+ * look like?) and only the first had a test. `relativeInside` is all three in one
+ * spelling; these checks are the contract, and the reason each of them is here is
+ * that the three can regress separately.
+ *
+ * The `null` vs `""` split is the load-bearing one: `""` means "the whole repo"
+ * to every caller (`--path` empty = scan everything), so an outside pick that
+ * answered `""` would silently widen the scan instead of refusing it.
+ */
+{
+  check(
+    "relative: the root itself answers the empty relPath",
+    relativeInside("/repo", "/repo") === "",
+    JSON.stringify(relativeInside("/repo", "/repo"))
+  );
+  check(
+    "relative: a subdirectory answers a forward-slash path",
+    relativeInside("/repo", "/repo/src") === "src",
+    JSON.stringify(relativeInside("/repo", "/repo/src"))
+  );
+  check(
+    "relative: nested directories keep their order and their slashes",
+    relativeInside("/repo", "/repo/src/lib/format.ts") === "src/lib/format.ts",
+    JSON.stringify(relativeInside("/repo", "/repo/src/lib/format.ts"))
+  );
+  check(
+    "relative: a `..` inside the pick is normalised before the answer",
+    relativeInside("/repo", "/repo/src/../lib") === "lib",
+    "the answer describes the directory the user picked, not the route they took"
+  );
+  check(
+    "relative: outside answers null, not the empty string",
+    relativeInside("/repo", "/etc") === null && relativeInside("/repo", "/repo2") === null,
+    "`\"\"` means 整个仓库 here, so a refusal must not share it"
+  );
+  check(
+    "relative: a `..` escape answers null",
+    relativeInside("/repo", "/repo/../etc") === null
+  );
+  check(
+    "relative: an empty root or candidate answers null",
+    relativeInside("", "/repo") === null && relativeInside("/repo", "") === null
+  );
+  check(
+    "relative: off Windows the pick is case-sensitive, like the guard",
+    relativeInside("/Repo", "/repo/sub") === null && relativeInside("/Repo", "/Repo/sub") === "sub"
+  );
+}
+
+/* ---- the Windows shapes the guard already knew, now answering with a path ---- */
+{
+  const win = { pathApi: path.win32, caseInsensitive: true };
+  check(
+    "Windows relative: backslash input answers a forward-slash relPath",
+    relativeInside("C:\\Repo", "C:\\Repo\\src\\lib", win) === "src/lib",
+    JSON.stringify(relativeInside("C:\\Repo", "C:\\Repo\\src\\lib", win))
+  );
+  check(
+    "Windows relative: the root itself (either case) answers the empty relPath",
+    relativeInside("C:\\Repo", "C:\\REPO", win) === "",
+    JSON.stringify(relativeInside("C:\\Repo", "C:\\REPO", win))
+  );
+  check(
+    "Windows relative: the answer keeps the case the user's dialog produced",
+    relativeInside("c:\\repo", "C:\\Repo\\Src\\Lib", win) === "Src/Lib",
+    "the fold is the comparison's business, not the answer's"
+  );
+  check(
+    "Windows relative: a different drive answers null",
+    relativeInside("C:\\Repo", "D:\\Repo\\sub", win) === null
+  );
+  check(
+    "Windows relative: a UNC share root answers the relPath without dropping a segment",
+    relativeInside("\\\\server\\share\\repo", "\\\\server\\share\\repo\\sub\\a", win) === "sub/a",
+    JSON.stringify(relativeInside("\\\\server\\share\\repo", "\\\\server\\share\\repo\\sub\\a", win))
+  );
+  check(
+    "Windows relative: a UNC path under a \\\\?\\ root keeps the prefix out of the answer",
+    relativeInside("\\\\?\\C:\\Repo", "\\\\?\\C:\\Repo\\sub\\a", win) === "sub/a",
+    JSON.stringify(relativeInside("\\\\?\\C:\\Repo", "\\\\?\\C:\\Repo\\sub\\a", win))
+  );
+  check(
+    "Windows relative: the \\\\?\\UNC\\ shape answers the tail only",
+    relativeInside(
+      "\\\\?\\UNC\\server\\share\\repo",
+      "\\\\?\\UNC\\server\\share\\repo\\sub",
+      win
+    ) === "sub",
+    JSON.stringify(
+      relativeInside("\\\\?\\UNC\\server\\share\\repo", "\\\\?\\UNC\\server\\share\\repo\\sub", win)
+    )
+  );
+  check(
+    "Windows relative: a different share under the same prefix answers null",
+    relativeInside("\\\\?\\UNC\\server\\a", "\\\\?\\UNC\\server\\b\\x", win) === null
+  );
+  check(
+    "Windows relative: with the case rule off, a differently-cased pick is refused",
+    relativeInside("C:\\Repo", "c:\\repo\\sub", { pathApi: path.win32, caseInsensitive: false }) === null,
+    "the same flag decides both questions, because both go through the guard"
+  );
+}
+
 /* ---- the call sites use the shared rule, not their own spelling ---- */
 {
   const mainSrc = fs.readFileSync(path.join(ROOT, "main.js"), "utf8");
   const gitSrc = fs.readFileSync(path.join(ROOT, "git-service.js"), "utf8");
   check(
-    "repo:pickInside guards the picked directory with isInside",
-    /require\("\.\/path-guard"\)/.test(mainSrc) && /isInside\(root, picked\)/.test(mainSrc),
+    "repo:pickInside asks path-guard for the relPath, not for a guard plus a hand-rolled relative",
+    /require\("\.\/path-guard"\)/.test(mainSrc) &&
+      /relativeInside\(repo, result\.filePaths\[0\]\)/.test(mainSrc) &&
+      !/path\.relative\(root, picked\)/.test(mainSrc),
     "main.js"
+  );
+  check(
+    "...and the picker's three answers come from that one call",
+    /const relPath = relativeInside\(/.test(mainSrc) &&
+      /relPath === null\) return \{ error: "所选目录不在该仓库内" \}/.test(mainSrc) &&
+      /return \{ relPath \}/.test(mainSrc),
+    "outside → error, everything else → relPath (empty string for the repo itself)"
   );
   check(
     "readFileWindow guards the worktree read with isInside",

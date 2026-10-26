@@ -57,24 +57,24 @@ const path = require("path");
 //     explicitly together with `pathApi: path.win32` — a Windows answer asserted
 //     without it would be asserting the host's rule, i.e. the Linux answer while
 //     running on Linux, and the case bug would be back in the untested column.
-function isInside(
-  root,
-  candidate,
-  { pathApi = path, caseInsensitive = process.platform === "win32" } = {}
-) {
-  if (typeof root !== "string" || typeof candidate !== "string" || root === "" || candidate === "") {
-    return false;
-  }
-  // Empty segments are separators, not names: `\\server\share\` (what `resolve`
-  // returns for a share root) and `\\server\share` have to compare equal, and so
-  // do `/` and `//`.
-  const segmentsOf = (value) => {
-    const resolved = pathApi.resolve(value);
-    const folded = caseInsensitive ? resolved.toLowerCase() : resolved;
-    return folded.split(pathApi.sep).filter((segment) => segment !== "");
-  };
-  const rootSegments = segmentsOf(root);
-  const candidateSegments = segmentsOf(candidate);
+const CASE_INSENSITIVE_PLATFORM = process.platform === "win32";
+
+// The one normalisation both functions below are built on: absolute, and split
+// into named parts. Empty parts are separators, not names — `\\server\share\`
+// (what `resolve` returns for a share root) and `\\server\share` have to compare
+// equal, and so do `/` and `//`.
+const segmentsOf = (value, pathApi, caseInsensitive) => {
+  const resolved = pathApi.resolve(value);
+  const folded = caseInsensitive ? resolved.toLowerCase() : resolved;
+  return folded.split(pathApi.sep).filter((segment) => segment !== "");
+};
+
+const usable = (value) => typeof value === "string" && value !== "";
+
+function isInside(root, candidate, { pathApi = path, caseInsensitive = CASE_INSENSITIVE_PLATFORM } = {}) {
+  if (!usable(root) || !usable(candidate)) return false;
+  const rootSegments = segmentsOf(root, pathApi, caseInsensitive);
+  const candidateSegments = segmentsOf(candidate, pathApi, caseInsensitive);
   // A candidate deeper than the root cannot be inside it; a root that is itself
   // a filesystem root (no segments) contains everything under it.
   if (candidateSegments.length < rootSegments.length) return false;
@@ -84,4 +84,46 @@ function isInside(
   return rootSegments.every((segment, index) => candidateSegments[index] === segment);
 }
 
-module.exports = { isInside };
+// `relativeInside` is the *other* question the same callers ask — not "may I
+// read this?" but "what is this, relative to the root, in the spelling the rest
+// of the app uses?". `repo:pickInside` used to answer it by hand:
+//
+//   path.relative(root, picked).split(path.sep).join("/") || ""
+//
+// after an `isInside` guard. Three separate answers were therefore being kept
+// in step by hand: whether it is inside, what the relative path is, and which
+// of them gets reported when it is not. Only the first had any test behind it
+// (`tools/path-guard-smoke.mjs`), which is why this one shape was worth pulling
+// out — the same rule, the same caller, one spelling.
+//
+// The contract, and the reason it is a `null` rather than an empty string:
+//
+//   root itself            → ""        (empty relPath = "the whole repo"; the
+//                                       picker offers that as 留空)
+//   an inside subdirectory → "src/a"   (forward slashes on every platform: this
+//                                       string is handed to the CLI as `--path`
+//                                       and shown in the UI, so a Windows
+//                                       backslash here would be a second spelling
+//                                       of the same path)
+//   anything outside       → null      (the refusal, and it must be
+//                                       distinguishable from "" — collapsing the
+//                                       two would turn "you picked something
+//                                       outside the repo" into "you picked the
+//                                       whole repo", silently widening the scan)
+//
+// The answer is sliced from the **unfolded** segments, so on Windows a user who
+// picked `c:\repo\Src\Sub` gets `Src/Sub` and not `src/sub`: the case fold is
+// the comparison's business (`isInside`), not the answer's. Segment counts are
+// the same folded or not, so the slice indexes line up.
+function relativeInside(
+  root,
+  candidate,
+  { pathApi = path, caseInsensitive = CASE_INSENSITIVE_PLATFORM } = {}
+) {
+  if (!isInside(root, candidate, { pathApi, caseInsensitive })) return null;
+  const rootSegments = segmentsOf(root, pathApi, false);
+  const candidateSegments = segmentsOf(candidate, pathApi, false);
+  return candidateSegments.slice(rootSegments.length).join("/");
+}
+
+module.exports = { isInside, relativeInside };

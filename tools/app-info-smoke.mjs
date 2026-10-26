@@ -14,6 +14,7 @@ import path from "node:path";
 const ROOT = path.resolve(import.meta.dirname, "..");
 const require = createRequire(path.join(ROOT, "package.json"));
 const { formatAppInfo } = require(path.join(ROOT, "app-info.js"));
+const { createInstall } = require(path.join(ROOT, "install-info.js"));
 
 const failures = [];
 const check = (name, ok, detail = "") => {
@@ -212,6 +213,83 @@ const base = {
       shaped.includes(key)
     ),
     JSON.stringify(shaped)
+  );
+}
+
+/* ---- the payload's key set is pinned, install facts included ----
+ * Every check above asserts *a* field; none of them asserts that the set of
+ * fields is the one the settings page and `src/lib/types.ts` expect. `...installInfo`
+ * is a spread, so a new field in `install-info.js`'s `installInfo()` walks into
+ * the IPC payload without anyone deciding to add it — and the renderer reads
+ * those fields by name, so a rename there is a blank row on the page while every
+ * check here stays green.
+ *
+ * So the install facts are not hand-written here: they come from the real
+ * `createInstall(...).installInfo()` (with stubs for `app`/`shell`, which is how
+ * `tools/install-info-smoke.mjs` drives it), and the whole key set is compared
+ * as one sorted list. A field added upstream in `install-info.js` turns this red
+ * with the key that appeared, which is the moment to decide whether it should be
+ * in the payload at all.
+ */
+{
+  const install = createInstall({
+    app: {
+      isPackaged: true,
+      getPath: (name) =>
+        name === "userData" ? "/home/me/.config/app" : "/opt/app/app",
+    },
+    shell: { showItemInFolder: () => {}, openPath: async () => "" },
+    platform: "linux",
+    env: {},
+    resourcesPath: () => "/opt/app/resources",
+  });
+  const installInfo = install.installInfo();
+  const info = formatAppInfo({
+    ...base,
+    binary: { path: "/opt/app/ocr", source: "local" },
+    installInfo,
+  });
+  const keys = Object.keys(info).sort();
+  const expected = [
+    "appVersion",
+    "binary",
+    "binarySource",
+    "canUninstall",
+    "configPath",
+    "docsUrl",
+    "executable",
+    "installDir",
+    "packaged",
+    "platform",
+    "portable",
+    "userData",
+    "version",
+  ].sort();
+  check(
+    "the payload's key set is exactly the pinned one",
+    JSON.stringify(keys) === JSON.stringify(expected),
+    JSON.stringify({ got: keys, want: expected })
+  );
+  check(
+    "...and every install fact the install module reports is in it",
+    Object.keys(installInfo).every((key) => key in info),
+    JSON.stringify({ installKeys: Object.keys(installInfo).sort(), payload: keys })
+  );
+  check(
+    "...and it carries no field that neither the app nor the install facts produced",
+    keys.every(
+      (key) =>
+        [
+          "appVersion",
+          "binary",
+          "binarySource",
+          "configPath",
+          "docsUrl",
+          "platform",
+          "version",
+        ].includes(key) || key in installInfo
+    ),
+    "a field from nowhere is a typo the renderer would read as absent"
   );
 }
 

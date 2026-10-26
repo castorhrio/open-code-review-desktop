@@ -16,7 +16,8 @@ const { makeRunHandler } = require("./run-handler");
 const { makeUninstallHandler } = require("./uninstall-handler");
 const { makeConfigHandlers } = require("./config-handler");
 const { createInstall } = require("./install-info");
-const { isInside } = require("./path-guard");
+const { relativeInside } = require("./path-guard");
+const { providersAnswer } = require("./provider-handler");
 const { formatAppInfo } = require("./app-info");
 
 const DOCS_URL = "https://open-codereview.ai/docs";
@@ -205,11 +206,14 @@ const uninstall = makeUninstallHandler({
 });
 ipcMain.handle("app:uninstall", uninstall);
 
-ipcMain.handle("app:providers", async () => {
-  const table = await ocr.providerTable();
-  if (!table.ok) return { ok: false, error: ocr.withHint(table.error), value: [] };
-  return { ok: true, value: table.rows };
-});
+// The answer's shape (a list even when the read failed) and its error sentence
+// (with the hint appended) live in `provider-handler.js`: the settings page reads
+// `value` as a list without asking `ok` first, and the hint is the only part of
+// the message the user can act on. This registration is all that is left, and it
+// is also the one place that hands over the real `withHint`.
+ipcMain.handle("app:providers", async () =>
+  providersAnswer(await ocr.providerTable(), { withHint: ocr.withHint })
+);
 
 /* ---------------- ipc: repo ---------------- */
 
@@ -232,13 +236,14 @@ ipcMain.handle("repo:pickInside", async (_e, repo) => {
     properties: ["openDirectory"],
   });
   if (result.canceled || !result.filePaths.length) return {};
-  const picked = path.resolve(result.filePaths[0]);
-  const root = path.resolve(repo);
-  if (!isInside(root, picked)) {
-    return { error: "所选目录不在该仓库内" };
-  }
-  const rel = path.relative(root, picked).split(path.sep).join("/");
-  return { relPath: rel || "" };
+  // `relativeInside` answers the three cases in one spelling — `""` for the repo
+  // itself (the picker treats that as 留空 = the whole repo), a forward-slash
+  // `relPath` for a subdirectory, and `null` for anything outside. The old body
+  // kept those three answers in step by hand (a `startsWith` guard, a
+  // `path.relative`, and a `|| ""`) and only the guard had a test behind it.
+  const relPath = relativeInside(repo, result.filePaths[0]);
+  if (relPath === null) return { error: "所选目录不在该仓库内" };
+  return { relPath };
 });
 
 ipcMain.handle("repo:pickFile", async (_e, opts) => {
