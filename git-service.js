@@ -5,9 +5,33 @@ const path = require("path");
 const fs = require("fs");
 const { spawn } = require("child_process");
 
+// Every git command runs in the C locale, deliberately.
+//
+// Two of the classifications below (`readFileAtRef`'s `bad-ref` / `missing`) read
+// git's *stderr wording*, and wording is not this program's to control: on a
+// Chinese (or any other localised) desktop, git says "fatal: 无效的对象名称" and
+// "fatal: 路径 ... 不存在", neither of which matches an English pattern. Both
+// failures then fall through to the generic branch, so a file that is simply not
+// in the reviewed snapshot is reported as "读取 ... 失败" — the one wording that
+// tells the reader nothing. The overall exit codes are unaffected by the locale,
+// only the sentences are, so pinning the locale is what makes the patterns in
+// `readFileAtRef` a stable contract instead of a guess about the user's
+// environment.
+//
+// `process.env` is spread in rather than replaced: PATH has to survive (that is
+// how `git` is found at all), and so does `GIT_CEILING_DIRECTORIES`-style
+// configuration the caller may be relying on. Only the message language is
+// forced. `git` is spawned asynchronously, never with `spawnSync`: `spawnSync` is
+// refused outright (EBUSY) in the sandbox the checks run in.
+//
+// Built per call rather than once at load: the caller's environment is allowed to
+// change between calls (the checks point `GIT_CEILING_DIRECTORIES` at a throwaway
+// directory, for instance), and a snapshot taken at load would silently ignore it.
+const gitEnv = () => ({ ...process.env, LC_ALL: "C", LANG: "C" });
+
 function git(args, cwd) {
   return new Promise((resolve) => {
-    const child = spawn("git", args, { cwd, windowsHide: true });
+    const child = spawn("git", args, { cwd, windowsHide: true, env: gitEnv() });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (d) => {

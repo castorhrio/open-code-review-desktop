@@ -134,6 +134,71 @@ check(
 check("...and it keeps git's own words in the message", /git/i.test(unknownWording.error || ""), unknownWording.error || "");
 fs.rmSync(notARepo, { recursive: true, force: true });
 
+/* ---- the reasons survive a non-English desktop ----
+ * `bad-ref` and `missing` are read out of git's stderr *sentences*, and git
+ * translates them: with a Chinese locale it says "无效的对象名称" / "路径 ... 不存在",
+ * neither of which matches an English pattern, so both classifications collapse
+ * into the generic `failed` branch and the reader is told "读取 ... 失败" — which
+ * says nothing about *what* was wrong. Pinning the locale is what makes those two
+ * reasons an answer rather than a guess about the user's machine.
+ *
+ * Two checks, because only one of them can fail on a machine without the locale:
+ *
+ *   1. the environment git is actually spawned with — asserted directly, and the
+ *      one that goes red anywhere if the override is removed;
+ *   2. the classification under a claimed Chinese locale — the end-to-end version
+ *      of the same promise, red on any machine where that locale is installed.
+ */
+const savedLocale = { LC_ALL: process.env.LC_ALL, LANG: process.env.LANG };
+process.env.LC_ALL = "zh_CN.UTF-8";
+process.env.LANG = "zh_CN.UTF-8";
+
+const zhBadRef = await gitSvc.readFile(dir, "a.go", { ref: "no-such-ref" });
+check(
+  "under a Chinese locale an unresolvable ref is still classified as bad-ref",
+  zhBadRef.ok === false && zhBadRef.reason === "bad-ref",
+  `${zhBadRef.reason || ""} / ${zhBadRef.error || ""}`
+);
+const zhMissing = await gitSvc.readFile(dir, "only-in-worktree.txt", { ref: "HEAD" });
+check(
+  "under a Chinese locale a path that is not in the ref is still classified as missing",
+  zhMissing.ok === false && zhMissing.reason === "missing",
+  `${zhMissing.reason || ""} / ${zhMissing.error || ""}`
+);
+
+// The locale itself: stub `spawn` for a freshly loaded copy of the service (so
+// its `require("child_process")` picks up the stub) and read the options it
+// passes on. PATH has to survive the override — without it git is not found at
+// all — while the message language must not be left to the ambient environment.
+{
+  const cp = await import("node:child_process");
+  const realSpawn = cp.default.spawn;
+  const calls = [];
+  cp.default.spawn = (...args) => {
+    calls.push(args);
+    return realSpawn(...args);
+  };
+  const servicePath = path.join(ROOT, "git-service.js");
+  delete require.cache[require.resolve(servicePath)];
+  const fresh = require(servicePath);
+  const probe = await fresh.git(["--version"], dir);
+  delete require.cache[require.resolve(servicePath)];
+  cp.default.spawn = realSpawn;
+
+  const opts = (calls[0] || [])[2] || {};
+  const env = opts.env || {};
+  check("git is spawned with a successful exit", probe.code === 0, probe.stderr || "");
+  check("git is spawned with LC_ALL=C", env.LC_ALL === "C", String(env.LC_ALL));
+  check("git is spawned with LANG=C", env.LANG === "C", String(env.LANG));
+  check("the rest of the environment is kept", env.PATH === process.env.PATH, String(env.PATH || "").slice(0, 40));
+  check("git is still spawned asynchronously, not with spawnSync", calls.length === 1 && typeof opts.cwd === "string", `${calls.length} spawn(s)`);
+}
+
+if (savedLocale.LC_ALL === undefined) delete process.env.LC_ALL;
+else process.env.LC_ALL = savedLocale.LC_ALL;
+if (savedLocale.LANG === undefined) delete process.env.LANG;
+else process.env.LANG = savedLocale.LANG;
+
 /* ---- the working tree does not hide the snapshot ---- */
 
 // The file is committed at HEAD and deleted in the working tree: the snapshot
