@@ -3157,6 +3157,58 @@ await shoot(page, "99-settings-savedkey-loading-table-unreadable", {
   },
 });
 
+// 「用系统默认程序打开」 on the code pane. The button reads `shell.openPath`'s
+// answer now, so a file that opened nothing no longer looks like a file that
+// opened — but one sentence for both failures is still one sentence too few: a
+// reviewed file the working tree no longer has (the finding names a path in the
+// ref that was reviewed, and the branch has moved on) is not the same as a file
+// that is there with no program registered for its type. Both answer with
+// "Failed to open path", so the absence is decided before the shell is asked,
+// and these two shots pin that the pane says which one it was.
+// Two readers of the same toolbar are mounted at once (the wide pane and the
+// stacked one), and at 1440px only one of them has a box — the other is a
+// zero-sized grid cell. Picking by title alone lands on the hidden one and the
+// click times out, so the selector asks for the one that is actually on screen.
+const openFileButton = (page) => page.locator('button[title="用系统默认程序打开"]:visible').first();
+
+await shoot(page, "100-results-open-file-missing", {
+  query: "?openfile=missing",
+  after: async (page) => {
+    await openFindings(page);
+    await selectFirstFinding(page);
+    await openFileButton(page).click();
+    await page.waitForTimeout(700);
+  },
+  expect: async (page) => {
+    const out = [];
+    const toast = await page.locator("[data-sonner-toast]").first().innerText().catch(() => "");
+    if (!toast) return ["a file that is gone was refused with no message at all"];
+    if (!/已经不在原处/.test(toast)) out.push(`a missing file is not reported as missing (toast: "${toast.slice(0, 60)}")`);
+    if (!/src\/service\.go/.test(toast)) out.push("the toast does not say which file is gone");
+    if (/没有能打开它的程序/.test(toast)) out.push("a deleted file is reported as having no handler");
+    return out;
+  },
+});
+
+await shoot(page, "101-results-open-file-failed", {
+  query: "?openfile=failed",
+  after: async (page) => {
+    await openFindings(page);
+    await selectFirstFinding(page);
+    await openFileButton(page).click();
+    await page.waitForTimeout(700);
+  },
+  expect: async (page) => {
+    const out = [];
+    const toast = await page.locator("[data-sonner-toast]").first().innerText().catch(() => "");
+    if (!toast) return ["a file with no handler was refused with no message at all"];
+    if (!/没有能打开它的程序/.test(toast)) out.push(`a shell refusal is not named as such (toast: "${toast.slice(0, 60)}")`);
+    if (!/no application is associated/.test(toast)) out.push("the shell's own sentence did not reach the toast");
+    if (/已经不在原处/.test(toast)) out.push("a file that exists is reported as gone");
+    return out;
+  },
+});
+
 await browser.close();
 server.close();
 

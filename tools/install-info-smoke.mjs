@@ -338,6 +338,50 @@ for (const platform of ["darwin", "linux"]) {
     JSON.stringify(res)
   );
   check("and the failure still names the action and the path", res.action === "open-file" && res.path === target, JSON.stringify(res));
+  check(
+    "a shell refusal is reported as the shell's own, not as a missing file",
+    res.reason === "open-failed",
+    JSON.stringify(res)
+  );
+}
+
+{
+  // A file the review names but the working tree no longer has: the branch moved
+  // on, or the finding came from a ref that never carried it. `shell.openPath()`
+  // answers this with the same "Failed to open path" it answers a missing
+  // handler with, so the two would be the same sentence — and 「没有能打开它的
+  // 程序」 over a deleted file is advice about the wrong thing. The file's absence
+  // is therefore decided before the shell is asked.
+  const shell = makeShell();
+  const tools = make({ packaged: true, resources: path.join(installed, "resources"), shell });
+  const gone = path.join(installed, "src", "removed.go");
+  const res = await tools.openFile(gone);
+  check("a file that is not there is refused", res.ok === false, JSON.stringify(res));
+  check("with a reason of its own", res.reason === "missing", JSON.stringify(res));
+  check("and a sentence that names the path", res.error.includes(gone), res.error);
+  check("the shell is not asked to open a path nothing exists at", shell.calls.open.length === 0, JSON.stringify(shell.calls));
+  check("the action and the path are still answered", res.action === "open-file" && res.path === gone, JSON.stringify(res));
+}
+
+{
+  // The existence check is the module's own seam (`exists`), so a stubbed
+  // filesystem answers it too — without this the check would be reading the real
+  // disk and could not be pinned either way round.
+  const shell = makeShell();
+  const tools = make({ packaged: true, resources: path.join(installed, "resources"), shell, exists: () => false });
+  const res = await tools.openFile(path.join(installed, "Open Code Review.exe"));
+  check("an injected filesystem that says the file is gone is believed", res.ok === false && res.reason === "missing", JSON.stringify(res));
+  check("and the shell is left alone for it as well", shell.calls.open.length === 0, JSON.stringify(shell.calls));
+}
+
+{
+  // An empty path and a missing file are the two refusals before the shell, and
+  // they are not the same refusal: one is "nothing was asked for", the other is
+  // "this file is gone". The renderer shows a path for the second.
+  const shell = makeShell();
+  const tools = make({ packaged: true, resources: path.join(installed, "resources"), shell });
+  const empty = await tools.openFile("");
+  check("an empty path has its own reason", empty.reason === "no-file", JSON.stringify(empty));
 }
 
 {

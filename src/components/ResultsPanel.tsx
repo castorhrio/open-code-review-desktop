@@ -135,11 +135,23 @@ function FileViewer({
               onClick={async () => {
                 if (!file.absPath) return;
                 // `openPath` fails by resolving to an error string, so the main
-                // process reads it and answers `{ ok, error }`. Ignoring it here
-                // (what this button used to do) means a file with no handler
-                // looks exactly like one that opened.
+                // process reads it and answers `{ ok, reason, error }`. Ignoring
+                // it here (what this button used to do) means a file with no
+                // handler looks exactly like one that opened.
+                //
+                // Two failures, two sentences: a reviewed file that is gone from
+                // the working tree is a normal consequence of reviewing a branch,
+                // and the shell's "failed to open path" says nothing about it.
                 const res = await api.openFile(file.absPath);
-                if (!res.ok) toast.error("无法打开", { description: res.error });
+                if (!res.ok) {
+                  if (res.reason === "missing")
+                    toast.error("这个文件已经不在原处", {
+                      description: `可能被移动或删除了，只剩被审查的 ref 里那份：${res.path || file.absPath}`,
+                    });
+                  else if (res.reason === "open-failed")
+                    toast.error("没有能打开它的程序", { description: res.error });
+                  else toast.error("无法打开", { description: res.error });
+                }
               }}
             >
               <ExternalLink className="size-3.5" />

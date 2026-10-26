@@ -168,11 +168,21 @@ function createInstall({
   // The two module names are separate on purpose: `open-dir` and `open-file`
   // differ in `path` too (a directory vs. the file inside it), and a caller that
   // logs or reports the action should not have to guess which was pressed.
+  //
+  // It answers with a `reason` as well, because the two failures want different
+  // advice and `shell.openPath()` gives both the same kind of sentence. A
+  // reviewed file can be gone from the working tree (the finding names a path in
+  // the ref that was reviewed, and the branch has moved on since); a file that
+  // is still there can have no handler for its type. "Failed to open path" fits
+  // both, so the *missing* one is decided here, before the shell is asked — the
+  // renderer then says 「不在了」 with the path instead of repeating the shell.
   async function openFile(target) {
-    if (!target) return { ok: false, error: "没有可打开的文件", action: OPEN_FILE, path: "" };
+    if (!target) return { ok: false, error: "没有可打开的文件", reason: "no-file", action: OPEN_FILE, path: "" };
+    if (!exists(target))
+      return { ok: false, error: `文件不存在：${target}`, reason: "missing", action: OPEN_FILE, path: target };
     const error = await shell.openPath(target);
     return error
-      ? { ok: false, error, action: OPEN_FILE, path: target }
+      ? { ok: false, error, reason: "open-failed", action: OPEN_FILE, path: target }
       : { ok: true, action: OPEN_FILE, path: target };
   }
 

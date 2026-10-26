@@ -68,8 +68,20 @@ export interface Bridge {
   }): Promise<FileWindow>;
   /** Same shape as `revealFile`: `shell.openPath` fails by resolving to an error
    *  string, so the main process reads it and answers `ok: false` — a bare string
-   *  would make "did not open" indistinguishable from "opened". */
-  openFile(absPath: string): Promise<{ ok: boolean; action?: "open-file"; path?: string; error?: string }>;
+   *  would make "did not open" indistinguishable from "opened".
+   *
+   *  `reason` says which of the three refusals it was. `missing` is decided
+   *  before the shell is asked (the file is gone from the working tree, which is
+   *  what a finding on a moved branch produces) and deserves its own sentence;
+   *  `open-failed` is the shell's own "no handler / refused" answer, which has
+   *  nothing to add to what it says. */
+  openFile(absPath: string): Promise<{
+    ok: boolean;
+    action?: "open-file";
+    path?: string;
+    reason?: "no-file" | "missing" | "open-failed";
+    error?: string;
+  }>;
   revealFile(
     absPath: string
   ): Promise<{ ok: boolean; action?: "reveal" | "open-parent"; path?: string; missing?: string; error?: string }>;
