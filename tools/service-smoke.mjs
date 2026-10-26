@@ -472,7 +472,7 @@ check(
 );
 // ...and the real CLI's answer, end to end: this is the list the view judges
 // built-in names by.
-const registry = await svc.presetNames();
+const registry = await svc.presetRegistry();
 check(
   "the CLI's own built-in service list reads back",
   registry.ok && registry.names.includes("deepseek") && registry.matched > 0 && !registry.names.includes("NAME"),
@@ -571,7 +571,7 @@ check(
   `${spawns} spawn(s) | ${JSON.stringify(afterWindow)}`
 );
 // Back to the real CLI: a cached failure must not outlive the failure.
-const afterFailure = await svc.presetNames({ refresh: true });
+const afterFailure = await svc.presetRegistry({ refresh: true });
 check(
   "the real list still reads back after a failed one was cached",
   afterFailure.ok && !afterFailure.cached && afterFailure.names.includes("deepseek"),
@@ -595,7 +595,7 @@ const readiness = (config, env = {}, extra = {}) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-config-"));
   const file = path.join(dir, "config.json");
   if (config) fs.writeFileSync(file, JSON.stringify(config));
-  // `extra` carries the built-in registry (`presetNames`): the view is a pure
+  // `extra` carries the built-in registry (`presetList`): the view is a pure
   // function of the file plus that list, and the list is the CLI's own.
   const view = svc.readConfigView({ configPath: file, env, ...extra });
   fs.rmSync(dir, { recursive: true, force: true });
@@ -840,7 +840,7 @@ check(
  * has its own key.
  */
 const PRESETS = ["anthropic", "deepseek", "dashscope"];
-const withPresets = (config, env = {}) => readiness(config, env, { presetNames: PRESETS });
+const withPresets = (config, env = {}) => readiness(config, env, { presetList: PRESETS });
 const handEdited = withPresets({
   provider: "corp-gateway",
   providers: { "corp-gateway": { api_key: "sk-test", model: "qwen3-max" } },
@@ -1550,6 +1550,187 @@ check(
 );
 svc.resetPresetCache();
 fs.rmSync(presetDir, { recursive: true, force: true });
+
+/* ---- one rule, two ends ----
+ * The settings page asks the main process "may I leave the Key blank for what
+ * this form is pointed at?", and the main process answers by comparing the
+ * saved Key's host with the form's host. Both ends read the same two sources —
+ * the entry's own `url` and the built-in table — but they read them in opposite
+ * orders: the main process let the entry win (which is what the CLI does, see
+ * `serviceEndpoint`), while the renderer let the table win. For a service whose
+ * entry names a URL of its own — a gateway, a proxy — the form therefore showed
+ * and tested a host the CLI would never use, and the Key that belongs to the
+ * entry was withheld as "belongs to another endpoint".
+ *
+ * The rule now lives in one place, the config view hands the renderer the
+ * endpoint it resolved, and the checks below hold the two ends to it: one
+ * config, one table, one endpoint.
+ */
+const TABLE = {
+  ok: true,
+  names: ["deepseek", "anthropic"],
+  rows: [
+    { name: "deepseek", protocol: "openai", url: DEEPSEEK_URL },
+    { name: "anthropic", protocol: "anthropic", url: "https://api.anthropic.com" },
+  ],
+  matched: 2,
+  error: "",
+};
+const presetUrlOf = (name) => (TABLE.rows.find((row) => row.name === name) || {}).url || "";
+
+// What the settings page shows and what the Key decision compared against, on
+// one config and one table. `otherOrder` is the same question asked the way the
+// renderer used to ask it — with the table's endpoint as the form's endpoint —
+// so the difference between the two answers is visible.
+const ends = (config, name) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-ends-"));
+  const file = path.join(dir, "config.json");
+  fs.writeFileSync(file, JSON.stringify(config));
+  const view = svc.readConfigView({ configPath: file, env: {}, presetList: TABLE });
+  const shown = view.endpoints[name] || "";
+  const lookup = svc.savedKeyLookup(name, shown, file, presetUrlOf(name), { tableUnavailable: false });
+  const otherOrder = svc.savedKeyLookup(name, presetUrlOf(name), file, presetUrlOf(name), { tableUnavailable: false });
+  fs.rmSync(dir, { recursive: true, force: true });
+  return { view, shown, lookup, otherOrder };
+};
+
+// A built-in service configured the way this app configures it — a Key and a
+// model, no URL — resolves to the table's endpoint, and both ends say so.
+const presetNoUrl = ends({ providers: { deepseek: { api_key: "sk-deep" } } }, "deepseek");
+check(
+  "the endpoint on screen and the endpoint the Key was compared against are one host",
+  presetNoUrl.shown === DEEPSEEK_URL && presetNoUrl.lookup.endpoint === DEEPSEEK_URL,
+  `${presetNoUrl.shown} | ${presetNoUrl.lookup.endpoint}`
+);
+// The entry's own URL wins over the table's — the CLI's order, not the
+// renderer's. This is the shape the inversion broke.
+const entryOwnUrl = ends(
+  {
+    provider: "deepseek",
+    providers: { deepseek: { url: "https://llm.corp.internal/v1", api_key: "sk-deep" } },
+  },
+  "deepseek"
+);
+check(
+  "an entry that names its own URL wins over the table's",
+  entryOwnUrl.shown === "https://llm.corp.internal/v1" && entryOwnUrl.lookup.endpoint === "https://llm.corp.internal/v1",
+  `${entryOwnUrl.shown} | ${entryOwnUrl.lookup.endpoint}`
+);
+check(
+  "and the table's endpoint is not what the form is pointed at",
+  entryOwnUrl.shown !== presetUrlOf("deepseek"),
+  entryOwnUrl.shown
+);
+// The Key belongs to that entry, and the form now points at that entry's host,
+// so it is reusable — the answer the old order lost.
+check(
+  "the Key of that entry is reusable, because the form points at its own host",
+  entryOwnUrl.lookup.reason === "" && entryOwnUrl.lookup.key === "sk-deep",
+  `${entryOwnUrl.lookup.reason} | ${entryOwnUrl.lookup.key}`
+);
+
+/* ---- the table and the entry: every combination, one answer ----
+ * `savedKeyLookup` has three inputs about the endpoint: the entry's own URL,
+ * the built-in table's URL for this name, and whether the table could be read
+ * at all. Each combination has one right answer, and the answers are not
+ * interchangeable — a Key withheld for the wrong reason sends the user to fix
+ * something that is not broken.
+ *
+ *   table read + the entry has no URL  → the table's URL is the host
+ *   table read + the entry has a URL   → the entry's URL is the host, and the
+ *                                         table's URL is a *different* host
+ *   table unread + the entry has no URL → the host is unknown: "table-unavailable"
+ *   table unread + the entry has a URL  → the entry's URL is the host anyway
+ *
+ * The second row is the one the old renderer kept asking about: it named the
+ * table's endpoint as the form's endpoint, and the answer was "this Key belongs
+ * to another endpoint" — correct about the request, wrong about the service.
+ *
+ * And the name that is not in the table at all: that is a custom service, and
+ * the table has nothing to say about *its* endpoint — the entry's own URL is
+ * the only source, so an entry without one names no host and no Key is handed
+ * to one. That is reported as "url-mismatch", the same answer as "the Key
+ * belongs to another endpoint": from the form's side both say the Key is not
+ * going to the host this form names, and the fix is the same one (fill the
+ * Base URL in, or type the Key).
+ *
+ * One thing the table's state decides even for a custom service: *which
+ * section* the CLI reads. `tryProviderConfig` picks the section by the name
+ * (`providers` for a built-in name, `custom_providers` for every other), so a
+ * table that could not be read leaves that question open — hence a custom
+ * service whose entry has no URL is also "table-unavailable" while the table
+ * is unreadable, and "url-mismatch" once it can be read.
+ */
+const customEntry = { custom_providers: { "corp-gateway": { url: gateway.url, api_key: "sk-custom" } } };
+const customSame = savedKeyResult(customEntry, "corp-gateway", gateway.url, "", { tableUnavailable: false });
+check(
+  "a custom service that is not in the table keeps its own endpoint",
+  customSame.key === "sk-custom" && customSame.reason === "" && customSame.endpoint === gateway.url,
+  `${customSame.reason} | ${customSame.endpoint}`
+);
+const customOther = savedKeyResult(customEntry, "corp-gateway", "https://elsewhere.example/v1", "", {
+  tableUnavailable: false,
+});
+check(
+  "and a Key is not handed to a host its entry does not name",
+  customOther.key === "" && customOther.reason === "url-mismatch" && customOther.endpoint === gateway.url,
+  `${customOther.reason} | ${customOther.endpoint}`
+);
+const customNoUrl = savedKeyResult({ custom_providers: { "corp-gateway": { api_key: "sk-custom" } } }, "corp-gateway", gateway.url, "", {
+  tableUnavailable: false,
+});
+check(
+  "a custom entry that names no host hands its Key to nobody",
+  customNoUrl.key === "" && customNoUrl.reason === "url-mismatch" && customNoUrl.endpoint === "",
+  `${customNoUrl.reason} | ${customNoUrl.endpoint}`
+);
+const customUnread = savedKeyResult({ custom_providers: { "corp-gateway": { api_key: "sk-custom" } } }, "corp-gateway", gateway.url, "", {
+  tableUnavailable: true,
+});
+check(
+  "and while the table is unreadable, even a custom service's section is unknown",
+  customUnread.key === "" && customUnread.reason === "table-unavailable",
+  `${customUnread.reason} | ${customUnread.key}`
+);
+// And the table's state for a built-in service, the combination the wording
+// calls out as its own cause.
+const presetUnread = savedKeyResult({ providers: { deepseek: { api_key: "sk-deep" } } }, "deepseek", DEEPSEEK_URL, "", {
+  tableUnavailable: true,
+});
+check(
+  "a built-in service with no URL of its own cannot say which host its Key belongs to",
+  presetUnread.key === "" && presetUnread.reason === "table-unavailable" && presetUnread.endpoint === "",
+  `${presetUnread.reason} | ${presetUnread.endpoint}`
+);
+const presetRead = savedKeyResult({ providers: { deepseek: { api_key: "sk-deep" } } }, "deepseek", DEEPSEEK_URL, DEEPSEEK_URL, {
+  tableUnavailable: false,
+});
+check(
+  "and once the table can be read, that same service names its host",
+  presetRead.key === "sk-deep" && presetRead.reason === "" && presetRead.endpoint === DEEPSEEK_URL,
+  `${presetRead.reason} | ${presetRead.endpoint}`
+);
+// The old order, asked one last time: the table's endpoint as the form's
+// endpoint, for a service whose entry names its own. The Key is withheld —
+// correctly, because that request pointed the Key at another host.
+check(
+  "naming the table's endpoint for an entry that has its own is a mismatch",
+  entryOwnUrl.otherOrder.key === "" && entryOwnUrl.otherOrder.reason === "url-mismatch",
+  `${entryOwnUrl.otherOrder.reason} | ${entryOwnUrl.otherOrder.key}`
+);
+check(
+  "and the mismatch is reported with the endpoint it was about",
+  entryOwnUrl.otherOrder.endpoint === "https://llm.corp.internal/v1",
+  entryOwnUrl.otherOrder.endpoint
+);
+// The one rule, called directly: the two ends above agree because they call it.
+check(
+  "the rule is the entry's URL, else the table's",
+  svc.serviceEndpoint({ url: "https://llm.corp.internal/v1" }, DEEPSEEK_URL) === "https://llm.corp.internal/v1" &&
+    svc.serviceEndpoint({}, DEEPSEEK_URL) === DEEPSEEK_URL &&
+    svc.serviceEndpoint({ url: "https://llm.corp.internal/v1/" }, DEEPSEEK_URL) === "https://llm.corp.internal/v1",
+  `${svc.serviceEndpoint({ url: "https://llm.corp.internal/v1" }, DEEPSEEK_URL)}`
+);
 
 /* ---- six causes, six sentences ----
  * The reason codes existed so the settings page could stop saying one sentence

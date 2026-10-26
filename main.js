@@ -433,7 +433,7 @@ ipcMain.handle("file:openUrl", (_e, url) => {
  * re-render, which would make that button the one thing that does *not* retry.
  */
 const configView = async (refresh = false) =>
-  ocr.readConfigView({ presetNames: await ocr.presetNames({ refresh }) });
+  ocr.readConfigView({ presetList: await ocr.presetRegistry({ refresh }) });
 
 ipcMain.handle("config:read", (_e, opts) => configView(Boolean(opts && opts.refresh)));
 
@@ -448,10 +448,24 @@ ipcMain.handle("config:read", (_e, opts) => configView(Boolean(opts && opts.refr
 // (`ocr llm providers`), which the renderer does not hold: the form's Base URL
 // for a built-in service is prefilled from that table, so asking here keeps the
 // answer and the field it is about on the same source.
+//
+// The answer also carries the two facts the renderer used to have to work out
+// for itself, and got wrong: `endpoint` is the host the service resolves to (the
+// same `serviceEndpoint` the config view uses, so the endpoint the Key is
+// compared against and the endpoint on screen are one host), and `tableOk` says
+// whether the built-in table could be read at all — so the banner about that
+// table and the sentence under the Key field come from one answer.
 ipcMain.handle("config:savedKey", async (_e, req) => {
   const form = req || {};
   const found = await ocr.savedKeyLookupByName(form.name, form.url);
-  return { ok: true, available: Boolean(found.key), reason: found.reason, hint: ocr.savedKeyFieldHint(found.reason) };
+  return {
+    ok: true,
+    available: Boolean(found.key),
+    reason: found.reason,
+    hint: ocr.savedKeyFieldHint(found.reason),
+    endpoint: found.endpoint,
+    tableOk: found.tableOk,
+  };
 });
 
 ipcMain.handle("config:save", async (_e, form) => {

@@ -266,6 +266,17 @@ export interface ConfigView {
   maxTokens: number;
   providers: Record<string, ProviderEntry>;
   customProviders: Record<string, ProviderEntry>;
+  /**
+   * The endpoint each known service resolves to, keyed by service name.
+   *
+   * It is computed in the main process, by the same rule the saved-Key decision
+   * uses (`serviceEndpoint` in `ocr-service.js`): the entry's own `url` if it
+   * has one, otherwise the built-in service's registered base URL. The settings
+   * page shows this and tests against it rather than deriving a second copy of
+   * the rule — a copy that read the two sources in the other order and pointed
+   * the form at a host the CLI would never use.
+   */
+  endpoints: Record<string, string>;
   llm: { url: string; model: string; protocol: string; hasToken: boolean; tokenPreview: string };
   envSources: string[];
   envCredentials: string[];

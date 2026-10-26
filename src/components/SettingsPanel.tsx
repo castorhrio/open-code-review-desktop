@@ -92,7 +92,21 @@ export function SettingsPanel() {
   const name = isCustomTarget ? customName.trim() : picked;
   const entry = (config && (config.providers[name] || config.customProviders[name])) || ({} as ProviderEntry);
   const builtIn = providers.find((p) => p.name === name);
-  const endpoint = (isCustomTarget ? customUrl : builtIn?.url || entry.url || "").trim();
+  // The endpoint is the main process's answer, not a second reading of the same
+  // two sources: the config view resolves it with the rule the CLI resolves it
+  // with (the entry's own `url`, else the built-in service's registered base
+  // URL — `url = preset.BaseURL; if entry.URL != "" { url = entry.URL }` in
+  // `internal/llm/resolver.go`, v1.13.3).
+  //
+  // This page used to read the two the other way round — the table's URL first,
+  // the entry's second — so for a service whose entry names a URL of its own
+  // (a gateway, a proxy) the form showed and tested a host the CLI would never
+  // use, and the Key that belongs to that entry was withheld as "belongs to
+  // another endpoint". One rule, one place.
+  //
+  // A custom service is the exception: the user is typing its endpoint, so the
+  // typed value is the one being tested.
+  const endpoint = (isCustomTarget ? customUrl : (config && config.endpoints?.[name]) || "").trim();
 
   // "May I leave the Key box blank for what this form is pointed at?" is a
   // question only the main process can answer: the endpoint of a built-in
@@ -102,6 +116,12 @@ export function SettingsPanel() {
   // and simply not reusable. Three different fixes hid behind that sentence
   // (press 刷新 / put the endpoint back / retype the Key), so the form shows the
   // cause it was given instead.
+  //
+  // The answer only reached the screen after the *shape* of the request was
+  // fixed: the preload took two positional arguments while this call passes
+  // the object the interface promises, so the main process used to receive the
+  // name as an object and answer "no Key saved" for every service. The bridge
+  // contract check now holds that shape (see `tools/bridge-contract.mjs`).
   useEffect(() => {
     if (!config || !name) {
       setSavedKey(null);
@@ -131,6 +151,13 @@ export function SettingsPanel() {
       </Page>
     );
   const configuredNames = new Set([...Object.keys(config.providers), ...Object.keys(config.customProviders)]);
+  // Whether the CLI's built-in service table could be read. The last lookup
+  // answers it, because that is the same read the Key sentence below is built
+  // from — so the banner and the sentence under the Key field cannot disagree
+  // about the table ("the list is unreadable" next to "your Key is fine" was
+  // possible while the two came from different reads). Before the first
+  // lookup lands, the config view's own answer is used.
+  const tableUnreadable = savedKey ? !savedKey.tableOk : config.presetRegistry === "unavailable";
   const pickable = providers.filter((p) => !config.customProviders[p.name]);
   const visibleProviders = showAllProviders
     ? pickable
@@ -245,7 +272,7 @@ export function SettingsPanel() {
                 one that called a refused config "ready". A fallback the user
                 cannot see is a silent downgrade, so it is said out loud, next to
                 the badge that it makes less trustworthy. */}
-            {config.presetRegistry === "unavailable" && (
+            {tableUnreadable && (
               <p
                 className="mb-4 flex items-start gap-1.5 text-body text-warn"
                 title={config.presetRegistryError || undefined}

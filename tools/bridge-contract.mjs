@@ -34,6 +34,8 @@ const check = (name, ok, detail) => {
 // ---------------------------------------------------------------------------
 let exposedKey = null;
 let exposed = null;
+// Every `ipcRenderer.invoke` the preload made, with what it forwarded.
+const invoked = [];
 
 const electronStub = {
   contextBridge: {
@@ -44,8 +46,13 @@ const electronStub = {
   },
   ipcRenderer: {
     // Never reached at load time — preload's methods are lazy closures — but the
-    // stub has to exist or requiring the module throws.
-    invoke: () => Promise.resolve(),
+    // stub has to exist or requiring the module throws. What it *does* record is
+    // what each method forwards, which is how the argument shapes are checked
+    // below.
+    invoke: (channel, ...args) => {
+      invoked.push({ channel, args });
+      return Promise.resolve();
+    },
     on: () => {},
     removeListener: () => {},
   },
@@ -83,6 +90,7 @@ check("preload exposes at least one method", real.length > 0, `${real.length} me
 // What the interface promises.
 // ---------------------------------------------------------------------------
 const apiTs = fs.readFileSync(path.join(root, "src/lib/api.ts"), "utf8");
+const preloadSrc = fs.readFileSync(preloadPath, "utf8");
 const bridgeBody = apiTs.match(/export interface Bridge \{([\s\S]*?)\n\}/);
 check("the Bridge interface is where this check expects it", Boolean(bridgeBody), bridgeBody ? "" : "could not find `export interface Bridge {` in src/lib/api.ts");
 
@@ -108,11 +116,158 @@ check(
   undeclared.length ? `exposed but not declared: ${undeclared.join(", ")}` : ""
 );
 
+// ---------------------------------------------------------------------------
+// The shape of the arguments, not just the names.
+// ---------------------------------------------------------------------------
+// A method that exists on both sides but takes its arguments in a different
+// shape was invisible here: the preload rebuilt the request from two positional
+// arguments, and a caller that passed the object the interface promises had it
+// arrive as *the name*. The main process then looked up a service called
+// "[object Object]", found nothing, and answered "no Key saved" — for every
+// service, forever. The six causes the Key wording distinguishes never reached
+// the screen, and nothing here noticed.
+//
+// So the shape is checked in two ways: the number of parameters each side
+// declares, and the values a caller passes — which must arrive at the main
+// process under the names the interface gave them, not nested one level deeper
+// under some other key.
+const splitTopLevel = (text, separators = [",", ";"]) => {
+  const parts = [];
+  let depth = 0;
+  let current = "";
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    // `=>` is an arrow, not a closing angle bracket: without this, a callback
+    // type would unbalance every counter below it.
+    if (ch === "=" && text[i + 1] === ">") {
+      current += "=>";
+      i++;
+      continue;
+    }
+    if (ch === "(" || ch === "{" || ch === "[" || ch === "<") depth++;
+    else if (ch === ")" || ch === "}" || ch === "]" || ch === ">") depth--;
+    if (depth === 0 && separators.includes(ch)) {
+      parts.push(current);
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim()) parts.push(current);
+  return parts.map((part) => part.trim()).filter(Boolean);
+};
+
+// The parameter list the interface declares for one method.
+const interfaceParams = (body, name) => {
+  const found = new RegExp(`^ {2}${name}\\b`, "m").exec(body);
+  if (!found) return null;
+  const open = body.indexOf("(", found.index);
+  if (open < 0) return null;
+  let depth = 0;
+  for (let i = open; i < body.length; i++) {
+    if (body[i] === "(") depth++;
+    else if (body[i] === ")") {
+      depth--;
+      if (depth === 0) return splitTopLevel(body.slice(open + 1, i), [","]);
+    }
+  }
+  return null;
+};
+
+// The parameter list the preload declares for one method.
+const preloadParams = (src, name) => {
+  const found = new RegExp(`\\b${name}\\s*:\\s*(?:async\\s*)?\\(([^)]*)\\)`).exec(src);
+  if (!found) return null;
+  return found[1]
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+};
+
+// The keys of an inline object type, e.g. `{ name: string; url: string }`.
+const objectTypeKeys = (typeText) => {
+  const text = typeText.trim();
+  if (!text.startsWith("{")) return [];
+  const close = text.lastIndexOf("}");
+  if (close < 0) return [];
+  return splitTopLevel(text.slice(1, close))
+    .map((member) => member.split(":")[0].replace(/\?$/, "").trim())
+    .filter((key) => /^[A-Za-z_$][\w$]*$/.test(key));
+};
+
+const arityMismatches = [];
+const shapeMismatches = [];
+for (const name of declared) {
+  const wanted = interfaceParams(bridgeBody[1], name);
+  const actual = preloadParams(preloadSrc, name);
+  if (!wanted || !actual) continue;
+  if (wanted.length !== actual.length)
+    arityMismatches.push(`${name}: the interface declares ${wanted.length}, the preload takes ${actual.length}`);
+  if (!wanted.length) continue;
+
+  // The probe: an object with one marker per key when the interface promises an
+  // object, positional markers otherwise.
+  const paramName = wanted[0].split(":")[0].replace(/\?$/, "").trim();
+  const typeText = wanted[0].includes(":") ? wanted[0].slice(wanted[0].indexOf(":") + 1) : "";
+  const keys = objectTypeKeys(typeText);
+  let args = [];
+  let markers = [];
+  if (keys.length) {
+    const probe = {};
+    for (const key of keys) probe[key] = `probe:${name}:${key}`;
+    markers = Object.values(probe);
+    args = [probe];
+  } else {
+    markers = wanted.map((_, i) => `probe:${name}:${i}`);
+    args = [...markers];
+  }
+
+  invoked.length = 0;
+  try {
+    exposed[name](...args);
+  } catch (err) {
+    shapeMismatches.push(`${name}: calling it with the interface's shape threw ${err && err.message}`);
+    continue;
+  }
+  // A method that only listens sends nothing; its shape is not a request.
+  if (!invoked.length) continue;
+  const payload = invoked[0].args[0];
+  const top = [];
+  const wrapped = {};
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    for (const [key, value] of Object.entries(payload)) {
+      top.push(value);
+      wrapped[key] = value;
+    }
+  } else {
+    top.push(payload);
+  }
+  // The markers have to arrive as they were sent: at the top level, or inside
+  // the one object the interface named (that is how a preload may wrap a
+  // request: `invoke("config:test", { form })`).
+  const inner = wrapped[paramName];
+  const innerValues = inner && typeof inner === "object" ? Object.values(inner) : [];
+  const missing = markers.filter((marker) => !top.includes(marker) && !innerValues.includes(marker));
+  if (missing.length)
+    shapeMismatches.push(
+      `${name}: the main process receives ${JSON.stringify(payload)} — ${missing.length} of the values the caller sent never arrive under the interface's names`
+    );
+}
+check(
+  "every method takes the number of arguments the interface declares",
+  arityMismatches.length === 0,
+  arityMismatches.join(" | ")
+);
+check(
+  "and the values a caller sends reach the main process under the interface's names",
+  shapeMismatches.length === 0,
+  shapeMismatches.join(" | ")
+);
+
 // A channel name is a string on both sides, so a typo is a call that never
 // resolves rather than an error anyone sees. Read the names out of the source:
 // the exposed methods are lazy closures, so nothing is invoked during load and
 // watching the stub would report an empty set (which it did, the first time).
-const preloadSrc = fs.readFileSync(preloadPath, "utf8");
 const invokeChannels = new Set([...preloadSrc.matchAll(/ipcRenderer\.invoke\(\s*"([^"]+)"/g)].map((m) => m[1]));
 const listenChannels = new Set([...preloadSrc.matchAll(/ipcRenderer\.on\(\s*"([^"]+)"/g)].map((m) => m[1]));
 

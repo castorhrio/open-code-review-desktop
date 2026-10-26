@@ -6,7 +6,7 @@
 
 ---
 
-## 上游状态（最近检查：2026-10-26，第 6 轮复核）
+## 上游状态（最近检查：2026-10-26，第 9 轮复核）
 
 上游 `alibaba/open-code-review` 自 desktop 锁定的 `v1.13.0` 之后发布了
 **3 个补丁版本**：`v1.13.1` / `v1.13.2` / `v1.13.3`（共 18 个 commit）。
@@ -22,8 +22,12 @@
 | 4 | 2026-10-26 | `375f64c` | `v1.13.3` | 无新内容（这次 `git fetch upstream --tags` 成功，与本地 ref 一致） |
 | 5 | 2026-10-26 | `375f64c`（2026-10-20） | `v1.13.3`（2026-10-22 发布） | 无新内容（`git fetch` 成功 + API 双核对） |
 
-结论：连续 5 轮没有需要移植的新功能 / 修复 / 破坏性变更，desktop 的封装（CLI flag、
+结论：连续 8 轮没有需要移植的新功能 / 修复 / 破坏性变更，desktop 的封装（CLI flag、
 输出解析、配置暴露点）无需改动。若某轮顶端 commit 仍为 `375f64c`，本表不新增行。
+
+第 9 轮的核对方式与第 2/3 轮相同：`git fetch upstream --tags` 在这台机器的沙箱里
+挂住（无输出直到超时），改用 GitHub API 核对——`commits?sha=main` 顶端仍是
+`375f64c`（2026-10-20），`tags` 仍是 `v1.13.3` / `v1.13.2` / `v1.13.1`。
 
 只是拉 tag 时会看到几条 `would clobber existing tag`（本仓也用 `v0.1.x` 编号，
 与上游 tag 撞名）：那是本地 remote 的 tag 同步提示，不影响 `upstream/main` 的
@@ -427,6 +431,134 @@ if isPreset { entry, ok = cfg.Providers[cfg.Provider] } else { ... }
 
 ---
 
+## 本轮 desktop 侧加固（与上游无关，第 8 轮）
+
+> 这一节是补记的：第 8 轮的代码（`6809a1d` … `9b60c87`，十个提交）早已落地，
+> 正文却一直没写，所以「文档落后于代码」这件事本身，把下一轮的上游复核也带偏了。
+
+上游顶端仍是 `375f64c` / `v1.13.3`（无新提交）。本轮把「保存的 Key 属于哪一条服务
+条目」这条判定从渲染层搬进主进程：**判定与措辞同处一地**，设置页不再自己猜端点、
+自己编句子。
+
+### 落地的东西
+
+- `ocr-service.js` 的 `entryByName`：四条匹配规则（精确 / 配置自己的 `provider` /
+  注册表拼法 / 文件顺序），每条都带名字。四条规则是一条 `if/else` 链，所以**顺序就是
+  语义**——把一条挪到另一条下面，不会有任何测试变红，只会悄悄换一个条目。规则常量
+  与函数一并导出，`tools/service-smoke.mjs` 逐条断言「是哪条规则答的」。
+- `ocr-service.js` 的 `savedKeyLookup`：六种扣下 Key 的原因（`config-unreadable` /
+  `no-entry` / `order-guess` / `url-mismatch` / `no-key` / `table-unavailable`），外加
+  一个**保守的默认值**：没说读过内置服务表，就当没读过（早先的默认是「读过，但表里
+  没有」——那会把 Key 交给表单上任何一个地址）。
+- `main.js` 新增 `config:savedKey` 通道；`SettingsPanel.tsx` 改为呈现主进程给出的原因，
+  措辞由 `savedKeyFieldHint` / `savedKeyTestMessage` 生成（两种说法、六种原因各自一句）。
+
+### 这一轮的判定链，两端还没有对到一起
+
+判定链是三段：**主进程算端点 → 主进程比对 Key 的归属 → 渲染层显示同一个端点**。
+第 8 轮把前两段搬进了主进程，第三段还在渲染层里自己算——而且算的是**反过来的
+优先级**（详见第 9 轮）。当时没有任何断言看着这一段，所以它可以一直错着。
+
+---
+
+## 本轮 desktop 侧加固（与上游无关，第 9 轮）
+
+上游顶端仍是 `375f64c` / `v1.13.3`（第 9 轮复核，GitHub API 核对；`git fetch` 在
+沙箱里挂住）。本轮只做一件事：**把上一轮那套判定真正接到屏幕上**，并把它依赖的两条
+接缝钉成会 FAIL 的断言。
+
+### P0 — 六种扣 Key 原因，一句也没到过屏幕
+
+`preload.js` 的 `savedKey` 收**两个位置参数**并自己拼成对象：
+
+```js
+savedKey: (name, url) => ipcRenderer.invoke("config:savedKey", { name, url }),
+```
+
+而接口（`src/lib/api.ts`）与渲染层（`SettingsPanel.tsx`）给的是**一个对象**：
+`api.savedKey({ name, url })`。于是主进程收到的是 `name = { name, url }`——一个
+对象。`entryByName` 拿它去查表，`String(name).toLowerCase()` 得到 `"[object object]"`,
+什么也查不到，于是**每一个服务**都落到 `no-entry`：
+
+```
+改之前 : {"key":"","reason":"no-entry"}
+改之后 : {"key":"sk-deep","reason":""}
+当时的说法: 该服务还没有已保存的 Key，留空保存不会写入 Key。
+```
+
+第 8 轮那套「六种原因各有一句话」的机制，就这样一句也没到过屏幕——设置页永远显示
+「该服务还没有已保存的 Key」，而这正是它当初要取代的那句话。
+
+**为什么没有任何检查发现**：`tools/bridge-contract.mjs` 只比对了**方法名**（声明的
+方法是否都在 preload 上、preload 上的方法是否都声明了），没有比对**参数形状**。
+
+- **改动**（`preload.js`）：`savedKey: (req) => ipcRenderer.invoke("config:savedKey", req)`。
+- **验证**（`tools/bridge-contract.mjs`）：新增两条检查——
+  1. **参数个数**：接口声明几个参数，preload 就该收几个（`savedKey` 原来接口 1 个、
+     preload 2 个）。
+  2. **值的去处**：拿一个探针去调每个方法，看渲染层传出去的值**是不是以接口给的名字
+     原样到了主进程**（不是被再包一层塞进别的键里）。
+  两条都实测过：把 preload 改回旧写法 → 两条同时变红（`savedKey: the interface
+  declares 1, the preload takes 2` / `2 of the values the caller sent never arrive
+  under the interface's names`）。
+
+### P0 — 判定链的两端：端点只有一个来源
+
+第 8 轮留下的那半段接缝，本轮收掉。端点的优先级以前是**反的**：
+
+- 主进程（`savedKeyLookup`）：条目的 `url` 优先，表里的端点兜底——**和 CLI 一致**
+  （`url = preset.BaseURL; if entry.URL != "" { url = entry.URL }`，
+  `internal/llm/resolver.go` @ `v1.13.3`）。
+- 渲染层（`SettingsPanel.tsx`）：**表里的端点优先**，条目的 `url` 兜底。
+
+于是一条自带端点的条目（公司网关、代理）会让设置页指向一个 CLI 永远不会用的主机：
+「测试连通」把 Key 发到那儿，而真正跑审查时 Key 走的是另一台；同时那条 Key 又被判成
+「属于另一个端点」而扣下——两处都错，方向还相反。
+
+- **改动**：
+  - `ocr-service.js` 新增 `serviceEndpoint(entry, presetUrl)`：**一条规则**，两个调用方
+    （配置视图算给渲染层看的端点，`savedKeyLookup` 比对 Key 归属时用它）。
+  - `readConfigView` 的视图多带一个 `endpoints`：名字 → 该服务解析出来的端点。渲染层
+    不再自己算，只读这个。
+  - `SettingsPanel.tsx`：`const endpoint = isCustomTarget ? customUrl : config.endpoints[name]`。
+- **验证**（`tools/service-smoke.mjs`）：同一份 config + 同一张表，断言**视图给渲染层
+  的端点**与 **`savedKeyLookup` 实际用的端点**相等；断言「条目自带端点时，条目赢过表」
+  （把 `serviceEndpoint` 的两个来源调换顺序 → 5 条断言变红，实测）。
+
+### P0 — `tableUnavailable` × `presetUrl` 的组合，逐条钉住
+
+三种输入（条目自己的 url、表里这一行的 url、表能不能读到）各有各的答案，答案之间
+**不能互换**——为错的原因扣下 Key，会把用户送去修一个没坏的东西。
+
+| 形状 | 答案 |
+| --- | --- |
+| 表能读 + 条目没有 url | 表里的 url 就是那台主机 |
+| 表能读 + 条目有 url | 条目的 url 是那台主机；表里的 url 是**另一台** |
+| 表读不到 + 条目没有 url | 主机未知 → `table-unavailable` |
+| 表读不到 + 条目有 url | 条目的 url 仍然是那台主机 |
+
+以及「名字根本不在表里」——那是自定义服务，表对它无话可说，端点只能来自条目自己；
+条目没写 url 就是**没有主机**，Key 不交给任何主机。这一条报的是 `url-mismatch`：
+从表单这一侧看，两种情况说的是同一件事（Key 不会发到这个表单指的地址），修法也是
+同一个（把 Base URL 填上，或把 Key 重新填一遍）。
+
+还有一件表的状态替所有人决定的事：**CLI 读哪一段**（`tryProviderConfig` 按名字选段：
+内置名读 `providers`，其余读 `custom_providers`）。所以表读不到时，连自定义服务读哪
+一段都是未知的——这就是自定义服务在表读不到时也报 `table-unavailable` 的原因。
+
+**验证**（`tools/service-smoke.mjs`）：上表的四种组合 + 自定义服务的三种形状，逐条
+断言「原因」与「端点」两个值。
+
+### P1 — `config:savedKey` 的回答带上表的状态
+
+`config:savedKey` 现在回 `{ ok, available, reason, hint, endpoint, tableOk }`：
+`endpoint` 是这次判定用的主机（与视图里的 `endpoints` 同源），`tableOk` 说内置服务表
+这次能不能读到。设置页那条「读不到内置服务名单」的横幅改用**同一个回答**里的
+`tableOk`——横幅与 Key 提示于是不会各说各话（一个说读到了、一个说读不到）。
+
+---
+
+
 ## 待移植 / 待验证
 
 ### 已完成 — `manifest.run_failure` 的中文映射与展示
@@ -499,9 +631,27 @@ desktop 的「工具调用 N（失败 M）」直接读 CLI 的 `tool_calls.failu
 ## 仍然开放的事项（非上游）
 
 第 5 轮收了「模型名按形态对齐上游」与「`MAX_ENTRIES` 全局裁剪」，第 6 轮收了
-「按名字选配置段」，第 7 轮收了 `entryByName` 的变体取舍；剩下的按优先级排在这里，
+「按名字选配置段」，第 7 轮收了 `entryByName` 的变体取舍，第 8 轮把 Key 归属判定搬进
+主进程，第 9 轮把这条判定真正接到屏幕上并收掉端点那一端；剩下的按优先级排在这里，
 下一轮挑。标注「**未动**」的条目是最近一轮看过、确认仍然成立但没有改的——不是新发现。
 
+- **P1**：`entryByName` 的「精确命中优先」与上游的「按名字选段」在**同名跨段**时
+  不一致。`tryProviderConfig` 先查注册表决定读 `providers` 还是 `custom_providers`，
+  然后用配置里的原始字符串去读那一段；而 `entryByName` 是 `providers[name] ||
+  custom_providers[name]`，所以一个**自定义名**同时被手改进 `providers` 段时，desktop
+  会拿 `providers` 那条（CLI 不会读的）里的 Key。第 6 轮的 `readConfigView` 已经按段
+  读，`entryByName` 还没跟上——它缺的是注册表，所以要么把注册表传进去，要么让调用方
+  先判段。文件 `ocr-service.js`。——**本轮发现，未动**。
+- **P1**：「条目没有写端点」与「Key 属于另一个端点」现在共用 `url-mismatch` 一句话
+  （「已保存的 Key 属于另一个端点」）。对前者这句话其实不准确——那条记录谁也没写
+  端点，Key 不属于任何端点。修法有两条：加第 7 种原因（措辞表、语气表、UI 夹具、
+  本文档的「六种」都要跟着改），或者把这句话改成两种都成立的写法。第 9 轮把这条
+  行为**钉住**并在 `tools/service-smoke.mjs` 的注释里写清它指的是什么，但没改措辞。
+- **P2**：渲染层那一端（设置页把哪个端点发给主进程）现在没有断言看着——它只做一次
+  查表（`config.endpoints[name]`），没有自己的规则，但**万一**有人把优先级写回去，
+  `tools/service-smoke.mjs` 看不见（它测的是主进程那两端）。第 9 轮留下的形状是：
+  渲染层不再有规则可写错，但也没有一条断言能证明这一点。文件
+  `src/components/SettingsPanel.tsx`。
 - **P2**：`writeAll` 的 Windows 回退分支里 `unlink(tmp)` 失败被吞掉，进程立刻退出
   会留下 `*.tmp` 垃圾。文件 `run-diagnostics.js`。——**未动**。改成把失败记进
   outcome。
@@ -514,6 +664,17 @@ desktop 的「工具调用 N（失败 M）」直接读 CLI 的 `tool_calls.failu
 
 ### 本轮做完、可以划掉的
 
+- ~~判定链的两端（主进程的 `presetUrl` 与渲染层算的 `endpoint`）没有对到一起~~ →
+  第 9 轮做完：端点只剩一条规则（`serviceEndpoint`），配置视图把它交给渲染层，
+  `tools/service-smoke.mjs` 用同一份 config + 同一张表断言两端相等；把优先级调回
+  旧的顺序 → 5 条断言变红（实测）。详见上面「P0 — 判定链的两端」。
+- ~~`tableUnavailable` × `presetUrl` 的组合没有逐条钉住~~ → 第 9 轮做完：四种组合
+  加自定义服务的三种形状，逐条断言「原因」与「端点」两个值，并写清了「名字不在表里」
+  指的是什么。
+- ~~`config:savedKey` 的回答不携带表状态，横幅与 Key 提示各说各话~~ → 第 9 轮
+  做完：回答带 `tableOk` 与 `endpoint`，横幅改用同一个回答。
+- ~~`config:savedKey` 没进 bridge 契约检查~~ → 第 9 轮做完：`tools/bridge-contract.mjs`
+  多了两条（参数个数、值的去处），实测能抓住把 preload 改回旧写法的那一处。
 - ~~`readConfigView` 在 active 分支漏报 model~~ → 第 4 轮做完（`ab21f7d` /
   `221e829`）：`hasModel` 不再漏报模型，`ready` 与 `missing` 出自同一张清单；
   第 5 轮又把 `hasModel` 数的那几个键**按形态**对齐了上游（见上面第 5 轮）。

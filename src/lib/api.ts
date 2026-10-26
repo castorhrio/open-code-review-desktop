@@ -85,8 +85,21 @@ export interface Bridge {
    * sentence to show when it may not. `reason` is one of the `KEY_WITHHELD_*`
    * strings in `ocr-service.js` (`""` when the Key is reusable); the Key itself
    * never reaches the renderer.
+   *
+   * `endpoint` is the host the service resolves to — the same value the config
+   * view's `endpoints` map holds, so the endpoint the Key was compared against
+   * and the endpoint on screen are one host. `tableOk` says whether the CLI's
+   * built-in service table could be read, so the banner about that table and
+   * the sentence under the Key field come from one answer.
    */
-  savedKey(req: { name: string; url: string }): Promise<{ ok: boolean; available: boolean; reason: string; hint: { tone: "ok" | "warn" | "muted"; text: string } }>;
+  savedKey(req: { name: string; url: string }): Promise<{
+    ok: boolean;
+    available: boolean;
+    reason: string;
+    hint: { tone: "ok" | "warn" | "muted"; text: string };
+    endpoint: string;
+    tableOk: boolean;
+  }>;
   saveConfig(form: {
     provider: string;
     isCustom: boolean;

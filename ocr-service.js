@@ -227,6 +227,37 @@ const KEY_WITHHELD_URL = "url-mismatch"; // the Key belongs to another endpoint
 const KEY_WITHHELD_EMPTY = "no-key"; // the entry exists and matches, but holds no credential
 const KEY_WITHHELD_TABLE = "table-unavailable"; // the built-in endpoint could not be read
 
+// A URL is compared without its trailing slashes: "https://api.deepseek.com/"
+// and "https://api.deepseek.com" are one host, and a difference there would
+// withhold a Key that does belong to the endpoint the form is pointed at.
+const strip = (value) => String(value || "").trim().replace(/\/+$/, "");
+
+/**
+ * The endpoint one service resolves to — the rule both ends of the Key decision
+ * ask.
+ *
+ * `tryProviderConfig` (internal/llm/resolver.go, v1.13.3) starts from the
+ * built-in service's registered base URL and lets the entry's own `url` override
+ * it:
+ *
+ *     url = preset.BaseURL
+ *     if entry.URL != "" { url = entry.URL }
+ *
+ * So the *entry* wins. The settings page used to read the two the other way
+ * round — the table's URL first, the entry's second — and for a service whose
+ * entry names a URL of its own (a gateway, a proxy) that made the form show
+ * and test a host the CLI would never use, and made the Key that belongs to the
+ * entry look like it belonged to a different endpoint.
+ *
+ * One function, two callers: the config view hands the renderer the endpoint to
+ * show and to test against, and `savedKeyLookup` compares the saved Key against
+ * the same value. A second copy of this rule is exactly what let the two ends
+ * disagree — and nothing asserted that they did.
+ */
+function serviceEndpoint(entry, presetUrl = "") {
+  return strip(entry && entry.url) || strip(presetUrl);
+}
+
 // The Key never travels to the renderer: the settings page asks "may I reuse
 // what is already saved for this service?" and only gets a value back when the
 // endpoint being tested is the one that Key belongs to. Sending a saved Key to
@@ -254,11 +285,15 @@ function savedKeyLookup(name, url, configPath = CONFIG_PATH, presetUrl = "", { t
   try {
     raw = JSON.parse(fs.readFileSync(configPath, "utf8"));
   } catch (_) {
-    return { key: "", reason: KEY_WITHHELD_CONFIG };
+    return { key: "", reason: KEY_WITHHELD_CONFIG, endpoint: "" };
   }
   const found = entryByName(raw, name);
-  if (!found) return { key: "", reason: KEY_WITHHELD_NO_ENTRY };
-  const withheld = (reason) => ({ key: "", reason });
+  if (!found) return { key: "", reason: KEY_WITHHELD_NO_ENTRY, endpoint: "" };
+  // The endpoint is part of the answer, not just the Key: the settings page
+  // shows the service's endpoint and the Key decision compares against it, and
+  // a caller that cannot see which endpoint was used has to take the wording on
+  // faith. It is returned on every path, including the ones that withhold.
+  const withheld = (reason, endpoint = "") => ({ key: "", reason, endpoint });
   // `order` answers a question `ocr` never asks, and that is why the answer
   // stops here. This is the shape where no spelling in the file is the one the
   // config's `provider` names *and* the file never spells the name the registry
@@ -272,8 +307,6 @@ function savedKeyLookup(name, url, configPath = CONFIG_PATH, presetUrl = "", { t
   // section is for); it just does not travel through here.
   if (found.rule === MATCH_ORDER) return withheld(KEY_WITHHELD_ORDER);
   const entry = found.entry;
-  const strip = (value) => String(value || "").trim().replace(/\/+$/, "");
-  const saved = strip(entry.url);
   const target = strip(url);
   // Which host the Key belongs to is *not* only the entry's own `url`: a
   // built-in service is normally configured with a Key and a model and no URL at
@@ -285,7 +318,12 @@ function savedKeyLookup(name, url, configPath = CONFIG_PATH, presetUrl = "", { t
   // to prevent. A custom provider has no table to fall back to (upstream requires
   // its `url` for every protocol that names an endpoint), so nothing is known
   // there and nothing is handed out.
-  const home = saved || strip(presetUrl);
+  //
+  // `serviceEndpoint` is the one rule for that order, and the config view uses
+  // it for the endpoint the settings page shows — so the endpoint the Key is
+  // compared against and the endpoint the user is looking at cannot be two
+  // different hosts.
+  const home = serviceEndpoint(entry, presetUrl);
   // The entry has no URL of its own and the table that would supply one could
   // not be read: the host this Key belongs to is unknown, and that is a
   // different failure from "it belongs somewhere else". Reported before the
@@ -294,10 +332,10 @@ function savedKeyLookup(name, url, configPath = CONFIG_PATH, presetUrl = "", { t
   if (!home && tableUnavailable) return withheld(KEY_WITHHELD_TABLE);
   // No target at all is the "may I reuse what is saved?" question, not a test
   // against a host, so there is nothing to compare and nothing to leak.
-  if (target && home !== target) return withheld(KEY_WITHHELD_URL);
+  if (target && home !== target) return withheld(KEY_WITHHELD_URL, home);
   const key = String(entry.api_key || entry.auth_token || "");
-  if (!key) return withheld(KEY_WITHHELD_EMPTY);
-  return { key, reason: "" };
+  if (!key) return withheld(KEY_WITHHELD_EMPTY, home);
+  return { key, reason: "", endpoint: home };
 }
 
 /**
@@ -322,12 +360,18 @@ function savedKeyFor(name, url, configPath = CONFIG_PATH, presetUrl = "") {
  * which withholds the Key rather than sending it to a host it may not belong to:
  * the user can always type the Key again, a Key sent to the wrong host cannot be
  * taken back.
+ *
+ * `tableOk` says whether that table could be read *for this lookup*, so the
+ * caller can tell "the built-in list is unreadable" from "this service has
+ * nothing to do with the built-in list" (a custom provider never does) without
+ * reading the reason code and guessing.
  */
 async function savedKeyLookupByName(name, url, configPath = CONFIG_PATH, options = {}) {
   const table = await providerTable(options);
   const wanted = String(name || "").toLowerCase();
   const row = table.ok ? table.rows.find((item) => String(item.name).toLowerCase() === wanted) : null;
-  return savedKeyLookup(name, url, configPath, row ? row.url : "", { tableUnavailable: !table.ok });
+  const found = savedKeyLookup(name, url, configPath, row ? row.url : "", { tableUnavailable: !table.ok });
+  return { ...found, tableOk: table.ok };
 }
 
 async function savedKeyForName(name, url, configPath = CONFIG_PATH, options = {}) {
@@ -562,31 +606,38 @@ async function providerTable({ refresh = false, runner = exec, now = Date.now } 
   return cachedPresetTable;
 }
 
-/** The names a built-in service can have, plus whether they could be read. */
-async function presetNames(options) {
+/**
+ * The built-in service registry: the names, the table's rows (so a caller can
+ * resolve a service's endpoint without reading the table again), and whether
+ * they could be read at all.
+ */
+async function presetRegistry(options) {
   const table = await providerTable(options);
   return {
     ok: table.ok,
     names: table.rows.map((row) => row.name),
+    rows: table.rows,
     matched: table.matched,
     error: table.error,
     ...(table.cached ? { cached: true } : {}),
   };
 }
 
-// `readConfigView` takes the list from its caller (the IPC layer hands in what
-// `presetNames()` returned), and the smoke checks hand in a plain array. Both
-// forms answer the same question; anything else means "not read".
+// `readConfigView` takes the registry from its caller (the IPC layer hands in
+// what `presetRegistry()` returned), and the smoke checks hand in a plain array
+// of names. Both forms answer the same question; anything else means "not
+// read". The rows are optional: without them the view can still say which names
+// are built in, but not what endpoint a built-in service resolves to.
 function registryFrom(presetList) {
   if (Array.isArray(presetList))
     return presetList.length
-      ? { ok: true, names: presetList, error: "" }
-      : { ok: false, names: [], error: lastPresetError || "内置服务名单为空" };
+      ? { ok: true, names: presetList, rows: [], error: "" }
+      : { ok: false, names: [], rows: [], error: lastPresetError || "内置服务名单为空" };
   if (presetList && typeof presetList === "object" && Array.isArray(presetList.names)) return presetList;
-  return { ok: false, names: [], error: lastPresetError || "还没有读取过内置服务名单" };
+  return { ok: false, names: [], rows: [], error: lastPresetError || "还没有读取过内置服务名单" };
 }
 
-function readConfigView({ configPath = CONFIG_PATH, env = process.env, presetNames: presetList = null } = {}) {
+function readConfigView({ configPath = CONFIG_PATH, env = process.env, presetList = null } = {}) {
   let raw = {};
   let fileExists = false;
   try {
@@ -655,6 +706,32 @@ function readConfigView({ configPath = CONFIG_PATH, env = process.env, presetNam
   // - legacy form (`tryLegacyLlmConfig`): only `llm.model` — the top-level
   //   `model` is not read at all.
   const entryModel = String(entry.model || "").trim();
+  // The endpoint every known service resolves to, so the settings page shows
+  // the host the CLI will use and tests against that one — instead of deriving
+  // it a second time from the table and the config, in the other order, and
+  // getting a different host.
+  //
+  // `serviceEndpoint` is the same rule `savedKeyLookup` compares a saved Key
+  // against, and it is applied here to the *entry the form is about* (the one
+  // named exactly, in either section) — the same entry the settings page looks
+  // up. A service with no endpoint of its own and no table row (a custom
+  // provider the user has not filled in yet) is simply absent.
+  const presetUrls = new Map();
+  for (const row of registry.rows || []) {
+    if (row && row.name) presetUrls.set(String(row.name).toLowerCase(), row.url || "");
+  }
+  const endpointNames = new Set([
+    ...Object.keys(raw.providers || {}),
+    ...Object.keys(raw.custom_providers || {}),
+    ...(registry.rows || []).map((row) => (row && row.name) || ""),
+  ]);
+  const endpoints = {};
+  for (const name of endpointNames) {
+    if (!name) continue;
+    const own = (raw.providers || {})[name] || (raw.custom_providers || {})[name] || {};
+    const endpoint = serviceEndpoint(own, presetUrls.get(String(name).toLowerCase()) || "");
+    if (endpoint) endpoints[name] = endpoint;
+  }
   const view = {
     path: configPath,
     fileExists,
@@ -665,6 +742,7 @@ function readConfigView({ configPath = CONFIG_PATH, env = process.env, presetNam
     maxTokens: raw.max_tokens || 0,
     providers: mapSection(raw.providers),
     customProviders: mapSection(raw.custom_providers),
+    endpoints,
     llm: {
       url: llmRaw.url || "",
       model: llmRaw.model || "",
@@ -1357,7 +1435,7 @@ async function setConfig(pairs) {
 async function unsetConfig(key) {
   const res = await exec(["config", "unset", key]);
   return res.code === 0
-    ? { ok: true, config: readConfigView({ presetNames: await presetNames() }) }
+    ? { ok: true, config: readConfigView({ presetList: await presetRegistry() }) }
     : { ok: false, error: withHint(failureText(res)) };
 }
 
@@ -1420,6 +1498,7 @@ module.exports = {
   CONFIG_PATH,
   readConfigView,
   entryByName,
+  serviceEndpoint,
   MATCH_EXACT,
   MATCH_ACTIVE,
   MATCH_REGISTRY,
@@ -1427,7 +1506,7 @@ module.exports = {
   parseProviderTable,
   parseProviderNames,
   providerTable,
-  presetNames,
+  presetRegistry,
   resetPresetCache,
   PRESET_FAILURE_TTL_MS,
   exec,

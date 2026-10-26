@@ -26,7 +26,13 @@ contextBridge.exposeInMainWorld("api", {
   openUrl: (url) => ipcRenderer.invoke("file:openUrl", url),
 
   readConfig: (opts) => ipcRenderer.invoke("config:read", opts),
-  savedKey: (name, url) => ipcRenderer.invoke("config:savedKey", { name, url }),
+  // The whole request object goes across, as the interface promises. This used
+  // to take two positional arguments and rebuild the object here, so a caller
+  // that passed the object the interface asks for had it read as *the name*:
+  // the main process looked up a service called "[object Object]", found
+  // nothing, and answered "no Key saved" for every service — the six reasons
+  // the wording distinguishes never reached the screen.
+  savedKey: (req) => ipcRenderer.invoke("config:savedKey", req),
   saveConfig: (form) => ipcRenderer.invoke("config:save", form),
   unsetConfig: (key) => ipcRenderer.invoke("config:unset", key),
   removeEntry: (name) => ipcRenderer.invoke("config:removeEntry", { name }),

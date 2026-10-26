@@ -363,6 +363,15 @@ const CONFIG = {
   customProviders: {
     "corp-gateway": { url: "https://llm.corp.internal/v1", protocol: "openai", model: "qwen3-max", hasKey: false },
   },
+  // The endpoint each service resolves to, resolved by the main process with the
+  // rule the CLI uses (the entry's own `url`, else the built-in service's
+  // registered base URL). The settings page shows this and tests against it,
+  // so a fixture without it would leave the form with no endpoint at all.
+  endpoints: {
+    deepseek: "https://api.deepseek.com/v1",
+    anthropic: "https://api.anthropic.com",
+    "corp-gateway": "https://llm.corp.internal/v1",
+  },
   llm: { url: "https://api.deepseek.com/v1", model: "deepseek-v4-pro", protocol: "openai", hasToken: true, tokenPreview: "sk-…7f3a" },
   envSources: [],
   envCredentials: [],
@@ -1043,6 +1052,11 @@ window.api = (() => {
   // ?savedkey=<reason> is the answer for "may I leave the Key box blank?": the
   // reason the Key is withheld, plus the sentence to show for it. With no query
   // the reason is empty, which is the ordinary "the saved Key will be reused".
+  // The answer also carries the built-in table's state and the endpoint the
+  // lookup used: the settings page reads the banner about that table from
+  // here, so a fixture that left the state out would claim the table is
+  // unreadable on every screen. (No backticks in here: the whole bridge is one
+  // template literal.)
   savedKey: async () => {
     const reason = q.get("savedkey") || "";
     const hints = ${JSON.stringify(SAVED_KEY_HINTS)};
@@ -1051,6 +1065,8 @@ window.api = (() => {
       available: !reason,
       reason,
       hint: hints[reason] || hints[""] || { tone: "muted", text: "" },
+      endpoint: ${JSON.stringify(CONFIG.endpoints.deepseek)},
+      tableOk: true,
     };
   },
   testLlm: async () => ({ ok: true, output: "[ok] deepseek deepseek-v4-pro 连通正常", via: "form" }),
