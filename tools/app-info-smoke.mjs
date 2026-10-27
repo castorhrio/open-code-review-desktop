@@ -1264,6 +1264,11 @@ const base = {
     // rejecting `app:info`.
     const calls = [];
     let installReads = 0;
+    // The sink is injected here too, not only in the block below: the
+    // no-prototype rejection is the one value whose sentence the guard has to
+    // invent, and "the page survived" says nothing about what the log line
+    // says. Both ends of that path are asked at once.
+    const noPrototypeReports = [];
     const info = await handleAppInfo({
       exec: (args, cwd, env, options) => {
         calls.push({ args, cwd, env, options });
@@ -1278,6 +1283,7 @@ const base = {
         installReads += 1;
         return base.installInfo;
       },
+      onProbeError: (message) => noPrototypeReports.push(message),
     });
     check(
       "handleAppInfo calls the service once with `version`, in the service's own signature, with the probe's budget in the fourth slot",
@@ -1299,6 +1305,38 @@ const base = {
         info.configPath === base.configPath &&
         installReads === 1,
       JSON.stringify({ info, installReads })
+    );
+
+    // The payload check above proves the page survives a value that cannot be
+    // stringified; it does not prove anyone learns why. `describeProbeError`
+    // answers the fixed sentence for this edge (its `String()` would throw), so
+    // the sink is asked for exactly that sentence, once — a `""`, an
+    // `"undefined"` or a `"[object Object]"` reaching the log is the failure
+    // this pair exists to catch, and none of the three can satisfy this check.
+    check(
+      "a rejection with no prototype reaches the sink as one non-empty sentence",
+      noPrototypeReports.length === 1 &&
+        typeof noPrototypeReports[0] === "string" &&
+        noPrototypeReports[0].trim() === "exec rejected without a message",
+      JSON.stringify(noPrototypeReports)
+    );
+    // And the guard's premise, asked rather than assumed: this value really does
+    // throw when stringified, so an unguarded `String(error)` inside the
+    // `.catch` would reject `app:info` instead of producing a sentence. Without
+    // this line the case would still pass against a `String()` that never
+    // throws — i.e. against a test value that stopped being the edge.
+    const noPrototypeThrows = (() => {
+      try {
+        String(Object.create(null));
+        return false;
+      } catch {
+        return true;
+      }
+    })();
+    check(
+      "...and the guard's premise is real: stringifying that value throws, so an unguarded read would have rejected app:info",
+      noPrototypeThrows,
+      "String(Object.create(null)) did not throw"
     );
 
     // The two blocks above meet only if `handleAppInfo` actually goes through

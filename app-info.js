@@ -218,7 +218,11 @@ const describeProbeError = (error) => {
   // into the fixed sentence instead of a rejected settings page. All three edges
   // are asserted in `tools/app-info-smoke.mjs`, because a `catch` that answers
   // "" is indistinguishable from one that answers a sentence unless someone
-  // asks.
+  // asks. The no-prototype edge is asked from both ends in that suite: the
+  // answer itself (`readVersionOutput`), and the path the app really runs
+  // (`handleAppInfo`, where the payload must stay complete *and* the injected
+  // sink must receive the fixed sentence — an empty string there is a log line
+  // about a failure that says nothing about it).
   const text = (() => {
     try {
       return error && typeof error === "object" && "message" in error

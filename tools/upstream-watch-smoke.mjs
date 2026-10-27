@@ -45,6 +45,8 @@ import {
   UPSTREAM_PACKAGE,
   versionInRange,
   docAuthoringRuleViolations,
+  docTruncationViolations,
+  DANGLING_LINE_ENDINGS,
   findDocPins,
   findPinShapedCitations,
   findShaCitations,
@@ -1713,6 +1715,145 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
     anchorOnly.length === docLines.length &&
       anchorOnly.filter((line, index) => line !== docLines[index]).length === 1,
     `changed=${anchorOnly.filter((line, index) => line !== docLines[index]).length}`
+  );
+}
+
+/* ---- a document that stops mid-sentence must not read as a finished one ----
+ * Every check above asks the doc for a shape it wants (three pins, one pointer,
+ * one table, one current-state section). None of them notices a file that simply
+ * stops: cut this doc in half and the pin, the ledger and the table are all
+ * still there, so the audit stays green while the last thing a reader sees is
+ * half a sentence. That is the failure `docTruncationViolations` answers, and the
+ * checks below ask it three ways so each fingerprint has a red of its own.
+ */
+{
+  const doc = fs.readFileSync(SYNC_DOC, "utf8");
+  const history = fs.readFileSync(HISTORY_DOC, "utf8");
+  const docLines = doc.split(/\r?\n/);
+
+  check(
+    "the sync doc is not truncated: fences closed, a finished last line, a current-state body with a finished sentence",
+    docTruncationViolations(doc).length === 0,
+    docTruncationViolations(doc).join("；") || "no violation"
+  );
+  check(
+    "...and the archive passes the same rule (it legitimately has no current-state section)",
+    docTruncationViolations(history).length === 0,
+    docTruncationViolations(history).join("；") || "no violation"
+  );
+
+  // (a) a fenced block left open. The doc is cut by deleting its last closing
+  // fence, which is what a bad paste at the end of a round looks like.
+  const closingFence = (() => {
+    for (let index = docLines.length - 1; index >= 0; index -= 1) {
+      if (docLines[index].trim() === "```") return index;
+    }
+    return -1;
+  })();
+  const unclosedFence = docLines.filter((_, index) => index !== closingFence).join("\n");
+  const fenceViolations = docTruncationViolations(unclosedFence);
+  // The opener the function should name: the last fence line *above* the one
+  // deleted, not the first in the file.
+  const openerLine = (() => {
+    for (let index = closingFence - 1; index >= 0; index -= 1) {
+      // A fence line may carry a language (`\`\`\`bash`), so the opener is found
+      // by prefix — asking for a bare fence found the *previous* block's closer
+      // and named the wrong line.
+      if (docLines[index].trim().startsWith("```")) return index + 1;
+    }
+    return null;
+  })();
+  check(
+    "a code block left open goes red, naming the line that opened it",
+    fenceViolations.length === 1 &&
+      openerLine !== null &&
+      fenceViolations[0].includes(`第 ${openerLine} 行`) &&
+      fenceViolations[0].includes("代码围栏"),
+    fenceViolations.join("；") || "no violation"
+  );
+  check(
+    "...and that copy differs from the doc by exactly one deleted line",
+    closingFence !== -1 &&
+      unclosedFence.split(/\r?\n/).length === docLines.length - 1,
+    `${docLines.length} -> ${unclosedFence.split(/\r?\n/).length}`
+  );
+
+  // (b) the cut lands mid-sentence: everything is present, the last line simply
+  // stops on a connector. This is the shape that reads as an editorial choice.
+  const cutMidSentence = `${doc}\n本轮改动停在半路，`;
+  const cutViolations = docTruncationViolations(cutMidSentence);
+  check(
+    "a last line that stops on a connector goes red, naming the character and the line",
+    cutViolations.length === 1 &&
+      cutViolations[0].includes("「，」") &&
+      cutViolations[0].includes(`第 ${doc.split(/\r?\n/).length + 1} 行`) &&
+      DANGLING_LINE_ENDINGS.includes("，"),
+    cutViolations.join("；") || "no violation"
+  );
+  // The counterweight: appending a *finished* paragraph is the legitimate edit
+  // every round makes, and it must stay green — otherwise the rule would just be
+  // "this doc is red".
+  const finishedTail = `${doc}\n本轮结论：无移植项。\n`;
+  check(
+    "...and appending a finished sentence stays green, so the rule is not 'any edit is red'",
+    docTruncationViolations(finishedTail).length === 0,
+    docTruncationViolations(finishedTail).join("；") || "no violation"
+  );
+
+  // (c) the cut lands right after a heading: a section with no body is the same
+  // shape, and the heading-on-the-last-line check is the only one that sees it.
+  const headingLast = `${doc}\n## 下一轮\n`;
+  const headingViolations = docTruncationViolations(headingLast);
+  check(
+    "a document that ends on a heading goes red: a section with no body is a truncation too",
+    headingViolations.length === 1 && headingViolations[0].includes("标题"),
+    headingViolations.join("；") || "no violation"
+  );
+
+  // (d) the section this round rewrites, emptied. "The heading is there" was
+  // already somebody else's check; the body was not.
+  const stateAt = docLines.findIndex((line) => /^##\s*当前状态（/.test(line));
+  const stateEnd = docLines.findIndex(
+    (line, index) => index > stateAt && /^#{1,2}\s/.test(line)
+  );
+  const emptied = [
+    ...docLines.slice(0, stateAt + 1),
+    "",
+    "",
+    ...docLines.slice(stateEnd === -1 ? docLines.length : stateEnd),
+  ].join("\n");
+  const emptyViolations = docTruncationViolations(emptied);
+  check(
+    "an emptied current-state section goes red, naming the section's line",
+    stateAt !== -1 &&
+      emptyViolations.length === 1 &&
+      emptyViolations[0].includes(`第 ${stateAt + 1} 行`) &&
+      emptyViolations[0].includes("没有正文"),
+    emptyViolations.join("；") || "no violation"
+  );
+
+  // (e) the body is there but no sentence in it is finished — the state a
+  // half-written round leaves behind.
+  const unfinished = [
+    ...docLines.slice(0, stateAt + 1),
+    "本轮复核：HEAD 未变，结论尚未写完",
+    ...docLines.slice(stateEnd === -1 ? docLines.length : stateEnd),
+  ].join("\n");
+  const unfinishedViolations = docTruncationViolations(unfinished);
+  check(
+    "...and a body with no finished sentence goes red for its own reason",
+    stateAt !== -1 &&
+      unfinishedViolations.length === 1 &&
+      unfinishedViolations[0].includes("句末标点"),
+    unfinishedViolations.join("；") || "no violation"
+  );
+  check(
+    "...and neither mutation was explained by the fence rule: both copies keep every fence",
+    emptied.split(/\r?\n/).filter((line) => line.trim().startsWith("```")).length ===
+      docLines.filter((line) => line.trim().startsWith("```")).length &&
+      unfinished.split(/\r?\n/).filter((line) => line.trim().startsWith("```")).length ===
+        docLines.filter((line) => line.trim().startsWith("```")).length,
+    "fence counts differ"
   );
 }
 

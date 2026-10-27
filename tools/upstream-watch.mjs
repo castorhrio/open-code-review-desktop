@@ -854,6 +854,120 @@ export const docAuthoringRuleViolations = (doc) => {
   return violations;
 };
 
+// ---- a truncated document must not read as a finished one ----
+//
+// Every other check in this module reads the doc for a *shape it wants*: three
+// pin declarations, one pointer, a table with headers, one current-state
+// section. None of them notices a file that simply stops. Cut this doc in half
+// mid-paragraph and the pin, the ledger and the table are all still there — the
+// audit stays green while the last thing a reader sees is half a sentence,
+// which is the one failure that looks like an editorial choice.
+//
+// Three fingerprints of truncation, each answered with a line number:
+//
+//   - a fenced code block left open — the cut landed inside a block, and
+//     everything after it renders as code;
+//   - the last non-empty line ends where no sentence ends: an ending that is
+//     only a connector (`：`, `、`, `，`, `-`) or an unclosed inline code span.
+//     A heading as the last line counts here too: a section with no body is the
+//     same shape as a cut right after the heading;
+//   - the current-state section has no complete sentence in its body. This is
+//     the section every round rewrites, so it is the one a bad paste shortens
+//     most often, and "the heading is there" was already checked by another
+//     rule — the body was not.
+//
+// The rule is deliberately about the *end* of the document, not about length:
+// a short doc is legitimate, a half-written last line is not.
+export const DANGLING_LINE_ENDINGS = Object.freeze(["-", ":", "：", ",", "，", "、", "…", "(", "（", "/", "|", "\\"]);
+
+// The current state's own body — the section every round rewrites. `null` when
+// the doc has no such section, so this rule can be asked of the archive too,
+// which legitimately has none.
+const currentStateBody = (lines) => {
+  const at = lines.findIndex((line) => /^##\s*当前状态（/.test(line));
+  if (at === -1) return null;
+  let end = lines.length;
+  for (let index = at + 1; index < lines.length; index += 1) {
+    if (/^#{1,2}\s/.test(lines[index])) {
+      end = index;
+      break;
+    }
+  }
+  return { line: at + 1, body: lines.slice(at + 1, end) };
+};
+
+export const docTruncationViolations = (doc) => {
+  const lines = String(doc == null ? "" : doc).split(/\r?\n/);
+  const violations = [];
+
+  // Fences, by count: an odd number means one was cut off *or* never closed,
+  // and the sentence names the opening line so the reader does not have to
+  // count fences to find it.
+  const fences = [];
+  lines.forEach((line, index) => {
+    if (line.trim().startsWith("```")) fences.push(index + 1);
+  });
+  if (fences.length % 2 === 1) {
+    violations.push(
+      `第 ${fences[fences.length - 1]} 行打开了代码围栏却没有闭合：` +
+        `共 ${fences.length} 行围栏（应为偶数），文档在这里被截断，或围栏丢了结尾`
+    );
+  }
+
+  // The last line that is not blank: what a reader's eye ends on.
+  let last = lines.length - 1;
+  while (last >= 0 && lines[last].trim() === "") last -= 1;
+  if (last < 0) {
+    violations.push("文档是空的：没有任何一行可以读，也就没有任何一轮的结论留下");
+    return violations;
+  }
+  const lastLine = lines[last].trim();
+  if (/^#{1,6}\s/.test(lastLine)) {
+    violations.push(
+      `第 ${last + 1} 行是文档的最后一行，而它是个标题（${lastLine}）：` +
+        "标题之后没有正文，和「截断正好落在标题后」是同一个形状"
+    );
+  } else {
+    const dangling = DANGLING_LINE_ENDINGS.find((ending) => lastLine.endsWith(ending));
+    // Inline code spans are counted per line (fence lines are excluded by the
+    // caller never getting here: a fence line ends with three backticks, which
+    // is odd — so only non-fence lines are asked).
+    const ticks = (lastLine.match(/`/g) || []).length;
+    if (dangling !== undefined) {
+      violations.push(
+        `第 ${last + 1} 行是文档的最后一行，却停在「${dangling}」上：` +
+          "句子没有写完，文档像是被截断的（最后一行要以句末标点收尾）"
+      );
+    } else if (!lastLine.startsWith("```") && ticks % 2 === 1) {
+      violations.push(
+        `第 ${last + 1} 行是文档的最后一行，却留下了一个没闭合的行内代码（反引号 ${ticks} 个）：` +
+          "最后一行没有写完"
+      );
+    }
+  }
+
+  // The body the current round rewrites.
+  const state = currentStateBody(lines);
+  if (state !== null) {
+    const body = state.body;
+    const prose = body.map((line) => line.trim()).filter((line) => line !== "");
+    const complete = prose.some((line) => /[。.]$/.test(line));
+    if (prose.length === 0) {
+      violations.push(
+        `「当前状态」一节（第 ${state.line} 行）没有正文：标题在、内容不在——` +
+          "本轮核对结论必须写进去，哪怕结论是「无新内容」"
+      );
+    } else if (!complete) {
+      violations.push(
+        `「当前状态」一节（第 ${state.line} 行）没有一句以句末标点收尾的话：` +
+          "正文写了一半，读起来像写完了一样"
+      );
+    }
+  }
+
+  return violations;
+};
+
 // ---- what the archive may quote, and what only the sync doc may declare ----
 //
 // `docs/upstream-history.md` quotes upstream commits in prose — whole

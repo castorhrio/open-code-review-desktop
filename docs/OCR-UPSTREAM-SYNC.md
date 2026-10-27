@@ -35,7 +35,7 @@ tag v1.13.3
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 96 轮：`git ls-remote` 退出码 0，`refs/heads/main` 与 pin 一致；`refs/tags/v1.13.3` 仍为最高 tag，由 `git ls-remote --tags` 核对；npm 仍为 `1.13.3`；通路：git）**
+**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 97 轮：`git ls-remote` 退出码 0，`refs/heads/main` 与 pin 一致；`refs/tags/v1.13.3` 仍为最高 tag，由 `git ls-remote --tags` 核对；npm 仍为 `1.13.3`；通路：git）**
 
 ### 核对通路账
 
@@ -104,6 +104,7 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 | 94 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；sender 的三格边界（未就绪 + 队列非空再 send、已 ready 重复 markReady、flush 失败不污染 dropped）与 `main.js` 的 `lost > 0` 接线进断言；`dependencyPinViolations` 补「无版本号」「pin tag 非版本号」两类红；加载彻底失败的取舍进注释 | — |
 | 95 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；两处「说出口」抽成 `main-wiring.js`（`reportSenderLoss` / `reportProbeError`）并直测、`markReady()` 的 `sent` 改成按次计并补「中断后继续 flush」的反向控制 | — |
 | 96 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；sender 的「超限丢最旧」「非法 limit 落默认」与「未就绪不触碰 window」补反向控制、`main-wiring` 的非法上限 / 非法消息四格补反向控制 | — |
+| 97 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；`describeProbeError` 的无原型拒绝补到 sink 端（payload 与句子两端同问）、文档截断进断言（未闭合围栏 / 停在半句 / 标题收尾 / 当前状态无正文） | — |
 
 ### 对照表（上游前进时要重读的五处）
 
