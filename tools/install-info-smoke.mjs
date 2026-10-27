@@ -22,7 +22,13 @@ const { createInstall } = require(path.join(ROOT, "install-info.js"));
 // set, which is this module's `installInfo()` spread into the IPC answer. Two
 // hand-maintained copies of these stubs used to back those two assertions, so a
 // drift in either made one suite red for a key the other had just invented.
-import { INSTALL_INFO_KEYS, installStubs, makeApp, makeShell } from "./install-fixture.mjs";
+import {
+  APP_INFO_COMPUTED_KEYS,
+  INSTALL_INFO_KEYS,
+  installStubs,
+  makeApp,
+  makeShell,
+} from "./install-fixture.mjs";
 
 const failures = [];
 const check = (name, ok, detail = "") => {
@@ -887,6 +893,51 @@ for (const platform of ["darwin", "linux"]) {
       JSON.stringify({ got: keys, want: expected })
     );
   }
+}
+
+/* ---------------- the six fact names are not app:info's own fields ---------------- */
+
+/* The other half of the collision decision pinned in `app-info-smoke.mjs`.
+ * `formatAppInfo()` spreads `installInfo()` *before* the seven fields it
+ * computes itself, so a fact that shared one of those names would be silently
+ * dropped. Both directions matter and neither can see the other: this module
+ * must not *offer* a colliding name, and `app-info-smoke.mjs` proves the
+ * computed value still wins if one ever appears. A rename here, or a reordered
+ * spread there, is visible in exactly one of the two.
+ */
+{
+  const facts = Object.keys(
+    make({ packaged: true, resources: path.join(installed, "resources") }).installInfo()
+  ).sort();
+  const collisions = facts.filter((key) => APP_INFO_COMPUTED_KEYS.includes(key));
+  check(
+    "installInfo() offers no name that formatAppInfo computes for itself",
+    collisions.length === 0,
+    JSON.stringify({
+      facts,
+      computed: [...APP_INFO_COMPUTED_KEYS].sort(),
+      collisions,
+    })
+  );
+  // Without a complete list, "no collision" passes over nothing. The seven
+  // names are written out here as the contract, and `app-info-smoke.mjs`
+  // separately ties the same list to the payload's non-install half — so a
+  // field dropped from the list is red on one side or the other.
+  const computed = [
+    "appVersion",
+    "binary",
+    "binarySource",
+    "configPath",
+    "docsUrl",
+    "platform",
+    "version",
+  ];
+  check(
+    "...and the computed-name list really covers all seven fields, so this is not a vacuous pass",
+    APP_INFO_COMPUTED_KEYS.length === computed.length &&
+      computed.every((key) => APP_INFO_COMPUTED_KEYS.includes(key)),
+    JSON.stringify({ got: [...APP_INFO_COMPUTED_KEYS].sort(), want: computed })
+  );
 }
 
 /* ---------------- the module stays importable without Electron ---------------- */

@@ -43,6 +43,27 @@ export const INSTALL_INFO_KEYS = Object.freeze([
 ]);
 
 /**
+ * The seven fields `formatAppInfo()` computes for itself, sorted. `app:info`
+ * spreads `installInfo()` *before* them, so an install fact with one of these
+ * names would silently lose to the computed value. That is the decision
+ * (computed wins), but it must stay a decision on both sides: this list lets
+ * `install-info-smoke.mjs` assert the module never *offers* a colliding name,
+ * and `app-info-smoke.mjs` assert the collision still resolves the other way
+ * even if one appears. Hand-written, for the same reason as
+ * `INSTALL_INFO_KEYS`: it is the contract, not a reflection of whatever the
+ * module happens to return.
+ */
+export const APP_INFO_COMPUTED_KEYS = Object.freeze([
+  "appVersion",
+  "binary",
+  "binarySource",
+  "configPath",
+  "docsUrl",
+  "platform",
+  "version",
+]);
+
+/**
  * `shell` that records the calls instead of opening a file manager.
  * `openError` is what `shell.openPath` resolves to — Electron's contract is that
  * a failure comes back as a non-empty string, not as a rejection.

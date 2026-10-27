@@ -35,7 +35,7 @@ tag v1.13.3
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 83 轮：`git ls-remote` 在 90 秒内超时，退出码 124；`api.github.com` 的 `commits/main` 退出码 0 且 `sha` 与 pin 一致；`refs/tags/v1.13.3` 本轮未独立核对；npm 为 `1.13.3`；通路：api）**
+**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 84 轮：`git ls-remote` 退出码 0，`refs/heads/main` 与 pin 一致；`api.github.com` 的 `commits/main` 给出同一个 `sha`；`refs/tags/v1.13.3` 本轮未独立核对；npm 为 `1.13.3`；通路：git）**
 
 ### 核对通路账
 
@@ -91,6 +91,7 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 | 81 | 2026-10-27 | api | `375f64c` / `v1.13.3`，无新内容；git 超时（124）、API 作答；npm `1.13.3`；`classifyRef` 去掉多余的数值换算（超大计数不再答「无关系」）、`gitEnv` 的接线探针改走 `readFileAtRef`、同步文档的「上一轮」压成指针并进断言 | — |
 | 82 | 2026-10-27 | api | `375f64c` / `v1.13.3`，无新内容；git 超时（124）、API 作答；npm `1.13.3`；`readFileAtRef` 的 stderr 措辞假设外化成 `REF_READ_WORDINGS` 表并按 sample 断言、核对通路账的末行绑定到提交信息的轮次 | — |
 | 83 | 2026-10-27 | api | `375f64c` / `v1.13.3`，无新内容；git 超时（124）、API 作答；npm `1.13.3`；真 git 的 stderr 与 `REF_READ_WORDINGS` 逐行对账（只被一行认出、与 sample 同一行）、`createRunner` → `runUpstreamWatch` 的「git 超时 → API 作答」按文本断言 | — |
+| 84 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；`installInfo` 撞名双向断言、上游自测入口改 argv、文档新增编辑规则清单并进断言 | — |
 
 ### 对照表（上游前进时要重读的五处）
 
@@ -98,9 +99,9 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
 对应行并把轮次与日期改成本轮。
 
-**第 46–83 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
+**第 46–84 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
 npm 通路可达，第 56 轮 git 超时但 API 可达，第 63–64 轮本文件无通路记录，第 68 轮 git
-超时但 API 可达，第 69–76、79–80 轮 git 可达，第 77 轮本文件无通路记录，第 78、81–83 轮
+超时但 API 可达，第 69–76、79–80、84 轮 git 可达，第 77 轮本文件无通路记录，第 78、81–83 轮
 git 超时但 API 可达），所以下表 5 行的
 「最近一次对照」停在第 45 轮是
 **没有理由重看**，不是忘了看：
@@ -133,6 +134,27 @@ git 超时但 API 可达），所以下表 5 行的
 
 以下是给人读的：为什么这么封装、调度规则、本轮结论，以及哪些地方改坏了不会有 audit 变红。
 
+## 写这份文档的规则（改之前先读）
+
+这份文件被 `npm run audit:upstream` 按**形状**核对：标记、标题、表格、pin 与每轮账都只有一份，
+位置和数量都是断言。下面是给第一次改它的人的入口——不读 `tools/upstream-watch.mjs` 也不会踩空。
+
+1. **机器可读区只由脚本维护。** 两块区域标记之间的 pin 块、本轮 HEAD 核对行、核对通路账和
+   对照点表各只有一份。人读区（结束标记之后）不要再写第二份：第二份不会被核对，却会和被
+   核对的那份慢慢说成两件事。
+2. **pin 只声明三处。** pin 块、固定行，加上人读区里介绍 `upstream:check` 的那一句散文；
+   三处都是整串 40 位 SHA，且必须与 `tools/upstream-watch.mjs` 的常量相同。想举例引用
+   某个 commit 时，不要写成这三种声明形状。
+3. **每轮都在核对通路账里记一行。** 通路写 `git` / `api` / `npm` / `none` 之一；只有
+   `git` 与 `api` 能回答 HEAD，`npm` / `none` 必须带 `[UPSTREAM-DEBT]`。没核对也要记，
+   不要跳过这一行。
+4. **本文件只留当前一轮的正文。** 上一轮整段搬到 `upstream-history.md`，这里只留一句指针；
+   指针要指向归档里真实存在的轮次，锚点用那一节标题的 slug。
+5. **归档段落正文写一次后不再改写。** 后来者只能在段末追加一条 `补记（第 N 轮）`，N 必须
+   晚于该段轮次；新轮次加在最上面，段落轮次递减。
+6. **别把锚点字面量抄进人读区。** 要提某个标题、表头或固定行时，用描述（例如「核对通路账
+   那张表」「对照点表头」），不要整行照抄；脚本会把照抄当成第二份锚点并点名行号。
+
 ## 关系
 - Desktop：https://github.com/castorhrio/open-code-review-desktop （服务器 `/opt/open-code-review-desktop`）
 - 上游开源库：https://github.com/alibaba/open-code-review
@@ -146,50 +168,43 @@ git 超时但 API 可达），所以下表 5 行的
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。搬完这里只留一句
    指针——「本文件只留当前一轮」不是约定而是断言（`previousRoundPointerViolations`）。
 
-## 当前状态（第 83 轮，2026-10-27）
+## 当前状态（第 84 轮，2026-10-27）
 
-第 83 轮复核：**HEAD 未变，结论仍是「无新内容」；API 与 npm 两条通路可达。**
-`git ls-remote https://github.com/alibaba/open-code-review.git` 本轮超时（`timeout` 返回
-124，与第 47–48 轮同因），改由 `api.github.com/repos/alibaba/open-code-review/commits/main`
-回答：HTTP 200，`sha` 仍是 `375f64c`（与第 49–82 轮同一个 commit）；`npm view
+第 84 轮复核：**HEAD 未变，结论仍是「无新内容」；git、API 与 npm 均可核对。**
+`git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main` 本轮退出码 0，
+`375f64cd6f67a48a135da83cfcf59c52669a09cb` 与 pin 一致（与第 49–83 轮同一个 commit）；
+`api.github.com/repos/alibaba/open-code-review/commits/main` 给出同一个 `sha`；`npm view
 @alibaba-group/open-code-review version` 仍是 `1.13.3`。tag 一处本轮没有独立核对——
 `refs/heads/main` 未变即「无新 commit」，registry 的 `latest` 未变即「无新发布」。desktop
 的 `^1.13.3` 无需改动，**无移植项**。
 
-本轮把上一轮承认的那半个缺口补上，并给 78/81/82 三轮真实发生过的那条路径加一格断言：
+本轮按控制仓简报换方向：不加新的断言密度，而是把三处容易维护错的规则收敛。
 
-- **P0-1：真 git 的 stderr 现在也要过表。** 第 82 轮把措辞假设外化成
-  `REF_READ_WORDINGS`（每行带 `reason` / `pattern` / `sample`），但 `sample` 是手写字符串，
-  证明的只是「表同意自己」。本轮 `tools/git-service-smoke.mjs` 用**同一个 `git()`**（因此
-  同一个 `gitEnv()`，仍是 C locale）、同一个临时仓库，问 git 要这两个失败的真 stderr，再交给
-  `readFileAtRef` 用的**同一个分类器**（`classifyRefReadFailure`，本轮为此导出）。三格三件事：
-  ① 真 git 仍以一行 `fatal: …`、退出码 128 回答这两个失败（这是 sample 的写法声明的前提）：
-  `fatal: path '不存在/的路径' does not exist in 'HEAD'` 与
-  `fatal: invalid object name 'not-a-real-ref'.`；② 每句话只被**一个**带 pattern 的行认出来，
-  且就是答案里那一行；③ 认出真话的行，与手写 `sample` 落到的行是**同一个行对象**——sample
-  与现实不可能各走一行还各自「对」。第四格是这三格的自测：两句真话都以 `fatal:` 开头，所以
-  「放宽成前缀」那种改法会同时命中两行，而表里没有任何一行会——断言写在 git 自己的输出上。
-  验过会红：把 `missing` 的 pattern 改成 `/^fatal:/i`，`bad-ref` 那格立刻点名
-  `matched=["bad-ref","missing"]`，随后每一格依赖「唯一命中」的检查一起红。
-  下文「能自动变红的地方」那句「没有任何 audit 会因为 git 改措辞而变红」因此**不再成立**，
-  已就地改写成它现在的真实边界：今天这套 git 的这两句话被钉住了，**别的失败**（子模块、
-  git 为其它情形保留的拼写）仍没人钉。
-- **P0-2：`createRunner` → `runUpstreamWatch` 那条线，按**文本**断言。** 第 59 轮起 git→API
-  的回落在**对象**上已被断言（`channel: "api"`），但轮次里人看到的是句子，中间还隔着
-  `upstreamDrift` → `formatDrift` 两道：`channel` 在路上丢了，对象仍绿而句子会印「通路：none」，
-  于是一次核对过的轮次读起来像欠账。现在注入 `git` 返回 `{error: ETIMEDOUT}`、API 返回 pin，
-  走完整条 `runUpstreamWatch`，断言句子带「通路：api」、不带 `[UPSTREAM-DEBT]`、不带
-  `[UPSTREAM-MOVED]`、**也不带那条失败通路的原因**（`ETIMEDOUT` 不许漏进安静句子里，
-  否则「无 marker = 没事要做」这个 grep 就不成立），退出码 0；另一格两条路都失败：句子以
-  `[UPSTREAM-DEBT]` 开头、带「通路：none」、两条原因都在、退出码仍 0。验过会红：把
-  `runUpstreamWatch` 里透传的 `channel` 写死成 `"git"`，第一格当场点名
-  `"channel":"git"` 与整句文本。
+- **P0-1：`installInfo` 撞名从注释约定变成双向断言。** `formatAppInfo` 先展开
+  `installInfo`，再用七个计算字段覆盖，所以撞名字段会无声消失。`tools/app-info-smoke.mjs`
+  现在用一个与**全部七个**计算字段重名、且值都不同的对象喂进去，断言七个字段全部保住计算值
+  （不只是抽查 `binary` / `version`），并前置断言这个撞名对象确实覆盖了七个名字。
+  `tools/install-info-smoke.mjs` 从另一边钉：`installInfo()` 返回的六个名字不得与那七个
+  重名，且共享的 `APP_INFO_COMPUTED_KEYS` 必须覆盖完整的七个——否则「没有撞名」会在一张
+  空表上通过。验过会红：把 spread 挪到计算字段之后，七个字段逐一被 `evil` 值顶掉；
+  把 `userData` 改名成 `binary`，install 一侧点名 `collisions:["binary"]`。
+- **P0-2：`tools/upstream-watch-smoke.mjs` 的自测入口从环境变量改成命令行参数。**
+  原来两个变量（选中红色子进程 / 选中绿色子进程）在 CI 或用户环境撞名时会改变
+  `npm run audit:upstream` 的行为。现在是 `--selftest` / `--no-respawn` 两个精确 token，
+  并新增三格：无参数时两个开关都为假（不从环境推断）、近似拼写（`--selftest=1`、裸
+  `selftest`）不算开关、旧环境变量名不再出现在源码里。红色子进程只带 `--selftest`，
+  另有一格断言它没有重入 spawn；绿色子进程仍证明整轮套件不是天生红。
+- **P1-1：文档的编辑规则有了人读入口。** `docs/OCR-UPSTREAM-SYNC.md` 人读区开头新增
+  「写这份文档的规则」六条（不抄锚点字面量），`tools/upstream-watch.mjs` 的
+  `docAuthoringRuleViolations` 断言这一节存在、至少四条编号规则、且在当前状态之前；
+  smoke 用删标题、把标题挪到当前状态之后、把清单删到三条三种副本验证它会红。
 
-两条都在 `git-service.js` / `tools/git-service-smoke.mjs` 与本文件里（P0-2 只动
-`tools/upstream-watch-smoke.mjs` 的断言），不碰 CLI 参数、配置读写与 IPC 注册体；改写了的
-那句话在下面「能自动变红的地方，和不能的地方」一节。`audit:git` / `audit:upstream` 本轮全绿。
+断言只动 `tools/app-info-smoke.mjs`、`tools/install-info-smoke.mjs`、
+`tools/install-fixture.mjs`、`tools/upstream-watch-smoke.mjs`、`tools/upstream-watch.mjs`
+与本文件，不碰 CLI 参数、配置读写、IPC 注册体或运行时行为。`audit:appinfo` /
+`audit:install` / `audit:upstream` 本轮全绿。
 
-上一轮（第 82 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-82-轮2026-10-27)，归档之后本文件不留第二份。
+上一轮（第 83 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-83-轮2026-10-27)，归档之后本文件不留第二份。
 
 ## 上游真变了怎么办（命令驱动，而不是「记得看一眼」）
 ```bash

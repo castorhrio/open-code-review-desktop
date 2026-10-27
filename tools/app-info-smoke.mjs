@@ -22,7 +22,11 @@ const {
   VERSION_PROBE_MS,
   VERSION_PROBE_GRACE_MS,
 } = require(path.join(ROOT, "app-info.js"));
-import { INSTALL_INFO_KEYS, stubInstall } from "./install-fixture.mjs";
+import {
+  APP_INFO_COMPUTED_KEYS,
+  INSTALL_INFO_KEYS,
+  stubInstall,
+} from "./install-fixture.mjs";
 
 const failures = [];
 const check = (name, ok, detail = "") => {
@@ -256,30 +260,56 @@ const base = {
  * `installInfo` altogether and this block would stay green.
  */
 {
+  // All seven fields, not a sample of them: the decision under test is "every
+  // field this function computes wins", and a check that named only `binary`
+  // and `version` would stay green while `platform` or `docsUrl` was replaced
+  // by an install fact. The values are impossible ones (`"evil"`, `"9.9.9"`,
+  // `"evil-os"`), so a failure prints which side won instead of two strings
+  // that happen to match.
+  const computedValues = {
+    binary: "/opt/app/ocr",
+    binarySource: "local",
+    version: "1.13.3",
+    configPath: base.configPath,
+    docsUrl: base.docsUrl,
+    appVersion: base.appVersion,
+    platform: base.platform,
+  };
   const colliding = {
     ...base.installInfo,
     binary: "evil",
-    binarySource: "evil",
+    binarySource: "evil-source",
     version: "9.9.9",
     configPath: "/evil/config.json",
+    docsUrl: "https://evil.example/docs",
+    appVersion: "6.6.6",
+    platform: "evil-os",
   };
+  check(
+    "the collision fixture names all seven computed fields, each with a different value",
+    JSON.stringify([...APP_INFO_COMPUTED_KEYS].sort()) ===
+      JSON.stringify(Object.keys(computedValues).sort()) &&
+      APP_INFO_COMPUTED_KEYS.every(
+        (key) => key in colliding && colliding[key] !== computedValues[key]
+      ),
+    JSON.stringify({ keys: APP_INFO_COMPUTED_KEYS, colliding })
+  );
   const shadowed = formatAppInfo({
     ...base,
     binary: { path: "/opt/app/ocr", source: "local" },
     versionStdout: "open-code-review 1.13.3\n",
     installInfo: colliding,
   });
+  const lost = APP_INFO_COMPUTED_KEYS.filter(
+    (key) => shadowed[key] !== computedValues[key]
+  );
   check(
-    "an install fact named like one of the app's own fields cannot replace it",
-    shadowed.binary === "/opt/app/ocr" &&
-      shadowed.binarySource === "local" &&
-      shadowed.version === "1.13.3" &&
-      shadowed.configPath === base.configPath,
+    "every field formatAppInfo computes keeps its own value when installInfo collides with all seven",
+    lost.length === 0,
     JSON.stringify({
-      binary: shadowed.binary,
-      binarySource: shadowed.binarySource,
-      version: shadowed.version,
-      configPath: shadowed.configPath,
+      lost: Object.fromEntries(
+        lost.map((key) => [key, { got: shadowed[key], want: computedValues[key] }])
+      ),
     })
   );
   check(
@@ -404,6 +434,22 @@ const base = {
     "the payload's key set is exactly the pinned one",
     JSON.stringify(keys) === JSON.stringify(expected),
     JSON.stringify({ got: keys, want: expected })
+  );
+  // The shared list of computed names has to be the payload's own half, or
+  // `install-info-smoke.mjs` would be asserting "no collision" against a list
+  // that has forgotten a field. Derived from the contract above (not from the
+  // module), so a new computed field has to be named in both places to pass.
+  const computedFromContract = expected
+    .filter((key) => !INSTALL_INFO_KEYS.includes(key))
+    .sort();
+  check(
+    "...and the shared list of computed fields is exactly the payload's non-install half",
+    JSON.stringify([...APP_INFO_COMPUTED_KEYS].sort()) ===
+      JSON.stringify(computedFromContract),
+    JSON.stringify({
+      got: [...APP_INFO_COMPUTED_KEYS].sort(),
+      want: computedFromContract,
+    })
   );
   check(
     "...and every install fact the install module reports is in it",

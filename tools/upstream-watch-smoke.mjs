@@ -16,6 +16,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  AUTHORING_RULES_HEADING,
+  AUTHORING_RULES_MIN,
   DEBT_MARKER,
   HISTORY_ALLOWED_SHA_CONTEXTS,
   HISTORY_APPEND_RULE_TERMS,
@@ -36,6 +38,7 @@ import {
   classifyGit,
   createRunner,
   describePinDisagreements,
+  docAuthoringRuleViolations,
   findDocPins,
   findPinShapedCitations,
   findShaCitations,
@@ -73,27 +76,65 @@ const check = (name, ok, detail = "") => {
   if (!ok) failures.push(name);
 };
 
-// Read by this file when it re-runs itself as a child process at the bottom of
-// the suite, to prove that a failed check reaches `process.exit(1)`. Never set
-// by a normal run.
-const SELF_TEST_ENV = "OCR_UPSTREAM_WATCH_SELFTEST";
+/* ---- the self-test switches are command-line flags, not the environment ----
+ * This suite re-runs itself at the bottom to prove two things: that a failed
+ * check reaches `process.exit(1)` (the red child), and that a run which should
+ * be green is not red by construction (the green child). Those two roles used to
+ * be selected by environment variables, which has a failure mode unrelated to
+ * this suite: a CI job, a shell profile, or a user who happens to export the
+ * same name changes what `npm run audit:upstream` does. An argv token is present
+ * only when this file's own spawn put it there.
+ *
+ * The two flags are different tokens on purpose. "Not the self-test" is exactly
+ * the state in which the bottom block spawns, so the green child needs a switch
+ * of its own to say "run, but do not re-spawn": one flag cannot express both
+ * halves without re-entering forever, and a hang reads as a slow machine rather
+ * than as a failure. Exact tokens, not prefixes — `--selftest=1` and a bare
+ * `selftest` are not switches, so a typo cannot silently select a mode.
+ */
+const FLAGS = Object.freeze({
+  selftest: "--selftest",
+  noRespawn: "--no-respawn",
+});
 
-// The second self-run is the green one ("a run without the self-test variable
-// exits 0"), and it needs a variable of its own to switch the re-spawn *off* —
-// because "the self-test variable is not set" is exactly the state in which the
-// bottom block spawns. One variable cannot express both halves: the green child
-// inherits `SELF_TEST_ENV` unset, runs the bottom block again, and spawns
-// another green child, forever. That failure did not look like a failure — the
-// suite hung, and a hang reads as a slow machine (it was killed past three
-// minutes). Two variables make "green, and one level deep" a state that can be
-// asked for: the green child is told not to re-spawn, and the check under it
-// asserts that it obeyed rather than merely that it exited 0.
-const NO_RESPAWN_ENV = "OCR_UPSTREAM_WATCH_NO_SELFTEST";
-if (process.env[SELF_TEST_ENV] === "1") {
+const parseFlags = (argv) => ({
+  selftest: (argv || []).includes(FLAGS.selftest),
+  noRespawn: (argv || []).includes(FLAGS.noRespawn),
+});
+
+const flags = parseFlags(process.argv.slice(2));
+
+if (flags.selftest) {
   check(
     "[self-test] a check that fails on purpose",
     false,
     "injected by the exit-code self-test"
+  );
+}
+
+// The switches as a pure question, asked before any child exists. The old
+// environment scheme could not make this check: "unset" and "set to something
+// unexpected" were two states that both looked like the normal run. Here, a
+// list with neither token means the normal run by construction.
+{
+  check(
+    "no flags: neither the self-test nor the no-respawn switch is on — nothing is inferred",
+    parseFlags([]).selftest === false && parseFlags([]).noRespawn === false,
+    JSON.stringify(parseFlags([]))
+  );
+  check(
+    "...and only the exact tokens switch a mode on: near-misses stay off",
+    parseFlags([FLAGS.selftest]).selftest === true &&
+      parseFlags([FLAGS.selftest]).noRespawn === false &&
+      parseFlags([FLAGS.noRespawn]).noRespawn === true &&
+      parseFlags([FLAGS.noRespawn]).selftest === false &&
+      parseFlags(["selftest", "--selftest=1", "--no-respawn=1"]).selftest === false &&
+      parseFlags(["selftest", "--selftest=1", "--no-respawn=1"]).noRespawn === false,
+    JSON.stringify([
+      parseFlags([FLAGS.selftest]),
+      parseFlags([FLAGS.noRespawn]),
+      parseFlags(["selftest", "--selftest=1", "--no-respawn=1"]),
+    ])
   );
 }
 
@@ -1231,6 +1272,94 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
   );
 }
 
+/* ---- the human half opens with the rules for editing it ----
+ * The rules this suite enforces are spread across the anchor check, the ledger
+ * binding and the archive rule — and all of them live in code a first-time
+ * editor never opens. The doc therefore has to carry the checklist itself, at
+ * the top of the human half, and this block asks for that shape: the section
+ * exists exactly where an editor meets it, it is a real numbered list, and it
+ * stays there when the wording around it changes.
+ */
+{
+  const doc = fs.readFileSync(SYNC_DOC, "utf8");
+  const docLines = doc.split(/\r?\n/);
+  const headingAt = docLines.findIndex((line) => line.trim().startsWith(AUTHORING_RULES_HEADING));
+
+  const violations = docAuthoringRuleViolations(doc);
+  check(
+    "the sync doc's human half carries the editing rules above the current round",
+    violations.length === 0,
+    violations.join("；") || "no violation"
+  );
+
+  // The section is an entry point only if it is a list: a lone heading would
+  // satisfy "it exists" while telling a new editor nothing.
+  const sectionEnd = docLines.findIndex(
+    (line, index) => index > headingAt && /^#{1,6}\s/.test(line)
+  );
+  const section = headingAt === -1 ? [] : docLines.slice(headingAt + 1, sectionEnd === -1 ? undefined : sectionEnd);
+  const rules = section.filter((line) => /^\s*\d+\.\s*\S/.test(line)).length;
+  check(
+    "...and it is a checklist, not a title: at least the minimum number of numbered rules",
+    AUTHORING_RULES_MIN >= 4 && rules >= AUTHORING_RULES_MIN,
+    JSON.stringify({ heading: AUTHORING_RULES_HEADING, rules, minimum: AUTHORING_RULES_MIN })
+  );
+
+  // (a) the heading deleted: the rules may still sit there, but nothing says
+  // they are rules. This is the failure the assertion exists for.
+  const withoutHeading = docLines
+    .filter((line) => !line.trim().startsWith(AUTHORING_RULES_HEADING))
+    .join("\n");
+  const missing = docAuthoringRuleViolations(withoutHeading);
+  check(
+    "deleting that section goes red and names the missing entry point",
+    missing.length === 1 &&
+      missing[0].includes("写这份文档的规则") &&
+      missing[0].includes("规则入口"),
+    JSON.stringify(missing)
+  );
+  check(
+    "...and the copy differs from the doc by exactly one deleted line",
+    withoutHeading.split(/\r?\n/).length === docLines.length - 1,
+    `doc=${docLines.length} copy=${withoutHeading.split(/\r?\n/).length}`
+  );
+
+  // (b) the section moved below the current round: still present, still worded
+  // the same, but no longer the first thing an editor meets.
+  const headingLine = headingAt === -1 ? "" : docLines[headingAt];
+  const rest = docLines.filter((_, index) => index !== headingAt);
+  const restStateAt = rest.findIndex((line) => /^##\s*当前状态（/.test(line));
+  const moved =
+    restStateAt === -1
+      ? ""
+      : [...rest.slice(0, restStateAt + 1), headingLine, ...rest.slice(restStateAt + 1)].join("\n");
+  const movedViolations = moved ? docAuthoringRuleViolations(moved) : [];
+  check(
+    "moving the section below the current round goes red, naming the line order",
+    moved !== "" &&
+      movedViolations.some((violation) => violation.includes("落在当前状态")) &&
+      movedViolations.some((violation) => violation.includes("写这份文档的规则")),
+    JSON.stringify(movedViolations)
+  );
+
+  // (c) a checklist shrunk below the minimum: the heading and the section are
+  // still there, so only a count can see that the entry point stopped covering
+  // the rules.
+  const numbered = [];
+  for (let index = headingAt + 1; headingAt !== -1 && index < (sectionEnd === -1 ? docLines.length : sectionEnd); index += 1) {
+    if (/^\s*\d+\.\s*\S/.test(docLines[index])) numbered.push(index);
+  }
+  const removed = new Set(numbered.slice(-3));
+  const shrunk = docLines.filter((_, index) => !removed.has(index)).join("\n");
+  const shrunkViolations = docAuthoringRuleViolations(shrunk);
+  check(
+    "shrinking the checklist below the minimum goes red, naming the rule count",
+    numbered.length >= AUTHORING_RULES_MIN + 1 &&
+      shrunkViolations.some((violation) => violation.includes("条编号规则")),
+    JSON.stringify(shrunkViolations)
+  );
+}
+
 /* ---- the human half keeps one round, and points at the archive for the rest ----
  * The sync doc says of itself 「本文件只留当前一轮」, and until now that was prose:
  * the human half also carried the previous round's whole body under a
@@ -1799,11 +1928,27 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
   );
 }
 
-if (process.env[SELF_TEST_ENV] !== "1" && process.env[NO_RESPAWN_ENV] !== "1") {
-  const child = spawnSync(process.execPath, [fileURLToPath(import.meta.url)], {
-    env: { ...process.env, [SELF_TEST_ENV]: "1" },
-    encoding: "utf8",
-  });
+if (!flags.selftest && !flags.noRespawn) {
+  const ownSource = fs.readFileSync(fileURLToPath(import.meta.url), "utf8");
+  // The old environment names must stay gone: a leftover read of either would
+  // put the environment back in charge of which mode this run is in. Built from
+  // pieces so this check does not match its own source text.
+  const oldEnvNames = [
+    ["OCR", "UPSTREAM", "WATCH", "SELFTEST"].join("_"),
+    ["OCR", "UPSTREAM", "WATCH", "NO", "SELFTEST"].join("_"),
+  ];
+  check(
+    "the switches are argv-only: no environment variable selects a mode any more",
+    oldEnvNames.every((name) => !ownSource.includes(name)),
+    JSON.stringify(oldEnvNames.filter((name) => ownSource.includes(name)))
+  );
+
+  const runChild = (flag) =>
+    spawnSync(process.execPath, [fileURLToPath(import.meta.url), flag], {
+      encoding: "utf8",
+    });
+
+  const child = runChild(FLAGS.selftest);
   // A spawn that never ran (`ENOENT`, an unreadable script) reports `status:
   // null` — the same "not 1" as a child that ran and failed. Without this the
   // self-run's whole point ("the exit code came from a real process") is taken
@@ -1826,32 +1971,45 @@ if (process.env[SELF_TEST_ENV] !== "1" && process.env[NO_RESPAWN_ENV] !== "1") {
     String(child.stderr || "").trim().split(/\r?\n/).slice(-2).join(" | ")
   );
 
-  // The other half of the same question: a run that *should* be green has to
-  // stay green. Without this, the suite could be red by construction — a
-  // check that always fails would still satisfy "a failing check exits 1", so
-  // the exit-code contract would be met by a permanently red suite and the
-  // self-test would be proving nothing. This child runs the same file with the
-  // self-test variable *not set at all* (the variable is deleted from the
-  // environment, not set to an empty string, so "unset" is what is exercised).
-  const cleanEnv = { ...process.env };
-  delete cleanEnv[SELF_TEST_ENV];
-  // ...and told not to re-spawn. Without this the green child meets the very
-  // condition the bottom block exists for (the self-test variable is unset) and
-  // spawns its own green child, one level deeper, forever.
-  cleanEnv[NO_RESPAWN_ENV] = "1";
-  const green = spawnSync(process.execPath, [fileURLToPath(import.meta.url)], {
-    env: cleanEnv,
-    encoding: "utf8",
-  });
+  // The bottom block's own check names are the evidence that a process ran the
+  // re-spawn at all. Defined once for both children, and asserted to exist in
+  // this source, so "absent from the output" can never pass because the names
+  // were reworded here.
+  const respawnCheckNames = ["a failing check makes this command exit non-zero", "the self-run really spawned"];
   check(
-    "the green self-run is told not to re-spawn, by a variable the red one does not use",
-    NO_RESPAWN_ENV !== SELF_TEST_ENV &&
-      cleanEnv[NO_RESPAWN_ENV] === "1" &&
-      !(SELF_TEST_ENV in cleanEnv),
-    JSON.stringify({ red: SELF_TEST_ENV, green: NO_RESPAWN_ENV })
+    "the names the re-spawn check looks for still exist in this file",
+    respawnCheckNames.every((name) => ownSource.includes(name)),
+    JSON.stringify(respawnCheckNames.filter((name) => !ownSource.includes(name)))
+  );
+
+  // The red child was spawned with `--selftest` only: it carries no
+  // `--no-respawn`. If the bottom block's condition were "no flags" instead of
+  // "neither flag", the red child would re-enter it and spawn a green
+  // grandchild, whose check names would appear in the red child's stdout. They
+  // must not: a child selected for the self-test is one level deep too.
+  check(
+    "...and the self-test child, spawned without --no-respawn, did not re-enter the self-run",
+    respawnCheckNames.every((name) => !String(child.stdout || "").includes(name)),
+    JSON.stringify({
+      leaked: respawnCheckNames.filter((name) => String(child.stdout || "").includes(name)),
+    })
+  );
+
+  // The other half of the same question: a run that *should* be green has to
+  // stay green. Without this, the suite could be red by construction — a check
+  // that always fails would still satisfy "a failing check exits 1", so the
+  // exit-code contract would be met by a permanently red suite and the
+  // self-test would be proving nothing.
+  const green = runChild(FLAGS.noRespawn);
+  check(
+    "the green self-run is selected by the other flag, so one child cannot become the other",
+    FLAGS.noRespawn !== FLAGS.selftest &&
+      parseFlags([FLAGS.selftest]).noRespawn === false &&
+      parseFlags([FLAGS.noRespawn]).selftest === false,
+    JSON.stringify({ red: FLAGS.selftest, green: FLAGS.noRespawn })
   );
   check(
-    "a run without the self-test variable exits 0 — the suite is not red by construction",
+    "a run without --selftest exits 0 — the suite is not red by construction",
     green.status === 0,
     `status=${green.status} signal=${green.signal || "none"}`
   );
@@ -1869,16 +2027,10 @@ if (process.env[SELF_TEST_ENV] !== "1" && process.env[NO_RESPAWN_ENV] !== "1") {
   // finished, which it never did. The bottom block's own check names are the
   // evidence: only a process that ran the re-spawn prints them, so their
   // absence from the green child's output is what proves it stopped there.
-  // Their presence in this file's source is asserted first, so "absent from the
-  // output" cannot pass because the names were reworded here.
-  const respawnCheckNames = ["a failing check makes this command exit non-zero", "the self-run really spawned"];
-  const ownSource = fs.readFileSync(fileURLToPath(import.meta.url), "utf8");
   check(
     "...and it did not re-spawn: none of the bottom block's own checks appear in its output",
-    respawnCheckNames.every((name) => ownSource.includes(name)) &&
-      respawnCheckNames.every((name) => !String(green.stdout || "").includes(name)),
+    respawnCheckNames.every((name) => !String(green.stdout || "").includes(name)),
     JSON.stringify({
-      reworded: respawnCheckNames.filter((name) => !ownSource.includes(name)),
       leaked: respawnCheckNames.filter((name) => String(green.stdout || "").includes(name)),
     })
   );

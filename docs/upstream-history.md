@@ -36,6 +36,51 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 补记落在这段之外。规则本身也必须写在这里（上面那句），否则它只存在于脚本里。
 
 ---
+## 上游状态（第 83 轮，2026-10-27）
+
+第 83 轮复核：**HEAD 未变，结论仍是「无新内容」；API 与 npm 两条通路可达。**
+`git ls-remote https://github.com/alibaba/open-code-review.git` 本轮超时（`timeout` 返回
+124，与第 47–48 轮同因），改由 `api.github.com/repos/alibaba/open-code-review/commits/main`
+回答：HTTP 200，`sha` 仍是 `375f64c`（与第 49–82 轮同一个 commit）；`npm view
+@alibaba-group/open-code-review version` 仍是 `1.13.3`。tag 一处本轮没有独立核对——
+`refs/heads/main` 未变即「无新 commit」，registry 的 `latest` 未变即「无新发布」。desktop
+的 `^1.13.3` 无需改动，**无移植项**。
+
+本轮把上一轮承认的那半个缺口补上，并给 78/81/82 三轮真实发生过的那条路径加一格断言：
+
+- **P0-1：真 git 的 stderr 现在也要过表。** 第 82 轮把措辞假设外化成
+  `REF_READ_WORDINGS`（每行带 `reason` / `pattern` / `sample`），但 `sample` 是手写字符串，
+  证明的只是「表同意自己」。本轮 `tools/git-service-smoke.mjs` 用**同一个 `git()`**（因此
+  同一个 `gitEnv()`，仍是 C locale）、同一个临时仓库，问 git 要这两个失败的真 stderr，再交给
+  `readFileAtRef` 用的**同一个分类器**（`classifyRefReadFailure`，本轮为此导出）。三格三件事：
+  ① 真 git 仍以一行 `fatal: …`、退出码 128 回答这两个失败（这是 sample 的写法声明的前提）：
+  `fatal: path '不存在/的路径' does not exist in 'HEAD'` 与
+  `fatal: invalid object name 'not-a-real-ref'.`；② 每句话只被**一个**带 pattern 的行认出来，
+  且就是答案里那一行；③ 认出真话的行，与手写 `sample` 落到的行是**同一个行对象**——sample
+  与现实不可能各走一行还各自「对」。第四格是这三格的自测：两句真话都以 `fatal:` 开头，所以
+  「放宽成前缀」那种改法会同时命中两行，而表里没有任何一行会——断言写在 git 自己的输出上。
+  验过会红：把 `missing` 的 pattern 改成 `/^fatal:/i`，`bad-ref` 那格立刻点名
+  `matched=["bad-ref","missing"]`，随后每一格依赖「唯一命中」的检查一起红。
+  下文「能自动变红的地方」那句「没有任何 audit 会因为 git 改措辞而变红」因此**不再成立**，
+  已就地改写成它现在的真实边界：今天这套 git 的这两句话被钉住了，**别的失败**（子模块、
+  git 为其它情形保留的拼写）仍没人钉。
+- **P0-2：`createRunner` → `runUpstreamWatch` 那条线，按**文本**断言。** 第 59 轮起 git→API
+  的回落在**对象**上已被断言（`channel: "api"`），但轮次里人看到的是句子，中间还隔着
+  `upstreamDrift` → `formatDrift` 两道：`channel` 在路上丢了，对象仍绿而句子会印「通路：none」，
+  于是一次核对过的轮次读起来像欠账。现在注入 `git` 返回 `{error: ETIMEDOUT}`、API 返回 pin，
+  走完整条 `runUpstreamWatch`，断言句子带「通路：api」、不带 `[UPSTREAM-DEBT]`、不带
+  `[UPSTREAM-MOVED]`、**也不带那条失败通路的原因**（`ETIMEDOUT` 不许漏进安静句子里，
+  否则「无 marker = 没事要做」这个 grep 就不成立），退出码 0；另一格两条路都失败：句子以
+  `[UPSTREAM-DEBT]` 开头、带「通路：none」、两条原因都在、退出码仍 0。验过会红：把
+  `runUpstreamWatch` 里透传的 `channel` 写死成 `"git"`，第一格当场点名
+  `"channel":"git"` 与整句文本。
+
+两条都在 `git-service.js` / `tools/git-service-smoke.mjs` 与本文件里（P0-2 只动
+`tools/upstream-watch-smoke.mjs` 的断言），不碰 CLI 参数、配置读写与 IPC 注册体；改写了的
+那句话在下面「能自动变红的地方，和不能的地方」一节。`audit:git` / `audit:upstream` 本轮全绿。
+
+上一轮（第 82 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-82-轮2026-10-27)，归档之后本文件不留第二份。
+
 ## 上游状态（第 82 轮，2026-10-27）
 
 第 82 轮复核：**HEAD 未变，结论仍是「无新内容」；API 与 npm 两条通路可达。**

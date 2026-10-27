@@ -658,6 +658,61 @@ export const previousRoundPointerViolations = (doc, historyDoc = "") => {
   return violations;
 };
 
+// ---- the human half opens with the rules for editing it ----
+//
+// The rules that keep this file auditable live in three places (the anchor
+// shapes, the ledger's binding to the commit subject, and the archive's append
+// rule) — and a person opening the doc to record a round meets none of them:
+// they open the doc, not this module. "Read `tools/upstream-watch.mjs`" is not
+// an entry point for a first edit. So the human half has to open with a short
+// checklist, and the checklist itself is asserted to exist.
+//
+// The checklist is prose on purpose. The literal anchors are *forbidden* in the
+// human half (a copy would be a second authority), so the section describes
+// them instead of quoting them — which is also why this rule is about the
+// section's shape and not its wording. The exact sentences will improve; what
+// may not disappear is the entry point.
+export const AUTHORING_RULES_HEADING = "## 写这份文档的规则";
+export const AUTHORING_RULES_MIN = 4;
+
+export const docAuthoringRuleViolations = (doc) => {
+  const lines = String(doc || "").split(/\r?\n/);
+  // The human half starts after the end marker; the marker's own count is
+  // `machineReadableBlockViolations`'s question, so a missing end marker is
+  // answered there rather than reported twice with the wrong cause.
+  const endAt = lines.findIndex((line) => line.includes(MACHINE_READABLE_END)) + 1;
+  if (endAt === 0) return [];
+
+  const human = lines.slice(endAt);
+  const headingAt = human.findIndex((line) => line.trim().startsWith(AUTHORING_RULES_HEADING));
+  const name = AUTHORING_RULES_HEADING.replace(/^##\s*/, "");
+  if (headingAt === -1) {
+    return [`人读区没有「${name}」一节：改这份文档的人在 audit 脚本之外找不到规则入口`];
+  }
+
+  const section = [];
+  for (let index = headingAt + 1; index < human.length; index += 1) {
+    if (/^#{1,6}\s/.test(human[index])) break;
+    section.push(human[index]);
+  }
+  const rules = section.filter((line) => /^\s*\d+\.\s*\S/.test(line)).length;
+  const violations = [];
+  if (rules < AUTHORING_RULES_MIN) {
+    violations.push(
+      `「${name}」只有 ${rules} 条编号规则（至少 ${AUTHORING_RULES_MIN} 条）：` +
+        "规则清单不能缩成一句，否则新写文档的人仍要读脚本"
+    );
+  }
+  const stateAt = human.findIndex((line) => /^##\s*当前状态（/.test(line));
+  if (stateAt !== -1 && headingAt > stateAt) {
+    violations.push(
+      `「${name}」在第 ${endAt + headingAt + 1} 行，落在当前状态（第 ${endAt + stateAt + 1} 行）之后：` +
+        "这一节要在人读区开头，改文档的人先看到规则"
+    );
+  }
+  return violations;
+};
+
 // ---- what the archive may quote, and what only the sync doc may declare ----
 //
 // `docs/upstream-history.md` quotes upstream commits in prose — whole
