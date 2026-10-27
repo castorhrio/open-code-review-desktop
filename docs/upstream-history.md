@@ -36,6 +36,47 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 补记落在这段之外。规则本身也必须写在这里（上面那句），否则它只存在于脚本里。
 
 ---
+## 上游状态（第 75 轮，2026-10-27）
+
+## 当前状态（第 75 轮，2026-10-27）
+
+第 75 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 两条通路都可达。**
+`git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
+refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
+（与第 49–74 轮同一个 commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
+`dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`；
+`npm view @alibaba-group/open-code-review version dist-tags` 仍是 `1.13.3` /
+`latest: 1.13.3`。desktop 的 `^1.13.3` 无需改动，**无移植项**。
+
+本轮不加产品功能面，做的是「文档承诺 ↔ 机器断言」之间还剩的两处桥，外加本文件自身的收敛：
+
+- **P0-1：`build.files` 的白名单不再只靠「有人记得加」。** `tools/check-packaging.mjs` 原先只顺
+  `main.js` / `preload.js` 的 `require` 图走，因此漏掉第二类漏打包——一个用**路径字符串**加载
+  的模块（`path.join(__dirname, …)` 交给子进程的那种）或一个**还没有人 require 的**新根模块：
+  它们在图里不存在，于是被当成「不需要打包」，等哪天有人用到才在打包版里炸。现在这条闸门问两
+  个问题：`require` 图里每个模块都要在白名单里；**根目录每一个 `*.js` 都要在白名单里**，不管有
+  没有东西 require 它（真不是运行时模块的就该搬到 `tools/`，报错就是这么说的）。同时核心抽成
+  可 import 的 `findPackagingProblems()` / `allowlistMatcher()` / `matchesPattern()`，新增
+  `tools/check-packaging-smoke.mjs` 把「这条闸门会红」变成断言：临时目录里造出四种形状
+  （直接 require、只有依赖 require 的传递模块、没人 require 的根模块、`!` 排除项、白名单里
+  写了不存在的文件、入口文件不存在），一次删一项，要求答案点名那一项；再拿本仓**真实的**
+  `package.json` 逐条验：白名单里 14 行 `*.js` **每一行都是承重的**——删掉任一行，闸门必须红并
+  点名它。这条清单是从 `package.json` 读的，不是抄在这里的，所以以后新增模块自动被覆盖，而一
+  行「已经没人需要」的死条目也会在这里被点出来。
+- **P0-2：`git-service` 通用分支的兜底本身被断言了。** `readFileAtRef` 的 `bad-ref` / `missing`
+  靠匹配 git 的英文措辞，本地化或新版 git 说别的就会落进通用 `failed` 分支——这条分支的诊断性
+  （句子里带 git 自己的首行 stderr 与**退出码**）是那个已知代价的唯一补偿。原来这条断言写成
+  三处内联正则，改一处仍读作「已覆盖」；现在只有一个谓词 `namesExitCode(message, code)`，三处
+  调用点都用它，并补两条自测：同一句失败去掉退出码后**必须判红**，以及它要的是 git 真正退出的
+  那个码（`退出码 128` 不许被当成 `退出码 1`）——所以「退出码在句子里」不会随重构悄悄消失。
+  中文措辞 `致命错误：无效的对象名称` 也单独成一条命名断言（`reason === "failed"` 且句子带退出码）。
+- **P1-1：本文件收敛成「机器可读区 + 人读区」。** 之前 pin 块、固定行、通路账、对照表散在
+  两百行正文中间，改一处要跨好几段读，人读的散文与脚本读的表混在一起。现在四块集中在文件顶部
+  的「机器可读区」（`<!-- machine-readable:start/end -->` 之间），按形状定位、不依赖行号；关系、
+  规则、本轮结论、「能自动变红的地方和不能的地方」放在后面的人读区。语义没变，`audit:upstream`
+  保持绿。第 74 轮的正文按归档规则搬进了 [`upstream-history.md`](upstream-history.md)。
+
+---
 ## 上游状态（第 74 轮，2026-10-27）
 
 ## 当前状态（第 74 轮，2026-10-27）

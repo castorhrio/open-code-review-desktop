@@ -12,11 +12,25 @@
 //      would be shipped as "not needed" and only fail the day something starts
 //      using it.
 //
-// So the answer is two questions, not one: walk the entry graph from
+// So the answer is two questions, not one: scan the entry graph from
 // `main.js` / `preload.js` and check every module it reaches, *and* require every
 // root-level `*.js` to be in the allowlist regardless of whether anything
 // requires it. A root `.js` that is genuinely not runtime belongs under
 // `tools/`, and the failure says so.
+//
+// "Scan" is the accurate word, and the difference matters: the require edges
+// are found by a regular expression over the source text — not by an AST, and
+// not by running anything. So a module loaded by a *computed* path
+// (`require(`./x`)`, `require("./" + "x")`) is invisible to it: the file never
+// enters the graph, so it is not "required at runtime" as far as the gate
+// knows. That hole is written down as an assertion instead of a comment —
+// `tools/check-packaging-smoke.mjs` pins both halves of it (a literal require
+// *is* followed, a computed one is not), so the day somebody teaches the scan
+// to follow computed requires, the two facts change together with the
+// mitigation they imply. The mitigation that exists today: a computed require
+// of a *root-level* module is still caught by the root sweep (with its own
+// wording), while a computed require of a module in a subdirectory is not
+// caught at all. Hence: runtime requires stay literal.
 //
 // The very same function is what `tools/check-packaging-smoke.mjs` points at a
 // fixture with one allowlist line removed, so "this gate can go red" is asserted

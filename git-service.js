@@ -28,6 +28,13 @@ const { isInside } = require("./path-guard");
 // Built per call rather than once at load: the caller's environment is allowed to
 // change between calls (the checks point `GIT_CEILING_DIRECTORIES` at a throwaway
 // directory, for instance), and a snapshot taken at load would silently ignore it.
+//
+// This is a deliberate trade, not a guarantee: no audit turns red when git changes
+// its wording (the fixtures are hand-written strings), so the fallback branch has to
+// stay diagnosable instead. The full statement of that cost — what is asserted, what
+// can only be re-read by hand — is in `docs/OCR-UPSTREAM-SYNC.md` 的
+// 『能自动变红的地方，和不能的地方』. Read it before touching the patterns in
+// `readFileAtRef`.
 const gitEnv = () => ({ ...process.env, LC_ALL: "C", LANG: "C" });
 
 function git(args, cwd) {

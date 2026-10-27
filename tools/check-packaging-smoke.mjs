@@ -137,6 +137,80 @@ try {
   fs.rmSync(fixture, { recursive: true, force: true });
 }
 
+/* ---- the known blind spot, written as an assertion ----
+ * The gate finds require edges with a regular expression over the source text,
+ * so it sees `require("./x")` and nothing else. A module loaded by a computed
+ * path — `require(`./x`)`, `require("./" + "x")` — is invisible to it: the
+ * walk never reaches the file, so the file is not in the graph and no
+ * "required at runtime" complaint is made about it.
+ *
+ * That is a real hole, and the honest way to hold it is an assertion rather
+ * than a comment: the two facts below (a literal require *is* followed, a
+ * computed one is not) are what the gate does today. If somebody teaches the
+ * scan to follow computed requires, these go red — on purpose, because the
+ * mitigation (runtime requires stay literal) would no longer be needed, and
+ * the sentence that says so would have to change with it.
+ */
+const blind = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-packaging-blind-"));
+try {
+  fs.writeFileSync(
+    path.join(blind, "main.js"),
+    [
+      'require("./literal");',
+      "require(`./templated`);",
+      'require("./" + "joined");',
+      'require(`./lib/${"deep"}`);',
+      "",
+    ].join("\n")
+  );
+  fs.writeFileSync(path.join(blind, "literal.js"), "module.exports = {};\n");
+  fs.writeFileSync(path.join(blind, "templated.js"), "module.exports = {};\n");
+  fs.writeFileSync(path.join(blind, "joined.js"), "module.exports = {};\n");
+  fs.mkdirSync(path.join(blind, "lib"));
+  fs.writeFileSync(path.join(blind, "lib", "deep.js"), "module.exports = {};\n");
+
+  const ALL = ["main.js", "literal.js", "templated.js", "joined.js"];
+  const blindRun = findPackagingProblems({ root: blind, patterns: ALL, entries: ["main.js"] });
+  check(
+    "a literal require is followed by the walk, so that module is in the graph",
+    blindRun.checked.includes("literal.js"),
+    JSON.stringify(blindRun.checked)
+  );
+  check(
+    "a computed require is not followed: the module never enters the graph",
+    !blindRun.checked.includes("templated.js") &&
+      !blindRun.checked.includes("joined.js") &&
+      !blindRun.checked.includes("lib/deep.js"),
+    JSON.stringify(blindRun.checked)
+  );
+  // The sharpest form of the hole: `lib/deep.js` is required by a computed
+  // path *and* is in no allowlist, and the gate says nothing at all. The root
+  // sweep does not reach into subdirectories, so neither question covers it.
+  check(
+    "...and the gate stays silent about all of them, including the one that is not packaged at all",
+    blindRun.problems.length === 0,
+    blindRun.problems.join(" | ") || "no problem"
+  );
+
+  // The mitigation that does exist: a computed require of a *root* module is
+  // still caught — by the root sweep, not by the graph — so the message says
+  // "root module", and it says what to do about it.
+  const withoutTemplated = findPackagingProblems({
+    root: blind,
+    patterns: ALL.filter((entry) => entry !== "templated.js"),
+    entries: ["main.js"],
+  });
+  check(
+    "a computed require of a root module is still caught, by the root sweep and with its own wording",
+    withoutTemplated.problems.length === 1 &&
+      names(withoutTemplated, "templated.js") &&
+      withoutTemplated.problems.some((problem) => problem.includes("root module")),
+    withoutTemplated.problems.join(" | ")
+  );
+} finally {
+  fs.rmSync(blind, { recursive: true, force: true });
+}
+
 /* ---- the real allowlist, from the real package.json ---- */
 {
   check(
@@ -192,18 +266,37 @@ try {
   // being carried forever.
   const jsLines = REAL_PATTERNS.filter((entry) => !entry.startsWith("!") && entry.endsWith(".js"));
   const notLoadBearing = [];
+  const redForAnotherReason = [];
   for (const line of jsLines) {
     const without = findPackagingProblems({
       root: ROOT,
       patterns: REAL_PATTERNS.filter((entry) => entry !== line),
       entries: DEFAULT_ENTRIES,
     });
-    if (!names(without, line)) notLoadBearing.push(line);
+    if (!names(without, line)) {
+      notLoadBearing.push(line);
+      continue;
+    }
+    // "It goes red" is not enough — it has to go red *because the module is no
+    // longer packaged*. A gate that went red for some other reason (a typo in
+    // the allowlist, a file renamed away) would satisfy a name-only check while
+    // the real hole stayed open, and the two reasons are told apart in the
+    // message. Pinned here so "the gate is green" can never be explained by a
+    // red that means something else.
+    const saysWhy = without.problems.some(
+      (problem) => problem.includes("required at runtime") || problem.includes("root module")
+    );
+    if (!saysWhy) redForAnotherReason.push(line);
   }
   check(
     `every one of the ${jsLines.length} allowlist *.js lines is load-bearing: removing it goes red and names it`,
     jsLines.length > 1 && notLoadBearing.length === 0,
     notLoadBearing.join(" | ") || `${jsLines.length} lines`
+  );
+  check(
+    "...and it goes red *because the module stopped being packaged*, not for some other reason",
+    redForAnotherReason.length === 0,
+    redForAnotherReason.join(" | ") || `${jsLines.length} line(s)`
   );
 }
 

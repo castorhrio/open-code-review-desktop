@@ -20,6 +20,9 @@ import {
   HISTORY_ALLOWED_SHA_CONTEXTS,
   HISTORY_APPEND_RULE_TERMS,
   HISTORY_NOTE_MARKER,
+  MACHINE_READABLE_ANCHORS,
+  MACHINE_READABLE_END,
+  MACHINE_READABLE_START,
   MOVED_MARKER,
   PINNED_UPSTREAM,
   PIN_BLOCK_END,
@@ -42,6 +45,7 @@ import {
   historyRoundNumbers,
   historySections,
   historyShaRule,
+  machineReadableBlockViolations,
   parseApiCommit,
   parseLsRemote,
   pinPlaceCoverage,
@@ -67,9 +71,20 @@ const check = (name, ok, detail = "") => {
 
 // Read by this file when it re-runs itself as a child process at the bottom of
 // the suite, to prove that a failed check reaches `process.exit(1)`. Never set
-// by a normal run, and never set by the child's own children (there are none):
-// the spawn is guarded on the same variable, so the self-test is one level deep.
+// by a normal run.
 const SELF_TEST_ENV = "OCR_UPSTREAM_WATCH_SELFTEST";
+
+// The second self-run is the green one ("a run without the self-test variable
+// exits 0"), and it needs a variable of its own to switch the re-spawn *off* —
+// because "the self-test variable is not set" is exactly the state in which the
+// bottom block spawns. One variable cannot express both halves: the green child
+// inherits `SELF_TEST_ENV` unset, runs the bottom block again, and spawns
+// another green child, forever. That failure did not look like a failure — the
+// suite hung, and a hang reads as a slow machine (it was killed past three
+// minutes). Two variables make "green, and one level deep" a state that can be
+// asked for: the green child is told not to re-spawn, and the check under it
+// asserts that it obeyed rather than merely that it exited 0.
+const NO_RESPAWN_ENV = "OCR_UPSTREAM_WATCH_NO_SELFTEST";
 if (process.env[SELF_TEST_ENV] === "1") {
   check(
     "[self-test] a check that fails on purpose",
@@ -946,6 +961,134 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
   );
 }
 
+/* ---- the machine-readable region's own shape ----
+ * The sync doc is two regions: the part this audit reads (between the two
+ * `<!-- machine-readable:… -->` markers) and the part it does not (everything
+ * after the end marker). The split is what makes the audit's answers stable —
+ * the pin block, the fixed line, the ledger and the comparison table are found
+ * *by shape*, so prose in the human half can grow without moving them.
+ *
+ * The split's failure mode is silent, which is why it needs its own rule: a
+ * second copy of an anchor in the human half (a second `### 核对通路账`, a
+ * second comparison table, a second pin block) leaves every other check green,
+ * because the counts that would see it are exactly the ones the audit does not
+ * make. The file then says the same thing twice, and the two copies can drift
+ * apart. That is the mechanical form of the sentence at the top of the file
+ * (「不要在人读区再声明一次 pin、复制一轮欠账、或另起一张对照表」).
+ *
+ * So: the real doc must be clean; the human half must be a real region (or
+ * "no anchor after the end marker" is vacuous); and three one-line mutations
+ * must each go red for their own reason.
+ */
+{
+  const doc = fs.readFileSync(SYNC_DOC, "utf8");
+  const docLines = doc.split(/\r?\n/);
+  const violations = machineReadableBlockViolations(doc);
+  check(
+    "the sync doc's machine-readable region has exactly the shape the audit reads",
+    violations.length === 0,
+    violations.join("；") || "no violation"
+  );
+  check(
+    "the region is checked for at least five anchors, each with its own name and its own matcher",
+    MACHINE_READABLE_ANCHORS.length >= 5 &&
+      new Set(MACHINE_READABLE_ANCHORS.map((anchor) => anchor.name)).size ===
+        MACHINE_READABLE_ANCHORS.length &&
+      MACHINE_READABLE_ANCHORS.every((anchor) => Boolean(anchor.marker) !== Boolean(anchor.where)),
+    JSON.stringify(MACHINE_READABLE_ANCHORS.map((anchor) => anchor.name))
+  );
+
+  const startLine = docLines.findIndex((line) => line.includes(MACHINE_READABLE_START)) + 1;
+  const endLine = docLines.findIndex((line) => line.includes(MACHINE_READABLE_END)) + 1;
+  const humanLines = docLines.length - endLine;
+  check(
+    "...and the human half is a real region, not an empty one",
+    startLine > 0 && endLine > startLine && humanLines > 20,
+    `start=${startLine} end=${endLine} human=${humanLines} line(s)`
+  );
+  // The human half is where the *third* pin declaration lives (the prose one).
+  // Asserting it is still there proves the rule aims at the right region — and
+  // that "no anchor after the end marker" is about the anchors, not about
+  // banning every shape of pin declaration from the human half.
+  const humanPins = findDocPins(docLines.slice(endLine).join("\n"));
+  check(
+    "...and it is the region that still holds the third (prose) pin declaration",
+    humanPins.pins.length === 1 && humanPins.pins[0].where === "正文固定 SHA",
+    JSON.stringify(humanPins.pins.map((pin) => [pin.where, pin.sha.slice(0, 7)]))
+  );
+
+  // (a) the marker pair split into two places: a second start marker below the
+  // end marker makes the file look like it has two machine-readable regions.
+  const split = [
+    ...docLines.slice(0, endLine),
+    MACHINE_READABLE_START,
+    ...docLines.slice(endLine),
+  ].join("\n");
+  const splitViolations = machineReadableBlockViolations(split);
+  check(
+    "a second machine-readable start marker goes red, naming the marker and both lines",
+    splitViolations.length === 1 &&
+      splitViolations[0].includes(MACHINE_READABLE_START) &&
+      splitViolations[0].includes("2 次") &&
+      splitViolations[0].includes(String(startLine)) &&
+      splitViolations[0].includes(String(endLine + 1)),
+    splitViolations.join("；")
+  );
+  check(
+    "...and that copy differs from the doc by exactly one inserted line",
+    split.split(/\r?\n/).length === docLines.length + 1,
+    `doc=${docLines.length} copy=${split.split(/\r?\n/).length}`
+  );
+
+  // (b) an anchor copied into the human half: the file now says the same thing
+  // twice, and the copy is the one nobody reads.
+  const copied = [
+    ...docLines.slice(0, endLine),
+    "### 核对通路账",
+    ...docLines.slice(endLine),
+  ].join("\n");
+  const copiedViolations = machineReadableBlockViolations(copied);
+  check(
+    "an anchor copied into the human half goes red, naming that line",
+    copiedViolations.length === 1 &&
+      copiedViolations[0].includes("人读区") &&
+      copiedViolations[0].includes("核对通路账") &&
+      copiedViolations[0].includes(String(endLine + 1)),
+    copiedViolations.join("；")
+  );
+  check(
+    "...and that copy differs from the doc by exactly one inserted line too",
+    copied.split(/\r?\n/).length === docLines.length + 1,
+    `doc=${docLines.length} copy=${copied.split(/\r?\n/).length}`
+  );
+
+  // (c) the two markers in the wrong order: the region would be the lines
+  // *before* the end marker, which is not what the file means.
+  const swapped = docLines
+    .map((line, index) => {
+      if (index + 1 === startLine) return line.replace(MACHINE_READABLE_START, MACHINE_READABLE_END);
+      if (index + 1 === endLine) return line.replace(MACHINE_READABLE_END, MACHINE_READABLE_START);
+      return line;
+    })
+    .join("\n");
+  const swappedViolations = machineReadableBlockViolations(swapped);
+  check(
+    "the two markers in the wrong order go red, naming both lines",
+    swappedViolations.length === 1 &&
+      swappedViolations[0].includes("顺序颠倒") &&
+      swappedViolations[0].includes(String(startLine)) &&
+      swappedViolations[0].includes(String(endLine)),
+    swappedViolations.join("；")
+  );
+  check(
+    "...and only the two marker lines changed",
+    swapped
+      .split(/\r?\n/)
+      .filter((line, index) => line !== docLines[index]).length === 2,
+    "the swap must not have touched anything else"
+  );
+}
+
 /* ---- the audit log is one file, and it is not a second pin authority ----
  * Thirteen round sections used to sit in the sync doc, above the pin and the
  * comparison table, each quoting an upstream SHA of its own (seven-character
@@ -1386,7 +1529,7 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
   );
 }
 
-if (process.env[SELF_TEST_ENV] !== "1") {
+if (process.env[SELF_TEST_ENV] !== "1" && process.env[NO_RESPAWN_ENV] !== "1") {
   const child = spawnSync(process.execPath, [fileURLToPath(import.meta.url)], {
     env: { ...process.env, [SELF_TEST_ENV]: "1" },
     encoding: "utf8",
@@ -1411,6 +1554,63 @@ if (process.env[SELF_TEST_ENV] !== "1") {
     "...and the injected failure is named on stderr, so the red says what failed",
     /a check that fails on purpose/.test(child.stderr || ""),
     String(child.stderr || "").trim().split(/\r?\n/).slice(-2).join(" | ")
+  );
+
+  // The other half of the same question: a run that *should* be green has to
+  // stay green. Without this, the suite could be red by construction — a
+  // check that always fails would still satisfy "a failing check exits 1", so
+  // the exit-code contract would be met by a permanently red suite and the
+  // self-test would be proving nothing. This child runs the same file with the
+  // self-test variable *not set at all* (the variable is deleted from the
+  // environment, not set to an empty string, so "unset" is what is exercised).
+  const cleanEnv = { ...process.env };
+  delete cleanEnv[SELF_TEST_ENV];
+  // ...and told not to re-spawn. Without this the green child meets the very
+  // condition the bottom block exists for (the self-test variable is unset) and
+  // spawns its own green child, one level deeper, forever.
+  cleanEnv[NO_RESPAWN_ENV] = "1";
+  const green = spawnSync(process.execPath, [fileURLToPath(import.meta.url)], {
+    env: cleanEnv,
+    encoding: "utf8",
+  });
+  check(
+    "the green self-run is told not to re-spawn, by a variable the red one does not use",
+    NO_RESPAWN_ENV !== SELF_TEST_ENV &&
+      cleanEnv[NO_RESPAWN_ENV] === "1" &&
+      !(SELF_TEST_ENV in cleanEnv),
+    JSON.stringify({ red: SELF_TEST_ENV, green: NO_RESPAWN_ENV })
+  );
+  check(
+    "a run without the self-test variable exits 0 — the suite is not red by construction",
+    green.status === 0,
+    `status=${green.status} signal=${green.signal || "none"}`
+  );
+  check(
+    "...and it really ran the whole suite, rather than dying before the first check",
+    /all upstream-watch checks passed/.test(green.stdout || "") && !/failed:/.test(green.stderr || ""),
+    String(green.stdout || "")
+      .trim()
+      .split(/\r?\n/)
+      .slice(-1)
+      .join(" | ")
+  );
+  // "Exited 0" on its own does not say the green child was one level deep — a
+  // child that re-spawned would exit 0 too, once the recursion under it
+  // finished, which it never did. The bottom block's own check names are the
+  // evidence: only a process that ran the re-spawn prints them, so their
+  // absence from the green child's output is what proves it stopped there.
+  // Their presence in this file's source is asserted first, so "absent from the
+  // output" cannot pass because the names were reworded here.
+  const respawnCheckNames = ["a failing check makes this command exit non-zero", "the self-run really spawned"];
+  const ownSource = fs.readFileSync(fileURLToPath(import.meta.url), "utf8");
+  check(
+    "...and it did not re-spawn: none of the bottom block's own checks appear in its output",
+    respawnCheckNames.every((name) => ownSource.includes(name)) &&
+      respawnCheckNames.every((name) => !String(green.stdout || "").includes(name)),
+    JSON.stringify({
+      reworded: respawnCheckNames.filter((name) => !ownSource.includes(name)),
+      leaked: respawnCheckNames.filter((name) => String(green.stdout || "").includes(name)),
+    })
   );
 }
 

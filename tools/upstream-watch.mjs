@@ -319,10 +319,15 @@ export const PIN_BLOCK_END = "<!-- upstream-pin:end -->";
 export const UPSTREAM_HISTORY_DOC = "docs/upstream-history.md";
 
 const SHA_IN_LINE = "([0-9a-fA-F]{7,40})";
+// The place name of the fixed "本轮 HEAD 核对" line. Named, because the
+// machine-readable region's anchor list below needs the *same* name to find
+// that line — and a second copy of this string is exactly the kind of thing
+// that drifts out of sync with the rule it describes.
+export const FIXED_LINE_PLACE = "本轮 HEAD 核对 行";
 // The shapes outside the block. `g` is not used: each rule is applied to one
 // line and the first match is the declaration.
 const PIN_LINE_RULES = [
-  { where: "本轮 HEAD 核对 行", re: new RegExp("本轮 HEAD 核对：`" + SHA_IN_LINE + "`") },
+  { where: FIXED_LINE_PLACE, re: new RegExp("本轮 HEAD 核对：`" + SHA_IN_LINE + "`") },
   { where: "正文固定 SHA", re: new RegExp("固定的整串 40 位 SHA\\s*`" + SHA_IN_LINE + "`") },
 ];
 
@@ -405,6 +410,134 @@ export const findDocPins = (doc) => {
     }
   });
   return { pins, tag, blockFound };
+};
+
+// ---- the machine-readable region's own shape ----
+//
+// The sync doc is two regions: the part `audit:upstream` reads (between
+// `<!-- machine-readable:start -->` and `<!-- machine-readable:end -->`) and the
+// part it does not (everything after the end marker). The split is what makes
+// the audit's answers stable — the pin block, the fixed line, the ledger and
+// the comparison table are located *by shape*, so prose in the human half can
+// grow without moving them.
+//
+// The split has a failure mode of its own, and it is silent: a second copy of
+// an anchor in the human half (a second `### 核对通路账`, a second comparison
+// table, a second pin block) leaves every other check green — the counts that
+// would see it are exactly the ones the audit does not make — while the file
+// now claims the same fact twice, and the two copies can drift apart. That is
+// the mechanical form of the sentence at the top of the file: 「不要在人读区再
+// 声明一次 pin、复制一轮欠账、或另起一张对照表」.
+//
+// So the shape is asserted rather than trusted: the two markers appear once
+// each and in that order, the five anchors appear once each *inside* the
+// region, and none of them appears after the end marker.
+//
+// The preamble (before the start marker) quotes three of the anchors on
+// purpose — it is the note that tells a reader what the script locates — so it
+// is deliberately outside the "exactly once" rule. The rule is about the human
+// half, which is where a second copy would be a second authority.
+export const MACHINE_READABLE_START = "<!-- machine-readable:start -->";
+export const MACHINE_READABLE_END = "<!-- machine-readable:end -->";
+
+// The anchors the machine-readable region must carry — each exactly once, and
+// none of them again in the human-readable region.
+//
+// A `marker` anchor is a literal string. The fixed line is matched by its pin
+// *shape* instead (the same rule `findDocPins` uses), so the heading that
+// merely names the line does not count as the line, and a prose mention
+// without a SHA does not count either.
+export const MACHINE_READABLE_ANCHORS = Object.freeze([
+  { name: "pin 块起点", marker: PIN_BLOCK_START },
+  { name: "pin 块终点", marker: PIN_BLOCK_END },
+  { name: "本轮 HEAD 核对 固定行", where: FIXED_LINE_PLACE },
+  { name: "核对通路账 标题", marker: "### 核对通路账" },
+  { name: "对照表 表头", marker: TABLE_HEADER },
+]);
+
+// The 1-based document lines one anchor sits on, inside the given lines.
+// A `where` anchor is a pin shape: only the line that really declares the pin
+// counts, never a heading that mentions it.
+const anchorLines = (lines, anchor) => {
+  const hits = [];
+  (lines || []).forEach((line, index) => {
+    if (anchor.marker) {
+      if (line.includes(anchor.marker)) hits.push(index + 1);
+      return;
+    }
+    const hit = matchPinShape(line);
+    if (hit && hit.where === anchor.where) hits.push(index + 1);
+  });
+  return hits;
+};
+
+// The rule as violations. Empty is the only acceptable answer for the real
+// sync doc; each entry names the line, because "the region's shape is wrong"
+// sends the reader to a 240-line diff.
+export const machineReadableBlockViolations = (doc) => {
+  const violations = [];
+  const lines = String(doc || "").split(/\r?\n/);
+
+  const markerLines = (marker) => {
+    const found = [];
+    lines.forEach((line, index) => {
+      if (line.includes(marker)) found.push(index + 1);
+    });
+    return found;
+  };
+
+  const startAt = markerLines(MACHINE_READABLE_START);
+  const endAt = markerLines(MACHINE_READABLE_END);
+
+  for (const [marker, found] of [
+    [MACHINE_READABLE_START, startAt],
+    [MACHINE_READABLE_END, endAt],
+  ]) {
+    if (found.length !== 1) {
+      violations.push(
+        `机器可读区标记 \`${marker}\` 出现 ${found.length} 次（应为 1 次）：` +
+          (found.length ? `第 ${found.join("、")} 行` : "找不到")
+      );
+    }
+  }
+  // Without exactly one marker of each kind there is no single region to talk
+  // about, so the anchor checks below are skipped rather than reporting "0
+  // times" for every anchor — that would be true, but explained by the wrong
+  // cause, and the reader would go looking for five missing anchors instead of
+  // the one duplicated marker that caused it.
+  if (startAt.length !== 1 || endAt.length !== 1) return violations;
+
+  if (startAt[0] > endAt[0]) {
+    violations.push(
+      `机器可读区的起点（第 ${startAt[0]} 行）在终点（第 ${endAt[0]} 行）之后，顺序颠倒`
+    );
+    return violations;
+  }
+
+  // The region is the lines strictly between the two markers; the human half
+  // is everything after the end marker. The offsets turn a position inside a
+  // slice back into a document line.
+  const inside = lines.slice(startAt[0], endAt[0] - 1);
+  const after = lines.slice(endAt[0]);
+
+  for (const anchor of MACHINE_READABLE_ANCHORS) {
+    const insideHits = anchorLines(inside, anchor);
+    if (insideHits.length !== 1) {
+      violations.push(
+        `机器可读区里的「${anchor.name}」出现 ${insideHits.length} 次（应为 1 次）：` +
+          (insideHits.length ? `第 ${insideHits.map((n) => n + startAt[0]).join("、")} 行` : "找不到")
+      );
+    }
+    const afterHits = anchorLines(after, anchor);
+    if (afterHits.length > 0) {
+      violations.push(
+        `「${anchor.name}」在人读区里又出现 ${afterHits.length} 次：` +
+          `第 ${afterHits.map((n) => n + endAt[0]).join("、")} 行——人读区不得复制机器可读区的锚点`
+      );
+    }
+  }
+
+  return violations;
 };
 
 // ---- what the archive may quote, and what only the sync doc may declare ----
