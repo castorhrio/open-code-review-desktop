@@ -25,6 +25,7 @@ const {
 } = require("./path-guard");
 const { providersAnswer } = require("./provider-handler");
 const { createWindowSender } = require("./window-sender");
+const { reportSenderLoss, reportProbeError } = require("./main-wiring");
 const { handleAppInfo } = require("./app-info");
 
 const DOCS_URL = "https://open-codereview.ai/docs";
@@ -79,15 +80,13 @@ function createWindow() {
   mainWindow.once("ready-to-show", () => mainWindow.show());
   // The page has run: hand over whatever was held while it was loading. A
   // renderer that never loads (or a queue that outgrew its bound) is not silent
-  // — the count comes back here and is said out loud on the one channel a
-  // packaged app can read.
+  // — the count comes back from `markReady()` and `reportSenderLoss` says it on
+  // the one channel a packaged app can read. The sentence itself, and the
+  // decision that a zero loss says nothing, live in `main-wiring.js`; this is
+  // the wiring that has to be right: read the count, hand over the bound, use
+  // the app's one door.
   mainWindow.webContents.once("did-finish-load", () => {
-    const { lost } = windowSender.markReady();
-    if (lost > 0) {
-      send("run:log", {
-        line: `[ui] 窗口就绪前有 ${lost} 条事件超出缓冲上限（${windowSender.limit} 条），已丢弃最早的那些`,
-      });
-    }
+    reportSenderLoss({ ...windowSender.markReady(), limit: windowSender.limit, send });
   });
   const devUrl = process.env.ELECTRON_RENDERER_URL;
   if (devUrl) {
@@ -193,11 +192,10 @@ ipcMain.handle("app:info", () =>
     // The probe's exception is dropped from the payload — the page has one
     // sentence for "no version" — but it used to be dropped from everywhere.
     // `handleAppInfo` calls this only when `exec` threw, so a missing version
-    // caused by a broken service still leaves a line behind. It goes to the
-    // same `run:log` sink as the uninstall warnings below: an installed app has
-    // no terminal, so stderr is not a place the user can read.
-    onProbeError: (message) =>
-      send("run:log", { line: `[app:info] 版本探测失败：${message}` }),
+    // caused by a broken service still leaves a line behind. The sentence and
+    // its channel are `reportProbeError` in `main-wiring.js` (tested there);
+    // what is left here is the wiring: the message, and the app's one door.
+    onProbeError: (message) => reportProbeError({ message, send }),
   })
 );
 

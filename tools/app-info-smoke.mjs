@@ -1457,25 +1457,30 @@ const base = {
   );
   // ...and the sink itself has to be wired, or the exit the handler now offers
   // is a door nobody opened: the diagnostic would still vanish for real users.
-  // The sink is `run:log` — the same one the uninstall warnings use — and not
-  // `console.warn`: a packaged app has no terminal, so a warning there is the
-  // same disappearance this exit exists to prevent. The shape (`{ line }`) is
-  // part of the assertion because a payload the renderer cannot read is the
-  // same as no line at all.
-  const handsProbeErrorToRunLog = (source) =>
+  // The sentence, its channel (`run:log`, not a terminal a packaged app cannot
+  // read) and its `{ line }` payload are `reportProbeError` in
+  // `main-wiring.js`, and are checked there by calling it
+  // (`tools/main-wiring-smoke.mjs`). What is left in the registration — and so
+  // what is left to assert here — is the hand-over: the sink the handler is
+  // given has to pass the probe's message and this app's one `send` along.
+  const handsProbeErrorOn = (source) =>
     /onProbeError\s*:/.test(source) &&
-    /send\(\s*["']run:log["']\s*,\s*\{\s*line\s*:/.test(source) &&
-    !/console\.warn\(/.test(source);
+    /reportProbeError\(\s*\{(?=[^}]*\bmessage\b)(?=[^}]*\bsend\b)[^}]*\}\s*\)/.test(source) &&
+    !/console\.warn\(/.test(source) &&
+    !/版本探测失败/.test(source);
   check(
-    "...and hands the probe's exception to run:log, not to a terminal a packaged app does not have",
-    handsProbeErrorToRunLog(body),
+    "...and hands the probe's exception to the module that says it, not to a terminal a packaged app does not have",
+    handsProbeErrorOn(body),
     registered.length === 1 ? registered[0].file : "no single registration"
   );
   check(
-    "...and that question goes red for console.warn and for a payload without `line`",
-    handsProbeErrorToRunLog(`onProbeError: (m) => console.warn(m),`) === false &&
-      handsProbeErrorToRunLog(`onProbeError: (m) => send("run:log", { id: m }),`) === false &&
-      handsProbeErrorToRunLog(`onProbeError: (m) => send("run:log", { line: m }),`) === true,
+    "...and that question goes red for console.warn, a dropped send, and a second copy of the sentence",
+    handsProbeErrorOn(`onProbeError: (m) => console.warn(m),`) === false &&
+      handsProbeErrorOn(`onProbeError: (m) => reportProbeError({ message: m }),`) === false &&
+      handsProbeErrorOn(
+        'onProbeError: (m) => send("run:log", { line: `[app:info] 版本探测失败：${m}` }),'
+      ) === false &&
+      handsProbeErrorOn(`onProbeError: (m) => reportProbeError({ message: m, send }),`) === true,
     "constructed registrations"
   );
 

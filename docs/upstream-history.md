@@ -38,6 +38,36 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 
 ---
 
+## 上游状态（第 94 轮，2026-10-27）
+
+第 94 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 均可核对。**
+`375f64cd…` 与 pin 一致（与第 49–93 轮同一个 commit），`git ls-remote --tags --refs` 仍以
+`refs/tags/v1.13.3` 为最高版本，`npm view @alibaba-group/open-code-review version` 仍是
+`1.13.3`。**无移植项**。
+
+本轮只动断言与注释，主题是「把第 93 轮已落地的行为，从边界与接线两侧钉牢」：
+
+- **P0-1：`window-sender.js` 的三格边界。** 第 93 轮测了正常路径，但三个格子仍可被命名：
+  ①未就绪且队列非空时再 `send()`——走的是排队分支，不是「flush 空转后误投」；
+  ②已 ready 时重复 `markReady()`——队列非空时第一次 flush、第二次 `sent === 0` 且不重投；
+  ③flush 中途失败时 `dropped` 不被污染——第 4 节的 `announcement` 与恢复调用都要求
+  `lost === 0`。三格都在 `tools/window-sender-smoke.mjs`，模块本身未改。
+- **P0-2：`main.js` 的接线。** 原来只断言「有 `markReady`、有 `limit`、有某个
+  `run:log` 发送」；现在要求 `did-finish-load` 的回调里调 `markReady`、
+  `createWindow()` 里调 `markUnready`，并且 `lost > 0` 的计数确实从 `markReady()` 读出、
+  经 `send("run:log", { line: … })` 说出。构造式自测把「换通道」「忽略计数」「换 payload
+  键」三种写法定否——任一改动都会先红。
+- **P1-1：`dependencyPinViolations` 的盲区。** 第 93 轮只演了 `*`；现在 `*` / `latest` /
+  空串一律按「读不出版本号」红，**不是**「无法比较即通过」；另补「pin 的 tag 不是版本号
+  （如 `nightly`）要点名 tag」与「不带 `v` 的裸版本 pin 仍判一致」。
+- **P1-2 / P2-1：注释补上取舍。** `window-sender.js` 顶部写明「页面始终没加载出来时
+  `markReady()` 不会被调用，队列填满后丢弃是接受的取舍」；`send()` 里写明未就绪时
+  `flush()` 第一行就返回 false，因此那条分支就是排队路径，避免读成「先试投一次」。
+
+改动在 `tools/window-sender-smoke.mjs`、`tools/upstream-watch-smoke.mjs`、
+`window-sender.js`（仅注释）、`docs/upstream-history.md` 与本文件。评审逻辑、CLI 参数、
+配置读写路径与运行期行为均未动。`audit:sender` / `audit:upstream` 本轮全绿。
+
 ## 上游状态（第 93 轮，2026-10-27）
 
 第 93 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 均可核对。**

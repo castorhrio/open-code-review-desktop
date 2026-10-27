@@ -119,7 +119,19 @@ const createWindowSender = (options) => {
     return false;
   };
 
-  /** The renderer is loaded: flush what was held, and say what the bound cost. */
+  /** The renderer is loaded: flush what was held, and say what the bound cost.
+   *
+   *  `sent` is how many lines *this call* got out — not the queue's lifetime
+   *  total and not how many were queued when the page started loading. A flush
+   *  can be interrupted (the receiver throws on the n-th line, the window is
+   *  torn down mid-loop), and the rest stays held; the next `markReady()` — a
+   *  reload, or the same page recovering — answers with those. So two answers
+   *  add up to the queue, and neither answer on its own describes it.
+   *
+   *  `lost` is how many lines the bound dropped since the previous ready, and
+   *  it is cleared on the way out: a loss is reported once, by the ready that
+   *  follows it, not on every later ready. A line refused by an interrupted
+   *  flush is *not* lost — it is still queued. */
   const markReady = () => {
     ready = true;
     const before = held.length;

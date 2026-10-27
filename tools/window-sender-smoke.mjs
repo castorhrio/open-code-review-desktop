@@ -281,6 +281,17 @@ const label = (entry) => `${entry.channel}:${entry.payload.line ?? JSON.stringif
     recovered.sent === 2 && recovered.lost === 0 && sender.pending() === 0,
     JSON.stringify({ recovered, pending: sender.pending() })
   );
+  // `sent` is per call, not the queue's total: the two answers are what a
+  // reader adds up to see the whole queue, and each one on its own describes
+  // only the part that got out this time. A `sent` that reported the queue's
+  // length would say "3" here and hide the interruption.
+  check(
+    "...and each answer's `sent` counts that call's lines, so the two add up to the queue exactly once",
+    announcement.sent + recovered.sent === 3 &&
+      faltering.received.length === 3 &&
+      new Set(faltering.received.map(label)).size === 3,
+    JSON.stringify({ first: announcement.sent, second: recovered.sent, received: faltering.received.map(label) })
+  );
 }
 
 /* ---- 5. the bound, and the loss that is reported ---- */
@@ -392,6 +403,69 @@ check(
   JSON.stringify(deliversBeforeReady(lifoSender))
 );
 
+/** Holds the lines, but a flush that hits a throwing send drops the rest. */
+const clearingSender = (getWindow) => {
+  const held = [];
+  let ready = false;
+  return {
+    send: (channel, payload) => {
+      if (!ready) {
+        held.push([channel, payload]);
+        return false;
+      }
+      getWindow().webContents.send(channel, payload);
+      return true;
+    },
+    markReady: () => {
+      ready = true;
+      let sent = 0;
+      try {
+        while (held.length) {
+          const [channel, payload] = held.shift();
+          getWindow().webContents.send(channel, payload);
+          sent += 1;
+        }
+      } catch (_) {
+        // The shape the comment in `flush()` rejects: giving up on the queue
+        // because one line could not go out is not the same as keeping order.
+        held.length = 0;
+      }
+      return { sent, lost: 0 };
+    },
+    markUnready: () => {
+      ready = false;
+    },
+  };
+};
+
+// An interrupted flush, then a recovered one: the whole queue has to arrive, in
+// order, exactly once. This is the property `markReady()`'s per-call `sent` is
+// about, and it is asked of the real sender and of one that clears the queue on
+// the first refusal — without which the question would also pass for a module
+// that answers `sent: 1, lost: 0` while two lines vanish.
+const SURVIVES = ["run:log:x", "run:log:y", "run:log:z"];
+const survivesInterruptedFlush = (make) => {
+  let current = null;
+  const sender = make(() => current);
+  ["x", "y", "z"].forEach((line) => sender.send("run:log", { line }));
+  let refuse = true;
+  current = makeWindow({ sendThrows: (call) => (refuse && call === 2 ? new Error("页面正在卸载") : null) });
+  sender.markReady();
+  refuse = false;
+  sender.markReady();
+  return current.received.map(label);
+};
+check(
+  "...and the real sender keeps the rest queued across an interrupted flush, so a later ready finishes the queue",
+  JSON.stringify(survivesInterruptedFlush(realSender)) === JSON.stringify(SURVIVES),
+  JSON.stringify(survivesInterruptedFlush(realSender))
+);
+check(
+  "...and a sender that drops the rest of the queue on a failed flush fails that question",
+  JSON.stringify(survivesInterruptedFlush(clearingSender)) !== JSON.stringify(SURVIVES),
+  JSON.stringify(survivesInterruptedFlush(clearingSender))
+);
+
 /* ---- 7. main.js only wires it ----
  * The module above can be perfect while the app keeps a second door, or forgets
  * to say "ready". Both are static facts about the wiring, so they are read from
@@ -422,37 +496,30 @@ check(
     /function\s+createWindow\s*\(\s*\)\s*\{[\s\S]{0,600}?windowSender\.markUnready\(\)/.test(mainSrc),
     "markUnready is never called inside createWindow"
   );
-  // The count has to leave by the same door: `lost > 0` must be *read* from
-  // markReady's answer and *said* on `run:log` as a `{ line }`, not on another
-  // channel and not with a different payload key. Each of the three halves is a
-  // separate regex, because a single loose one would also pass a branch that
-  // ignores the count.
-  const reportsLoss =
-    /const\s*\{\s*lost\s*\}\s*=\s*windowSender\.markReady\(\)/.test(mainSrc) &&
-    /if\s*\(\s*lost\s*>\s*0\s*\)\s*\{[\s\S]{0,600}?send\(\s*"run:log"\s*,\s*\{\s*line:/.test(mainSrc) &&
-    /windowSender\.limit/.test(mainSrc);
+  // What the count is *said* through is `reportSenderLoss`, which has its own
+  // suite (`tools/main-wiring-smoke.mjs`: one call, `run:log`, `{ line }`, the
+  // count and the bound, silence at zero, and the three ways to get it wrong).
+  // The question left here is the one that suite cannot ask: the renderer's own
+  // load event is where `markReady()`'s answer goes. A `markReady()` whose
+  // answer is dropped is this module's loss report with the reporting removed.
+  const handsTheLossOn = (source) =>
+    /did-finish-load[\s\S]{0,400}?reportSenderLoss\(\s*\{[\s\S]{0,200}?windowSender\.markReady\(\)/.test(
+      source
+    );
   check(
-    "...and it reports what the bound cost, on the channel a packaged app can read",
-    reportsLoss,
-    "the dropped count is not read from markReady and said on run:log"
+    "...and hands markReady's answer to the module that says it, instead of keeping a second copy",
+    handsTheLossOn(mainSrc),
+    "markReady's answer leaves the load handler nowhere"
   );
-  // ...and the question really asks those three things: a branch that says the
-  // count on another channel, ignores the count, or uses another payload key
-  // must answer no.
-  const saysIt = (source) =>
-    /const\s*\{\s*lost\s*\}\s*=\s*windowSender\.markReady\(\)/.test(source) &&
-    /if\s*\(\s*lost\s*>\s*0\s*\)\s*\{[\s\S]{0,600}?send\(\s*"run:log"\s*,\s*\{\s*line:/.test(source) &&
-    /windowSender\.limit/.test(source);
-  const wrongChannel =
-    'const { lost } = windowSender.markReady(); if (lost > 0) { send("update:state", { line: `${lost} / ${windowSender.limit}` }); }';
-  const ignoresCount =
-    'const { lost } = windowSender.markReady(); send("run:log", { line: "x" });';
-  const wrongKey =
-    'const { lost } = windowSender.markReady(); if (lost > 0) { send("run:log", { id: lost }); }';
+  // ...and the question really asks it: a handler that throws the answer away,
+  // and one that inlines the old branch, both answer no.
+  const dropsTheLoss = 'mainWindow.webContents.once("did-finish-load", () => { windowSender.markReady(); });';
+  const inlinesTheLoss =
+    'mainWindow.webContents.once("did-finish-load", () => { const { lost } = windowSender.markReady(); if (lost > 0) { send("run:log", { line: `有 ${lost} 条` }); } });';
   check(
-    "...and a report on another channel, with another key, or without reading the count is refused",
-    !saysIt(wrongChannel) && !saysIt(ignoresCount) && !saysIt(wrongKey),
-    JSON.stringify({ wrongChannel: saysIt(wrongChannel), ignoresCount: saysIt(ignoresCount), wrongKey: saysIt(wrongKey) })
+    "...and a handler that drops the answer or inlines the sentence is refused",
+    !handsTheLossOn(dropsTheLoss) && !handsTheLossOn(inlinesTheLoss),
+    JSON.stringify({ drops: handsTheLossOn(dropsTheLoss), inlines: handsTheLossOn(inlinesTheLoss) })
   );
 
   // One door: no other root module may *send* on a window's `webContents`. A
