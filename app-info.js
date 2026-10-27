@@ -65,6 +65,22 @@ function formatAppInfo({
   void timedOut;
   void probeError;
   return {
+    // The install facts are spread *first*, so a field of theirs that happens to
+    // share a name with one of this function's own fields cannot replace it.
+    // The seven fields below are the answers `app:info` itself gives: `version`
+    // comes out of `readVersion` (the probe's budgets already decided what could
+    // be read) and `binarySource` is deliberately nulled when there is no path.
+    // An install fact called `binary` or `version` is not a better answer to
+    // those questions — it is a name collision — so it loses, and the payload
+    // keeps saying what this function decided.
+    //
+    // The cost is stated rather than hidden: a colliding install field vanishes
+    // without a word. `tools/app-info-smoke.mjs` asks this shape directly
+    // (`installInfo: { binary: "evil", version: "9.9.9" }`) and requires those
+    // fields to keep the computed values, so the day someone moves the spread
+    // back below them — the natural edit if `installInfo` reads as "more fields
+    // to add" — the test is what says the decision changed.
+    ...(installInfo || {}),
     binary: binaryPath,
     // "not found" has one answer here: no path, no source. Copying a stale
     // `source` next to a null `path` would let the page say "package" while
@@ -82,7 +98,6 @@ function formatAppInfo({
     docsUrl,
     appVersion,
     platform,
-    ...(installInfo || {}),
   };
 }
 
@@ -136,6 +151,8 @@ const saidNothing = (timedOut) => ({
 // difference is carried in a field instead of being lost in the `.catch`. Kept
 // as a sentence (never `undefined`) so "there was an exception" is not confused
 // with "there was not one".
+const PROBE_ERROR_FALLBACK = "exec rejected without a message";
+
 const describeProbeError = (error) => {
   // An Error (or anything carrying a `message`) is read from that field first;
   // every other value is stringified. A rejected plain object stringifies to
@@ -144,11 +161,37 @@ const describeProbeError = (error) => {
   // message. The rule is "there is always a sentence, and it is either what
   // was thrown or the fact that nothing usable was": `undefined` and `""` are
   // the only strings that must not come out of here.
-  const text =
-    error && typeof error === "object" && "message" in error
-      ? String(error.message || "")
-      : String(error == null ? "" : error);
-  return text && text !== "[object Object]" ? text : "exec rejected without a message";
+  //
+  // `"message" in error` walks the prototype chain, and that is the decision,
+  // not an oversight. An `Error` subclass may expose `message` through a getter
+  // on its prototype, and that message is as real as an own property —
+  // `Object.prototype.hasOwnProperty.call(error, "message")` would answer "no
+  // message" for a legitimate error and hide the one line that says what broke.
+  // The price is that an inherited `message` from anywhere in the chain is read
+  // too; `probeError` never reaches the payload (`formatAppInfo` names and drops
+  // it), so a wrong-but-present sentence costs a worse log line, while dropping
+  // a real one costs whoever debugs the next `app:info` an hour.
+  // `tools/app-info-smoke.mjs` pins both halves: `Object.create({ message })`
+  // yields that message, and a plain `Error` still yields its own.
+  //
+  // The outermost edge of that chain is `Object.create(null)`: it has no
+  // `toString`, so `String(it)` *throws* — and this function runs inside a
+  // `.catch`, so a throw here rejects `app:info` and blanks the very page this
+  // file exists to keep readable. Hence the guard: a value that cannot be turned
+  // into a sentence is answered with the fixed sentence, same as one that said
+  // nothing usable. Both edges are asserted in `tools/app-info-smoke.mjs`,
+  // because a `catch` that answers "" is indistinguishable from one that answers
+  // a sentence unless someone asks.
+  const text = (() => {
+    try {
+      return error && typeof error === "object" && "message" in error
+        ? String(error.message || "")
+        : String(error == null ? "" : error);
+    } catch {
+      return "";
+    }
+  })();
+  return text && text !== "[object Object]" ? text : PROBE_ERROR_FALLBACK;
 };
 
 /* ---- the one decision the probe ends with ----
@@ -219,7 +262,16 @@ const versionWaitMs = ({ timeoutMs, graceMs } = {}) => {
   // the child is still inside its own budget would report a failure that has not
   // happened yet. True by construction above; the check is the assertion that
   // the two lines above stay that way.
-  return { budget, grace, wait: budget + grace };
+  //
+  // The answer is the two numbers the probe *waits with*, and no third. `grace`
+  // stays a local: it is an addend, not something any caller acts on, and a
+  // `grace` field on the answer would be one only this file's own tests could
+  // read — the shape `app-info.js` spent round 71/72 removing from the payload.
+  // "The grace fell back to the default" is asked as `wait - budget` instead,
+  // which is the quantity that actually reaches `setTimeout`, and
+  // `readVersionOutput` destructures exactly `{ budget, wait }`, so the object
+  // has no consumer for a third field either way.
+  return { budget, wait: budget + grace };
 };
 
 async function readVersionOutput({

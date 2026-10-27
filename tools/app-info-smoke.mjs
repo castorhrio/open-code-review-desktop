@@ -238,6 +238,73 @@ const base = {
   );
 }
 
+/* ---- an install fact cannot answer a question this function owns ----
+ * `...installInfo` is a spread, so an install field that happened to be called
+ * `binary`, `version` or `configPath` would replace the value `formatAppInfo`
+ * had just computed — the page would then show a version that came out of the
+ * install facts, and nothing above would notice: the payload's *key set* stays
+ * exactly the same when a name collides, so the pinned-key check cannot see it.
+ *
+ * The decision is "the fields this function computes win": a collision is a name
+ * collision, not a better answer, and the losing install field is dropped. The
+ * case is written with values that could only come from the collision
+ * (`"evil"`, `"9.9.9"`), so a failure prints which side won instead of two
+ * strings that happen to match.
+ *
+ * The third check is the other half: the install facts that do *not* collide must
+ * still travel, otherwise "the top level wins" could be implemented by dropping
+ * `installInfo` altogether and this block would stay green.
+ */
+{
+  const colliding = {
+    ...base.installInfo,
+    binary: "evil",
+    binarySource: "evil",
+    version: "9.9.9",
+    configPath: "/evil/config.json",
+  };
+  const shadowed = formatAppInfo({
+    ...base,
+    binary: { path: "/opt/app/ocr", source: "local" },
+    versionStdout: "open-code-review 1.13.3\n",
+    installInfo: colliding,
+  });
+  check(
+    "an install fact named like one of the app's own fields cannot replace it",
+    shadowed.binary === "/opt/app/ocr" &&
+      shadowed.binarySource === "local" &&
+      shadowed.version === "1.13.3" &&
+      shadowed.configPath === base.configPath,
+    JSON.stringify({
+      binary: shadowed.binary,
+      binarySource: shadowed.binarySource,
+      version: shadowed.version,
+      configPath: shadowed.configPath,
+    })
+  );
+  check(
+    "...and a collision adds no key: the payload is the same set as without it",
+    JSON.stringify(Object.keys(shadowed).sort()) ===
+      JSON.stringify(
+        Object.keys(
+          formatAppInfo({
+            ...base,
+            binary: { path: "/opt/app/ocr", source: "local" },
+            versionStdout: "open-code-review 1.13.3\n",
+          })
+        ).sort()
+      ),
+    JSON.stringify(Object.keys(shadowed).sort())
+  );
+  check(
+    "...and the install facts that do not collide still travel",
+    shadowed.packaged === true &&
+      shadowed.installDir === "/opt/app" &&
+      shadowed.canUninstall === false,
+    JSON.stringify({ packaged: shadowed.packaged, installDir: shadowed.installDir })
+  );
+}
+
 /* ---- the shared stub fixture answers the six facts it promises ----
  * The install facts below come from `tools/install-fixture.mjs`, which is also
  * where `tools/install-info-smoke.mjs` gets its `app` / `shell` stubs. Sharing
@@ -609,8 +676,20 @@ const base = {
     const exact = versionWaitMs({ timeoutMs: 40, graceMs: 60 });
     check(
       "the wait is the budget plus the grace when both are usable",
-      exact.budget === 40 && exact.grace === 60 && exact.wait === 100,
+      exact.budget === 40 && exact.wait === 100 && exact.wait - exact.budget === 60,
       JSON.stringify(exact)
+    );
+    // The answer is `{ budget, wait }` and nothing else. A `grace` field was
+    // there for one round and only this suite ever read it — the shape the
+    // payload work of rounds 71/72 exists to keep out of the codebase. "The
+    // grace fell back to the default" is asked as `wait - budget` below: that is
+    // the number which actually reaches `setTimeout`, so the assertion is about
+    // the wait rather than about an intermediate nobody consumes. Pinned as a key
+    // set, because a field re-added "for the test" is exactly how it comes back.
+    check(
+      "the answer is exactly the two numbers the probe waits with, and no third",
+      JSON.stringify(Object.keys(exact).sort()) === JSON.stringify(["budget", "wait"]),
+      JSON.stringify(Object.keys(exact).sort())
     );
     // Zero grace is a legitimate answer ("stop the moment the child's own budget
     // runs out"), so it must not be folded into the default with the invalid
@@ -618,7 +697,7 @@ const base = {
     const noGrace = versionWaitMs({ timeoutMs: 40, graceMs: 0 });
     check(
       "a zero grace is obeyed: the wait is exactly the budget",
-      noGrace.grace === 0 && noGrace.wait === noGrace.budget,
+      noGrace.wait === noGrace.budget && noGrace.wait === 40 && noGrace.wait - noGrace.budget === 0,
       JSON.stringify(noGrace)
     );
 
@@ -635,7 +714,8 @@ const base = {
       const answer = versionWaitMs({ timeoutMs: 40, graceMs });
       check(
         `an ${label} grace falls back to the default instead of shortening the wait (${label})`,
-        answer.grace === VERSION_PROBE_GRACE_MS && answer.wait === 40 + VERSION_PROBE_GRACE_MS,
+        answer.wait === 40 + VERSION_PROBE_GRACE_MS &&
+          answer.wait - answer.budget === VERSION_PROBE_GRACE_MS,
         JSON.stringify(answer)
       );
     }
@@ -752,10 +832,22 @@ const base = {
     // a bare string, an object with no message, or an Error with an empty one.
     // All of them reach `probeError` as a sentence, because "the service threw"
     // is a fact that must not become `undefined` on the way.
+    // The prototype chain is the boundary this round asked about: `"message" in
+    // error` reads an *inherited* message too, and that is the decision (an
+    // `Error` subclass may expose `message` through a getter on its prototype,
+    // and `hasOwnProperty` would call that error message-less). So the expected
+    // answer for an object whose only `message` is on its prototype is that
+    // message, not the fixed sentence — and a plain `Error` above still answers
+    // its own, which is what keeps this from being "anything goes".
     for (const [label, rejection, expected] of [
       ["a bare string", "boom", "boom"],
       ["an object with no message", {}, "exec rejected without a message"],
       ["an Error with an empty message", new Error(""), "exec rejected without a message"],
+      [
+        "an object whose `message` only exists on its prototype",
+        Object.create({ message: "inherited" }),
+        "inherited",
+      ],
     ]) {
       const answer = await readVersionOutput({
         binary: { path: "/opt/app/ocr" },
@@ -768,6 +860,48 @@ const base = {
         JSON.stringify(answer.probeError)
       );
     }
+  }
+
+  /* ---- the outermost edge of the chain: a rejection with no prototype ----
+   * `describeProbeError` runs inside a `.catch`, so a throw in there rejects
+   * `app:info` and blanks the settings page — the exact failure this module
+   * exists to prevent. `Object.create(null)` is the value that produced it: with
+   * no `toString` anywhere in its chain, `String(it)` throws before any sentence
+   * exists. The case is built from `Object.create(null)` rather than from a class
+   * on purpose, because the edge is the absence of everything, not a custom
+   * shape someone thought of.
+   *
+   * The try/catch belongs to this test, not to the module: if the probe ever
+   * rejects again, the suite must name the case that did it instead of dying
+   * with a stack trace in the middle of the file.
+   */
+  {
+    let answer = null;
+    try {
+      answer = await readVersionOutput({
+        binary: { path: "/opt/app/ocr" },
+        exec: () => Promise.reject(Object.create(null)),
+        timeoutMs: 2000,
+      });
+    } catch {
+      answer = { rejected: true };
+    }
+    check(
+      "a rejection with no prototype at all still answers a sentence instead of rejecting app:info",
+      answer !== null &&
+        !answer.rejected &&
+        answer.probeError === "exec rejected without a message" &&
+        answer.timedOut === false,
+      JSON.stringify(answer)
+    );
+    check(
+      "...and the payload built from it is the complete one the page needs",
+      (() => {
+        const info = formatAppInfo({ ...base, binary: { path: "/opt/app/ocr" }, ...answer });
+        return info.version === "" && info.binary === "/opt/app/ocr" && !("probeError" in info);
+      })(),
+      JSON.stringify(formatAppInfo({ ...base, binary: { path: "/opt/app/ocr" }, ...answer }))
+    );
   }
 
   /* ---- the deadline's own decision, asked the question the race cannot pose ----

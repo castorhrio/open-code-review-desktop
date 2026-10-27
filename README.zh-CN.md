@@ -105,6 +105,8 @@ preload.js               contextBridge 接口
 - **`asar` 必须保持 `false`。** 开启后 `resolveNativeBinary()` 返回 `app.asar\…` 路径，`fs.existsSync()` 会返回 true 骗过检查（Electron 只给 `fs` 打了补丁），而 `spawn()` 走 CreateProcess 不认识该路径直接 ENOENT——每次审查静默失败。
 - 界面产物目录是 **`out/`**（不是 `dist/`），且以 `base: './'` 构建，才能在 `file://` 下加载。
 
+`npm run audit:upstream` 是唯一读 Markdown 的检查：它在 [`docs/OCR-UPSTREAM-SYNC.md`](docs/OCR-UPSTREAM-SYNC.md) 里钉住本封装验证过的上游 commit，并且**按形状**而不是行号定位该文件的机器可读区。改那份文档前先读 `tools/upstream-watch.mjs` 里的锚点定义；人读区不许重复它们——多一份拷贝会让计数断言变红并点名行号。
+
 ## 发版
 
 `node tools/release.mjs <x.y.z>` 会升版本、提交 `chore(release): <x.y.z>`、跑完整门禁、打 Windows 安装包，并对 `release/` 重跑密钥扫描；若 electron-builder 撞上 `win-unpacked.tmp` 被锁的重命名失败，它会先清空 `release-<version>/`、改到该目录重新构建，再把产物移回 `release/`（所以同版本重跑是重试，而不是在上一次的产物上再叠一层）。版本号写错（缺参数、`1.2`、`v0.1.14`）会在做任何事之前被拒绝。它停在两件属于人的动作之前：推送提交，以及发布 GitHub Release（自动更新源读的是 releases/latest）。

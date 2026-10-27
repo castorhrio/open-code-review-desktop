@@ -35,7 +35,7 @@ tag v1.13.3
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 78 轮：`git ls-remote` 在 120 秒内超时，退出码 124；`api.github.com` 的 `commits/main` 退出码 0 且 `sha` 与 pin 一致；npm 为 `1.13.3`；通路：api）**
+**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 79 轮：`git ls-remote` 退出码 0，`refs/heads/main` 与 pin 一致，`refs/tags/v1.13.3` 仍指向 tag 对象 `dd925205`；npm 为 `1.13.3`；通路：git）**
 
 ### 核对通路账
 
@@ -79,6 +79,7 @@ tag v1.13.3
 | 76 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；机器可读区的形状进断言（`machineReadableBlockViolations` 三条反面用例）、packaging 闸门补「红的原因」断言与非字面量 require 的反向用例、`git-service` ↔ 本文件交叉引用 | — |
 | 77 | 2026-10-27 | none | 本文件没有核对记录（该轮未更新状态与账） | `[UPSTREAM-DEBT]` HEAD |
 | 78 | 2026-10-27 | api | `375f64c` / `v1.13.3`，无新内容；git 超时（124）、API 作答；npm `1.13.3`；版本探测的等待预算抽成 `versionWaitMs` 并补 grace/budget 边界与 `probeError` 的异常值形状 | — |
+| 79 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；`installInfo` 同名覆盖改成「顶层优先」并补反向断言、`describeProbeError` 补原型链两端、`versionWaitMs` 去掉只被测试读的 `grace` | — |
 
 ### 对照表（上游前进时要重读的五处）
 
@@ -86,9 +87,9 @@ tag v1.13.3
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
 对应行并把轮次与日期改成本轮。
 
-**第 46–78 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
+**第 46–79 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
 npm 通路可达，第 56 轮 git 超时但 API 可达，第 63–64 轮本文件无通路记录，第 68 轮 git
-超时但 API 可达，第 69–76 轮 git 可达，第 77 轮本文件无通路记录，第 78 轮 git 超时但
+超时但 API 可达，第 69–76、79 轮 git 可达，第 77 轮本文件无通路记录，第 78 轮 git 超时但
 API 可达），所以下表 5 行的
 「最近一次对照」停在第 45 轮是
 **没有理由重看**，不是忘了看：
@@ -133,7 +134,39 @@ API 可达），所以下表 5 行的
 4. **不要**静默忽略上游 release：每轮把结论写进下面「当前状态」，并把上一轮的正文搬到
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。
 
-## 当前状态（第 78 轮，2026-10-27）
+## 当前状态（第 79 轮，2026-10-27）
+
+第 79 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 两条通路都可达。**
+`git ls-remote https://github.com/alibaba/open-code-review.git HEAD refs/tags/v1.13.3`
+退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`（与第 49–78 轮同一个
+commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
+`dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`；`npm view @alibaba-group/open-code-review version`
+仍是 `1.13.3`。desktop 的 `^1.13.3` 无需改动，**无移植项**。
+
+本轮仍不扩大纯函数抽取范围，只补上一轮抽出来的那两个函数里最后没被问过的形状：
+
+- **P0-1：`formatAppInfo` 的 `installInfo` 同名覆盖定案为「顶层优先」。** 原来
+  `...installInfo` 展开在最后，一个叫 `binary` / `version` / `configPath` 的安装事实会**静默**
+  顶掉刚算出来的值，而载荷的 key 集因为同名不变，钉 key 集的断言看不见它。现在展开挪到最前：
+  字段同名是撞名，不是更好的答案，撞名的安装字段被丢弃。smoke 用
+  `installInfo: { binary: "evil", version: "9.9.9", binarySource: "evil", configPath: "/evil/…" }`
+  逐字断言四个字段保住计算值、key 集不变、且不撞名的安装事实照旧随行（否则「顶层优先」可以
+  用「索性丢掉 installInfo」实现而这条仍绿）。把展开挪回下面，这条会直接红——已这样验过。
+- **P0-2：`describeProbeError` 的原型链两端各补一格。** `"message" in error` 走原型链是
+  **决定**：`Error` 子类可以把 `message` 做成原型上的 getter，`hasOwnProperty` 会把这种合法错误
+  判成「没有消息」，所以断言 `Object.create({ message: "inherited" })` 落到 `"inherited"`，而
+  普通 `Error` 仍答自己的 message。另一端 `Object.create(null)` 没有 `toString`，`String(it)`
+  会**抛**——这行跑在 `.catch` 里，抛出去就是 `app:info` 被拒、设置页空白，所以取值加了守卫，
+  这一格断言它答固定句子而不是拒绝（去掉守卫，这条当场红）。
+- **P1-3：`versionWaitMs` 的 `grace` 字段去掉。** 它只有一个读者——本文件的测试——正是第
+  71/72 轮从载荷里清掉的那种「只被断言存在」的字段。现在答案就是 `{ budget, wait }` 两个数
+  （smoke 断言 key 集恰好这两个），「grace 回落到了默认值」改成问 `wait - budget`，也就是真正
+  进 `setTimeout` 的那个量。
+
+沿用第 78 轮的结论：这三条都在 `app-info.js` 与 `tools/app-info-smoke.mjs` 内，不碰 CLI 参数、
+配置读写与 `git show` 分类，`audit:service` / `audit:config` / `audit:git` 不受影响。
+
+## 上一轮（第 78 轮，2026-10-27）
 
 第 78 轮复核：**HEAD 未变，结论仍是「无新内容」；本轮 git 超时、API 作答，npm 一致。**
 `git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
