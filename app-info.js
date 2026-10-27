@@ -47,6 +47,16 @@ const readVersion = (binaryPath, stdout, stderr) => {
  *   3. `src/lib/types.ts` — `AppInfo` declares neither field, so the renderer
  *      cannot read a value the payload never ships.
  *
+ * Dropping a diagnostic from the payload is not the same as dropping it
+ * entirely: `probeError` is the one that says the service *broke*, and with no
+ * other exit it vanished the moment the answer was assembled. `handleAppInfo`
+ * therefore hands it to an injected `onProbeError` sink (a no-op by default),
+ * and `main.js` passes a `console.warn` — so the fact is still recorded, just
+ * not in anything the renderer can read. `timedOut` keeps no sink: the wait is
+ * bounded by this module's own budget, so "we stopped waiting" is a performance
+ * fact whose user-visible consequence (an empty version) the payload already
+ * carries, while an exception is a failure nothing else would report.
+ *
  * Shipping them later means touching all of them: add the fields to `AppInfo`
  * and to the return object, add their names to `APP_INFO_COMPUTED_KEYS`, and
  * extend the smoke test's pinned key set. Changing one alone leaves the other
@@ -390,6 +400,18 @@ const assembleAppInfo = ({
 // used to be untestable is covered by the same call. `binaryResolution` and
 // `installInfo` stay functions because the handler answered from the state at
 // ask time, not at registration time.
+//
+// `onProbeError` is where the probe's dropped diagnostic goes instead of
+// nowhere (see the three-place list above). It is called at most once, with the
+// sentence `describeProbeError` produced, and only when `exec` actually threw —
+// a timeout or a silent CLI is an answer, not an exception. The call is guarded
+// because the sink is injected and a throwing one would reject `app:info`,
+// which is the blank settings page this module exists to prevent.
+//
+// The install facts are read *after* the probe rather than before it: the
+// answer describes the app at the moment it is handed over, and the probe is the
+// only part of it that can take seconds. Reading them first would answer with a
+// snapshot taken before the wait.
 const handleAppInfo = async ({
   exec,
   binaryResolution,
@@ -398,6 +420,7 @@ const handleAppInfo = async ({
   appVersion = "",
   platform = "",
   installInfo = {},
+  onProbeError = () => {},
 } = {}) => {
   const binary = typeof binaryResolution === "function" ? binaryResolution() : null;
   const probe = await readVersionOutput({
@@ -407,6 +430,13 @@ const handleAppInfo = async ({
         ? (args, options) => exec(args, undefined, undefined, options)
         : null,
   });
+  if (probe.probeError) {
+    try {
+      onProbeError(probe.probeError);
+    } catch {
+      // A log line that throws is still only a log line.
+    }
+  }
   return assembleAppInfo({
     binary,
     probe,

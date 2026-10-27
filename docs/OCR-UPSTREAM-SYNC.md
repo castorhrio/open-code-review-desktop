@@ -35,7 +35,7 @@ tag v1.13.3
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 90 轮：`git ls-remote` 报 GnuTLS 错误、GitHub 不可达，改由 GitHub API 的 commits / releases 作答：`main` 顶端与 pin 一致、`v1.13.3` 仍为最新 release；npm 仍为 `1.13.3`；tag 对象未独立重读；通路：api）**
+**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 91 轮：`git ls-remote` 退出码 0，`refs/heads/main` 与 pin 一致；`refs/tags/v1.13.3` 仍为最高 tag；npm 仍为 `1.13.3`；tag 对象未独立重读；通路：git）**
 
 ### 核对通路账
 
@@ -98,6 +98,7 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 | 88 | 2026-10-27 | api | `375f64c` / `v1.13.3`，无新内容；git 超时（124）、API 作答；npm `1.13.3`；`describeProbeError` 抛错 getter、`APP_INFO_COMPUTED_KEYS` 单向权威、兜底带出 `rawStderr` | — |
 | 89 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；计算键清单补「每个名字都被某次返回」、兜底 `error` 的原文摘要与真 git 兜底进断言 | — |
 | 90 | 2026-10-27 | api | `375f64c` / `v1.13.3`，无新内容；git TLS 错误（GnuTLS）、API 作答；npm `1.13.3`；账末窗口的构造式自测（N / N+1 绿、N-1 / N-2 红并点名两边轮次）、`timedOut` / `probeError` 丢弃决定的三处清单、`AppInfo` ↔ 计算键 + 安装键交叉断言 | — |
+| 91 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；`probeError` 的丢弃加注入式出口（`onProbeError`，`main.js` 记一条 `console.warn`）、`binarySource` 与 `executable` 的空串语义进断言 | — |
 
 ### 对照表（上游前进时要重读的五处）
 
@@ -105,10 +106,10 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
 对应行并把轮次与日期改成本轮。
 
-**第 46–89 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
+**第 46–91 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
 npm 通路可达，第 56 轮 git 超时但 API 可达，第 63–64 轮本文件无通路记录，第 68 轮 git
-超时但 API 可达，第 69–76、79–80、84–85、87、89 轮 git 可达，第 77 轮本文件无通路记录，第 78、81–83、86、88 轮
-git 超时但 API 可达），所以下表 5 行的
+超时但 API 可达，第 69–76、79–80、84–85、87、89、91 轮 git 可达，第 77 轮本文件无通路记录，第 78、81–83、86、88、90 轮
+git 超时（第 90 轮为 TLS 错误）但 API 可达），所以下表 5 行的
 「最近一次对照」停在第 45 轮是
 **没有理由重看**，不是忘了看：
 它记录的是「最后一次有人逐行读上游源码」的轮次，而不是「最后一次确认上游没变」的轮次。
@@ -176,41 +177,42 @@ git 超时但 API 可达），所以下表 5 行的
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。搬完这里只留一句
    指针——「本文件只留当前一轮」不是约定而是断言（`previousRoundPointerViolations`）。
 
-## 当前状态（第 89 轮，2026-10-27）
+## 当前状态（第 91 轮，2026-10-27）
 
-第 89 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 可达。**
-`git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main` 本轮退出码 0，
-`375f64c` 与 pin 一致（与第 49–88 轮同一个 commit）；`git ls-remote --tags --refs` 仍以
-`refs/tags/v1.13.3` 为最高版本，`npm view @alibaba-group/open-code-review version` 仍是
-`1.13.3`（tag 对象本轮没有独立重读——branch 未变即「无新 commit」，registry 的 `latest`
-未变即「无新发布」）。desktop 的 `^1.13.3` 无需改动，**无移植项**。
+第 91 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 可达。**
+`git ls-remote https://github.com/alibaba/open-code-review.git HEAD` 本轮退出码 0，
+`375f64cd…` 与 pin 一致（与第 49–90 轮同一个 commit），`refs/tags/v1.13.3` 的 tag 对象仍
+指向同一 commit；`npm view @alibaba-group/open-code-review version` 仍是 `1.13.3`（第 90 轮
+git 通路报 GnuTLS 错误，本轮恢复）。desktop 的 `^1.13.3` 无需改动，**无移植项**。
 
-本轮按控制仓简报收口两条「清单或文案漂移不会红」的缺口，都不改运行期行为与 UI：
+本轮按控制仓简报收口两条「诊断与空值语义只写在注释里」的缺口：
 
-- **P0-1：`APP_INFO_COMPUTED_KEYS` 补上「每个列出的名字都被某次返回」的弱约束。**
-  第 88 轮只断言「返回值 ⊆ 清单」，于是「从 `formatAppInfo` 删掉一个字段但忘删清单」是
-  静默的：单向检查只问返回键在不在清单里，没问清单里的名字还活不活。现在
-  `tools/app-info-smoke.mjs` 用三种形态（有 binary + 版本、无 binary、无 installInfo）拼出
-  实际返回键的并集，要求清单里每个名字至少出现一次；清单仍是权威，约束仍是弱的（不要求
-  每次调用的键集相同）。反向控制：从 `formatAppInfo` 的返回里删掉 `platform`，断言点名
-  `missingFromAnswers: ["platform"]` 并红。`tools/install-fixture.mjs` 的注释同步改成
-  「两个方向问的不是同一个问题」。
-- **P0-2：兜底分支的用户可见文案带上 git 原文摘要，并证明真 git 会走到这里。**
-  `error` 自第 82 轮起就带 git 首行与退出码，`rawStderr` 自第 88 轮起保存完整 stderr，
-  但「`error` 真的含原文」此前没有断言——把 `first` 换成固定句，所有检查仍绿。
-  `tools/git-service-smoke.mjs` 现在用两行表外措辞断言：`error` 含首行、不含第二行，
-  `rawStderr` 含第二行；再拿一个**真 git** 的非仓库失败（`fatal: not a git repository`）走
-  同一条 `readFileAtRef`，要求 `rawStderr` 非空、`error` 含其首行——这证明兜底不是只能被
-  stub 构造出来。（`gitEnv()` 固定 C locale，所以「非 C locale 更深地走到兜底」无法从
-  `readFileAtRef` 这一侧主动制造；真 git 的兜底证据改由这条未被识别的真实措辞提供。）
-  反向控制：把兜底 `message` 里的 `first` 去掉，两条断言当场红。
+- **P0-2：`probeError` 的丢弃有了出口，而 payload 不变。** `formatAppInfo` 仍然不返回
+  任何诊断字段（第 90 轮的三处清单照旧），但「服务真的抛了」此前除了 `version: ""` 之外
+  没有任何读者。`handleAppInfo` 现在接受一个注入的 `onProbeError`（默认 no-op），只在
+  `exec` 抛错时调用一次、传入 `describeProbeError` 的那句话；`main.js` 传入
+  `console.warn`，所以真实用户那里不再蒸发。回调自身抛错被接住——它只是日志，不能把
+  `app:info` 变成拒绝、把设置页变空白。`timedOut` 仍不设出口：等待由本模块自己的预算
+  封顶，「不等了」的可见后果（空版本）payload 已经带着；异常才是别处无从得知的失败。
+  `tools/app-info-smoke.mjs` 断言四种情形：抛错时调用一次且句子正确、正常应答不调用、
+  服务自报超时/静默不调用、回调抛错时 payload 仍完整；并断言 `main.js` 的接线里有
+  `onProbeError` 与 `console.warn`。反向控制：删掉 `handleAppInfo` 里的调用，第一条即红。
+- **P1-1：空串的语义进断言。** `binarySource` 用 `||` 把 `""` 与「没有 source」折成同
+  一个 `null`——这是决定，但此前只覆盖了「键缺失」一格，改成 `??` 会静默让页面收到空徽章。
+  `installInfo()` 的 `executable` 同理（真实 Electron 永远给路径，只有 stub 能构造空串）。
+  `tools/app-info-smoke.mjs` 与 `tools/install-info-smoke.mjs` 各补一格，后者同时要求其余
+  五个事实不变，避免「修这个字段」顺手抹掉另一个。
 
-改动只在 `tools/app-info-smoke.mjs`、`tools/install-fixture.mjs`（注释）、
-`tools/git-service-smoke.mjs`、`docs/hardening-log.md`、`docs/upstream-history.md`
-与本文件；不碰 `main.js`、`src/**`、CLI 参数、配置读写、IPC 注册体或运行期代码。
-`audit:appinfo` / `audit:git` / `audit:upstream` 本轮全绿（`audit:static` 随后整体复跑）。
+P0-1（`AppInfo` ↔ 两条清单的交叉断言）已由第 90 轮落地，本轮不重复。
+P2-4 只补了注释：`handleAppInfo` 在探测之后读安装事实是有意的——回答描述的是交出去的
+那一刻，而探测是唯一可能耗秒的部分。
 
-上一轮（第 88 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-88-轮2026-10-27)，归档之后本文件不留第二份。
+改动在 `app-info.js`、`main.js`、`tools/app-info-smoke.mjs`、`tools/install-info-smoke.mjs`、
+`docs/upstream-history.md` 与本文件；`binarySource` / `executable` 的运行期行为未变，
+`probeError` 只是从「无处可去」变成「去一条日志」。`audit:appinfo` / `audit:install` /
+`audit:upstream` 本轮全绿（`audit:static` 随后整体复跑）。
+
+上一轮（第 90 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-90-轮2026-10-27)，归档之后本文件不留第二份。
 
 ## 上游真变了怎么办（命令驱动，而不是「记得看一眼」）
 ```bash

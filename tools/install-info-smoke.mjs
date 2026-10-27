@@ -88,10 +88,15 @@ const make = ({
   exists = fs.existsSync,
   readdir = fs.readdirSync,
   dirname = path.dirname,
+  // `exe` is a seam rather than a constant because `app.getPath("exe")` is
+  // stubbed: the one fact the real Electron always answers with a path is the
+  // one this suite has to be able to make empty, to pin that an empty string is
+  // reported as empty rather than replaced with a guess.
+  exe = APP_EXE,
 }) =>
   createInstall(
     installStubs({
-      app: makeApp({ packaged, resources, userData: PROFILE, exe: APP_EXE }),
+      app: makeApp({ packaged, resources, userData: PROFILE, exe }),
       shell,
       platform,
       env,
@@ -116,6 +121,38 @@ const make = ({
   const plan = tools.uninstallPlan();
   check("the uninstall plan names the uninstaller", plan.ok === true && plan.target === path.join(installed, "Uninstall Open Code Review.exe"));
   check("and 「打开安装目录」 is allowed", tools.installDirPlan().ok === true && tools.installDirPlan().dir === installed);
+}
+
+/* ---------------- an empty fact stays empty ---------------- */
+
+/* `app.getPath("exe")` always answers a path in real Electron, so this shape is
+ * only reachable with a stub — which is exactly why it needs pinning: a fallback
+ * ("if the exe is empty, point at the install directory") would be invisible in
+ * every real run while telling the settings page about an executable that does
+ * not exist. The decision is the same one `binarySource` makes on the other side
+ * of the payload: an empty answer is reported as empty (or null), never filled
+ * in from a neighbour. Pinned with the other five facts unchanged, so a fix for
+ * this field cannot quietly erase a different one. */
+{
+  const info = make({
+    packaged: true,
+    resources: path.join(installed, "resources"),
+    exe: "",
+  }).installInfo();
+  check(
+    "an empty exe path is reported as an empty string, not filled in from the install root",
+    info.executable === "",
+    JSON.stringify(info.executable)
+  );
+  check(
+    "...and the other five install facts are unaffected",
+    info.installDir === installed &&
+      info.userData === PROFILE &&
+      info.packaged === true &&
+      info.portable === false &&
+      info.canUninstall === true,
+    JSON.stringify(info)
+  );
 }
 
 /* ---------------- shape 2: portable ---------------- */

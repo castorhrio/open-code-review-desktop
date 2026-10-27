@@ -128,6 +128,22 @@ const base = {
     noSource.binarySource === null,
     JSON.stringify(noSource.binarySource)
   );
+  // The empty string is the third "no source" shape, and the one the `||` in
+  // `binarySource` folds: `""` is falsy, so it lands on `null` exactly like a
+  // missing key does. That is the decision — an empty source is "not reported",
+  // not a source literally named "" — and it is pinned because the alternative
+  // reading (`??` instead of `||`) would look equally correct in the source and
+  // ship `binarySource: ""` to a page that renders it as a blank badge.
+  const emptySource = formatAppInfo({
+    ...base,
+    binary: { path: "/opt/app/ocr", source: "" },
+    versionStdout: "1.13.3\n",
+  });
+  check(
+    "an empty source is reported as null, not as an empty string",
+    emptySource.binarySource === null,
+    JSON.stringify(emptySource.binarySource)
+  );
 }
 
 /* ---- (c) binary + stderr only: read stderr instead of answering empty ---- */
@@ -1296,6 +1312,88 @@ const base = {
     );
   }
 
+  /* ---- the dropped exception is not dropped from everywhere ----
+   * Everything above proves `probeError` stays out of the payload. That was the
+   * decision, but it left the fact with no reader at all: a service that threw
+   * produced a page saying "no version" and nothing anywhere saying why. The
+   * exit is an injected sink, so it is a behaviour and not a comment: the
+   * handler calls it once when `exec` threw, never when the probe answered
+   * (including a silent CLI and the service's own timeout), and a sink that
+   * throws cannot take the page down with it.
+   */
+  {
+    const seen = [];
+    const failed = await handleAppInfo({
+      exec: () => Promise.reject(new Error("spawn ENOTDIR")),
+      binaryResolution: () => ({ path: "/opt/app/ocr", source: "local" }),
+      installInfo: () => base.installInfo,
+      onProbeError: (message) => seen.push(message),
+    });
+    check(
+      "the handler hands a thrown probe's sentence to the injected sink exactly once",
+      JSON.stringify(seen) === JSON.stringify(["spawn ENOTDIR"]),
+      JSON.stringify(seen)
+    );
+    check(
+      "...and the payload is the usual one: an empty version and no probeError field",
+      failed.version === "" &&
+        failed.binary === "/opt/app/ocr" &&
+        !("probeError" in failed),
+      JSON.stringify({ version: failed.version, keys: Object.keys(failed).sort() })
+    );
+
+    const quiet = [];
+    const answered = await handleAppInfo({
+      exec: () => Promise.resolve({ stdout: "open-code-review 1.13.3\n", stderr: "" }),
+      binaryResolution: () => ({ path: "/opt/app/ocr", source: "local" }),
+      installInfo: () => base.installInfo,
+      onProbeError: (message) => quiet.push(message),
+    });
+    check(
+      "a probe that answered does not call the sink",
+      quiet.length === 0 && answered.version === "1.13.3",
+      JSON.stringify({ quiet, version: answered.version })
+    );
+
+    // The service's own timeout is an answer — the CLI was asked and said it
+    // stopped — so it must not be reported as an exception. The same holds for
+    // a CLI that printed nothing, which is simply `version: ""`.
+    const silent = [];
+    const serviceTimedOut = await handleAppInfo({
+      exec: () => Promise.resolve({ stdout: "", stderr: "", timedOut: true }),
+      binaryResolution: () => ({ path: "/opt/app/ocr", source: "local" }),
+      installInfo: () => base.installInfo,
+      onProbeError: (message) => silent.push(message),
+    });
+    check(
+      "...and a service that timed out or said nothing is not an exception: the sink stays silent",
+      silent.length === 0 && serviceTimedOut.version === "",
+      JSON.stringify({ silent, version: serviceTimedOut.version })
+    );
+
+    // The sink is injected, so it is allowed to be anything — including broken.
+    // A throw here would reject `app:info` and blank the settings page, which is
+    // the one outcome every branch of this module is shaped to avoid.
+    let survived = null;
+    try {
+      survived = await handleAppInfo({
+        exec: () => Promise.reject(new Error("boom")),
+        binaryResolution: () => ({ path: "/opt/app/ocr", source: "local" }),
+        installInfo: () => base.installInfo,
+        onProbeError: () => {
+          throw new Error("the sink itself broke");
+        },
+      });
+    } catch {
+      survived = null;
+    }
+    check(
+      "a sink that throws does not reject app:info; the page still gets its payload",
+      survived !== null && survived.version === "" && survived.binary === "/opt/app/ocr",
+      JSON.stringify(survived)
+    );
+  }
+
   // The drop is a decision in `app-info.js` only while the registration does not
   // choose fields off the probe. Reading the registration is the only way to see
   // that (it is Electron-only code), and the assertion is deliberately about the
@@ -1351,7 +1449,17 @@ const base = {
       /appVersion/.test(body) &&
       /platform/.test(body) &&
       /installInfo/.test(body) &&
+      // `onProbeError` does not trip this: the probe *field* is `probeError`
+      // (lowercase), and the sink is `onProbeError` — naming the callback is
+      // wiring, while reading the field would be a second decision point.
       !/versionStdout|versionStderr|timedOut|probeError|formatAppInfo/.test(body),
+    registered.length === 1 ? registered[0].file : "no single registration"
+  );
+  // ...and the sink itself has to be wired, or the exit the handler now offers
+  // is a door nobody opened: the diagnostic would still vanish for real users.
+  check(
+    "...and hands the probe's exception to a log sink, so the fact is recorded somewhere",
+    /onProbeError\s*:/.test(body) && /console\.warn\(/.test(body),
     registered.length === 1 ? registered[0].file : "no single registration"
   );
 

@@ -38,6 +38,57 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 
 ---
 
+## 上游状态（第 90 轮，2026-10-27）
+
+第 90 轮复核：**HEAD 未变，结论仍是「无新内容」；git 通路报 TLS 错误（GnuTLS），改由 API 作答。**
+`refs/heads/main` 的顶端仍是 `375f64c`（与第 49–89 轮同一个 commit，通路 `api`），
+`v1.13.3` 仍为最新 release，npm 仍是 `1.13.3`；desktop 的 `^1.13.3` 无需改动，**无移植项**。
+
+该轮只改测试与注释：`ledgerRoundViolations` 的 N / N+1 窗口用构造提交逐格自测
+（N / N+1 绿，N-1 / N-2 红并点名两边轮次）；`timedOut` / `probeError` 的丢弃决定收敛成
+`app-info.js` 里的三处清单，并加上 `src/lib/types.ts` 的 `AppInfo` ↔
+`APP_INFO_COMPUTED_KEYS` + `INSTALL_INFO_KEYS` 交叉断言。
+
+**补记（第 91 轮）**
+第 90 轮只更新了同步文档的机器可读区（pin 行与通路账第 90 行），人读区正文此前没有
+单列；本段由第 91 轮据该轮提交信息与通路账补写，结论以通路账为准。
+
+## 上游状态（第 89 轮，2026-10-27）
+
+第 89 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 可达。**
+`git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main` 本轮退出码 0，
+`375f64c` 与 pin 一致（与第 49–88 轮同一个 commit）；`git ls-remote --tags --refs` 仍以
+`refs/tags/v1.13.3` 为最高版本，`npm view @alibaba-group/open-code-review version` 仍是
+`1.13.3`（tag 对象本轮没有独立重读——branch 未变即「无新 commit」，registry 的 `latest`
+未变即「无新发布」）。desktop 的 `^1.13.3` 无需改动，**无移植项**。
+
+本轮按控制仓简报收口两条「清单或文案漂移不会红」的缺口，都不改运行期行为与 UI：
+
+- **P0-1：`APP_INFO_COMPUTED_KEYS` 补上「每个列出的名字都被某次返回」的弱约束。**
+  第 88 轮只断言「返回值 ⊆ 清单」，于是「从 `formatAppInfo` 删掉一个字段但忘删清单」是
+  静默的：单向检查只问返回键在不在清单里，没问清单里的名字还活不活。现在
+  `tools/app-info-smoke.mjs` 用三种形态（有 binary + 版本、无 binary、无 installInfo）拼出
+  实际返回键的并集，要求清单里每个名字至少出现一次；清单仍是权威，约束仍是弱的（不要求
+  每次调用的键集相同）。反向控制：从 `formatAppInfo` 的返回里删掉 `platform`，断言点名
+  `missingFromAnswers: ["platform"]` 并红。`tools/install-fixture.mjs` 的注释同步改成
+  「两个方向问的不是同一个问题」。
+- **P0-2：兜底分支的用户可见文案带上 git 原文摘要，并证明真 git 会走到这里。**
+  `error` 自第 82 轮起就带 git 首行与退出码，`rawStderr` 自第 88 轮起保存完整 stderr，
+  但「`error` 真的含原文」此前没有断言——把 `first` 换成固定句，所有检查仍绿。
+  `tools/git-service-smoke.mjs` 现在用两行表外措辞断言：`error` 含首行、不含第二行，
+  `rawStderr` 含第二行；再拿一个**真 git** 的非仓库失败（`fatal: not a git repository`）走
+  同一条 `readFileAtRef`，要求 `rawStderr` 非空、`error` 含其首行——这证明兜底不是只能被
+  stub 构造出来。（`gitEnv()` 固定 C locale，所以「非 C locale 更深地走到兜底」无法从
+  `readFileAtRef` 这一侧主动制造；真 git 的兜底证据改由这条未被识别的真实措辞提供。）
+  反向控制：把兜底 `message` 里的 `first` 去掉，两条断言当场红。
+
+改动只在 `tools/app-info-smoke.mjs`、`tools/install-fixture.mjs`（注释）、
+`tools/git-service-smoke.mjs`、`docs/hardening-log.md`、`docs/upstream-history.md`
+与本文件；不碰 `main.js`、`src/**`、CLI 参数、配置读写、IPC 注册体或运行期代码。
+`audit:appinfo` / `audit:git` / `audit:upstream` 本轮全绿（`audit:static` 随后整体复跑）。
+
+上一轮（第 88 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-88-轮2026-10-27)，归档之后本文件不留第二份。
+
 ## 上游状态（第 88 轮，2026-10-27）
 
 第 88 轮复核：**HEAD 未变，结论仍是「无新内容」；API 与 npm 可达，git 通路本轮超时。**

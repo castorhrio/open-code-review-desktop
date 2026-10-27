@@ -169,6 +169,12 @@ ipcMain.handle("app:info", () =>
     appVersion: app.getVersion(),
     platform: process.platform,
     installInfo: () => install.installInfo(),
+    // The probe's exception is dropped from the payload — the page has one
+    // sentence for "no version" — but it used to be dropped from everywhere.
+    // `handleAppInfo` calls this only when `exec` threw, so a missing version
+    // caused by a broken service still leaves a line behind.
+    onProbeError: (message) =>
+      console.warn("[app:info] version probe failed:", message),
   })
 );
 
