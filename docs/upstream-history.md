@@ -38,6 +38,41 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 
 ---
 
+## 上游状态（第 93 轮，2026-10-27）
+
+第 93 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 均可核对。**
+`375f64cd…` 与 pin 一致（与第 49–92 轮同一个 commit），`git ls-remote --tags --refs` 仍以
+`refs/tags/v1.13.3` 为最高版本，`npm view @alibaba-group/open-code-review version` 仍是
+`1.13.3`。desktop 的 `^1.13.3` 与 pin 一致，本轮把这一点变成了断言（见下 P1）；
+**无移植项**。
+
+本轮三件事，主题是「同一个承诺写在两处时，让两处互相看着」：
+
+- **P0-2（真缺陷）：窗口未就绪时发出的行不再静默丢弃。** `main.js` 的 `send()` 原本是
+  `if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(…)`：看着像
+  安全网，其实是静默丢弃。`updater.init()` 在 `createWindow()` 之前就跑，启动时算出的
+  `update:state` 谁也收不到；窗口正在重建、或页面还没加载完时产生的 `run:log` 同样消失
+  ——而这正是「异常要有出口」那条约束下最不能丢的一类行（装好的应用没有终端）。现在
+  这些行**排队**，在渲染进程的 `did-finish-load` 时按原序 flush；队列有上限（
+  `DEFAULT_PENDING_LIMIT = 200`），超限丢最旧的并**把丢掉的条数从 `markReady()` 还回来**，
+  由 `main.js` 在 `run:log` 上说出「窗口就绪前有 N 条事件超出缓冲上限」。实现收进
+  `window-sender.js`（`createWindowSender({ currentWindow })`），`main.js` 只留接线：
+  `createWindow()` 里 `markUnready()`、`did-finish-load` 上 `markReady()`。
+- **P1-4：`package.json` 的依赖版本 ↔ `PINNED_UPSTREAM.tag`。** 文档写「封装上游
+  v1.13.3」、依赖写 `^1.13.3`，是同一个承诺的第四份拷贝；`^` 允许下一次 `npm install`
+  就换成 1.14，而 pin、对照表 5 行与 `UPSTREAM_RESOLVER` 模拟仍描述 1.13.3。新增
+  `dependencyPinViolations()` / `versionInRange()`，`audit:upstream` 要求两者一致，并把
+  「依赖抬到 `^1.14.0`」「压根没写依赖」「区间读不出版本（`*`）」三种情形逐条演成红。
+- **P2-5：注释引用的章节必须**恰好一处**。** 第 92 轮只断言「那个标题存在」；同一标题在
+  文档里出现两次时，注释指向哪一处只能靠猜，而其中一份迟早没人维护。现在按**计数**判定，
+  并自测「复制一份同名标题即红、改成相近但不同的名字不红」。
+
+改动在 `window-sender.js`（新增）、`main.js`、`package.json`（`build.files` 与
+`audit:sender`）、`tools/window-sender-smoke.mjs`（新增）、`tools/upstream-watch.mjs`、
+`tools/upstream-watch-smoke.mjs`、`tools/git-service-smoke.mjs`、`docs/upstream-history.md`
+与本文件。评审逻辑、CLI 参数、配置读写路径均未动。`audit:sender` / `audit:packaging` /
+`audit:bridge` / `audit:git` / `audit:upstream` 本轮全绿，`audit:static` 整体复跑亦全绿。
+
 ## 上游状态（第 92 轮，2026-10-27）
 
 第 92 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 可达。**

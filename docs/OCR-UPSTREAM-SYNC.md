@@ -35,7 +35,7 @@ tag v1.13.3
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 93 轮：`git ls-remote` 与 `--tags --refs` 退出码 0，`refs/heads/main` 与 pin 一致；`refs/tags/v1.13.3` 仍为最高 tag；npm 仍为 `1.13.3`；tag 对象未独立重读；通路：git）**
+**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 94 轮：`git ls-remote` 与 `--tags --refs` 退出码 0，`refs/heads/main` 与 pin 一致；`refs/tags/v1.13.3` 仍为最高 tag；npm 仍为 `1.13.3`；tag 对象未独立重读；通路：git）**
 
 ### 核对通路账
 
@@ -101,6 +101,7 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 | 91 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；`probeError` 的丢弃加注入式出口（`onProbeError`，`main.js` 记一条 `console.warn`）、`binarySource` 与 `executable` 的空串语义进断言 | — |
 | 92 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；`probeError` 出口与卸载告警统一到 `run:log`（接线断言改问通道与 `{ line }`，构造式自测钉住 `console.warn` / `{ id }` 判否）、代码→文档的章节引用进断言（改标题即点名缺失） | — |
 | 93 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；窗口未就绪时的事件改成排队 + `did-finish-load` 后 flush（`window-sender.js`，超限丢最旧并回报条数）、依赖版本 ↔ pin tag 进断言、注释引用的章节按「恰好一处」判定 | — |
+| 94 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；sender 的三格边界（未就绪 + 队列非空再 send、已 ready 重复 markReady、flush 失败不污染 dropped）与 `main.js` 的 `lost > 0` 接线进断言；`dependencyPinViolations` 补「无版本号」「pin tag 非版本号」两类红；加载彻底失败的取舍进注释 | — |
 
 ### 对照表（上游前进时要重读的五处）
 
@@ -108,9 +109,9 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
 对应行并把轮次与日期改成本轮。
 
-**第 46–93 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
+**第 46–94 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
 npm 通路可达，第 56 轮 git 超时但 API 可达，第 63–64 轮本文件无通路记录，第 68 轮 git
-超时但 API 可达，第 69–76、79–80、84–85、87、89、91–93 轮 git 可达，第 77 轮本文件无通路记录，第 78、81–83、86、88、90 轮
+超时但 API 可达，第 69–76、79–80、84–85、87、89、91–94 轮 git 可达，第 77 轮本文件无通路记录，第 78、81–83、86、88、90 轮
 git 超时（第 90 轮为 TLS 错误）但 API 可达），所以下表 5 行的
 「最近一次对照」停在第 45 轮是
 **没有理由重看**，不是忘了看：
@@ -179,42 +180,37 @@ git 超时（第 90 轮为 TLS 错误）但 API 可达），所以下表 5 行�
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。搬完这里只留一句
    指针——「本文件只留当前一轮」不是约定而是断言（`previousRoundPointerViolations`）。
 
-## 当前状态（第 93 轮，2026-10-27）
+## 当前状态（第 94 轮，2026-10-27）
 
-第 93 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 均可核对。**
-`375f64cd…` 与 pin 一致（与第 49–92 轮同一个 commit），`git ls-remote --tags --refs` 仍以
+第 94 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 均可核对。**
+`375f64cd…` 与 pin 一致（与第 49–93 轮同一个 commit），`git ls-remote --tags --refs` 仍以
 `refs/tags/v1.13.3` 为最高版本，`npm view @alibaba-group/open-code-review version` 仍是
-`1.13.3`。desktop 的 `^1.13.3` 与 pin 一致，本轮把这一点变成了断言（见下 P1）；
-**无移植项**。
+`1.13.3`。**无移植项**。
 
-本轮三件事，主题是「同一个承诺写在两处时，让两处互相看着」：
+本轮只动断言与注释，主题是「把第 93 轮已落地的行为，从边界与接线两侧钉牢」：
 
-- **P0-2（真缺陷）：窗口未就绪时发出的行不再静默丢弃。** `main.js` 的 `send()` 原本是
-  `if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(…)`：看着像
-  安全网，其实是静默丢弃。`updater.init()` 在 `createWindow()` 之前就跑，启动时算出的
-  `update:state` 谁也收不到；窗口正在重建、或页面还没加载完时产生的 `run:log` 同样消失
-  ——而这正是「异常要有出口」那条约束下最不能丢的一类行（装好的应用没有终端）。现在
-  这些行**排队**，在渲染进程的 `did-finish-load` 时按原序 flush；队列有上限（
-  `DEFAULT_PENDING_LIMIT = 200`），超限丢最旧的并**把丢掉的条数从 `markReady()` 还回来**，
-  由 `main.js` 在 `run:log` 上说出「窗口就绪前有 N 条事件超出缓冲上限」。实现收进
-  `window-sender.js`（`createWindowSender({ currentWindow })`），`main.js` 只留接线：
-  `createWindow()` 里 `markUnready()`、`did-finish-load` 上 `markReady()`。
-- **P1-4：`package.json` 的依赖版本 ↔ `PINNED_UPSTREAM.tag`。** 文档写「封装上游
-  v1.13.3」、依赖写 `^1.13.3`，是同一个承诺的第四份拷贝；`^` 允许下一次 `npm install`
-  就换成 1.14，而 pin、对照表 5 行与 `UPSTREAM_RESOLVER` 模拟仍描述 1.13.3。新增
-  `dependencyPinViolations()` / `versionInRange()`，`audit:upstream` 要求两者一致，并把
-  「依赖抬到 `^1.14.0`」「压根没写依赖」「区间读不出版本（`*`）」三种情形逐条演成红。
-- **P2-5：注释引用的章节必须**恰好一处**。** 第 92 轮只断言「那个标题存在」；同一标题在
-  文档里出现两次时，注释指向哪一处只能靠猜，而其中一份迟早没人维护。现在按**计数**判定，
-  并自测「复制一份同名标题即红、改成相近但不同的名字不红」。
+- **P0-1：`window-sender.js` 的三格边界。** 第 93 轮测了正常路径，但三个格子仍可被命名：
+  ①未就绪且队列非空时再 `send()`——走的是排队分支，不是「flush 空转后误投」；
+  ②已 ready 时重复 `markReady()`——队列非空时第一次 flush、第二次 `sent === 0` 且不重投；
+  ③flush 中途失败时 `dropped` 不被污染——第 4 节的 `announcement` 与恢复调用都要求
+  `lost === 0`。三格都在 `tools/window-sender-smoke.mjs`，模块本身未改。
+- **P0-2：`main.js` 的接线。** 原来只断言「有 `markReady`、有 `limit`、有某个
+  `run:log` 发送」；现在要求 `did-finish-load` 的回调里调 `markReady`、
+  `createWindow()` 里调 `markUnready`，并且 `lost > 0` 的计数确实从 `markReady()` 读出、
+  经 `send("run:log", { line: … })` 说出。构造式自测把「换通道」「忽略计数」「换 payload
+  键」三种写法定否——任一改动都会先红。
+- **P1-1：`dependencyPinViolations` 的盲区。** 第 93 轮只演了 `*`；现在 `*` / `latest` /
+  空串一律按「读不出版本号」红，**不是**「无法比较即通过」；另补「pin 的 tag 不是版本号
+  （如 `nightly`）要点名 tag」与「不带 `v` 的裸版本 pin 仍判一致」。
+- **P1-2 / P2-1：注释补上取舍。** `window-sender.js` 顶部写明「页面始终没加载出来时
+  `markReady()` 不会被调用，队列填满后丢弃是接受的取舍」；`send()` 里写明未就绪时
+  `flush()` 第一行就返回 false，因此那条分支就是排队路径，避免读成「先试投一次」。
 
-改动在 `window-sender.js`（新增）、`main.js`、`package.json`（`build.files` 与
-`audit:sender`）、`tools/window-sender-smoke.mjs`（新增）、`tools/upstream-watch.mjs`、
-`tools/upstream-watch-smoke.mjs`、`tools/git-service-smoke.mjs`、`docs/upstream-history.md`
-与本文件。评审逻辑、CLI 参数、配置读写路径均未动。`audit:sender` / `audit:packaging` /
-`audit:bridge` / `audit:git` / `audit:upstream` 本轮全绿，`audit:static` 整体复跑亦全绿。
+改动在 `tools/window-sender-smoke.mjs`、`tools/upstream-watch-smoke.mjs`、
+`window-sender.js`（仅注释）、`docs/upstream-history.md` 与本文件。评审逻辑、CLI 参数、
+配置读写路径与运行期行为均未动。`audit:sender` / `audit:upstream` 本轮全绿。
 
-上一轮（第 92 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-92-轮2026-10-27)，归档之后本文件不留第二份。
+上一轮（第 93 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-93-轮2026-10-27)，归档之后本文件不留第二份。
 
 ## 上游真变了怎么办（命令驱动，而不是「记得看一眼」）
 ```bash

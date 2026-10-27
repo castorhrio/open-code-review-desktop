@@ -31,6 +31,15 @@
  * The window is asked for by a getter rather than handed in: the app creates,
  * closes and recreates it while this object lives, so a captured reference
  * would be the destroyed one.
+ *
+ * One case is deliberately not solved: if the page never finishes loading at
+ * all (`main.js` stops retrying after 40 attempts), `markReady()` is never
+ * called and the queue simply fills to `limit`, dropping the rest. That is the
+ * accepted trade — with no renderer there is nobody to read a log line, and
+ * adding a second channel for launch-time events would bring back the terminal
+ * this app does not have. The bound still matters: if any window does load
+ * later, the loss comes back through `markReady()` as a count rather than as a
+ * silent gap.
  */
 const DEFAULT_PENDING_LIMIT = 200;
 
@@ -98,7 +107,9 @@ const createWindowSender = (options) => {
   const send = (channel, payload) => {
     // An older line still waiting means the receiver did not take it a moment
     // ago. Flushing first is what keeps the order; if that fails, this line
-    // queues behind the others rather than jumping the queue.
+    // queues behind the others rather than jumping the queue. While unready
+    // `flush()` answers false on its first line without touching the window, so
+    // this branch is the ordinary queueing path, not a retry that might deliver.
     if (held.length > 0 && !flush()) {
       hold(channel, payload);
       return false;

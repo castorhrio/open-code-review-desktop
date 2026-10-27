@@ -60,6 +60,7 @@ import {
   parseApiCommit,
   parseLsRemote,
   pinPlaceCoverage,
+  pinVersion,
   previousRoundPointerViolations,
   headingSlug,
   roundFromCommitSubject,
@@ -796,21 +797,53 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
       bumped[0].includes(UPSTREAM_PACKAGE),
     JSON.stringify(bumped)
   );
-  const noDependency = dependencyPinViolations({
-    dependencies: { ...realPkg.dependencies, [UPSTREAM_PACKAGE]: undefined },
-  });
+  const noDependency = dependencyPinViolations({ dependencies: {} });
   check(
     "...and a package.json with no dependency on the CLI at all is red too, not silently green",
     noDependency.length === 1 && noDependency[0].includes("没有"),
     JSON.stringify(noDependency)
   );
-  const unreadableRange = dependencyPinViolations({
-    dependencies: { ...realPkg.dependencies, [UPSTREAM_PACKAGE]: "*" },
-  });
+  // "Cannot compare" is not "agrees": every shapeless range has to be refused,
+  // and each one has to be refused by the *unreadable-range* sentence rather
+  // than by some later mismatch.
+  const unreadableRanges = ["*", "latest", ""];
+  const unreadableResults = unreadableRanges.map((range) =>
+    dependencyPinViolations({ dependencies: { ...realPkg.dependencies, [UPSTREAM_PACKAGE]: range } })
+  );
   check(
-    "...and a range with no version in it is refused rather than read as agreement",
-    unreadableRange.length === 1 && unreadableRange[0].includes("读不出版本号"),
-    JSON.stringify(unreadableRange)
+    "...and every range with no version in it is refused rather than read as agreement",
+    unreadableResults.every(
+      (violations) => violations.length === 1 && violations[0].includes("读不出版本号")
+    ),
+    JSON.stringify(unreadableRanges.map((range, index) => [range, unreadableResults[index]]))
+  );
+  // The pin side is a version too. A pin tag like `nightly` (or one renamed
+  // without a version) leaves nothing to compare, and must be named as the
+  // pin's problem — not reported as a dependency mismatch, which would send the
+  // reader to the wrong file.
+  const notAVersionPin = dependencyPinViolations(
+    { dependencies: { ...realPkg.dependencies } },
+    { sha: PINNED_UPSTREAM.sha, tag: "nightly" }
+  );
+  check(
+    "...and a pin whose tag is not a version is refused, naming the tag",
+    notAVersionPin.length === 1 &&
+      notAVersionPin[0].includes("不是版本号") &&
+      notAVersionPin[0].includes("nightly"),
+    JSON.stringify(notAVersionPin)
+  );
+  check(
+    "...while a bare version pin (no leading v) still compares as equal",
+    dependencyPinViolations(
+      { dependencies: { ...realPkg.dependencies } },
+      { sha: PINNED_UPSTREAM.sha, tag: pinVersion(PINNED_UPSTREAM) }
+    ).length === 0,
+    JSON.stringify(
+      dependencyPinViolations(
+        { dependencies: { ...realPkg.dependencies } },
+        { sha: PINNED_UPSTREAM.sha, tag: pinVersion(PINNED_UPSTREAM) }
+      )
+    )
   );
   check(
     "...and the version is read out of every range shape, and out of none of the shapeless ones",

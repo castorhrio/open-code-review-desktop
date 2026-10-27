@@ -134,6 +134,57 @@ const label = (entry) => `${entry.channel}:${entry.payload.line ?? JSON.stringif
   );
 }
 
+/* ---- 2b. two boundary shapes the happy path does not reach ---- */
+{
+  // Unready *and* already holding something: `send()` takes the
+  // `held.length > 0 && !flush()` branch. With no readiness `flush()` refuses
+  // before it ever asks the window, so the new line must queue behind the old
+  // one. A window object that exists makes this easy to get wrong.
+  let current = null;
+  const sender = createWindowSender({ currentWindow: () => current });
+  sender.markUnready();
+  sender.send("run:log", { line: "第一条" });
+  const loadedButUnready = makeWindow();
+  current = loadedButUnready;
+  const queued = sender.send("run:log", { line: "第二条" });
+  check(
+    "an unready sender that is already holding lines queues the next one instead of delivering it",
+    queued === false && sender.pending() === 2 && loadedButUnready.received.length === 0,
+    JSON.stringify({ queued, pending: sender.pending(), received: loadedButUnready.received.length })
+  );
+  sender.markReady();
+  check(
+    "...and the flush that follows keeps both in order",
+    JSON.stringify(loadedButUnready.received.map(label)) ===
+      JSON.stringify(["run:log:第一条", "run:log:第二条"]),
+    JSON.stringify(loadedButUnready.received.map(label))
+  );
+
+  // `markReady()` says the page is up; being told twice must not re-send. The
+  // queue is filled while *already* ready (the window was destroyed), then a
+  // fresh window is loaded and markReady is called twice: the first flush takes
+  // the line, the second finds an empty queue and reports nothing at all.
+  let current2 = null;
+  const sender2 = createWindowSender({ currentWindow: () => current2 });
+  current2 = makeWindow({ destroyed: true });
+  sender2.markReady();
+  sender2.send("run:log", { line: "旧窗销毁后的一行" });
+  check(
+    "a ready sender whose window is destroyed still holds the line",
+    sender2.pending() === 1,
+    JSON.stringify({ pending: sender2.pending() })
+  );
+  const live = makeWindow();
+  current2 = live;
+  const first = sender2.markReady();
+  const second = sender2.markReady();
+  check(
+    "markReady on an already-ready sender flushes once; a second call sends nothing and reports no loss",
+    first.sent === 1 && second.sent === 0 && second.lost === 0 && live.received.length === 1,
+    JSON.stringify({ first, second, received: live.received.map(label) })
+  );
+}
+
 /* ---- 3. the window going away, and coming back ---- */
 {
   let current = null;
@@ -211,14 +262,24 @@ const label = (entry) => `${entry.channel}:${entry.payload.line ?? JSON.stringif
     announcement.sent === 1 && sender.pending() === 2,
     JSON.stringify({ sent: announcement.sent, pending: sender.pending() })
   );
+  check(
+    "...and a break mid-flush is not counted as the bound dropping lines",
+    announcement.lost === 0,
+    JSON.stringify({ lost: announcement.lost })
+  );
 
   broken = false;
-  sender.markReady();
+  const recovered = sender.markReady();
   check(
     "...and the rest follows in the same order, once, with no duplicate",
     JSON.stringify(faltering.received.map(label)) ===
       JSON.stringify(["run:log:a", "run:log:b", "run:log:c"]),
     JSON.stringify(faltering.received.map(label))
+  );
+  check(
+    "...and the recovery reports neither a loss nor a duplicate send",
+    recovered.sent === 2 && recovered.lost === 0 && sender.pending() === 0,
+    JSON.stringify({ recovered, pending: sender.pending() })
   );
 }
 
@@ -353,18 +414,45 @@ check(
   );
   check(
     "...it marks the sender ready on the renderer's own load event",
-    /did-finish-load/.test(mainSrc) && /windowSender\.markReady\(\)/.test(mainSrc),
+    /did-finish-load[\s\S]{0,600}?windowSender\.markReady\(\)/.test(mainSrc),
     "no did-finish-load → markReady wiring"
   );
   check(
     "...it marks it unready when a window is created, so a reload queues instead of dropping",
-    /windowSender\.markUnready\(\)/.test(mainSrc),
-    "markUnready is never called"
+    /function\s+createWindow\s*\(\s*\)\s*\{[\s\S]{0,600}?windowSender\.markUnready\(\)/.test(mainSrc),
+    "markUnready is never called inside createWindow"
   );
+  // The count has to leave by the same door: `lost > 0` must be *read* from
+  // markReady's answer and *said* on `run:log` as a `{ line }`, not on another
+  // channel and not with a different payload key. Each of the three halves is a
+  // separate regex, because a single loose one would also pass a branch that
+  // ignores the count.
+  const reportsLoss =
+    /const\s*\{\s*lost\s*\}\s*=\s*windowSender\.markReady\(\)/.test(mainSrc) &&
+    /if\s*\(\s*lost\s*>\s*0\s*\)\s*\{[\s\S]{0,600}?send\(\s*"run:log"\s*,\s*\{\s*line:/.test(mainSrc) &&
+    /windowSender\.limit/.test(mainSrc);
   check(
     "...and it reports what the bound cost, on the channel a packaged app can read",
-    /windowSender\.limit/.test(mainSrc) && /send\(\s*"run:log"\s*,\s*\{\s*line/.test(mainSrc),
-    "the dropped count is not said out loud"
+    reportsLoss,
+    "the dropped count is not read from markReady and said on run:log"
+  );
+  // ...and the question really asks those three things: a branch that says the
+  // count on another channel, ignores the count, or uses another payload key
+  // must answer no.
+  const saysIt = (source) =>
+    /const\s*\{\s*lost\s*\}\s*=\s*windowSender\.markReady\(\)/.test(source) &&
+    /if\s*\(\s*lost\s*>\s*0\s*\)\s*\{[\s\S]{0,600}?send\(\s*"run:log"\s*,\s*\{\s*line:/.test(source) &&
+    /windowSender\.limit/.test(source);
+  const wrongChannel =
+    'const { lost } = windowSender.markReady(); if (lost > 0) { send("update:state", { line: `${lost} / ${windowSender.limit}` }); }';
+  const ignoresCount =
+    'const { lost } = windowSender.markReady(); send("run:log", { line: "x" });';
+  const wrongKey =
+    'const { lost } = windowSender.markReady(); if (lost > 0) { send("run:log", { id: lost }); }';
+  check(
+    "...and a report on another channel, with another key, or without reading the count is refused",
+    !saysIt(wrongChannel) && !saysIt(ignoresCount) && !saysIt(wrongKey),
+    JSON.stringify({ wrongChannel: saysIt(wrongChannel), ignoresCount: saysIt(ignoresCount), wrongKey: saysIt(wrongKey) })
   );
 
   // One door: no other root module may *send* on a window's `webContents`. A
