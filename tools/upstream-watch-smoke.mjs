@@ -16,8 +16,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  AUTHORING_HUMAN_HEADING,
   AUTHORING_RULES_HEADING,
   AUTHORING_RULES_MIN,
+  AUTHORING_SCRIPT_HEADING,
+  AUTHORING_SCRIPT_POINTER,
   DEBT_MARKER,
   HISTORY_ALLOWED_SHA_CONTEXTS,
   HISTORY_APPEND_RULE_TERMS,
@@ -1272,18 +1275,38 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
   );
 }
 
-/* ---- the human half opens with the rules for editing it ----
+/* ---- the human half opens with two kinds of rules, kept apart ----
  * The rules this suite enforces are spread across the anchor check, the ledger
- * binding and the archive rule — and all of them live in code a first-time
- * editor never opens. The doc therefore has to carry the checklist itself, at
- * the top of the human half, and this block asks for that shape: the section
- * exists exactly where an editor meets it, it is a real numbered list, and it
- * stays there when the wording around it changes.
+ * binding and the archive rule. The doc has to carry an entry point for a
+ * first-time editor — but not one flat list, because the old list mixed two
+ * readers:
+ *
+ *   - what a person does to this file (keep one round, append-only archive, a
+ *     ledger row every round);
+ *   - what only `tools/upstream-watch.mjs` knows (anchor shapes, pin arity,
+ *     "do not copy anchor literals").
+ *
+ * The second group is a pointer, not prose. The checks below assert both
+ * subsections exist in that order, that the human one is a real numbered list,
+ * and that the pointer names the module. Each way of breaking the shape is
+ * asked on a one-line edit, so a failure names its own cause.
  */
 {
   const doc = fs.readFileSync(SYNC_DOC, "utf8");
   const docLines = doc.split(/\r?\n/);
-  const headingAt = docLines.findIndex((line) => line.trim().startsWith(AUTHORING_RULES_HEADING));
+  const endAt = docLines.findIndex((line) => line.includes(MACHINE_READABLE_END)) + 1;
+  const human = docLines.slice(endAt);
+  const headingAt = human.findIndex((line) => line.trim().startsWith(AUTHORING_RULES_HEADING));
+  const headingEnd = human.findIndex(
+    (line, index) => index > headingAt && /^#{1,2}\s/.test(line)
+  );
+  const section =
+    headingAt === -1 ? [] : human.slice(headingAt + 1, headingEnd === -1 ? undefined : headingEnd);
+  const humanAt = section.findIndex((line) => line.trim().startsWith(AUTHORING_HUMAN_HEADING));
+  const scriptAt = section.findIndex((line) => line.trim().startsWith(AUTHORING_SCRIPT_HEADING));
+  const humanBody =
+    humanAt === -1 ? [] : section.slice(humanAt + 1, scriptAt === -1 ? undefined : scriptAt);
+  const rules = humanBody.filter((line) => /^\s*\d+\.\s*\S/.test(line)).length;
 
   const violations = docAuthoringRuleViolations(doc);
   check(
@@ -1292,30 +1315,37 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
     violations.join("；") || "no violation"
   );
 
-  // The section is an entry point only if it is a list: a lone heading would
-  // satisfy "it exists" while telling a new editor nothing.
-  const sectionEnd = docLines.findIndex(
-    (line, index) => index > headingAt && /^#{1,6}\s/.test(line)
-  );
-  const section = headingAt === -1 ? [] : docLines.slice(headingAt + 1, sectionEnd === -1 ? undefined : sectionEnd);
-  const rules = section.filter((line) => /^\s*\d+\.\s*\S/.test(line)).length;
   check(
-    "...and it is a checklist, not a title: at least the minimum number of numbered rules",
-    AUTHORING_RULES_MIN >= 4 && rules >= AUTHORING_RULES_MIN,
-    JSON.stringify({ heading: AUTHORING_RULES_HEADING, rules, minimum: AUTHORING_RULES_MIN })
+    "the rules are split into a human checklist and a pointer for the audit code",
+    headingAt !== -1 && humanAt !== -1 && scriptAt !== -1 && humanAt < scriptAt,
+    JSON.stringify({
+      heading: AUTHORING_RULES_HEADING,
+      human: AUTHORING_HUMAN_HEADING,
+      script: AUTHORING_SCRIPT_HEADING,
+      humanAt,
+      scriptAt,
+    })
+  );
+  check(
+    "...and the human half is a checklist, not a title: at least the minimum number of numbered rules",
+    AUTHORING_RULES_MIN >= 3 && rules >= AUTHORING_RULES_MIN,
+    JSON.stringify({ heading: AUTHORING_HUMAN_HEADING, rules, minimum: AUTHORING_RULES_MIN })
+  );
+  check(
+    "...and the script half points at tools/upstream-watch.mjs instead of restating it",
+    scriptAt !== -1 && section.slice(scriptAt + 1).join("\n").includes(AUTHORING_SCRIPT_POINTER),
+    JSON.stringify({ pointer: AUTHORING_SCRIPT_POINTER, scriptAt })
   );
 
-  // (a) the heading deleted: the rules may still sit there, but nothing says
-  // they are rules. This is the failure the assertion exists for.
+  // (a) the parent heading deleted: both subsections may still sit there, but
+  // nothing says they are the entry point.
   const withoutHeading = docLines
     .filter((line) => !line.trim().startsWith(AUTHORING_RULES_HEADING))
     .join("\n");
   const missing = docAuthoringRuleViolations(withoutHeading);
   check(
     "deleting that section goes red and names the missing entry point",
-    missing.length === 1 &&
-      missing[0].includes("写这份文档的规则") &&
-      missing[0].includes("规则入口"),
+    missing.length === 1 && missing[0].includes("改这份文档之前") && missing[0].includes("规则入口"),
     JSON.stringify(missing)
   );
   check(
@@ -1324,39 +1354,98 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
     `doc=${docLines.length} copy=${withoutHeading.split(/\r?\n/).length}`
   );
 
-  // (b) the section moved below the current round: still present, still worded
-  // the same, but no longer the first thing an editor meets.
-  const headingLine = headingAt === -1 ? "" : docLines[headingAt];
-  const rest = docLines.filter((_, index) => index !== headingAt);
+  // (b) one of the two subsections deleted: the parent heading survives, so
+  // only the split itself can see that a reader lost half of the rules.
+  for (const [label, heading] of [
+    ["human", AUTHORING_HUMAN_HEADING],
+    ["script", AUTHORING_SCRIPT_HEADING],
+  ]) {
+    const without = docLines.filter((line) => !line.trim().startsWith(heading)).join("\n");
+    const lost = docAuthoringRuleViolations(without);
+    check(
+      `deleting the ${label} subsection goes red and names it`,
+      lost.length === 1 && lost[0].includes("缺少") && lost[0].includes(heading.replace(/^###\s*/, "")),
+      JSON.stringify(lost)
+    );
+    check(
+      `...and the ${label} copy differs from the doc by exactly one deleted line`,
+      without.split(/\r?\n/).length === docLines.length - 1,
+      `doc=${docLines.length} copy=${without.split(/\r?\n/).length}`
+    );
+  }
+
+  // (c) the two subsection headings swapped: the words are all still there, but
+  // the reader meets the script's constraints before their own checklist.
+  const swapped = (() => {
+    if (humanAt === -1 || scriptAt === -1) return "";
+    const out = [...docLines];
+    const first = endAt + headingAt + 1 + humanAt;
+    const second = endAt + headingAt + 1 + scriptAt;
+    [out[first], out[second]] = [out[second], out[first]];
+    return out.join("\n");
+  })();
+  const swapViolations = swapped ? docAuthoringRuleViolations(swapped) : [];
+  check(
+    "swapping the two subsections goes red, naming the order",
+    swapViolations.some((violation) => violation.includes("顺序颠倒")),
+    JSON.stringify(swapViolations)
+  );
+
+  // (d) the whole section moved below the current round: still present, still
+  // worded the same, but no longer the first thing an editor meets.
+  const block = headingAt === -1 ? [] : human.slice(headingAt, headingEnd === -1 ? undefined : headingEnd);
+  const rest = headingAt === -1 ? [...human] : [...human.slice(0, headingAt), ...human.slice(headingAt + block.length)];
   const restStateAt = rest.findIndex((line) => /^##\s*当前状态（/.test(line));
-  const moved =
-    restStateAt === -1
+  const movedDoc =
+    restStateAt === -1 || !block.length
       ? ""
-      : [...rest.slice(0, restStateAt + 1), headingLine, ...rest.slice(restStateAt + 1)].join("\n");
-  const movedViolations = moved ? docAuthoringRuleViolations(moved) : [];
+      : [
+          ...docLines.slice(0, endAt),
+          ...rest.slice(0, restStateAt + 1),
+          ...block,
+          ...rest.slice(restStateAt + 1),
+        ].join("\n");
+  const movedViolations = movedDoc ? docAuthoringRuleViolations(movedDoc) : [];
   check(
     "moving the section below the current round goes red, naming the line order",
-    moved !== "" &&
+    movedDoc !== "" &&
       movedViolations.some((violation) => violation.includes("落在当前状态")) &&
-      movedViolations.some((violation) => violation.includes("写这份文档的规则")),
+      movedViolations.some((violation) => violation.includes("改这份文档之前")),
     JSON.stringify(movedViolations)
   );
 
-  // (c) a checklist shrunk below the minimum: the heading and the section are
-  // still there, so only a count can see that the entry point stopped covering
-  // the rules.
+  // (e) the human checklist shrunk below the minimum: both headings are still
+  // there, so only a count can see that the entry point stopped covering the
+  // conventions.
   const numbered = [];
-  for (let index = headingAt + 1; headingAt !== -1 && index < (sectionEnd === -1 ? docLines.length : sectionEnd); index += 1) {
-    if (/^\s*\d+\.\s*\S/.test(docLines[index])) numbered.push(index);
+  for (let line = 0; line < humanBody.length; line += 1) {
+    if (/^\s*\d+\.\s*\S/.test(humanBody[line])) numbered.push(endAt + headingAt + 1 + humanAt + 1 + line);
   }
-  const removed = new Set(numbered.slice(-3));
-  const shrunk = docLines.filter((_, index) => !removed.has(index)).join("\n");
+  const removedRules = new Set(numbered.slice(AUTHORING_RULES_MIN - 1));
+  const shrunk = docLines.filter((_, index) => !removedRules.has(index)).join("\n");
   const shrunkViolations = docAuthoringRuleViolations(shrunk);
   check(
-    "shrinking the checklist below the minimum goes red, naming the rule count",
-    numbered.length >= AUTHORING_RULES_MIN + 1 &&
+    "shrinking the human checklist below the minimum goes red, naming the rule count",
+    numbered.length >= AUTHORING_RULES_MIN &&
       shrunkViolations.some((violation) => violation.includes("条编号规则")),
     JSON.stringify(shrunkViolations)
+  );
+
+  // (f) the pointer replaced by a restatement: the subsection exists, it even
+  // talks about the audit, but the one address a red run needs is gone.
+  const withoutPointer = docLines
+    .map((line) => line.split(AUTHORING_SCRIPT_POINTER).join("某个脚本"))
+    .join("\n");
+  const pointerViolations = docAuthoringRuleViolations(withoutPointer);
+  check(
+    "dropping the pointer from the script subsection goes red, naming the module",
+    pointerViolations.length === 1 && pointerViolations[0].includes(AUTHORING_SCRIPT_POINTER),
+    JSON.stringify(pointerViolations)
+  );
+  check(
+    "...and that copy differs from the doc in no line's count",
+    withoutPointer !== doc && withoutPointer.split(/\r?\n/).length === docLines.length,
+    "only the pointer text changed"
   );
 }
 

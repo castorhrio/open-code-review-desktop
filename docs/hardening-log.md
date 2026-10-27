@@ -1266,3 +1266,28 @@ error string。`revealPath` 的祖先回退分支（配置文件还没保存过�
   `npm run audit` 先 build 一次，四个浏览器 harness 共用 `out/`，「bundle 比源码旧」
   这件事改由 `requireBuilt()` 拒绝（第 24 轮再把这道门扩大到 `tools/ui-audit/` 与
   `vite.config.mjs`）。条目挂在待办里的时候已经做完了，本轮复核时才发现。
+
+---
+
+## 第 86 轮 — pin 的双写：两处声明、一处断言（上游核对相关）
+
+**选择。** 上游 pin（commit 与 tag）同时写在两处：`tools/upstream-watch.mjs` 的
+`PINNED_UPSTREAM` 常量，以及 `docs/OCR-UPSTREAM-SYNC.md` 的 pin 块（那份文档里另有
+固定行与一句散文，三处合起来被 `audit:upstream` 当作同一份声明）。两边不一致，或
+文档里少一处、多一处，`describePinDisagreements` / `pinPlaceCoverage` 会 `exit 1`。
+
+**为什么不选单一来源。** 脚本要在没有文档、没有网络时也能回答「pin 是什么」——
+`upstream:check` 会被任何流程顺手调用，所以常量必须留在代码里；文档则是 review 时
+不打开源码就能看到 pin 的唯一位置，所以正文必须留在文档里。让文档当唯一来源意味着
+连网前先解析 Markdown；让代码当唯一来源意味着读 pin 前先 checkout。
+
+**代价。** 改 pin 是两步，漏一步就是「文档说 A、脚本比 B」，而 `upstream:check` 只
+比较 A 与远端的关系，说不出 B 已经落后。双向比对就是这个代价的对冲；「恰好三处」
+则防止某一份拷贝长成没人核对的第二个权威源。代价本身是真实的：它不会因为写了
+这段说明而消失。
+
+**何时该考虑改成单一来源。** 当 tag 能由 `package.json` 的 `dependencies`
+（`@alibaba-group/open-code-review`）唯一推导、且 commit 也能由 release 元数据唯一
+确定时，代码里的 40 位 SHA 可以降级为「从依赖推导」。在那之前，新增一个推导路径
+只会多出第三个真相源，而不是减少一个；改动的判据是「两处都可由同一个输入算出」，
+而不是「两处看起来一样」。

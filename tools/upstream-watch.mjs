@@ -667,13 +667,48 @@ export const previousRoundPointerViolations = (doc, historyDoc = "") => {
 // an entry point for a first edit. So the human half has to open with a short
 // checklist, and the checklist itself is asserted to exist.
 //
-// The checklist is prose on purpose. The literal anchors are *forbidden* in the
-// human half (a copy would be a second authority), so the section describes
-// them instead of quoting them — which is also why this rule is about the
-// section's shape and not its wording. The exact sentences will improve; what
-// may not disappear is the entry point.
-export const AUTHORING_RULES_HEADING = "## 写这份文档的规则";
-export const AUTHORING_RULES_MIN = 4;
+// The checklist is split in two because it used to answer two different readers
+// with one voice. A person adding a round needs the editing conventions (one
+// round here, append-only archive, a ledger row every round). The rest of the
+// old list was a *description of this module's constants* — the anchor shapes,
+// "pins live in exactly three places", "do not copy anchor literals" — which a
+// reader only needs once the audit is already red, and which this module is the
+// authoritative copy of. Repeating them in prose is a second copy that can go
+// stale while the checker stays green.
+//
+// So the second subsection is a pointer, and only the pointer is asserted: it
+// must name this module, so a reader sent there finds the constants. The literal
+// anchors stay *forbidden* in the human half (a copy would be a second
+// authority), which is why the pointer names code rather than quoting shapes.
+export const AUTHORING_RULES_HEADING = "## 改这份文档之前";
+export const AUTHORING_HUMAN_HEADING = "### 给人读的编辑约定";
+export const AUTHORING_SCRIPT_HEADING = "### 给 audit:upstream 看的约束";
+export const AUTHORING_SCRIPT_POINTER = "tools/upstream-watch.mjs";
+// The human list is deliberately short: each entry is a thing a person does to
+// this file. Script-enforced shapes belong to the other subsection and are
+// counted by the checks themselves, not by a checklist that could shrink.
+export const AUTHORING_RULES_MIN = 3;
+
+const headingBounds = (lines, heading) => {
+  const at = lines.findIndex((line) => line.trim().startsWith(heading));
+  if (at === -1) return null;
+  let end = lines.length;
+  for (let index = at + 1; index < lines.length; index += 1) {
+    // The parent section owns its `###` subsections, so only a heading at the
+    // parent's own level (or above) closes it.
+    if (/^#{1,2}\s/.test(lines[index])) {
+      end = index;
+      break;
+    }
+  }
+  return { at, end };
+};
+
+// A subsection has to appear exactly once: `findIndex` alone would accept a
+// second copy, which is the "two copies of one rule" failure this split exists
+// to avoid.
+const headingCount = (lines, heading) =>
+  lines.filter((line) => line.trim().startsWith(heading)).length;
 
 export const docAuthoringRuleViolations = (doc) => {
   const lines = String(doc || "").split(/\r?\n/);
@@ -684,29 +719,70 @@ export const docAuthoringRuleViolations = (doc) => {
   if (endAt === 0) return [];
 
   const human = lines.slice(endAt);
-  const headingAt = human.findIndex((line) => line.trim().startsWith(AUTHORING_RULES_HEADING));
   const name = AUTHORING_RULES_HEADING.replace(/^##\s*/, "");
-  if (headingAt === -1) {
+  const parent = headingBounds(human, AUTHORING_RULES_HEADING);
+  if (!parent) {
     return [`人读区没有「${name}」一节：改这份文档的人在 audit 脚本之外找不到规则入口`];
   }
 
-  const section = [];
-  for (let index = headingAt + 1; index < human.length; index += 1) {
-    if (/^#{1,6}\s/.test(human[index])) break;
-    section.push(human[index]);
-  }
-  const rules = section.filter((line) => /^\s*\d+\.\s*\S/.test(line)).length;
   const violations = [];
-  if (rules < AUTHORING_RULES_MIN) {
+  const body = human.slice(parent.at + 1, parent.end);
+  const humanName = AUTHORING_HUMAN_HEADING.replace(/^###\s*/, "");
+  const scriptName = AUTHORING_SCRIPT_HEADING.replace(/^###\s*/, "");
+
+  for (const [heading, label] of [
+    [AUTHORING_HUMAN_HEADING, humanName],
+    [AUTHORING_SCRIPT_HEADING, scriptName],
+  ]) {
+    const count = headingCount(body, heading);
+    if (count === 0) {
+      violations.push(
+        `「${name}」缺少「${label}」小节：人读的约定与脚本执行的约束是两类，` +
+          "混在一张清单里时，其中一类会先失去维护"
+      );
+    } else if (count > 1) {
+      violations.push(
+        `「${name}」里「${label}」出现了 ${count} 次：规则只写一份，第二份是没人核对的那一份`
+      );
+    }
+  }
+
+  const humanAt = body.findIndex((line) => line.trim().startsWith(AUTHORING_HUMAN_HEADING));
+  const scriptAt = body.findIndex((line) => line.trim().startsWith(AUTHORING_SCRIPT_HEADING));
+  if (humanAt !== -1 && scriptAt !== -1 && humanAt > scriptAt) {
     violations.push(
-      `「${name}」只有 ${rules} 条编号规则（至少 ${AUTHORING_RULES_MIN} 条）：` +
-        "规则清单不能缩成一句，否则新写文档的人仍要读脚本"
+      `「${name}」的两个小节顺序颠倒：先写「${humanName}」，再写「${scriptName}」——` +
+        "人先看到自己要做的事，脚本约束只是指针"
     );
   }
+
+  if (humanAt !== -1) {
+    const end = scriptAt !== -1 && scriptAt > humanAt ? scriptAt : body.length;
+    const rules = body
+      .slice(humanAt + 1, end)
+      .filter((line) => /^\s*\d+\.\s*\S/.test(line)).length;
+    if (rules < AUTHORING_RULES_MIN) {
+      violations.push(
+        `「${humanName}」只有 ${rules} 条编号规则（至少 ${AUTHORING_RULES_MIN} 条）：` +
+          "编辑约定不能缩成一句，否则新写文档的人仍要读脚本"
+      );
+    }
+  }
+
+  if (scriptAt !== -1) {
+    const text = body.slice(scriptAt + 1).join("\n");
+    if (!text.includes(AUTHORING_SCRIPT_POINTER)) {
+      violations.push(
+        `「${scriptName}」没有指向 \`${AUTHORING_SCRIPT_POINTER}\`：脚本约束的权威定义在代码里，` +
+          "这里只该是一个指针；指针丢了，读者要么照抄一份会过期的规则，要么猜"
+      );
+    }
+  }
+
   const stateAt = human.findIndex((line) => /^##\s*当前状态（/.test(line));
-  if (stateAt !== -1 && headingAt > stateAt) {
+  if (stateAt !== -1 && parent.at > stateAt) {
     violations.push(
-      `「${name}」在第 ${endAt + headingAt + 1} 行，落在当前状态（第 ${endAt + stateAt + 1} 行）之后：` +
+      `「${name}」在第 ${endAt + parent.at + 1} 行，落在当前状态（第 ${endAt + stateAt + 1} 行）之后：` +
         "这一节要在人读区开头，改文档的人先看到规则"
     );
   }

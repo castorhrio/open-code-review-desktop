@@ -36,6 +36,42 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 补记落在这段之外。规则本身也必须写在这里（上面那句），否则它只存在于脚本里。
 
 ---
+## 上游状态（第 85 轮，2026-10-27）
+
+第 85 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 均可核对。**
+`git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main` 本轮退出码 0，
+`375f64c` 与 pin 一致（与第 49–84 轮同一个 commit）；`git ls-remote --tags` 显示
+`refs/tags/v1.13.3^{}` 仍指向同一个 commit；`npm view @alibaba-group/open-code-review version`
+仍是 `1.13.3`。GitHub API 本轮没有另问一次——git 的 branch 与 tag 两条都答了问题。
+desktop 的 `^1.13.3` 无需改动，**无移植项**。
+
+本轮兑现控制仓简报里唯一还没落地的一项：`main.js` 的接线层此前只有正则断言
+（「handler 里有 `...probe`」），证明的是源码拼写，不是「探针的整个返回对象真的交给了
+`formatAppInfo`」。
+
+- **P0-1：`app:info` 的 handler body 抽成可调用的 `handleAppInfo`，并直测 spread。**
+  `app-info.js` 新增两个导出：`assembleAppInfo({ binary, probe, …facts })` 是唯一执行
+  `...probe` 的那一行；`handleAppInfo` 负责取 `binaryResolution()`、跑
+  `readVersionOutput`、调 `assembleAppInfo`，并把服务四参数
+  `exec(args, cwd, env, options)` 到探针 `exec(args, { timeoutMs })` 的适配也收进来。
+  `main.js` 的注册现在只剩 `ipcMain.handle("app:info", () => handleAppInfo({ … }))`。
+  `tools/app-info-smoke.mjs` 用**带 getter 的探针对象**问 `assembleAppInfo`：`timedOut`
+  与 `probeError` 是否被读取，只有真的发生 spread 才会为真；反面控制是「只取
+  `versionStdout`/`versionStderr`」的写法，同样两个 getter 保持沉默——证明这条断言分得清
+  spread 与挑选。另有三格问 `handleAppInfo` 本身：服务只被调用一次且参数是 `["version"]`、
+  预算落在第四个参数、`Object.create(null)` 的 rejection 仍 resolve 出完整 payload
+  （`installInfo` 只读一次）。验过会红：把 `...probe` 改成显式两个字段，spread 那格与
+  「handler 走 `assembleAppInfo`」那格当场红；还原后全绿。
+- **P0-2：`describeProbeError` 的「不 reject」断言**在上一轮已经落地
+  （`exec: () => Promise.reject(Object.create(null))` 的 resolve + 固定句），本轮复核后
+  保留，不重复加格。
+- **P1-1：`preload.js` ↔ `src/lib/api.ts` 的方法名 / 参数个数**同样已由
+  `tools/bridge-contract.mjs` 覆盖（双向名单、arity、逐参数落点），本轮复核后不动。
+
+改动只在 `app-info.js`、`main.js`、`tools/app-info-smoke.mjs` 与本文件；不碰 CLI 参数、
+配置读写、`git show` 分类或本文件的机器可读区（除本轮自己的 pin 行与账）。
+`audit:appinfo` / `audit:bridge` / `audit:static` 本轮全绿。
+
 ## 上游状态（第 84 轮，2026-10-27）
 
 第 84 轮复核：**HEAD 未变，结论仍是「无新内容」；git、API 与 npm 均可核对。**
