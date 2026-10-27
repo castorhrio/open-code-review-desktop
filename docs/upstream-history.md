@@ -36,6 +36,38 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 补记落在这段之外。规则本身也必须写在这里（上面那句），否则它只存在于脚本里。
 
 ---
+## 上游状态（第 80 轮，2026-10-27）
+
+第 80 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 两条通路都可达。**
+`git ls-remote https://github.com/alibaba/open-code-review.git HEAD refs/heads/main
+refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
+（与第 49–79 轮同一个 commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
+`dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`；`npm view @alibaba-group/open-code-review version`
+仍是 `1.13.3`。desktop 的 `^1.13.3` 无需改动，**无移植项**。
+
+本轮不再扩纯函数抽取，回到 `git-service.js` 里两处「相信一个自己控制不了的输入」的地方，
+各补一条会红的断言——两条都先验过「改回旧写法就红」：
+
+- **P0-1：`classifyRef` 的计数改成「十进制数字」严格匹配。** 原来两半交给
+  `Number.parseInt` 再查 `Number.isFinite`，而 `parseInt` 接受数字**前缀**：`"3x 0"` 读成
+  3 与 0（`ancestor`）、`"0 3x"` 读成 0 与 3（`descendant`）、`"0x10 0"` 读成 0 与 0——
+  **`same`**，正是这个函数唯一不能错的那个答案（「两分支是同一个 commit」）；负号同理
+  （`"-1 0"` → `ancestor`），而 `rev-list` 根本印不出负计数。现在两半先过 `/^\d+$/`，
+  形状不对一律答 `""`，`inspect` 就不把该 ref 放进 `relations`、UI 回落到工作区。
+  smoke 新增六格畸形形状（`3x` / `0x10` / 负号 / 小数），与已有的四格合法形状同表；
+  把严格匹配换回 `parseInt`，这六格当场红、四格合法形状仍绿——已这样验过。
+- **P0-2：`gitEnv` 导出并直测。** 固定 `LC_ALL=C` / `LANG=C` 是 `readFileAtRef` 两条
+  英文分类的前提，此前只有「真跑一次 git、从 `spawn` 的 options 里读回 env」这一条路：
+  它证明键到了 `spawn`，但证明不了展开语义与「每次调用新建」——删掉 `...process.env`
+  后 `git` 仍能靠默认路径被找到，探针照样成功。现在直接问导出的 `gitEnv()`：在
+  `zh_CN.UTF-8` 的环境里两个键仍是 `C`，且**调用方的 `process.env` 未被改写**（排除
+  「改完再返回同一个对象」）；`PATH` 与一个自造的调用方变量都还在（spread 的语义）；
+  两次调用之间改变量，第二次能看见（不是模块加载时的快照）。去掉 spread，三格红；已验过。
+  同一段还留着「键确实进了 `spawn` options」那条探针，两者互补：一个问函数，一个问接线。
+
+两条都在 `git-service.js` 与 `tools/git-service-smoke.mjs` 内，不碰 CLI 参数、配置读写与
+`readFileAtRef` 的 stderr 分类；`audit:service` / `audit:config` / `audit:git` 本轮全绿。
+
 ## 上游状态（第 79 轮，2026-10-27）
 
 第 79 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 两条通路都可达。**

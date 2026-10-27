@@ -49,6 +49,8 @@ import {
   parseApiCommit,
   parseLsRemote,
   pinPlaceCoverage,
+  previousRoundPointerViolations,
+  headingSlug,
   runUpstreamWatch,
   tableRowCoverage,
   upstreamDrift,
@@ -1086,6 +1088,103 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
       .split(/\r?\n/)
       .filter((line, index) => line !== docLines[index]).length === 2,
     "the swap must not have touched anything else"
+  );
+}
+
+/* ---- the human half keeps one round, and points at the archive for the rest ----
+ * The sync doc says of itself 「本文件只留当前一轮」, and until now that was prose:
+ * the human half also carried the previous round's whole body under a
+ * `## 上一轮（第 N 轮…）` heading, i.e. a second copy of what the archive already
+ * holds. Two copies of one narrative drift, and the copy nobody updates keeps
+ * reading like the current answer.
+ *
+ * So the shape is a rule, and the rule is asserted in both directions: the real
+ * doc must be clean, and each of the four ways to break it must go red for its
+ * own reason — a body coming back, the pointer disappearing, a pointer to a round
+ * the archive never archived, and a pointer whose anchor is not the archived
+ * heading's slug (which lands at the top of the archive file, looking like a
+ * successful click).
+ */
+{
+  const doc = fs.readFileSync(SYNC_DOC, "utf8");
+  const history = fs.readFileSync(HISTORY_DOC, "utf8");
+  const docLines = doc.split(/\r?\n/);
+  const endLine = docLines.findIndex((line) => line.includes(MACHINE_READABLE_END)) + 1;
+  const violations = previousRoundPointerViolations(doc, history);
+  check(
+    "the sync doc's human half keeps one round and points at the archive for the previous one",
+    violations.length === 0,
+    violations.join("；") || "no violation"
+  );
+
+  const pointerLine = docLines.find((line) => /^上一轮（第\s*(\d+)\s*轮）的正文见/.test(line));
+  check(
+    "...and the pointer it keeps is a sentence, not a section: no heading, one line",
+    pointerLine !== undefined && !/^#{1,6}\s/.test(pointerLine),
+    pointerLine || "no pointer line"
+  );
+  // The anchor is compared against the archive's own heading, so the two cannot
+  // silently disagree; the slug rule is asserted on a real heading rather than
+  // restated here.
+  const archived = /^## 上游状态（第\s*(\d+)\s*轮/m.exec(history);
+  check(
+    "the anchor a pointer carries is the archived heading's own slug",
+    archived !== null &&
+      headingSlug(archived[0]) === archived[0].replace(/^##\s*/, "").toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, "").trim().replace(/\s+/g, "-"),
+    archived ? headingSlug(archived[0]) : "no archived section"
+  );
+
+  // (a) the previous round's body comes back — the shape this rule exists for.
+  const restored = [...docLines];
+  restored.splice(endLine + 1, 0, "", "## 上一轮（第 79 轮，2026-10-27）", "", "第 79 轮的正文又抄了一遍。");
+  const restoredViolations = previousRoundPointerViolations(restored.join("\n"), history);
+  check(
+    "a previous-round section copied back into the human half goes red, naming that line",
+    restoredViolations.length >= 1 &&
+      restoredViolations.some((v) => v.includes("上一轮（第 79 轮）") && v.includes(String(endLine + 3))),
+    restoredViolations.join("；")
+  );
+
+  // (b) the pointer removed: "no second body" would otherwise be satisfied by
+  // simply dropping the mention, leaving the reader unable to find that round.
+  const dropped = docLines.filter((line) => !/^上一轮（第\s*\d+\s*轮）的正文见/.test(line)).join("\n");
+  const droppedViolations = previousRoundPointerViolations(dropped, history);
+  check(
+    "dropping the pointer instead of the body goes red too, for its own reason",
+    droppedViolations.length === 1 && droppedViolations[0].includes("指针出现 0 次"),
+    droppedViolations.join("；")
+  );
+
+  // (c) a pointer to a round the archive does not have.
+  const wrongRound = doc.replace(pointerLine, pointerLine.replace(/第\s*79\s*轮/, "第 999 轮"));
+  const wrongRoundViolations = previousRoundPointerViolations(wrongRound, history);
+  check(
+    "a pointer to a round that was never archived goes red, naming the round",
+    wrongRoundViolations.length === 1 && wrongRoundViolations[0].includes("第 999 轮"),
+    wrongRoundViolations.join("；")
+  );
+
+  // (d) the right round, the wrong anchor: the round exists, but the link lands
+  // at the top of the archive file instead of on that section.
+  const wrongAnchor = doc.replace(pointerLine, pointerLine.replace(/upstream-history\.md#[^)]+/, "upstream-history.md#上游状态"));
+  const wrongAnchorViolations = previousRoundPointerViolations(wrongAnchor, history);
+  check(
+    "an anchor that is not the archived heading's slug goes red, naming both anchors",
+    wrongAnchorViolations.length === 1 &&
+      wrongAnchorViolations[0].includes("`#上游状态`") &&
+      wrongAnchorViolations[0].includes("`#上游状态第-79-轮2026-10-27`"),
+    wrongAnchorViolations.join("；")
+  );
+
+  // Same fixture discipline as the machine-readable block: each copy differs from
+  // the real doc in one place only, so the red cannot be explained by anything
+  // else. The two one-line edits are compared by line count and by content.
+  const anchorOnly = wrongAnchor.split(/\r?\n/);
+  check(
+    "...and the wrong-anchor copy changed exactly one line",
+    anchorOnly.length === docLines.length &&
+      anchorOnly.filter((line, index) => line !== docLines[index]).length === 1,
+    `changed=${anchorOnly.filter((line, index) => line !== docLines[index]).length}`
   );
 }
 

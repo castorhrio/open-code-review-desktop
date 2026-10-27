@@ -35,7 +35,7 @@ tag v1.13.3
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 80 轮：`git ls-remote` 退出码 0，`refs/heads/main` 与 pin 一致，`refs/tags/v1.13.3` 仍指向 tag 对象 `dd925205`；npm 为 `1.13.3`；通路：git）**
+**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 81 轮：`git ls-remote` 在 120 秒内超时，退出码 124；`api.github.com` 的 `commits/main` 退出码 0 且 `sha` 与 pin 一致；`refs/tags/v1.13.3` 本轮未独立核对；npm 为 `1.13.3`；通路：api）**
 
 ### 核对通路账
 
@@ -81,6 +81,7 @@ tag v1.13.3
 | 78 | 2026-10-27 | api | `375f64c` / `v1.13.3`，无新内容；git 超时（124）、API 作答；npm `1.13.3`；版本探测的等待预算抽成 `versionWaitMs` 并补 grace/budget 边界与 `probeError` 的异常值形状 | — |
 | 79 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；`installInfo` 同名覆盖改成「顶层优先」并补反向断言、`describeProbeError` 补原型链两端、`versionWaitMs` 去掉只被测试读的 `grace` | — |
 | 80 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；`classifyRef` 的计数改成「十进制数字」严格匹配（堵住 `parseInt` 前缀把畸形形状猜成关系）、`gitEnv` 导出并直测 spread / 只读调用方环境 / 逐调用新鲜 | — |
+| 81 | 2026-10-27 | api | `375f64c` / `v1.13.3`，无新内容；git 超时（124）、API 作答；npm `1.13.3`；`classifyRef` 去掉多余的数值换算（超大计数不再答「无关系」）、`gitEnv` 的接线探针改走 `readFileAtRef`、同步文档的「上一轮」压成指针并进断言 | — |
 
 ### 对照表（上游前进时要重读的五处）
 
@@ -88,10 +89,10 @@ tag v1.13.3
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
 对应行并把轮次与日期改成本轮。
 
-**第 46–80 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
+**第 46–81 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
 npm 通路可达，第 56 轮 git 超时但 API 可达，第 63–64 轮本文件无通路记录，第 68 轮 git
-超时但 API 可达，第 69–76、79–80 轮 git 可达，第 77 轮本文件无通路记录，第 78 轮 git 超时但
-API 可达），所以下表 5 行的
+超时但 API 可达，第 69–76、79–80 轮 git 可达，第 77 轮本文件无通路记录，第 78、81 轮 git
+超时但 API 可达），所以下表 5 行的
 「最近一次对照」停在第 45 轮是
 **没有理由重看**，不是忘了看：
 它记录的是「最后一次有人逐行读上游源码」的轮次，而不是「最后一次确认上游没变」的轮次。
@@ -133,71 +134,49 @@ API 可达），所以下表 5 行的
 3. **移植**：可安全合并的 → 写入本仓并测通；不能立刻做的 → 记入私有 control 仓的
    下一轮简报。本仓库**不再维护** `next-iteration.md` 之类的工作流文档。
 4. **不要**静默忽略上游 release：每轮把结论写进下面「当前状态」，并把上一轮的正文搬到
-   [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。
+   [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。搬完这里只留一句
+   指针——「本文件只留当前一轮」不是约定而是断言（`previousRoundPointerViolations`）。
 
-## 当前状态（第 80 轮，2026-10-27）
+## 当前状态（第 81 轮，2026-10-27）
 
-第 80 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 两条通路都可达。**
-`git ls-remote https://github.com/alibaba/open-code-review.git HEAD refs/heads/main
-refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
-（与第 49–79 轮同一个 commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
-`dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`；`npm view @alibaba-group/open-code-review version`
-仍是 `1.13.3`。desktop 的 `^1.13.3` 无需改动，**无移植项**。
+第 81 轮复核：**HEAD 未变，结论仍是「无新内容」；API 与 npm 两条通路可达。**
+`git ls-remote https://github.com/alibaba/open-code-review.git` 本轮超时（`timeout` 返回
+124，与第 47–48 轮同因），改由 `api.github.com/repos/alibaba/open-code-review/commits/main`
+回答：HTTP 200，`sha` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`（与第 49–80 轮同一个
+commit，2026-10-20 的 `fix(tool): report an empty code_comment batch instead of success
+(#1773)`）；`npm view @alibaba-group/open-code-review version` 仍是 `1.13.3`。tag 一处本轮
+没有独立核对——`refs/heads/main` 未变即「无新 commit」，registry 的 `latest` 未变即「无新
+发布」。desktop 的 `^1.13.3` 无需改动，**无移植项**。
 
-本轮不再扩纯函数抽取，回到 `git-service.js` 里两处「相信一个自己控制不了的输入」的地方，
-各补一条会红的断言——两条都先验过「改回旧写法就红」：
+本轮按上一轮留下的三件事收口，主题都是「一行检查在防什么，必须有答案」：
 
-- **P0-1：`classifyRef` 的计数改成「十进制数字」严格匹配。** 原来两半交给
-  `Number.parseInt` 再查 `Number.isFinite`，而 `parseInt` 接受数字**前缀**：`"3x 0"` 读成
-  3 与 0（`ancestor`）、`"0 3x"` 读成 0 与 3（`descendant`）、`"0x10 0"` 读成 0 与 0——
-  **`same`**，正是这个函数唯一不能错的那个答案（「两分支是同一个 commit」）；负号同理
-  （`"-1 0"` → `ancestor`），而 `rev-list` 根本印不出负计数。现在两半先过 `/^\d+$/`，
-  形状不对一律答 `""`，`inspect` 就不把该 ref 放进 `relations`、UI 回落到工作区。
-  smoke 新增六格畸形形状（`3x` / `0x10` / 负号 / 小数），与已有的四格合法形状同表；
-  把严格匹配换回 `parseInt`，这六格当场红、四格合法形状仍绿——已这样验过。
-- **P0-2：`gitEnv` 导出并直测。** 固定 `LC_ALL=C` / `LANG=C` 是 `readFileAtRef` 两条
-  英文分类的前提，此前只有「真跑一次 git、从 `spawn` 的 options 里读回 env」这一条路：
-  它证明键到了 `spawn`，但证明不了展开语义与「每次调用新建」——删掉 `...process.env`
-  后 `git` 仍能靠默认路径被找到，探针照样成功。现在直接问导出的 `gitEnv()`：在
-  `zh_CN.UTF-8` 的环境里两个键仍是 `C`，且**调用方的 `process.env` 未被改写**（排除
-  「改完再返回同一个对象」）；`PATH` 与一个自造的调用方变量都还在（spread 的语义）；
-  两次调用之间改变量，第二次能看见（不是模块加载时的快照）。去掉 spread，三格红；已验过。
-  同一段还留着「键确实进了 `spawn` options」那条探针，两者互补：一个问函数，一个问接线。
+- **P0-1：`classifyRef` 里那两行 `Number.isFinite` 定案为「不是防御，是多做的换算」，删掉。**
+  上一轮把计数改成十进制数字严格匹配后，那两行看着不可达——其实可达，只是要一个 309 位以上
+  的计数（`Number.parseInt("9".repeat(400))` 是 `Infinity`）。但它防的那件事本来就不该发生：
+  四种关系只问「哪一半是零」。所以现在**不做任何数值换算**，`isZeroCount()` 直接读数字
+  （`/^0+$/`）。smoke 补两格超大计数（24 位与 400 位）：两者都仍答一个关系；把 `parseInt`
+  放回去，400 位那格当场答 `""`（`Infinity` 进 `isFinite` 守卫）、四格普通计数仍绿——已这样
+  验过。「这一行在防什么」的答案现在是：什么都不防，它是多余的。
+- **P0-2：`gitEnv` 的 spawn 接线探针从「问 `git()`」改成「问 `readFileAtRef`」。**
+  第 80 轮正文说这条探针还在——它确实在，但问的是 `fresh.git(["--version"])`：证明的是
+  `git()` 会带 `gitEnv()`，不是**代码面板那条读文件的路**会。把 `spawn("git", ["show", …])`
+  内联进 `readFileAtRef`（参数都现成，看着像无害的简化）会让分类悄悄脱离 C locale，而旧探针
+  照旧全绿。现在探针走一次真的 `readFileAtRef`，从 `spawn` 的 options 里读回 `LC_ALL` /
+  `LANG` / `PATH` / `cwd`，并断言那次调用真的带了 `show`——已按上面的内联验过会红（三格）。
+  那个函数因此有了两条互补的断言：`gitEnv()` 问返回值，本探针问接线。
+- **P1-1：「本文件只留当前一轮」从散文变成断言。** 人读区此前的「上一轮（第 79 轮）」是完整
+  正文，与 `upstream-history.md` 里的第 79 轮段重复，而文件开头就写着「只留当前一轮」。正文按
+  规则搬进归档，这里只留一句指针；同时新增 `previousRoundPointerViolations()`（在
+  `tools/upstream-watch.mjs`）：人读区不得再起「上一轮（第 N 轮）」的标题段、指针必须恰好一句、
+  指针说的那一轮必须在归档里真有段落、锚点必须等于那段标题算出来的 slug（否则点过去落在归档
+  文件顶部，看着像点成功了）。smoke 用四条「只改一处」的副本逐条验红。
 
-两条都在 `git-service.js` 与 `tools/git-service-smoke.mjs` 内，不碰 CLI 参数、配置读写与
-`readFileAtRef` 的 stderr 分类；`audit:service` / `audit:config` / `audit:git` 本轮全绿。
+三条都在 `git-service.js` / `tools/git-service-smoke.mjs` / `tools/upstream-watch.mjs` /
+`tools/upstream-watch-smoke.mjs` 与本文件内，不碰 CLI 参数、配置读写与 IPC 注册体；
+`audit:service` / `audit:config` / `audit:git` / `audit:upstream` 本轮全绿。
 
-## 上一轮（第 79 轮，2026-10-27）
+上一轮（第 79 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-79-轮2026-10-27)，归档之后本文件不留第二份。
 
-第 79 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 两条通路都可达。**
-`git ls-remote https://github.com/alibaba/open-code-review.git HEAD refs/tags/v1.13.3`
-退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`（与第 49–78 轮同一个
-commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
-`dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`；`npm view @alibaba-group/open-code-review version`
-仍是 `1.13.3`。desktop 的 `^1.13.3` 无需改动，**无移植项**。
-
-本轮仍不扩大纯函数抽取范围，只补上一轮抽出来的那两个函数里最后没被问过的形状：
-
-- **P0-1：`formatAppInfo` 的 `installInfo` 同名覆盖定案为「顶层优先」。** 原来
-  `...installInfo` 展开在最后，一个叫 `binary` / `version` / `configPath` 的安装事实会**静默**
-  顶掉刚算出来的值，而载荷的 key 集因为同名不变，钉 key 集的断言看不见它。现在展开挪到最前：
-  字段同名是撞名，不是更好的答案，撞名的安装字段被丢弃。smoke 用
-  `installInfo: { binary: "evil", version: "9.9.9", binarySource: "evil", configPath: "/evil/…" }`
-  逐字断言四个字段保住计算值、key 集不变、且不撞名的安装事实照旧随行（否则「顶层优先」可以
-  用「索性丢掉 installInfo」实现而这条仍绿）。把展开挪回下面，这条会直接红——已这样验过。
-- **P0-2：`describeProbeError` 的原型链两端各补一格。** `"message" in error` 走原型链是
-  **决定**：`Error` 子类可以把 `message` 做成原型上的 getter，`hasOwnProperty` 会把这种合法错误
-  判成「没有消息」，所以断言 `Object.create({ message: "inherited" })` 落到 `"inherited"`，而
-  普通 `Error` 仍答自己的 message。另一端 `Object.create(null)` 没有 `toString`，`String(it)`
-  会**抛**——这行跑在 `.catch` 里，抛出去就是 `app:info` 被拒、设置页空白，所以取值加了守卫，
-  这一格断言它答固定句子而不是拒绝（去掉守卫，这条当场红）。
-- **P1-3：`versionWaitMs` 的 `grace` 字段去掉。** 它只有一个读者——本文件的测试——正是第
-  71/72 轮从载荷里清掉的那种「只被断言存在」的字段。现在答案就是 `{ budget, wait }` 两个数
-  （smoke 断言 key 集恰好这两个），「grace 回落到了默认值」改成问 `wait - budget`，也就是真正
-  进 `setTimeout` 的那个量。
-
-沿用第 78 轮的结论：这三条都在 `app-info.js` 与 `tools/app-info-smoke.mjs` 内，不碰 CLI 参数、
-配置读写与 `git show` 分类，`audit:service` / `audit:config` / `audit:git` 不受影响。
 ## 上游真变了怎么办（命令驱动，而不是「记得看一眼」）
 ```bash
 npm run audit:service   # CLI 参数构建 / 四种模式的输出解析 / resolver 查找顺序的投影

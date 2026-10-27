@@ -485,6 +485,15 @@ fs.rmSync(notARepo, { recursive: true, force: true });
     { stdout: "3 0", want: "ancestor", why: "behind HEAD" },
     { stdout: "2 5", want: "diverged", why: "on neither side" },
     { stdout: "0 0", want: "same", why: "the same commit" },
+    // The two counts a number cannot carry. Nothing about a commit count needs a
+    // conversion — the only question asked of it is "is it zero?" — so these are
+    // answered like any other count. They are here because a `parseInt` re-enters
+    // this function very easily (the zeros look like numbers), and with it these
+    // two become "21 digits rounded to 1e24" and "Infinity": the first still
+    // reads as non-zero by luck, the second does not, so the 400-digit one is the
+    // assertion that a numeric conversion is not load-bearing.
+    { stdout: "999999999999999999999999 0", want: "ancestor", why: "behind HEAD by more commits than a double holds exactly" },
+    { stdout: "0 " + "9".repeat(400), want: "descendant", why: "ahead of HEAD by more commits than a double can hold at all" },
   ];
   for (const { stdout, want, why } of shapes) {
     const { rel, calls } = await classifyStdout(stdout);
@@ -530,6 +539,23 @@ fs.rmSync(notARepo, { recursive: true, force: true });
       JSON.stringify(rel)
     );
   }
+
+  // The oversized pair, asked on its own so the reason it is allowed is written
+  // down: `Number.parseInt("9".repeat(400))` is `Infinity`, so a numeric version
+  // of this function has to treat "a count bigger than any repository" as no
+  // relation at all — the one answer that makes the UI silently fall back instead
+  // of defaulting a branch range. A digit test cannot make that mistake.
+  const oversized = await classifyStdout("0 " + "9".repeat(400));
+  check(
+    "a count too large for a double is still a count, and names a relation",
+    oversized.rel === "descendant",
+    JSON.stringify(oversized.rel)
+  );
+  check(
+    "...and the number that count would have become is really out of a double's range",
+    Number.parseInt("9".repeat(400)) === Infinity && !Number.isFinite(Number.parseInt("9".repeat(400))),
+    String(Number.parseInt("9".repeat(400)))
+  );
 
   // A git that failed (an unknown ref, a repository that is not there) has no
   // shape to read at all, and must not be answered with one.
@@ -729,6 +755,16 @@ check(
 // its `require("child_process")` picks up the stub) and read the options it
 // passes on. PATH has to survive the override — without it git is not found at
 // all — while the message language must not be left to the ambient environment.
+//
+// The call made through the stub is `readFileAtRef`, a real read of a real file at
+// a real ref, rather than `git(...)` directly. The two ask different questions
+// and only the second one is about the read path: `gitEnv()` (asked on its own
+// further down) says what the environment *should* look like, this block says the
+// code that draws the code pane actually spawns git with it. Inlining a
+// `spawn("git", ["show", …], { cwd })` into `readFileAtRef` looks like a harmless
+// shortcut — it already knows the arguments — and would leave the classifications
+// that pane depends on unpinned to the C locale, while a probe that called `git()`
+// itself would stay green.
 {
   const cp = await import("node:child_process");
   const realSpawn = cp.default.spawn;
@@ -740,17 +776,26 @@ check(
   const servicePath = path.join(ROOT, "git-service.js");
   delete require.cache[require.resolve(servicePath)];
   const fresh = require(servicePath);
-  const probe = await fresh.git(["--version"], dir);
+  const probe = await fresh.readFileAtRef(dir, "a.go", "HEAD", 1, 5, 0);
   delete require.cache[require.resolve(servicePath)];
   cp.default.spawn = realSpawn;
 
   const opts = (calls[0] || [])[2] || {};
   const env = opts.env || {};
-  check("git is spawned with a successful exit", probe.code === 0, probe.stderr || "");
+  check(
+    "the read the wiring probe watches really ran, under a Chinese locale, and found the file",
+    probe.ok === true && (probe.lines || []).map((l) => l.content).join("\n").includes("func main() {}"),
+    probe.ok ? "" : probe.error || ""
+  );
+  check(
+    "...so the environment read back is the one the code pane's read used",
+    calls.length === 1 && (calls[0][1] || []).includes("show"),
+    JSON.stringify((calls[0] && calls[0][1]) || [])
+  );
   check("git is spawned with LC_ALL=C", env.LC_ALL === "C", String(env.LC_ALL));
   check("git is spawned with LANG=C", env.LANG === "C", String(env.LANG));
   check("the rest of the environment is kept", env.PATH === process.env.PATH, String(env.PATH || "").slice(0, 40));
-  check("git is still spawned asynchronously, not with spawnSync", calls.length === 1 && typeof opts.cwd === "string", `${calls.length} spawn(s)`);
+  check("git is still spawned asynchronously, not with spawnSync", calls.length === 1 && opts.cwd === dir, `${calls.length} spawn(s) / ${String(opts.cwd)}`);
 }
 
 /* ---- the two keys, asked of the function that builds them ----

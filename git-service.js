@@ -77,6 +77,15 @@ async function resolveRef(repo, ref) {
 // What a count may look like: decimal digits, nothing else. See `classifyRef`.
 const COUNT = /^\d+$/;
 
+// Whether a count that already passed `COUNT` is zero — the only question the
+// four relations below ever ask of it. Kept as a test on the digits rather than a
+// number: a count is a commit count, so `Number.parseInt` buys nothing here and
+// costs two ways to be wrong — it rounds anything above 2^53 (24 digits already
+// do) and answers `Infinity` for a count long enough to exceed a double's range.
+// Both are still perfectly good answers to "is it zero", which is why they are
+// read off the text instead.
+const isZeroCount = (digits) => /^0+$/.test(digits);
+
 /**
  * How a ref stands relative to HEAD, which is the only thing that decides
  * whether a `--from <ref> --to HEAD` comparison has anything in it.
@@ -111,6 +120,16 @@ const COUNT = /^\d+$/;
  * silent failure mode. `rev-list` cannot print a negative count either, so
  * "-1 0" is no shape at all; parsed, it would read as `ancestor`.
  *
+ * What is asked of the two counts, once their shape is known, is only "is it
+ * zero?" — all four answers are statements about which half is zero. So the
+ * digits stay digits and are tested for zero-ness, never converted: a count with
+ * more digits than a double holds exactly is still a count, and one long enough
+ * to exceed a double's range is `Infinity` when parsed. Neither is a relation, so
+ * a numeric conversion here would be a second way to lose the answer this
+ * function exists to give — `isZeroCount` is the whole contract, and the
+ * oversized shapes are pinned in `tools/git-service-smoke.mjs` so that putting a
+ * `parseInt` back goes red there.
+ *
  * A *legal ref name* is an upstream constraint of this function, not a promise
  * it makes: `ref` comes from `inspect`'s own `refs` list (git's
  * `%(refname:short)` output) or from `resolveRef`'s caller, so it is a name git
@@ -127,11 +146,12 @@ async function classifyRef(repoRoot, ref) {
   if (res.code !== 0) return "";
   const parts = res.stdout.trim().split(/\s+/);
   if (parts.length !== 2 || !parts.every((part) => COUNT.test(part))) return "";
-  const [left, right] = parts.map((n) => Number.parseInt(n, 10));
-  if (!Number.isFinite(left) || !Number.isFinite(right)) return "";
-  if (left === 0 && right === 0) return "same";
-  if (left === 0) return "descendant";
-  if (right === 0) return "ancestor";
+  const [left, right] = parts;
+  const leftIsZero = isZeroCount(left);
+  const rightIsZero = isZeroCount(right);
+  if (leftIsZero && rightIsZero) return "same";
+  if (leftIsZero) return "descendant";
+  if (rightIsZero) return "ancestor";
   return "diverged";
 }
 

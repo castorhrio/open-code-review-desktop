@@ -540,6 +540,124 @@ export const machineReadableBlockViolations = (doc) => {
   return violations;
 };
 
+// ---- the human half keeps one round, and points at the archive for the rest ----
+//
+// The file states its own scope at the top: 「逐轮正文归档在 upstream-history.md，
+// 本文件只留当前一轮」. Until this rule existed that was only prose — the human half
+// carried the *previous* round's full body as a `## 上一轮（第 N 轮…）` section, which
+// is the same narrative the archive already holds. A body living in two files is
+// the failure the archive's own rule exists to prevent, one level up: the copy
+// nobody updates keeps reading like the current answer, and "which round wrote
+// this sentence" needs a diff to answer.
+//
+// So the shape is asserted instead of trusted, and it is checked on the human
+// half only (the machine-readable region is the other check's business):
+//
+//   - no `## 上一轮（第 N 轮…）` heading — a previous round's body belongs in the
+//     archive, and a heading is what makes a body a body;
+//   - exactly one pointer sentence, because a file that simply dropped the
+//     mention would satisfy "no second body" while leaving the reader with no way
+//     to find the previous round;
+//   - that pointer must name a round the archive really has, with the anchor of
+//     *that* section — a pointer to a round that was never archived, or to a
+//     rewritten heading's old slug, lands at the top of the archive file, which
+//     looks like a successful click and goes to the wrong place.
+//
+// The anchor is compared, not trusted, for the second reason: the slug is
+// computed from the heading by GitHub's rules (lowercase, punctuation dropped,
+// spaces to hyphens), so a heading edited next round does not silently break the
+// link — this check goes red instead.
+export const PREVIOUS_ROUND_HEADING = /^#{2,4}\s*上一轮（第\s*(\d+)\s*轮/;
+export const PREVIOUS_ROUND_POINTER =
+  /上一轮（第\s*(\d+)\s*轮）的正文见\s*\[`?upstream-history\.md`?\]\(upstream-history\.md#([^)\s]+)\)/;
+
+// The anchor GitHub gives a heading: lowercase, punctuation dropped, spaces to
+// hyphens, letters/digits (any script) kept. Written out rather than imported so
+// the rule the pointer is checked against is the rule the reader's browser uses,
+// and it is asserted against a real heading in the smoke test.
+export const headingSlug = (heading) =>
+  String(heading == null ? "" : heading)
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s-]/gu, "")
+    .trim()
+    .replace(/\s+/g, "-");
+
+// The rule as violations. Empty is the only acceptable answer for the real sync
+// doc; each entry names the line, because "the human half is the wrong shape"
+// sends the reader to a 300-line diff.
+export const previousRoundPointerViolations = (doc, historyDoc = "") => {
+  const violations = [];
+  const lines = String(doc || "").split(/\r?\n/);
+  const markerLines = (marker) => {
+    const found = [];
+    lines.forEach((line, index) => {
+      if (line.includes(marker)) found.push(index + 1);
+    });
+    return found;
+  };
+  const startAt = markerLines(MACHINE_READABLE_START);
+  const endAt = markerLines(MACHINE_READABLE_END);
+  // Where the human half starts is `machineReadableBlockViolations`'s question.
+  // Answering it here too would report the same broken file twice, with the
+  // second copy pointing at the wrong cause.
+  if (startAt.length !== 1 || endAt.length !== 1 || startAt[0] > endAt[0]) return violations;
+
+  const after = lines.slice(endAt[0]);
+  // A position inside `after` turned back into a document line.
+  const at = (index) => index + endAt[0] + 1;
+
+  after.forEach((line, index) => {
+    const hit = PREVIOUS_ROUND_HEADING.exec(line);
+    if (hit) {
+      violations.push(
+        `第 ${at(index)} 行：人读区里又起了一段「上一轮（第 ${hit[1]} 轮）」的正文——` +
+          `逐轮正文属于 ${UPSTREAM_HISTORY_DOC}，本文件只留一个指针句`
+      );
+    }
+  });
+
+  const pointers = [];
+  after.forEach((line, index) => {
+    const hit = PREVIOUS_ROUND_POINTER.exec(line);
+    if (hit) pointers.push({ line: at(index), round: Number(hit[1]), anchor: hit[2] });
+  });
+  if (pointers.length !== 1) {
+    violations.push(
+      `人读区的「上一轮」指针出现 ${pointers.length} 次（应为 1 次）：` +
+        (pointers.length
+          ? `第 ${pointers.map((pointer) => pointer.line).join("、")} 行`
+          : "找不到——上一轮的正文归档了，但没有任何一行指过去")
+    );
+    return violations;
+  }
+
+  const [pointer] = pointers;
+  const sections = historySections(historyDoc);
+  const target = sections.find((section) => section.round === pointer.round);
+  if (!target) {
+    violations.push(
+      `第 ${pointer.line} 行：指针说的是第 ${pointer.round} 轮，` +
+        `而 ${UPSTREAM_HISTORY_DOC} 里没有这一轮的段落` +
+        `（有 ${sections.filter((section) => section.round !== null).map((section) => section.round).join("、")}）`
+    );
+    return violations;
+  }
+  // `historySections` records the heading *line number*; the slug is computed
+  // from that line of the archive itself, because the heading text is what a
+  // reader clicks, not a copy of it kept here.
+  const headingText = String(historyDoc).split(/\r?\n/)[target.line - 1] || "";
+  const want = headingSlug(headingText);
+  if (pointer.anchor !== want) {
+    violations.push(
+      `第 ${pointer.line} 行：指针的锚点 \`#${pointer.anchor}\` 不是 ` +
+        `${UPSTREAM_HISTORY_DOC} 第 ${target.line} 行标题的锚点 \`#${want}\`，` +
+        "点过去会落到归档文件顶部而不是那一轮"
+    );
+  }
+  return violations;
+};
+
 // ---- what the archive may quote, and what only the sync doc may declare ----
 //
 // `docs/upstream-history.md` quotes upstream commits in prose — whole
