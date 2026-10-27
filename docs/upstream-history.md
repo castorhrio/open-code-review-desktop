@@ -37,6 +37,39 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 补记落在这段之外。规则本身也必须写在这里（上面那句），否则它只存在于脚本里。
 
 ---
+
+## 上游状态（第 87 轮，2026-10-27）
+
+第 87 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 可达。**
+`git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main` 本轮退出码 0，
+`375f64c` 与 pin 一致（与第 49–86 轮同一个 commit）；`git ls-remote --tags --refs` 仍以
+`refs/tags/v1.13.3` 为最高版本，`npm view @alibaba-group/open-code-review version` 仍是
+`1.13.3`（tag 对象本轮没有独立重读——branch 未变即「无新 commit」，registry 的 `latest`
+未变即「无新发布」）。desktop 的 `^1.13.3` 无需改动，**无移植项**。
+
+本轮按控制仓简报收口两条「会红」的边界，都不改运行期行为：
+
+- **P0-1：`formatAppInfo` 的撞名面从「七个计算字段」扩到「全部返回键」。**
+  `tools/app-info-smoke.mjs` 不再从手写清单取键，而是从
+  `formatAppInfo({ installInfo: {} })` 的返回对象直接读；每个键各给一个 `evil-<key>` 值
+  塞进 `installInfo`，断言全部保住计算值。共享的 `APP_INFO_COMPUTED_KEYS` 仍保留
+  （`install-info-smoke.mjs` 用它证明模块不提供撞名），但新增一格要求它恰好等于这组返回
+  键——清单落后于返回值时先红。验过会红：把 `...installInfo` 挪到计算字段之后，七个键
+  逐一变成 `evil-*`，失败信息列全。
+- **P0-2：`docs/upstream-history.md` 不许整串引用 pin。**
+  新增 `historyPinLeakViolations`：按 `PINNED_UPSTREAM.sha` 的整串逐行查，命中即点名行号；
+  7 位前缀、别的 commit / tag 对象的整串仍然允许。pin 常量不是整串时直接报错，避免
+  `includes()` 永远不中而让规则空过。归档里原有的 25 处整串 pin 一并改成 7 位前缀（与文件
+  开头早已写下的「历史段里的 SHA 是 7 位前缀或 tag 对象」一致）；这是本轮唯一的归档正文
+  改动，取舍记在 `docs/hardening-log.md`。反向控制：在归档第一行插入整串 pin，断言点名
+  第 1 行且只改了一行。
+
+改动只在 `app-info.js`（注释）、`tools/app-info-smoke.mjs`、`tools/install-info-smoke.mjs`、
+`tools/install-fixture.mjs`（注释）、`tools/upstream-watch.mjs`、`tools/upstream-watch-smoke.mjs`、
+`docs/hardening-log.md`、`docs/upstream-history.md` 与本文件；不碰 `main.js`、`src/**`、
+CLI 参数、配置读写或 `git show` 分类。`audit:appinfo` / `audit:upstream` / `audit:static`
+本轮全绿。
+
 ## 上游状态（第 86 轮，2026-10-27）
 
 第 86 轮复核：**HEAD 未变，结论仍是「无新内容」；API 与 npm 可达，git 通路本轮超时。**

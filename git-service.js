@@ -248,8 +248,11 @@ async function inspect(repo) {
  * spelling git reserves for some other case), and the samples are still strings
  * somebody typed — so the fallback answer has to carry git's own first stderr
  * line and its exit code, the one part of the failure that does not depend on
- * language. The whole cost is stated in `docs/OCR-UPSTREAM-SYNC.md`『能自动变红的
- * 地方，和不能的地方』.
+ * language. It also carries the untrimmed stderr on `rawStderr` (fallback only)
+ * so a wording the table stopped recognising leaves the original sentence in the
+ * answer for a log, rather than only the generic sentence the reader sees. The
+ * whole cost is stated in `docs/OCR-UPSTREAM-SYNC.md`『能自动变红的地方，和不能的
+ * 地方』.
  *
  * Row order matters: the first row whose `pattern` matches wins, and the single
  * row with `pattern: null` is the fallback for every wording nobody listed. It
@@ -277,7 +280,8 @@ const REF_READ_WORDINGS = Object.freeze([
     // fatal: …" leaves the reader with a sentence they cannot look up; with it,
     // the sentence can be matched against the git that produced it. The exit code
     // is also the one part of a git failure that does not depend on the message
-    // language at all.
+    // language at all. `readFileAtRef` additionally puts the whole stderr on
+    // `rawStderr` for this row, so a drift that lands here is visible to a log.
     reason: "failed",
     pattern: null,
     sample: "fatal: couldn't find 'a.go' in 'HEAD'",
@@ -337,6 +341,14 @@ async function readFileAtRef(repo, relPath, ref, startLine, endLine, pad) {
       ref,
       path: relPath,
       error: wording.message({ ref, relPath, first, code }),
+      // The fallback is where the classifier admits it did not recognise git's
+      // wording — i.e. the branch a changed git or a different locale reaches
+      // silently, because it is still a well-formed failure. `error` has one
+      // generic sentence for the reader; the raw stderr is for whoever debugs
+      // that sentence later, so a drift in the table leaves evidence behind
+      // instead of only a plausible-looking failure. It is not part of the
+      // user-facing sentence (the code pane shows `error`).
+      ...(wording.reason === "failed" ? { rawStderr: String(res.stderr || "") } : {}),
     };
   }
   const all = res.stdout.split(/\r?\n/);

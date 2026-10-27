@@ -505,6 +505,37 @@ fs.rmSync(notARepo, { recursive: true, force: true });
     `${localised.res.reason || ""} / ${localised.res.error || ""}`
   );
 
+  /* ---- a fallback keeps the sentence it gave up on ----
+   * `failed` is the one branch where the classifier admits it did not recognise
+   * git's wording, and therefore the only place a changed git or locale degrades
+   * a specific reason into a generic failure without anything turning red: the
+   * answer is still well-formed, and the old checks still pass. The mitigation is
+   * evidence, not a claim: the fallback carries git's untrimmed stderr on
+   * `rawStderr`, so a drift can be seen in a log.
+   *
+   * The wording used here is deliberately absent from the table and from the list
+   * above; its only relevant property is being an unrecognised `fatal:` sentence.
+   * The recognized wording below is the other half: `rawStderr` must mark *this
+   * branch*, not every failure, or its presence would stop meaning anything.
+   */
+  const unknownRaw = await classifyStderr("fatal: something new");
+  check(
+    "an unrecognised stderr lands on failed and carries git's raw stderr for a log",
+    unknownRaw.res.ok === false &&
+      unknownRaw.res.reason === "failed" &&
+      typeof unknownRaw.res.rawStderr === "string" &&
+      unknownRaw.res.rawStderr.includes("fatal: something new"),
+    JSON.stringify({ reason: unknownRaw.res.reason, rawStderr: unknownRaw.res.rawStderr })
+  );
+  const knownNoRaw = await classifyStderr("fatal: path 'a.go' does not exist in 'HEAD'");
+  check(
+    "...and a recognised wording does not carry rawStderr, so the field marks the fallback",
+    knownNoRaw.res.ok === false &&
+      knownNoRaw.res.reason === "missing" &&
+      !("rawStderr" in knownNoRaw.res),
+    JSON.stringify({ reason: knownNoRaw.res.reason, rawStderr: knownNoRaw.res.rawStderr })
+  );
+
   /* ---- the exit-code assertion itself, in both directions ----
    * The three checks above are only a gate if `namesExitCode` can say no. A regex
    * loosened to "退出码" would accept a sentence that lost the number — which is

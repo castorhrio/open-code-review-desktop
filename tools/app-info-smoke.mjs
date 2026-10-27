@@ -262,54 +262,56 @@ const base = {
  * `installInfo` altogether and this block would stay green.
  */
 {
-  // The collision surface is **every key this function returns**, read off the
-  // function instead of off a hand-written list of "computed" names. The
-  // decision under test is "every field this function answers for itself wins
-  // over an install fact of the same name"; a list covering only the fields that
-  // exist today would stay green if someone added another and forgot to extend
-  // it. Deriving the keys here makes a new field part of the test the day it is
-  // added, and the check below ties the shared `APP_INFO_COMPUTED_KEYS` (also
-  // imported by `install-info-smoke.mjs`) to that same set, so the other side
-  // cannot keep asserting against a shorter list.
+  // The authoritative list is `APP_INFO_COMPUTED_KEYS` in
+  // `tools/install-fixture.mjs`, and the assertion here is deliberately
+  // one-way: every key this function returns must be named by that list. The
+  // other direction — a listed key the function does not return — is not an
+  // error, because the list is a contract written independently of the
+  // implementation. That independence is the whole point: if both sides were
+  // derived from each other, a field added to the return object and to the list
+  // would stay green while the collision proof silently stopped covering it.
+  //
+  // The reference answer uses `installInfo: {}` (an explicit empty object), not
+  // `undefined`: this block is about "which keys does the function compute", and
+  // `{}` keeps the "install facts are present but empty" shape, so the spread is
+  // still exercised. `undefined` would make "present but empty" and "absent" look
+  // the same in the key set and blur which half supplied a key.
+  const computedKeys = [...APP_INFO_COMPUTED_KEYS].sort();
   const reference = formatAppInfo({
     ...base,
+    installInfo: {},
     binary: { path: "/opt/app/ocr", source: "local" },
     versionStdout: "open-code-review 1.13.3\n",
   });
-  const ownKeys = Object.keys(
-    formatAppInfo({
-      ...base,
-      // No install facts: what remains is the answer this function computes.
-      installInfo: {},
-      binary: { path: "/opt/app/ocr", source: "local" },
-      versionStdout: "open-code-review 1.13.3\n",
+  const ownKeys = Object.keys(reference).sort();
+  check(
+    "every key formatAppInfo returns is named by the authoritative computed-key list",
+    ownKeys.every((key) => computedKeys.includes(key)),
+    JSON.stringify({
+      got: ownKeys,
+      missingFromList: ownKeys.filter((key) => !computedKeys.includes(key)),
     })
-  ).sort();
-  check(
-    "the shared computed-key list is exactly formatAppInfo's own return keys",
-    JSON.stringify(ownKeys) === JSON.stringify([...APP_INFO_COMPUTED_KEYS].sort()),
-    JSON.stringify({ got: [...APP_INFO_COMPUTED_KEYS].sort(), want: ownKeys })
   );
   check(
-    "...and that set still contains the four fields an install fact could plausibly shadow",
+    "...and that list still contains the four fields an install fact could plausibly shadow",
     ["configPath", "docsUrl", "appVersion", "platform"].every((key) =>
-      ownKeys.includes(key)
+      computedKeys.includes(key)
     ),
-    JSON.stringify(ownKeys)
+    JSON.stringify(computedKeys)
   );
-  // Every own key, each with a different value. `evil-<key>` cannot equal any
-  // computed answer, so a failure prints which side won instead of two strings
-  // that happen to match.
+  // The collision surface comes from the list, not from the return value. Every
+  // listed key gets a different `evil-<key>` value, so a failure prints which
+  // side won instead of two strings that happen to match.
   const colliding = {
     ...base.installInfo,
-    ...Object.fromEntries(ownKeys.map((key) => [key, `evil-${key}`])),
+    ...Object.fromEntries(computedKeys.map((key) => [key, `evil-${key}`])),
   };
   check(
-    "the collision fixture names every returned key, each with a different value",
-    ownKeys.every(
+    "the collision fixture names every computed key, each with a different value",
+    computedKeys.every(
       (key) => key in colliding && colliding[key] !== reference[key]
     ),
-    JSON.stringify({ keys: ownKeys, colliding })
+    JSON.stringify({ keys: computedKeys, colliding })
   );
   const shadowed = formatAppInfo({
     ...base,
@@ -327,19 +329,17 @@ const base = {
       ),
     })
   );
+  // A collision is a name overlap, not an extra field: the payload is exactly
+  // the computed keys plus the install facts that did not overlap. Built from the
+  // inputs rather than from the "no install facts" answer, so a listed key the
+  // function does not return (a stale entry) is expected to travel as an ordinary
+  // install fact instead of turning this check red for an unrelated reason.
+  const expectedPayloadKeys = [...new Set([...ownKeys, ...Object.keys(colliding)])].sort();
   check(
-    "...and a collision adds no key: the payload is the same set as without it",
+    "...and a collision adds no key: the payload is the computed keys plus the install facts",
     JSON.stringify(Object.keys(shadowed).sort()) ===
-      JSON.stringify(
-        Object.keys(
-          formatAppInfo({
-            ...base,
-            binary: { path: "/opt/app/ocr", source: "local" },
-            versionStdout: "open-code-review 1.13.3\n",
-          })
-        ).sort()
-      ),
-    JSON.stringify(Object.keys(shadowed).sort())
+      JSON.stringify(expectedPayloadKeys),
+    JSON.stringify({ got: Object.keys(shadowed).sort(), want: expectedPayloadKeys })
   );
   check(
     "...and the install facts that do not collide still travel",
@@ -908,6 +908,20 @@ const base = {
         "an object whose `message` only exists on its prototype",
         Object.create({ message: "inherited" }),
         "inherited",
+      ],
+      // The middle edge of the same chain: `"message" in error` is true, but
+      // reading the property throws. `describeProbeError` runs inside a `.catch`,
+      // so an unguarded read would reject `app:info` and blank the settings page.
+      // The fixed sentence is the answer — the same one as "no usable message" —
+      // and the suite must not die with the getter's error instead of naming it.
+      [
+        "an object whose `message` getter throws",
+        Object.defineProperty({}, "message", {
+          get() {
+            throw new Error("boom");
+          },
+        }),
+        "exec rejected without a message",
       ],
     ]) {
       const answer = await readVersionOutput({

@@ -920,11 +920,11 @@ for (const platform of ["darwin", "linux"]) {
     })
   );
   // Without a complete list, "no collision" passes over nothing. The names are
-  // written out here as the contract; `app-info-smoke.mjs` separately derives
-  // the same set from `formatAppInfo({ installInfo: {} })` and requires
-  // `APP_INFO_COMPUTED_KEYS` to equal it — so a field dropped from the list is
-  // red on one side or the other, and the collision proof there runs over the
-  // derived set rather than over this list.
+  // written out here as the contract; `app-info-smoke.mjs` treats
+  // `APP_INFO_COMPUTED_KEYS` as the authority and asserts that every key
+  // `formatAppInfo()` returns is named by it (one-way, so the list is not
+  // derived from the implementation), then runs the collision proof over this
+  // list. A field dropped from the list is red on one side or the other.
   const computed = [
     "appVersion",
     "binary",

@@ -180,9 +180,12 @@ const describeProbeError = (error) => {
   // `.catch`, so a throw here rejects `app:info` and blanks the very page this
   // file exists to keep readable. Hence the guard: a value that cannot be turned
   // into a sentence is answered with the fixed sentence, same as one that said
-  // nothing usable. Both edges are asserted in `tools/app-info-smoke.mjs`,
-  // because a `catch` that answers "" is indistinguishable from one that answers
-  // a sentence unless someone asks.
+  // nothing usable. The middle edge is a `message` getter that throws: the `in`
+  // test succeeds, reading the property throws, and the same `try` turns that
+  // into the fixed sentence instead of a rejected settings page. All three edges
+  // are asserted in `tools/app-info-smoke.mjs`, because a `catch` that answers
+  // "" is indistinguishable from one that answers a sentence unless someone
+  // asks.
   const text = (() => {
     try {
       return error && typeof error === "object" && "message" in error

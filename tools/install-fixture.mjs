@@ -51,13 +51,16 @@ export const INSTALL_INFO_KEYS = Object.freeze([
  * *offers* a colliding name, and `app-info-smoke.mjs` assert the collision still
  * resolves the other way even if one appears.
  *
- * The list is hand-written because it is a contract, not a reflection of
- * whatever the module happens to return — but it is no longer the *only* copy:
- * `app-info-smoke.mjs` derives the same set from `formatAppInfo({ installInfo: {} })`
- * and requires this list to equal it, then runs the collision proof over the
- * derived set. A field added to the return object therefore has to be named here
- * (or the equality check goes red), and is covered by the collision proof even
- * before that edit.
+ * The list is the authority, not a reflection of whatever the module happens to
+ * return. `app-info-smoke.mjs` asserts one direction only — every key
+ * `formatAppInfo()` returns is named here — and runs the collision proof over
+ * *this* list, not over the return value. A field added to the return object
+ * without being named here is therefore red, while a name listed here that the
+ * function does not return is harmless (the fixture then contributes an ordinary
+ * install fact). Deriving the collision surface from the return value instead
+ * would make the two sides provable from each other: add a field and the list
+ * together and every check stays green while the new field's collision is never
+ * tried.
  */
 export const APP_INFO_COMPUTED_KEYS = Object.freeze([
   "appVersion",

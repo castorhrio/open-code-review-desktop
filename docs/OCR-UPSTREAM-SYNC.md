@@ -35,7 +35,7 @@ tag v1.13.3
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 87 轮：`git ls-remote` 退出码 0，`refs/heads/main` 与 pin 一致；`refs/tags/v1.13.3` 仍为最高 tag；npm 为 `1.13.3`；tag 对象未独立重读；通路：git）**
+**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 88 轮：`git ls-remote` 超时、退出码 124，改由 GitHub API 核对 `refs/heads/main` 与 pin 一致；npm 仍为 `1.13.3`；tag 对象未独立重读；通路：api）**
 
 ### 核对通路账
 
@@ -95,6 +95,7 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 | 85 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；`app:info` 的 body 抽成 `handleAppInfo` / `assembleAppInfo`，用 getter 探针直测 spread | — |
 | 86 | 2026-10-27 | api | `375f64c` / `v1.13.3`，无新内容；git 超时（124）、API 作答；npm `1.13.3`；编辑规则拆成「给人读的约定」与「给 audit 看的约束」并逐条反向断言 | — |
 | 87 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；`formatAppInfo` 撞名面扩到全部返回键、归档禁止整串引用 pin | — |
+| 88 | 2026-10-27 | api | `375f64c` / `v1.13.3`，无新内容；git 超时（124）、API 作答；npm `1.13.3`；`describeProbeError` 抛错 getter、`APP_INFO_COMPUTED_KEYS` 单向权威、兜底带出 `rawStderr` | — |
 
 ### 对照表（上游前进时要重读的五处）
 
@@ -102,9 +103,9 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
 对应行并把轮次与日期改成本轮。
 
-**第 46–87 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
+**第 46–88 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
 npm 通路可达，第 56 轮 git 超时但 API 可达，第 63–64 轮本文件无通路记录，第 68 轮 git
-超时但 API 可达，第 69–76、79–80、84–85、87 轮 git 可达，第 77 轮本文件无通路记录，第 78、81–83、86 轮
+超时但 API 可达，第 69–76、79–80、84–85、87 轮 git 可达，第 77 轮本文件无通路记录，第 78、81–83、86、88 轮
 git 超时但 API 可达），所以下表 5 行的
 「最近一次对照」停在第 45 轮是
 **没有理由重看**，不是忘了看：
@@ -173,39 +174,46 @@ git 超时但 API 可达），所以下表 5 行的
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。搬完这里只留一句
    指针——「本文件只留当前一轮」不是约定而是断言（`previousRoundPointerViolations`）。
 
-## 当前状态（第 87 轮，2026-10-27）
+## 当前状态（第 88 轮，2026-10-27）
 
-第 87 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 可达。**
-`git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main` 本轮退出码 0，
-`375f64c` 与 pin 一致（与第 49–86 轮同一个 commit）；`git ls-remote --tags --refs` 仍以
-`refs/tags/v1.13.3` 为最高版本，`npm view @alibaba-group/open-code-review version` 仍是
-`1.13.3`（tag 对象本轮没有独立重读——branch 未变即「无新 commit」，registry 的 `latest`
-未变即「无新发布」）。desktop 的 `^1.13.3` 无需改动，**无移植项**。
+第 88 轮复核：**HEAD 未变，结论仍是「无新内容」；API 与 npm 可达，git 通路本轮超时。**
+`git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main` 本轮超时
+（`timeout` 返回 124，与第 83、86 轮同因），改由 `npm run upstream:check` 走
+`api.github.com/repos/alibaba/open-code-review/commits/main` 作答：`sha` 仍是 `375f64c`
+（与第 49–87 轮同一个 commit，通路 `api`）；`npm view @alibaba-group/open-code-review version`
+仍是 `1.13.3`。tag 一处本轮没有独立核对——`refs/heads/main` 未变即「无新 commit」，
+registry 的 `latest` 未变即「无新发布」。desktop 的 `^1.13.3` 无需改动，**无移植项**。
 
-本轮按控制仓简报收口两条「会红」的边界，都不改运行期行为：
+本轮按控制仓简报收口三条「外部世界变了不会红」的缺口，都不改运行期行为与 UI：
 
-- **P0-1：`formatAppInfo` 的撞名面从「七个计算字段」扩到「全部返回键」。**
-  `tools/app-info-smoke.mjs` 不再从手写清单取键，而是从
-  `formatAppInfo({ installInfo: {} })` 的返回对象直接读；每个键各给一个 `evil-<key>` 值
-  塞进 `installInfo`，断言全部保住计算值。共享的 `APP_INFO_COMPUTED_KEYS` 仍保留
-  （`install-info-smoke.mjs` 用它证明模块不提供撞名），但新增一格要求它恰好等于这组返回
-  键——清单落后于返回值时先红。验过会红：把 `...installInfo` 挪到计算字段之后，七个键
-  逐一变成 `evil-*`，失败信息列全。
-- **P0-2：`docs/upstream-history.md` 不许整串引用 pin。**
-  新增 `historyPinLeakViolations`：按 `PINNED_UPSTREAM.sha` 的整串逐行查，命中即点名行号；
-  7 位前缀、别的 commit / tag 对象的整串仍然允许。pin 常量不是整串时直接报错，避免
-  `includes()` 永远不中而让规则空过。归档里原有的 25 处整串 pin 一并改成 7 位前缀（与文件
-  开头早已写下的「历史段里的 SHA 是 7 位前缀或 tag 对象」一致）；这是本轮唯一的归档正文
-  改动，取舍记在 `docs/hardening-log.md`。反向控制：在归档第一行插入整串 pin，断言点名
-  第 1 行且只改了一行。
+- **P0-1：`describeProbeError` 补上「`message` 是抛错 getter」这一格。**
+  `"message" in error` 走原型链，读取一个会抛的 getter 会让 `describeProbeError` 自己抛；
+  它运行在 `.catch` 里，抛出去就是设置页空白。该形状本来就由 try/catch 接住，但此前没有
+  断言：现在 `tools/app-info-smoke.mjs` 用
+  `Object.defineProperty({}, "message", { get() { throw … } })` 作拒绝值，要求
+  `probeError` 落回固定句 `exec rejected without a message`、`app:info` 不拒绝。反向控制：
+  去掉 try/catch，断言当场红并停在 `describeProbeError`。
+- **P0-2：`APP_INFO_COMPUTED_KEYS` 成为唯一权威，返回值只做单向断言。**
+  第 87 轮从返回键推导撞名面，与清单做等值断言；两侧同时改就仍能同绿。现在
+  `tools/app-info-smoke.mjs` 要求 `formatAppInfo` 的返回键 **⊆** `APP_INFO_COMPUTED_KEYS`
+  （多出来即红），撞名面从常量推导而不是从返回值推导；清单里多出一个函数未返回的名字
+  不报错（它只是作为普通安装字段随 `...installInfo` 走）。反向控制：给 `formatAppInfo`
+  加一个返回字段但不改常量，断言点名该字段并变红。
+- **P0-3：`readFileAtRef` 落到兜底分支时带出 git 原始 stderr。**
+  `REF_READ_WORDINGS` 的 sample 是手写的；git 改措辞或换 locale 时表全部 miss、答案仍是
+  `failed`，而 `audit:git` 原本照旧全绿。现在兜底分支把未 trim 的 stderr 放进返回对象的
+  `rawStderr`（只在该分支；不拼进用户可见的 `error`），并由 `tools/git-service-smoke.mjs`
+  用表外措辞 `fatal: something new` 断言 `reason === "failed"` 且 `rawStderr` 非空；同一
+  组断言还要求已识别措辞不带 `rawStderr`，否则该字段就不再标记「这是兜底」。反向控制：
+  去掉 `rawStderr`，断言当场红。
 
-改动只在 `app-info.js`（注释）、`tools/app-info-smoke.mjs`、`tools/install-info-smoke.mjs`、
-`tools/install-fixture.mjs`（注释）、`tools/upstream-watch.mjs`、`tools/upstream-watch-smoke.mjs`、
-`docs/hardening-log.md`、`docs/upstream-history.md` 与本文件；不碰 `main.js`、`src/**`、
-CLI 参数、配置读写或 `git show` 分类。`audit:appinfo` / `audit:upstream` / `audit:static`
-本轮全绿。
+改动只在 `app-info.js`（注释）、`tools/app-info-smoke.mjs`、`tools/install-fixture.mjs`
+（注释）、`tools/install-info-smoke.mjs`（注释）、`git-service.js`、
+`tools/git-service-smoke.mjs`、`docs/hardening-log.md`、`docs/upstream-history.md`
+与本文件；不碰 `main.js`、`src/**`、CLI 参数、配置读写或 IPC 注册体。
+`audit:appinfo` / `audit:git` / `audit:upstream` 本轮全绿（`audit:static` 随后整体复跑）。
 
-上一轮（第 86 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-86-轮2026-10-27)，归档之后本文件不留第二份。
+上一轮（第 87 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-87-轮2026-10-27)，归档之后本文件不留第二份。
 
 ## 上游真变了怎么办（命令驱动，而不是「记得看一眼」）
 ```bash
@@ -266,9 +274,14 @@ stderr（`missing` / `bad-ref` 各一句）过同一个分类器，要求每句�
 了**——git 换了这两句措辞，`audit:git` 会红（这不是「本仓修不了」的红：改的是本仓的
 pattern）。仍然没人钉的是**别的失败**：子模块、git 为其它情形保留的拼写、以及 git 从不
 在这三处发出的措辞，都只能靠人读。代价的补偿照旧是通用分支必须可诊断——它带上 git 自己
-的首行 stderr 与退出码，退出码是这条路上唯一不随语言变的部分。评审时若想动这两组正则，
+的首行 stderr 与退出码，退出码是这条路上唯一不随语言变的部分。第 88 轮起，兜底分支还把
+**未 trim 的原始 stderr** 放在返回对象的 `rawStderr` 上（只在该分支，不拼进用户可见的
+`error`），`tools/git-service-smoke.mjs` 用一条表外措辞（`fatal: something new`）断言它
+非空、用一条已识别措辞断言它不出现——所以「分类悄悄退化」至少会留下证据。这条通道让
+退化**可被看见**，但没有把表 miss 变红：表外的措辞仍然按 `failed` 回答，只是 `rawStderr`
+不再是空的。评审时若想动这两组正则，
 请同时想清楚这两层各自覆盖什么，以及本节记录的那半个缺口。对应代码见 `git-service.js` 顶部 `gitEnv()`
-注释（那里写了为什么固定 C locale、以及为什么代价的补偿是通用分支必须带退出码）。
+注释（那里写了为什么固定 C locale、以及为什么代价的补偿是通用分支必须带退出码与 `rawStderr`）。
 
 **但 audit 变红不等于覆盖完整**：下面这几处只有人工对照，改坏了不会让任何 audit 变红。
 
