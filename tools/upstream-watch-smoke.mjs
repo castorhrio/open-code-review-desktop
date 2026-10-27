@@ -1047,6 +1047,62 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
     droppedLedger.length === 1 && droppedLedger[0].includes(DEBT_MARKER),
     JSON.stringify(droppedLedger)
   );
+  // The window as a table, built from literals instead of the live ledger and
+  // the live HEAD: the rule above is exercised once, against whatever this
+  // round happens to be, so "N-1 is red" and "N+1 is green" were never both
+  // asked at once. Each row changes one input; the subject is a real commit
+  // sentence, because that is the string `git log -1 --format=%s` hands over.
+  const ledgerEnding = (last, head) =>
+    ledgerRoundViolations([last - 1, last], `fix: 某处改动（第 ${head} 轮上游核对：无新内容）`);
+  const bindingCases = [
+    ["the commit's own round", 82, true],
+    ["one round ahead while the doc is written", 83, true],
+    ["one row short", 81, false],
+    ["two rows short", 80, false],
+  ];
+  const bindingAnswers = bindingCases.map(([label, last, green]) => {
+    const violations = ledgerEnding(last, 82);
+    return {
+      label,
+      last,
+      green,
+      violations,
+      namesBoth:
+        violations.length === 1 &&
+        violations[0].includes("第 82 轮") &&
+        violations[0].includes(`停在 ${last} 轮`),
+    };
+  });
+  check(
+    "the ledger window, asked with constructed subjects: N and N+1 are green, N-1 and N-2 are red",
+    bindingAnswers.every((entry) => (entry.violations.length === 0) === entry.green),
+    JSON.stringify(
+      bindingAnswers
+        .filter((entry) => (entry.violations.length === 0) !== entry.green)
+        .map(({ label, last, green, violations }) => ({ label, last, green, violations }))
+    )
+  );
+  check(
+    "...and both shortfall sentences name the commit's round and the ledger's",
+    bindingAnswers
+      .filter((entry) => !entry.green)
+      .every((entry) => entry.namesBoth),
+    JSON.stringify(
+      bindingAnswers
+        .filter((entry) => !entry.green && !entry.namesBoth)
+        .map(({ label, last, violations }) => ({ label, last, violations }))
+    )
+  );
+  // "Only change one line" as a copy of the rule: the same ledger (ending on
+  // round 82) and the same subject with its digit moved by one. Nothing else in
+  // the input moves, so a rule that accepted any nearby number would stay
+  // green here and this check would be the one that says so.
+  check(
+    "...and moving only the subject's round by one, with the ledger untouched, turns it red",
+    ledgerRoundViolations([80, 82], "第 82 轮").length === 0 &&
+      ledgerRoundViolations([80, 82], "第 83 轮").length === 1,
+    JSON.stringify(ledgerRoundViolations([80, 82], "第 83 轮"))
+  );
   // The other direction of the window, and the two shapes that are not rounds at
   // all. Without these the accepted window could widen to "any number below the
   // ledger" and the mutation above would still pass.

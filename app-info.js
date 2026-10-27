@@ -32,6 +32,28 @@ const readVersion = (binaryPath, stdout, stderr) => {
   return line.replace(/^open-code-review\s*/, "");
 };
 
+/* ---- one decision, three places: `timedOut` / `probeError` stay internal ----
+ *
+ * `readVersionOutput` answers with two diagnostics the settings page does not
+ * render: `timedOut` ("we stopped waiting") and `probeError` ("the exec threw").
+ * `main.js` spreads the whole answer into `formatAppInfo`, so the drop happens
+ * here, and it is recorded in three places that must move together:
+ *
+ *   1. this file — both are named parameters and `void`-ed above the return
+ *      object. An unnamed extra key and a discarded one would look identical.
+ *   2. `tools/app-info-smoke.mjs` — the payload's pinned key set excludes both
+ *      names even when the probe carries them, and that suite cross-checks the
+ *      computed-key list against `src/lib/types.ts`.
+ *   3. `src/lib/types.ts` — `AppInfo` declares neither field, so the renderer
+ *      cannot read a value the payload never ships.
+ *
+ * Shipping them later means touching all of them: add the fields to `AppInfo`
+ * and to the return object, add their names to `APP_INFO_COMPUTED_KEYS`, and
+ * extend the smoke test's pinned key set. Changing one alone leaves the other
+ * two asserting the opposite, which is why the places are listed rather than
+ * left to be rediscovered.
+ */
+
 function formatAppInfo({
   binary,
   versionStdout = "",

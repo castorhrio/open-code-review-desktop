@@ -381,6 +381,52 @@ const base = {
   );
 }
 
+/* ---- the renderer's type is the payload's other half ----
+ * `AppInfo` in `src/lib/types.ts` is what the settings page reads by name, and
+ * it is the third place the "probe diagnostics stay internal" decision is
+ * recorded. The two lists in this repository — `APP_INFO_COMPUTED_KEYS` (what
+ * `formatAppInfo` computes) and `INSTALL_INFO_KEYS` (what it spreads) — must
+ * together be exactly the interface's fields. A subset check on the computed
+ * list alone would be wrong here: the payload also ships the six install facts,
+ * so the contract is the union, not a subset of either half.
+ *
+ * The literal is read from the source instead of importing TypeScript: this
+ * suite runs under plain Node, and a compiler would make "the fields the page
+ * may read" depend on the same build step the test is meant to check. Stripping
+ * the doc comments first is deliberate — several of them mention field names
+ * in prose, and a parser that counted those would agree with a rename.
+ */
+{
+  const typesSource = fs.readFileSync(path.join(ROOT, "src", "lib", "types.ts"), "utf8");
+  const start = typesSource.indexOf("export interface AppInfo {");
+  const end = start === -1 ? -1 : typesSource.indexOf("\n}", start);
+  const appInfoBody = start === -1 || end === -1 ? "" : typesSource.slice(start, end + 2);
+  const declared = appInfoBody
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n")
+    .map((line) => /^\s*([A-Za-z_$][\w$]*)\??\s*:/.exec(line))
+    .filter(Boolean)
+    .map((hit) => hit[1])
+    .sort();
+  const declaredPayloadKeys = [...APP_INFO_COMPUTED_KEYS, ...INSTALL_INFO_KEYS].sort();
+  check(
+    "src/lib/types.ts's AppInfo declares exactly the computed keys plus the install facts",
+    appInfoBody !== "" &&
+      declared.length === new Set(declared).size &&
+      JSON.stringify(declared) === JSON.stringify(declaredPayloadKeys),
+    JSON.stringify({
+      found: appInfoBody !== "",
+      got: declared,
+      want: declaredPayloadKeys,
+    })
+  );
+  check(
+    "...and neither dropped probe diagnostic is a declared field, so the type records the drop too",
+    !declared.includes("timedOut") && !declared.includes("probeError"),
+    JSON.stringify(declared.filter((key) => key === "timedOut" || key === "probeError"))
+  );
+}
+
 /* ---- the shared stub fixture answers the six facts it promises ----
  * The install facts below come from `tools/install-fixture.mjs`, which is also
  * where `tools/install-info-smoke.mjs` gets its `app` / `shell` stubs. Sharing
