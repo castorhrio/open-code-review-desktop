@@ -51,8 +51,9 @@ const readVersion = (binaryPath, stdout, stderr) => {
  * entirely: `probeError` is the one that says the service *broke*, and with no
  * other exit it vanished the moment the answer was assembled. `handleAppInfo`
  * therefore hands it to an injected `onProbeError` sink (a no-op by default),
- * and `main.js` passes a `console.warn` — so the fact is still recorded, just
- * not in anything the renderer can read. `timedOut` keeps no sink: the wait is
+ * and `main.js` sends it to the same `run:log` channel the uninstall warnings
+ * use — so the fact lands where a packaged app can read it, not on a stderr
+ * nobody has a terminal for. `timedOut` keeps no sink: the wait is
  * bounded by this module's own budget, so "we stopped waiting" is a performance
  * fact whose user-visible consequence (an empty version) the payload already
  * carries, while an exception is a failure nothing else would report.

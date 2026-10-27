@@ -1457,10 +1457,26 @@ const base = {
   );
   // ...and the sink itself has to be wired, or the exit the handler now offers
   // is a door nobody opened: the diagnostic would still vanish for real users.
+  // The sink is `run:log` — the same one the uninstall warnings use — and not
+  // `console.warn`: a packaged app has no terminal, so a warning there is the
+  // same disappearance this exit exists to prevent. The shape (`{ line }`) is
+  // part of the assertion because a payload the renderer cannot read is the
+  // same as no line at all.
+  const handsProbeErrorToRunLog = (source) =>
+    /onProbeError\s*:/.test(source) &&
+    /send\(\s*["']run:log["']\s*,\s*\{\s*line\s*:/.test(source) &&
+    !/console\.warn\(/.test(source);
   check(
-    "...and hands the probe's exception to a log sink, so the fact is recorded somewhere",
-    /onProbeError\s*:/.test(body) && /console\.warn\(/.test(body),
+    "...and hands the probe's exception to run:log, not to a terminal a packaged app does not have",
+    handsProbeErrorToRunLog(body),
     registered.length === 1 ? registered[0].file : "no single registration"
+  );
+  check(
+    "...and that question goes red for console.warn and for a payload without `line`",
+    handsProbeErrorToRunLog(`onProbeError: (m) => console.warn(m),`) === false &&
+      handsProbeErrorToRunLog(`onProbeError: (m) => send("run:log", { id: m }),`) === false &&
+      handsProbeErrorToRunLog(`onProbeError: (m) => send("run:log", { line: m }),`) === true,
+    "constructed registrations"
   );
 
   // The defaults have to be usable, and the grace has to be *after* the budget:

@@ -172,9 +172,11 @@ ipcMain.handle("app:info", () =>
     // The probe's exception is dropped from the payload — the page has one
     // sentence for "no version" — but it used to be dropped from everywhere.
     // `handleAppInfo` calls this only when `exec` threw, so a missing version
-    // caused by a broken service still leaves a line behind.
+    // caused by a broken service still leaves a line behind. It goes to the
+    // same `run:log` sink as the uninstall warnings below: an installed app has
+    // no terminal, so stderr is not a place the user can read.
     onProbeError: (message) =>
-      console.warn("[app:info] version probe failed:", message),
+      send("run:log", { line: `[app:info] 版本探测失败：${message}` }),
   })
 );
 

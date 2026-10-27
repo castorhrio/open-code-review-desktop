@@ -1119,6 +1119,61 @@ check("...and is gone from the working tree", deletedWorktree.ok === false, dele
 
 fs.rmSync(dir, { recursive: true, force: true });
 
+/* ---- the comments point at a section that still exists ----
+ * `git-service.js` tells the reader where the trade-off of the stderr tables is
+ * written down: 「能自动变红的地方，和不能的地方」 in the sync doc. That is a
+ * contract between a comment and a document, and until now nothing checked it —
+ * renaming the section left the comment pointing at nothing, and "read the doc
+ * before touching the patterns" became an instruction that lands at the top of
+ * the file. So the citation is parsed out of the source and matched against the
+ * document's headings as one normalized string (the source wraps the sentence
+ * across lines and comment markers, so the question is about the words, not the
+ * layout). The self-test renames the heading and requires the check to name the
+ * missing title, so the assertion cannot go vacuous when the citation is moved.
+ */
+{
+  const normalize = (text) =>
+    String(text)
+      .replace(/\/\*|\*\//g, " ")
+      .replace(/^\s*\*/gm, "")
+      .replace(/\/\//g, " ")
+      .replace(/\s+/g, "");
+  const citationsIn = (source) =>
+    [...normalize(source).matchAll(/docs\/OCR-UPSTREAM-SYNC\.md[^『\n]{0,12}『([^』]+)』/g)].map(
+      (hit) => hit[1]
+    );
+  const headingsIn = (doc) =>
+    new Set(
+      [...String(doc).matchAll(/^#{2,6}\s+(.+)$/gm)].map((hit) => normalize(hit[1]))
+    );
+  const unresolvedIn = (source, doc) => {
+    const headings = headingsIn(doc);
+    return citationsIn(source).filter((title) => !headings.has(normalize(title)));
+  };
+
+  const source = fs.readFileSync(path.join(ROOT, "git-service.js"), "utf8");
+  const doc = fs.readFileSync(path.join(ROOT, "docs", "OCR-UPSTREAM-SYNC.md"), "utf8");
+  const citations = citationsIn(source);
+  check(
+    "the source cites the sync doc section the comments rely on",
+    citations.length > 0,
+    JSON.stringify(citations)
+  );
+  const unresolved = unresolvedIn(source, doc);
+  check(
+    "...and every cited section title is a heading in that document",
+    unresolved.length === 0,
+    JSON.stringify(unresolved)
+  );
+  const renamed = doc.replace("### 能自动变红的地方，和不能的地方", "### 一个改过名的章节");
+  check(
+    "...and renaming that heading goes red, naming the title the comment still uses",
+    renamed !== doc &&
+      JSON.stringify(unresolvedIn(source, renamed)) === JSON.stringify(citations),
+    JSON.stringify(unresolvedIn(source, renamed))
+  );
+}
+
 console.log(`\n${failures.length === 0 ? "all git-service checks passed" : `${failures.length} failed`}`);
 if (failures.length) {
   console.error(`\ngit-service checks failed: ${failures.join(", ")}`);

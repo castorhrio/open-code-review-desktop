@@ -38,6 +38,47 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 
 ---
 
+## 上游状态（第 91 轮，2026-10-27）
+
+第 91 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 可达。**
+`git ls-remote https://github.com/alibaba/open-code-review.git HEAD` 本轮退出码 0，
+`375f64cd…` 与 pin 一致（与第 49–90 轮同一个 commit），`refs/tags/v1.13.3` 的 tag 对象仍
+指向同一 commit；`npm view @alibaba-group/open-code-review version` 仍是 `1.13.3`（第 90 轮
+git 通路报 GnuTLS 错误，本轮恢复）。desktop 的 `^1.13.3` 无需改动，**无移植项**。
+
+本轮按控制仓简报收口两条「诊断与空值语义只写在注释里」的缺口：
+
+- **P0-2：`probeError` 的丢弃有了出口，而 payload 不变。** `formatAppInfo` 仍然不返回
+  任何诊断字段（第 90 轮的三处清单照旧），但「服务真的抛了」此前除了 `version: ""` 之外
+  没有任何读者。`handleAppInfo` 现在接受一个注入的 `onProbeError`（默认 no-op），只在
+  `exec` 抛错时调用一次、传入 `describeProbeError` 的那句话；`main.js` 传入
+  `console.warn`，所以真实用户那里不再蒸发。回调自身抛错被接住——它只是日志，不能把
+  `app:info` 变成拒绝、把设置页变空白。`timedOut` 仍不设出口：等待由本模块自己的预算
+  封顶，「不等了」的可见后果（空版本）payload 已经带着；异常才是别处无从得知的失败。
+  `tools/app-info-smoke.mjs` 断言四种情形：抛错时调用一次且句子正确、正常应答不调用、
+  服务自报超时/静默不调用、回调抛错时 payload 仍完整；并断言 `main.js` 的接线里有
+  `onProbeError` 与 `console.warn`。反向控制：删掉 `handleAppInfo` 里的调用，第一条即红。
+- **P1-1：空串的语义进断言。** `binarySource` 用 `||` 把 `""` 与「没有 source」折成同
+  一个 `null`——这是决定，但此前只覆盖了「键缺失」一格，改成 `??` 会静默让页面收到空徽章。
+  `installInfo()` 的 `executable` 同理（真实 Electron 永远给路径，只有 stub 能构造空串）。
+  `tools/app-info-smoke.mjs` 与 `tools/install-info-smoke.mjs` 各补一格，后者同时要求其余
+  五个事实不变，避免「修这个字段」顺手抹掉另一个。
+
+P0-1（`AppInfo` ↔ 两条清单的交叉断言）已由第 90 轮落地，本轮不重复。
+P2-4 只补了注释：`handleAppInfo` 在探测之后读安装事实是有意的——回答描述的是交出去的
+那一刻，而探测是唯一可能耗秒的部分。
+
+改动在 `app-info.js`、`main.js`、`tools/app-info-smoke.mjs`、`tools/install-info-smoke.mjs`、
+`docs/upstream-history.md` 与本文件；`binarySource` / `executable` 的运行期行为未变，
+`probeError` 只是从「无处可去」变成「去一条日志」。`audit:appinfo` / `audit:install` /
+`audit:upstream` 本轮全绿（`audit:static` 随后整体复跑）。
+
+上一轮（第 90 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-90-轮2026-10-27)，归档之后本文件不留第二份。
+
+**补记（第 92 轮）**
+第 91 轮把 `probeError` 接到 `main.js` 的 `console.warn`；第 92 轮改为同一个 `run:log`
+sink（`{ line }`），payload 与键集不变，接线断言同步改问通道。本段正文保留当时的记录。
+
 ## 上游状态（第 90 轮，2026-10-27）
 
 第 90 轮复核：**HEAD 未变，结论仍是「无新内容」；git 通路报 TLS 错误（GnuTLS），改由 API 作答。**
