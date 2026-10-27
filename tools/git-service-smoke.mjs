@@ -1142,13 +1142,22 @@ fs.rmSync(dir, { recursive: true, force: true });
     [...normalize(source).matchAll(/docs\/OCR-UPSTREAM-SYNC\.md[^『\n]{0,12}『([^』]+)』/g)].map(
       (hit) => hit[1]
     );
-  const headingsIn = (doc) =>
-    new Set(
-      [...String(doc).matchAll(/^#{2,6}\s+(.+)$/gm)].map((hit) => normalize(hit[1]))
-    );
+  // How many headings carry each title. A citation needs *exactly one*: "the
+  // heading exists" is satisfied by a document that says the same thing twice,
+  // and then the comment points at two places with no way to tell which — the
+  // copy nobody maintains is as likely a landing spot as the one the sentence
+  // meant. Counting, not testing membership, is the difference.
+  const headingCountsIn = (doc) => {
+    const counts = new Map();
+    for (const hit of String(doc).matchAll(/^#{2,6}\s+(.+)$/gm)) {
+      const title = normalize(hit[1]);
+      counts.set(title, (counts.get(title) || 0) + 1);
+    }
+    return counts;
+  };
   const unresolvedIn = (source, doc) => {
-    const headings = headingsIn(doc);
-    return citationsIn(source).filter((title) => !headings.has(normalize(title)));
+    const counts = headingCountsIn(doc);
+    return citationsIn(source).filter((title) => counts.get(normalize(title)) !== 1);
   };
 
   const source = fs.readFileSync(path.join(ROOT, "git-service.js"), "utf8");
@@ -1171,6 +1180,22 @@ fs.rmSync(dir, { recursive: true, force: true });
     renamed !== doc &&
       JSON.stringify(unresolvedIn(source, renamed)) === JSON.stringify(citations),
     JSON.stringify(unresolvedIn(source, renamed))
+  );
+  // The other way "the heading exists" can be true and useless: a second copy of
+  // it. Two sections that say the same thing send the reader to one of them by
+  // luck, and the sentence's promise ("this is where the trade-off is written
+  // down") stops being answerable. So the citation has to land on exactly one.
+  const duplicated = `${doc}\n### 能自动变红的地方，和不能的地方（第二份）\n`;
+  const duplicatedExact = `${doc}\n### 能自动变红的地方，和不能的地方\n`;
+  check(
+    "...and a second copy of the heading goes red too, naming the cited title",
+    JSON.stringify(unresolvedIn(source, duplicatedExact)) === JSON.stringify(citations),
+    JSON.stringify(unresolvedIn(source, duplicatedExact))
+  );
+  check(
+    "...while a *differently named* near-copy does not (the check counts, it does not fuzzy-match)",
+    JSON.stringify(unresolvedIn(source, duplicated)) === JSON.stringify([]),
+    JSON.stringify(unresolvedIn(source, duplicated))
   );
 }
 

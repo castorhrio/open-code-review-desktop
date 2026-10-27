@@ -38,6 +38,37 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 
 ---
 
+## 上游状态（第 92 轮，2026-10-27）
+
+第 92 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 可达。**
+`npm run upstream:check` 本轮走 git 通路、退出码 0，`375f64cd…` 与 pin 一致（与第
+49–91 轮同一个 commit）；`git ls-remote --tags --refs` 仍以 `refs/tags/v1.13.3` 为最高
+版本，`npm view @alibaba-group/open-code-review version` 仍是 `1.13.3`。desktop 的
+`^1.13.3` 无需改动，**无移植项**。
+
+本轮按控制仓简报收口三件事，主题是「同一类事实只留一个出口、一个地址」：
+
+- **P0-3：`probeError` 的出口与卸载告警统一到 `run:log`。** 第 91 轮把 `probeError` 接到
+  `main.js` 的 `console.warn`，可同一文件里的卸载告警刻意不用它：装好的应用没有终端，
+  stderr 不是用户能读的地方。现在 `onProbeError` 发 `run:log`（`{ line }`，无 `id`），与
+  `app:uninstall` 的 `warn` 同一个 sink；payload 与键集不变。`tools/app-info-smoke.mjs`
+  的接线断言改问 `send("run:log", { line: … })`，并补一条构造式自测：`console.warn` 与
+  `{ id }` 都判否、`{ line }` 判是——换通道或换字段都会红。
+- **P0-1：代码→文档的章节引用可自动变红。** `git-service.js` 的两处注释都让人去读
+  `docs/OCR-UPSTREAM-SYNC.md` 的「能自动变红的地方，和不能的地方」。该节一直存在，但没有
+  断言；改名后注释会指向不存在的位置而全绿。`tools/git-service-smoke.mjs` 现在把源码里的
+  `docs/OCR-UPSTREAM-SYNC.md … 『标题』` 解析出来，与文档标题做空白归一比较，并自测
+  「把标题改掉」会点名缺失的那一个。
+- **P0-2：第 91 轮正文核对无截断。** 该段完整结束于改动清单与绿灯记录；本轮把它原样归档
+  到 `upstream-history.md`，本文件只留指针（`previousRoundPointerViolations` 全绿）。
+
+改动在 `main.js`、`app-info.js`（注释）、`tools/app-info-smoke.mjs`、
+`tools/git-service-smoke.mjs`、`docs/upstream-history.md` 与本文件；不碰 `src/**`、CLI 参数、
+配置读写与其它 IPC 注册体。`audit:appinfo` / `audit:git` / `audit:upstream` 本轮全绿，
+`audit:static` 整体复跑亦全绿。
+
+---
+
 ## 上游状态（第 91 轮，2026-10-27）
 
 第 91 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 可达。**

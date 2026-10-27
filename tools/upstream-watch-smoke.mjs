@@ -41,6 +41,9 @@ import {
   classifyGit,
   createRunner,
   describePinDisagreements,
+  dependencyPinViolations,
+  UPSTREAM_PACKAGE,
+  versionInRange,
   docAuthoringRuleViolations,
   findDocPins,
   findPinShapedCitations,
@@ -768,6 +771,52 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
     "the pin block's tag is the tag this module pins",
     docPins.tag !== null && docPins.tag.tag === PINNED_UPSTREAM.tag,
     JSON.stringify(docPins.tag)
+  );
+
+  // The pin has a fourth copy, in a different file and a different shape:
+  // `package.json`'s dependency range. The doc says "the desktop wraps v1.13.3",
+  // the dependency says `^1.13.3`, and `^` means the next install may bring 1.14
+  // while the pin, the five rows and the resolver simulation still describe
+  // 1.13.3. The two have to agree *now* — and the failure has to name both
+  // places, because "the dependency moved" is not the interesting half.
+  const realPkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
+  check(
+    "package.json's dependency on the CLI names the version the pin names",
+    dependencyPinViolations(realPkg).length === 0,
+    dependencyPinViolations(realPkg).join("；") || JSON.stringify(realPkg.dependencies[UPSTREAM_PACKAGE])
+  );
+  const bumped = dependencyPinViolations({
+    dependencies: { ...realPkg.dependencies, [UPSTREAM_PACKAGE]: "^1.14.0" },
+  });
+  check(
+    "...and raising that range without touching the pin goes red, naming both versions",
+    bumped.length === 1 &&
+      bumped[0].includes("1.14.0") &&
+      bumped[0].includes(PINNED_UPSTREAM.tag) &&
+      bumped[0].includes(UPSTREAM_PACKAGE),
+    JSON.stringify(bumped)
+  );
+  const noDependency = dependencyPinViolations({
+    dependencies: { ...realPkg.dependencies, [UPSTREAM_PACKAGE]: undefined },
+  });
+  check(
+    "...and a package.json with no dependency on the CLI at all is red too, not silently green",
+    noDependency.length === 1 && noDependency[0].includes("没有"),
+    JSON.stringify(noDependency)
+  );
+  const unreadableRange = dependencyPinViolations({
+    dependencies: { ...realPkg.dependencies, [UPSTREAM_PACKAGE]: "*" },
+  });
+  check(
+    "...and a range with no version in it is refused rather than read as agreement",
+    unreadableRange.length === 1 && unreadableRange[0].includes("读不出版本号"),
+    JSON.stringify(unreadableRange)
+  );
+  check(
+    "...and the version is read out of every range shape, and out of none of the shapeless ones",
+    JSON.stringify(["^1.13.3", "~1.13.30", ">=1.13.3 <2", "1.13.3", "*", "", "latest"].map(versionInRange)) ===
+      JSON.stringify(["1.13.3", "1.13.30", "1.13.3", "1.13.3", null, null, null]),
+    JSON.stringify(["^1.13.3", "~1.13.30", ">=1.13.3 <2", "1.13.3", "*", "", "latest"].map(versionInRange))
   );
 
   // The comparison has to be red on a one-character edit *and* say where. Same

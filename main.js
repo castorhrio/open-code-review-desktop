@@ -24,11 +24,20 @@ const {
   pickFileOptions,
 } = require("./path-guard");
 const { providersAnswer } = require("./provider-handler");
+const { createWindowSender } = require("./window-sender");
 const { handleAppInfo } = require("./app-info");
 
 const DOCS_URL = "https://open-codereview.ai/docs";
 
 let mainWindow = null;
+
+// Every event the main process emits goes through this door (see
+// `window-sender.js` for why): a line produced before the renderer is loaded is
+// held and flushed, not dropped. `updater.init()` below already runs before the
+// window exists, so the first `update:state` — and any `run:log` line from a run
+// started while the window was being recreated — depends on it.
+const windowSender = createWindowSender({ currentWindow: () => mainWindow });
+const send = (channel, payload) => windowSender.send(channel, payload);
 
 // Where the window's size and position are remembered between launches: one
 // small JSON file in the profile directory, read on launch and written on close.
@@ -47,6 +56,10 @@ function readBounds() {
 }
 
 function createWindow() {
+  // The window about to be built has no page yet: readiness is the renderer's
+  // `did-finish-load` below, so lines sent into the gap queue up instead of
+  // going nowhere.
+  windowSender.markUnready();
   const bounds = readBounds();
   mainWindow = new BrowserWindow({
     ...bounds,
@@ -64,6 +77,18 @@ function createWindow() {
     },
   });
   mainWindow.once("ready-to-show", () => mainWindow.show());
+  // The page has run: hand over whatever was held while it was loading. A
+  // renderer that never loads (or a queue that outgrew its bound) is not silent
+  // — the count comes back here and is said out loud on the one channel a
+  // packaged app can read.
+  mainWindow.webContents.once("did-finish-load", () => {
+    const { lost } = windowSender.markReady();
+    if (lost > 0) {
+      send("run:log", {
+        line: `[ui] 窗口就绪前有 ${lost} 条事件超出缓冲上限（${windowSender.limit} 条），已丢弃最早的那些`,
+      });
+    }
+  });
   const devUrl = process.env.ELECTRON_RENDERER_URL;
   if (devUrl) {
     // `npm run dev` launches Vite and Electron together, so the dev server may
@@ -87,10 +112,6 @@ function createWindow() {
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
-}
-
-function send(channel, payload) {
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
 }
 
 updater.init((state) => send("update:state", state));

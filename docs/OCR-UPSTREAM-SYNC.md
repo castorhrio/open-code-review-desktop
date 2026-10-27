@@ -35,7 +35,7 @@ tag v1.13.3
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 92 轮：`git ls-remote` 退出码 0，`refs/heads/main` 与 pin 一致；`refs/tags/v1.13.3` 仍为最高 tag；npm 仍为 `1.13.3`；tag 对象未独立重读；通路：git）**
+**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 93 轮：`git ls-remote` 与 `--tags --refs` 退出码 0，`refs/heads/main` 与 pin 一致；`refs/tags/v1.13.3` 仍为最高 tag；npm 仍为 `1.13.3`；tag 对象未独立重读；通路：git）**
 
 ### 核对通路账
 
@@ -100,6 +100,7 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 | 90 | 2026-10-27 | api | `375f64c` / `v1.13.3`，无新内容；git TLS 错误（GnuTLS）、API 作答；npm `1.13.3`；账末窗口的构造式自测（N / N+1 绿、N-1 / N-2 红并点名两边轮次）、`timedOut` / `probeError` 丢弃决定的三处清单、`AppInfo` ↔ 计算键 + 安装键交叉断言 | — |
 | 91 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；`probeError` 的丢弃加注入式出口（`onProbeError`，`main.js` 记一条 `console.warn`）、`binarySource` 与 `executable` 的空串语义进断言 | — |
 | 92 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；`probeError` 出口与卸载告警统一到 `run:log`（接线断言改问通道与 `{ line }`，构造式自测钉住 `console.warn` / `{ id }` 判否）、代码→文档的章节引用进断言（改标题即点名缺失） | — |
+| 93 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；窗口未就绪时的事件改成排队 + `did-finish-load` 后 flush（`window-sender.js`，超限丢最旧并回报条数）、依赖版本 ↔ pin tag 进断言、注释引用的章节按「恰好一处」判定 | — |
 
 ### 对照表（上游前进时要重读的五处）
 
@@ -107,9 +108,9 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
 对应行并把轮次与日期改成本轮。
 
-**第 46–92 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
+**第 46–93 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
 npm 通路可达，第 56 轮 git 超时但 API 可达，第 63–64 轮本文件无通路记录，第 68 轮 git
-超时但 API 可达，第 69–76、79–80、84–85、87、89、91–92 轮 git 可达，第 77 轮本文件无通路记录，第 78、81–83、86、88、90 轮
+超时但 API 可达，第 69–76、79–80、84–85、87、89、91–93 轮 git 可达，第 77 轮本文件无通路记录，第 78、81–83、86、88、90 轮
 git 超时（第 90 轮为 TLS 错误）但 API 可达），所以下表 5 行的
 「最近一次对照」停在第 45 轮是
 **没有理由重看**，不是忘了看：
@@ -178,36 +179,42 @@ git 超时（第 90 轮为 TLS 错误）但 API 可达），所以下表 5 行�
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。搬完这里只留一句
    指针——「本文件只留当前一轮」不是约定而是断言（`previousRoundPointerViolations`）。
 
-## 当前状态（第 92 轮，2026-10-27）
+## 当前状态（第 93 轮，2026-10-27）
 
-第 92 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 可达。**
-`npm run upstream:check` 本轮走 git 通路、退出码 0，`375f64cd…` 与 pin 一致（与第
-49–91 轮同一个 commit）；`git ls-remote --tags --refs` 仍以 `refs/tags/v1.13.3` 为最高
-版本，`npm view @alibaba-group/open-code-review version` 仍是 `1.13.3`。desktop 的
-`^1.13.3` 无需改动，**无移植项**。
+第 93 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 均可核对。**
+`375f64cd…` 与 pin 一致（与第 49–92 轮同一个 commit），`git ls-remote --tags --refs` 仍以
+`refs/tags/v1.13.3` 为最高版本，`npm view @alibaba-group/open-code-review version` 仍是
+`1.13.3`。desktop 的 `^1.13.3` 与 pin 一致，本轮把这一点变成了断言（见下 P1）；
+**无移植项**。
 
-本轮按控制仓简报收口三件事，主题是「同一类事实只留一个出口、一个地址」：
+本轮三件事，主题是「同一个承诺写在两处时，让两处互相看着」：
 
-- **P0-3：`probeError` 的出口与卸载告警统一到 `run:log`。** 第 91 轮把 `probeError` 接到
-  `main.js` 的 `console.warn`，可同一文件里的卸载告警刻意不用它：装好的应用没有终端，
-  stderr 不是用户能读的地方。现在 `onProbeError` 发 `run:log`（`{ line }`，无 `id`），与
-  `app:uninstall` 的 `warn` 同一个 sink；payload 与键集不变。`tools/app-info-smoke.mjs`
-  的接线断言改问 `send("run:log", { line: … })`，并补一条构造式自测：`console.warn` 与
-  `{ id }` 都判否、`{ line }` 判是——换通道或换字段都会红。
-- **P0-1：代码→文档的章节引用可自动变红。** `git-service.js` 的两处注释都让人去读
-  `docs/OCR-UPSTREAM-SYNC.md` 的「能自动变红的地方，和不能的地方」。该节一直存在，但没有
-  断言；改名后注释会指向不存在的位置而全绿。`tools/git-service-smoke.mjs` 现在把源码里的
-  `docs/OCR-UPSTREAM-SYNC.md … 『标题』` 解析出来，与文档标题做空白归一比较，并自测
-  「把标题改掉」会点名缺失的那一个。
-- **P0-2：第 91 轮正文核对无截断。** 该段完整结束于改动清单与绿灯记录；本轮把它原样归档
-  到 `upstream-history.md`，本文件只留指针（`previousRoundPointerViolations` 全绿）。
+- **P0-2（真缺陷）：窗口未就绪时发出的行不再静默丢弃。** `main.js` 的 `send()` 原本是
+  `if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(…)`：看着像
+  安全网，其实是静默丢弃。`updater.init()` 在 `createWindow()` 之前就跑，启动时算出的
+  `update:state` 谁也收不到；窗口正在重建、或页面还没加载完时产生的 `run:log` 同样消失
+  ——而这正是「异常要有出口」那条约束下最不能丢的一类行（装好的应用没有终端）。现在
+  这些行**排队**，在渲染进程的 `did-finish-load` 时按原序 flush；队列有上限（
+  `DEFAULT_PENDING_LIMIT = 200`），超限丢最旧的并**把丢掉的条数从 `markReady()` 还回来**，
+  由 `main.js` 在 `run:log` 上说出「窗口就绪前有 N 条事件超出缓冲上限」。实现收进
+  `window-sender.js`（`createWindowSender({ currentWindow })`），`main.js` 只留接线：
+  `createWindow()` 里 `markUnready()`、`did-finish-load` 上 `markReady()`。
+- **P1-4：`package.json` 的依赖版本 ↔ `PINNED_UPSTREAM.tag`。** 文档写「封装上游
+  v1.13.3」、依赖写 `^1.13.3`，是同一个承诺的第四份拷贝；`^` 允许下一次 `npm install`
+  就换成 1.14，而 pin、对照表 5 行与 `UPSTREAM_RESOLVER` 模拟仍描述 1.13.3。新增
+  `dependencyPinViolations()` / `versionInRange()`，`audit:upstream` 要求两者一致，并把
+  「依赖抬到 `^1.14.0`」「压根没写依赖」「区间读不出版本（`*`）」三种情形逐条演成红。
+- **P2-5：注释引用的章节必须**恰好一处**。** 第 92 轮只断言「那个标题存在」；同一标题在
+  文档里出现两次时，注释指向哪一处只能靠猜，而其中一份迟早没人维护。现在按**计数**判定，
+  并自测「复制一份同名标题即红、改成相近但不同的名字不红」。
 
-改动在 `main.js`、`app-info.js`（注释）、`tools/app-info-smoke.mjs`、
-`tools/git-service-smoke.mjs`、`docs/upstream-history.md` 与本文件；不碰 `src/**`、CLI 参数、
-配置读写与其它 IPC 注册体。`audit:appinfo` / `audit:git` / `audit:upstream` 本轮全绿，
-`audit:static` 整体复跑亦全绿。
+改动在 `window-sender.js`（新增）、`main.js`、`package.json`（`build.files` 与
+`audit:sender`）、`tools/window-sender-smoke.mjs`（新增）、`tools/upstream-watch.mjs`、
+`tools/upstream-watch-smoke.mjs`、`tools/git-service-smoke.mjs`、`docs/upstream-history.md`
+与本文件。评审逻辑、CLI 参数、配置读写路径均未动。`audit:sender` / `audit:packaging` /
+`audit:bridge` / `audit:git` / `audit:upstream` 本轮全绿，`audit:static` 整体复跑亦全绿。
 
-上一轮（第 91 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-91-轮2026-10-27)，归档之后本文件不留第二份。
+上一轮（第 92 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-92-轮2026-10-27)，归档之后本文件不留第二份。
 
 ## 上游真变了怎么办（命令驱动，而不是「记得看一眼」）
 ```bash

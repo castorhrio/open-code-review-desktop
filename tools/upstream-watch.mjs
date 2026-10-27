@@ -166,6 +166,71 @@ export const tableRowCoverage = (doc, rows = ROWS_TO_REREAD) => {
   };
 };
 
+// ---- the pin, and the dependency that installs the CLI it pins ------------
+//
+// The sync doc says the desktop wraps upstream `v1.13.3`; `package.json` says
+// `"@alibaba-group/open-code-review": "^1.13.3"`. That is one promise written in
+// two files maintained by different edits, and the two can disagree without
+// anything looking wrong: `^` lets the next `npm install` bring 1.14 while the
+// pin, the five comparison rows and the `UPSTREAM_RESOLVER` simulation all still
+// describe 1.13.3. Today they agree (npm's latest *is* 1.13.3), which is exactly
+// why nothing would notice the day they stop.
+//
+// So the version in the dependency range is compared to the pinned tag: raising
+// the dependency has to move the pin — and therefore the reading list — with it,
+// and the red sentence names both sides instead of leaving the reader to grep
+// for the second one.
+export const UPSTREAM_PACKAGE = "@alibaba-group/open-code-review";
+
+// The version out of a semver range: `^1.13.3`, `~1.13.3`, `>=1.13.3 <2` and a
+// bare `1.13.3` all answer `1.13.3`. A range with no version in it (`*`,
+// `latest`, a git url, an empty string) answers `null` — those are the values
+// this check cannot compare, and treating "cannot compare" as "agrees" is the
+// failure mode the check exists to prevent.
+export const versionInRange = (range) => {
+  const hit = /(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)/.exec(String(range == null ? "" : range));
+  return hit ? hit[1] : null;
+};
+
+/** The pinned tag without its `v`, i.e. the version npm would publish. */
+export const pinVersion = (pinned = PINNED_UPSTREAM) =>
+  String((pinned && pinned.tag) || "").replace(/^v/, "");
+
+// The rule as violations. Empty is the only acceptable answer for this repo's
+// `package.json` next to the pin it ships with.
+export const dependencyPinViolations = (pkg, pinned = PINNED_UPSTREAM) => {
+  const want = pinVersion(pinned);
+  if (!/^\d+\.\d+\.\d+/.test(want)) {
+    return [
+      `pin 的 tag 不是版本号（${JSON.stringify((pinned && pinned.tag) || null)}）：` +
+        "本条按版本号比较，读不出 pin 的版本就没有可比的一方",
+    ];
+  }
+  const dependencies = (pkg && pkg.dependencies) || {};
+  const range = dependencies[UPSTREAM_PACKAGE];
+  if (range === undefined) {
+    return [
+      `package.json 的 dependencies 里没有 ${UPSTREAM_PACKAGE}：` +
+        `pin 说封装的是 ${pinned.tag}，依赖里却一个字都没写`,
+    ];
+  }
+  const got = versionInRange(range);
+  if (got === null) {
+    return [
+      `package.json 把 ${UPSTREAM_PACKAGE} 写成 ${JSON.stringify(range)}，读不出版本号；` +
+        `pin 是 ${pinned.tag}（${want}），两者无从比较——写一个能读出 ${want} 的版本区间`,
+    ];
+  }
+  if (got !== want) {
+    return [
+      `package.json 的 ${UPSTREAM_PACKAGE} 落在 ${got}（${JSON.stringify(range)}），` +
+        `而 pin 是 ${pinned.tag}（${want}）：依赖先动，就要把 pin、对照表 5 行与 ` +
+        "`UPSTREAM_RESOLVER` 一起复核后改成本轮的版本",
+    ];
+  }
+  return [];
+};
+
 const FULL_SHA = /^[0-9a-f]{40}$/i;
 
 // One predicate for the one question ("is this a whole commit?"), because it is
