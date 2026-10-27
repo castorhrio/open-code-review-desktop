@@ -474,6 +474,160 @@ export const findShaCitations = (doc) => {
   return citations;
 };
 
+/* ---- what may still change in the archive ----
+ * The archive is not frozen: a later round sometimes has to add "and here is
+ * what that decision cost" to a section it did not write — round 72 did exactly
+ * that to round 71's section. That edit is legitimate, but it was *invisible*:
+ * the only rule anyone could point at was "the log holds no pin", which says
+ * nothing about rewriting the prose around one. A file whose sections may be
+ * edited by anyone, any number of times, with no mark left behind, is not an
+ * archive — it is a second draft of the sync doc, and "which round wrote this
+ * sentence" stops being answerable.
+ *
+ * So the rule is stated twice: once in the doc's own preamble (a reader has to
+ * be able to find it without opening this module), and once here as the
+ * predicate the audit runs. Three promises, each of them mechanical:
+ *
+ *  - a section's body is written once. Later rounds may only append note blocks
+ *    *at the end of that section*, one per round, each opening with the note
+ *    marker — so any sentence a reader meets before the first note was written
+ *    by the section's own round, and every later addition names its round;
+ *  - a note's round is later than the section's round (you cannot annotate your
+ *    own round) and notes inside one section are in increasing order (the file
+ *    reads forward in time even though the sections read backward);
+ *  - new sections are added above the previous one, so heading rounds strictly
+ *    decrease from the top: "the newest round is at the top" is then a fact
+ *    about the file, not a habit.
+ */
+export const HISTORY_NOTE_MARKER = /^\s*\*\*补记（第\s*(\d+)\s*轮）\*\*/;
+
+// Both are spelled out so the doc and this module say the same sentence; the
+// smoke test requires every term to appear in the doc's own preamble, so the
+// rule cannot be described here and merely implied there.
+export const HISTORY_APPEND_RULE_TERMS = Object.freeze([
+  "补记（第 N 轮）",
+  "不再改写",
+  "段末",
+  "轮次递减",
+]);
+
+export const historyAppendRule = () =>
+  "归档段落的正文写入后不再改写：后续轮次只能在段末追加一段 `**补记（第 N 轮）**`，" +
+  "N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减。";
+
+// Every `## 上游状态（…第 N 轮…）` section, with its 1-based heading line, body
+// lines and note blocks. A heading whose round cannot be read is returned with
+// `round: null` rather than dropped — "a section that does not say which round
+// it is" is a fact the caller has to report, not one it may skip.
+export const historySections = (doc) => {
+  const lines = String(doc || "").split(/\r?\n/);
+  const sections = [];
+  let current = null;
+  lines.forEach((line, index) => {
+    const heading = /^##\s*上游状态（/.test(line);
+    if (heading) {
+      const round = /第\s*(\d+)\s*轮/.exec(line);
+      current = {
+        heading,
+        line: index + 1,
+        round: round ? Number(round[1]) : null,
+        body: [],
+        notes: [],
+      };
+      sections.push(current);
+      return;
+    }
+    if (current) current.body.push({ line: index + 1, text: line });
+  });
+  for (const section of sections) section.notes = section.body.filter((entry) => HISTORY_NOTE_MARKER.test(entry.text));
+  return sections;
+};
+
+// The rule as violations. Empty is the only acceptable answer for the real
+// archive; each entry names the line, because "the archive is malformed" sends
+// the reader to a 600-line diff.
+export const historyAppendViolations = (doc) => {
+  const violations = [];
+  const sections = historySections(doc);
+
+  const firstHeadingAt = sections.length ? sections[0].line : Infinity;
+  // A note marker before the first section is a note about nothing: either the
+  // preamble was edited by a round, or a section lost its heading.
+  String(doc || "")
+    .split(/\r?\n/)
+    .forEach((line, index) => {
+      if (index + 1 < firstHeadingAt && HISTORY_NOTE_MARKER.test(line)) {
+        violations.push(`第 ${index + 1} 行：补记出现在归档段落之外（第一节之前），没有可落的段`);
+      }
+    });
+
+  for (const section of sections) {
+    if (section.round === null) {
+      violations.push(`第 ${section.line} 行：段落的标题读不出轮次，无法判断它允许哪些补记`);
+      continue;
+    }
+    // Notes have to be a *suffix* of the section: the first non-blank line after
+    // a note block ends anything that may still be appended.
+    let sawNote = false;
+    let insideNote = false;
+    for (const entry of section.body) {
+      if (HISTORY_NOTE_MARKER.test(entry.text)) {
+        sawNote = true;
+        insideNote = true;
+        continue;
+      }
+      if (!sawNote) continue;
+      if (entry.text.trim() === "") {
+        insideNote = false;
+        continue;
+      }
+      if (!insideNote) {
+        violations.push(
+          `第 ${entry.line} 行：补记之后又出现叙述，归档只许在段末追加补记（正文不再改写）`
+        );
+        insideNote = true; // one message per paragraph, not per line
+      }
+    }
+    // `round` of each note, read again here so a marker with a missing number is
+    // visible as "no notes found" below rather than as a silently dropped entry.
+    const noteRounds = section.notes.map((entry) => ({
+      line: entry.line,
+      round: Number(HISTORY_NOTE_MARKER.exec(entry.text)[1]),
+    }));
+    noteRounds.forEach((note, index) => {
+      if (note.round <= section.round) {
+        violations.push(
+          `第 ${note.line} 行：第 ${section.round} 轮段落里的补记写着第 ${note.round} 轮，补记必须晚于该段轮次`
+        );
+      }
+      if (index > 0 && note.round <= noteRounds[index - 1].round) {
+        violations.push(
+          `第 ${note.line} 行：同段补记的轮次不是递增（第 ${noteRounds[index - 1].round} 轮之后是第 ${note.round} 轮）`
+        );
+      }
+    });
+  }
+
+  for (let index = 1; index < sections.length; index += 1) {
+    const above = sections[index - 1];
+    const here = sections[index];
+    if (above.round !== null && here.round !== null && here.round >= above.round) {
+      violations.push(
+        `第 ${here.line} 行：段落轮次不是递减（第 ${above.round} 轮之后是第 ${here.round} 轮），新轮次正文要加在最上面`
+      );
+    }
+  }
+  return violations;
+};
+
+// The sections the archive must carry, for the smoke test's "the rule is not
+// vacuous" question: a document with no sections satisfies every "no violation"
+// check above for the wrong reason.
+export const historyRoundNumbers = (doc) =>
+  historySections(doc)
+    .map((section) => section.round)
+    .filter((round) => round !== null);
+
 // The archive's half of the rule: citations wearing a declaration's clothes.
 // Empty is the answer `docs/upstream-history.md` must give.
 export const findPinShapedCitations = (doc) =>

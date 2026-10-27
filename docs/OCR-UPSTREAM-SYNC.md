@@ -12,47 +12,43 @@
 4. **不要**静默忽略上游 release：每轮把结论写进下面「当前状态」，并把上一轮的正文搬到
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。
 
-## 当前状态（第 72 轮，2026-10-27）
+## 当前状态（第 73 轮，2026-10-27）
 
-第 72 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 两条通路都可达。**
+第 73 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 两条通路都可达。**
 `git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
 refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
-（与第 49–71 轮同一个 commit），`--tags` 里最高版本仍是 `v1.13.3`；
+（与第 49–72 轮同一个 commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
+`dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`（`--tags` 里最高版本仍是 `v1.13.3`）；
 `npm view @alibaba-group/open-code-review version dist-tags` 仍是 `1.13.3` /
 `latest: 1.13.3`。desktop 的 `^1.13.3` 无需改动，**无移植项**。
 
-本轮不加新功能面，只把上一轮三处「决定已经做出、但还缺机械保证」的收口补齐，并把
-上一轮没写完的代价说明补上：
+本轮不加新功能面，做的是上一轮简报里的两条 P0 与一条 P1，主题都是「同一件事写了两遍，
+而第二遍没人看着」：
 
-- **`formatAppInfo` 的「入参 key-set」钉上了——这是上一轮最要紧的那一条。** 上一轮把
-  `timedOut` 的取舍搬回 `app-info.js`：注册里改成 `...probe`，整个探测答案交给
-  `formatAppInfo`，由它决定哪些字段上路。这个承诺要成立，得有一道机械保证——**入参里
-  没人决定过的 key 不许进 payload**。`tools/app-info-smoke.mjs` 现在钉三件事：
-  (1) 带 `timedOut`、`versionTimedOut` 和一个无意义 key 的入参，payload 里一个都不许有；
-  (2) 这样的 payload 的 key 集合与「正常作答」逐字相同；(3) 被决定的那几个字段
-  （`version` / `binary` / `binarySource` / `configPath`）的值没变。另一支「把 `main.js`
-  改成显式三字段」没有选：那会把取舍点搬回注册里，正是上一轮要收口的东西。
-- **`readVersionOutput` 末尾「迟到就丢弃」的那条判断被拆成一个能问的单元。**
-  `app-info.js` 里的 `if (late || !answer) return saidNothing(true)` 有一半是**从外面造
-  不出来的形状**：`Promise.race` 结算给先落地的那个 promise，而 deadline 到 race 只走
-  一跳微任务、探测答案要走上 exec→map→catch→race 好几跳，所以 deadline 一旦触发就必然
-  已经赢了那场 race，`answer` 必是 `null`——「迟到了**而且**答案还在」在
-  `readVersionOutput` 外面根本到不了（实测过，不是推的）。一个没人能触发的分支就是
-  一个没人能相信的分支，所以判断本身被提成 `versionAnswer(answer, late)` 导出，
-  `audit:appinfo` 直接问它：迟到且答案还在 → 答案丢弃、答「等过了」；deadline 赢了
-  race → 同一个答案；按时到达 → 原样通过；服务自己的 `timedOut` → 透传。另加一条源码
-  断言钉住探测确实 `return versionAnswer(answer, late)`，免得函数与实现各走各的。
-- **`repo:pick` 的「原样返回」从一句话变成逐字断言。** 上一轮承诺 UNC 路径原样保留、
-  不 `resolve()`；原有三态断言（相对 → `""`、`C:repo` → `""`、UNC → 保留）里只有第三条
-  会红，而「保留」到底是原样还是归一没有独立断言。`audit:path` 现在逐条比对：返回值与
-  入参**逐字相同**（含大小写、含 `\\?\` 前缀），并与 `path.win32.resolve` 的结果对照，
-  明确点出 `C:\Repo\..\Repo` 这条就是「`resolve` 会改写、这里不改」的分界；POSIX 一侧
-  同样断言 `/repo/../repo` 不被折叠。
-- **上一轮「选 b」的代价写进正文。** 第 71 轮那段（现在在
-  [`upstream-history.md`](upstream-history.md)）补了一句：设置页在 CLI 迟答时只看到
-  `version: ""`，与 CLI 静默不可区分——这是有意的，因为 `binary` / `binarySource` 已经
-  能区分「没找到」与「找到了但没说话」，而「迟答」与「静默」对用户的可行动作相同（都
-  指向检查杀软 / 网络盘）。代价写清楚，下一轮才不会再把这个方案提一遍。
+- **P0-1：`app:info` 与 `install:info` 的桩参数合并成一份 fixture。** 两条断言说过同一个
+  key 集合：`tools/install-info-smoke.mjs` 钉 `installInfo()` 的六个字段，
+  `tools/app-info-smoke.mjs` 钉 `app:info` 的 payload 键集（`installInfo()` 被展开进去）。
+  两处注释都写着「与另一处互相钉住」，但桩参数（`app` / `shell`）在两边各有一份拷贝，
+  任一处漂移会让两条断言朝相反方向报红，且不说哪份是新的。现在桩与六项事实一起搬进
+  `tools/install-fixture.mjs`：`INSTALL_INFO_KEYS`、`makeApp`、`makeShell`、
+  `installStubs`、`stubInstall`。`install-info-smoke` 仍然自己回答文件系统问题（真临时
+  目录、注入 `exists`/`readdir`/`dirname`）——那才是它测的行为；共享的是桩的形状与
+  六项事实的名字。`app-info-smoke` 另外钉三件事：fixture 的桩恰好答六个 key、值就是页面
+  夹具一直在用的那套、并且两个 suite 都还从这个文件 import（源码断言——本地再抄一份桩
+  正是这件事要停掉的行为，而它在两边的行为断言里都看不见）。
+- **P0-2：`git-service.js` 的 stderr 分类代价写进「能自动变红的地方，和不能的地方」。**
+  见下面那一节新增的一段：分类读的是 git 自己的措辞，`audit:git` 的九条 stderr 是手写
+  字符串，所以断言证明的只是「今天的措辞仍匹配」，不是「git 明天还这么说」。这就是它的
+  代价，写下来，免得下一轮再提一遍。
+- **P1-1：`docs/upstream-history.md` 的追加规则，从习惯变成断言。** 第 72 轮给第 71 轮
+  正文补了一句「这一支的代价」——改动是对的，但没有痕迹，于是「这句话是哪一轮写的」
+  只能靠回忆。现在那份文件开头写明自己是**可追溯的活文档**：正文写入后不再改写，后续
+  轮次只能在段末追加一段 `**补记（第 N 轮）**`，N 必须晚于该段轮次，新轮次正文加在最
+  上面（段落轮次递减）。规则的可执行形式是 `tools/upstream-watch.mjs` 的
+  `historyAppendViolations()`：`audit:upstream` 要求它对真实归档返回空数组、要求归档里
+  至少真有一条补记（否则「没有违例」是空话），并用「只改一行」的副本逐条验证它会红——
+  补记之后又出现叙述、补记写成本段自己的轮次、补记被挪到正文之前、段落顺序被改乱、
+  补记落在任何段落之外。第 72 轮那条补记已按新形状改成段末的 `**补记（第 72 轮）**`。
 
 ## 上游真变了怎么办（命令驱动，而不是「记得看一眼」）
 ```bash
@@ -114,6 +110,18 @@ pin 或 ls-remote 给出的 SHA 短于 40 位时一律判「跳过」并说明�
 `entryByName` 指出同一条——所以上游改了「按哪个拼写找条目」，这条会先红。它红的时候先读
 上游 HEAD 的 `resolver.go`，改的是 `MATCH_RULES` 和这段模拟，不是把断言放宽。
 
+**`git-service.js` 的 `readFileAtRef` 按 stderr 措辞分类，代价在这里写清楚。** 它用两组
+正则把 `git show` 的失败分成 `bad-ref`（引用不存在）与 `missing`（文件不在那个快照里），
+两者都对用户说不同的话。这两组正则匹配的是 git 的英文措辞，所以模块固定了
+`LC_ALL=C` / `LANG=C`（本地化 git 说的 `致命错误：无效的对象名称` 会落进通用分支）；而
+`tools/git-service-smoke.mjs` 的九条夹具是**手写字符串**，不是从真 git 抓的。也就是说：
+`audit:git` 证明的是「这些措辞今天仍匹配」，**不是**「git 明天还这么说」——git 换了措辞
+时，夹具照旧全绿，真实分类静默落到 `failed`。这是有意接受的：把一条真实 git 的 stderr
+钉进断言，会让套件在某些 git 版本上红，而那不是本仓能修的东西。代价的补偿是通用分支
+必须可诊断——它带上 git 自己的首行 stderr 与退出码，退出码是这条路上唯一不随语言变的
+部分。评审时若想动这两组正则，请同时想清楚这一点：**没有任何 audit 会因为 git 改措辞
+而变红**，只能靠人读这里的措辞与本段的记录。
+
 **但 audit 变红不等于覆盖完整**：下面这几处只有人工对照，改坏了不会让任何 audit 变红。
 
 **`upstream:check`（哨兵）的退出码恒为 0，只报告不失败——它的绿不是安全网；`audit:upstream` 跑的是本套断言（pin 三处声明、对照表双射、通路账），是会 `exit 1` 的那一半——恒绿不是安全网，所以红色的那一半必须真的红。** 上游漂移的唯一安全网
@@ -122,7 +130,7 @@ pin 或 ls-remote 给出的 SHA 短于 40 位时一律判「跳过」并说明�
 没变**，所以每轮的结论仍要写进上面「当前状态」——跳过时至少留下 `[UPSTREAM-DEBT]` 与
 「核对通路账」里的一行欠账。
 
-**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 72 轮：`git ls-remote` 退出码 0，`refs/heads/main` 与 pin 一致；tag 与 npm 均为 `1.13.3`；通路：git）**
+**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 73 轮：`git ls-remote` 退出码 0，`refs/heads/main` 与 pin 一致；tag 与 npm 均为 `1.13.3`；通路：git）**
 
 ### 核对通路账
 
@@ -160,14 +168,15 @@ pin 或 ls-remote 给出的 SHA 短于 40 位时一律判「跳过」并说明�
 | 70 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；`app:info` 版本探测加预算、恒绿归属纠正并加 exit 码自测 | — |
 | 71 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；`timedOut` 语义定案（丢弃并断言）、`repo:pick` 走同一道闸门、自跑子进程断言 | — |
 | 72 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；`formatAppInfo` 入参 key-set 钉住、`late` 判断拆成可问的单元、`pickedRepoOrEmpty` 逐字断言 | — |
+| 73 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；install 桩合并成 `tools/install-fixture.mjs` 并断言 fixture 自身、stderr 分类代价入档、归档追加规则进断言 | — |
 
 「最近一次对照」只写**那一项最近被人工重新核对**的轮次。该列没有列出本轮，表示本轮
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
 对应行并把轮次与日期改成本轮。
 
-**第 46–72 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
+**第 46–73 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
 npm 通路可达，第 56 轮 git 超时但 API 可达，第 63–64 轮本文件无通路记录，第 68 轮 git
-超时但 API 可达，第 69–72 轮 git 可达），所以下表 5 行的
+超时但 API 可达，第 69–73 轮 git 可达），所以下表 5 行的
 「最近一次对照」停在第 45 轮是
 **没有理由重看**，不是忘了看：
 它记录的是「最后一次有人逐行读上游源码」的轮次，而不是「最后一次确认上游没变」的轮次。

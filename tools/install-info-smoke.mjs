@@ -17,6 +17,12 @@ import { createRequire } from "node:module";
 const ROOT = path.resolve(import.meta.dirname, "..");
 const require = createRequire(path.join(ROOT, "package.json"));
 const { createInstall } = require(path.join(ROOT, "install-info.js"));
+// The stubs and the six install facts live in `tools/install-fixture.mjs`, shared
+// with `tools/app-info-smoke.mjs`: that file pins the `app:info` payload's key
+// set, which is this module's `installInfo()` spread into the IPC answer. Two
+// hand-maintained copies of these stubs used to back those two assertions, so a
+// drift in either made one suite red for a key the other had just invented.
+import { INSTALL_INFO_KEYS, installStubs, makeApp, makeShell } from "./install-fixture.mjs";
 
 const failures = [];
 const check = (name, ok, detail = "") => {
@@ -57,43 +63,16 @@ const bare = path.join(tmp, "bare");
 fs.mkdirSync(bare, { recursive: true });
 fs.writeFileSync(path.join(bare, "Open Code Review.exe"), "");
 
-/**
- * `shell` that records the calls instead of opening a file manager.
- * `openError` is what `shell.openPath` resolves to — Electron's contract is that
- * a failure comes back as a non-empty string, not as a rejection.
- *
- * `openThrows` is the shell that rejects anyway. That is not the contract, but it
- * is not this module's contract either, and an unhandled rejection here reaches
- * the renderer as a thrown `await` — the one failure shape that says nothing.
- * Any value other than `undefined` is thrown as-is, so the two reasonless shapes
- * (`null`, and an `Error` with an empty message) can each be stubbed exactly.
- * `undefined` therefore means "do not throw" — not `null`, which is a value to
- * throw and the one case a message cannot be read off.
- */
-const makeShell = (openError = "", openThrows = undefined) => {
-  const calls = { reveal: [], open: [] };
-  return {
-    calls,
-    showItemInFolder: (p) => calls.reveal.push(p),
-    openPath: async (p) => {
-      calls.open.push(p);
-      if (openThrows !== undefined) throw openThrows;
-      return openError;
-    },
-  };
-};
+// The two paths this suite's `app` stub answers with: a profile under the temp
+// root, and the exe inside the install root below. They are bound here rather
+// than defaulted inside the shared `makeApp`, because they depend on the temp
+// tree this file creates — the fixture's defaults are the disk-free ones.
+const PROFILE = path.join(tmp, "profile");
+const APP_EXE = path.join(installed, "Open Code Review.exe");
 
-/**
- * `app` with only the two members install-info reads. `getPath("exe")` answers
- * with a path under the install root, because that is the only thing the
- * renderer shows for it.
- */
-const makeApp = ({ packaged, resources = "", userData = path.join(tmp, "profile"), exe = path.join(installed, "Open Code Review.exe") }) => ({
-  isPackaged: packaged,
-  resourcesPath: resources,
-  getPath: (name) => (name === "userData" ? userData : exe),
-});
-
+/** `install-info.js` built from the shared stubs, with this suite's answers for
+ *  the questions that are the behaviour under test: real temp directories
+ *  (`exists` / `readdir`) and the platform's own `dirname`. */
 const make = ({
   packaged,
   resources = "",
@@ -104,16 +83,18 @@ const make = ({
   readdir = fs.readdirSync,
   dirname = path.dirname,
 }) =>
-  createInstall({
-    app: makeApp({ packaged, resources }),
-    shell,
-    platform,
-    env,
-    resourcesPath: () => resources,
-    exists,
-    readdir,
-    dirname,
-  });
+  createInstall(
+    installStubs({
+      app: makeApp({ packaged, resources, userData: PROFILE, exe: APP_EXE }),
+      shell,
+      platform,
+      env,
+      resourcesPath: () => resources,
+      exists,
+      readdir,
+      dirname,
+    })
+  );
 
 /* ---------------- shape 1: installed ---------------- */
 
@@ -866,12 +847,17 @@ for (const platform of ["darwin", "linux"]) {
  * reads those names, so a rename or an addition is a blank row on the settings
  * page. The key set is pinned once per install shape — the facts are the same
  * six whether the copy is installed, portable or a dev build, only their values
- * differ. `tools/app-info-smoke.mjs` pins the same six names in its payload
- * `expected` list; the two fixtures are what keep this contract from drifting
- * with only one side noticing.
+ * differ.
+ *
+ * The list itself lives in `tools/install-fixture.mjs`, next to the stubs this
+ * suite builds the module from, so this check and `app-info-smoke.mjs`'s payload
+ * check cannot disagree about which six facts exist: one list, two assertions
+ * about two different things (the module's answer, and the IPC payload built
+ * from it). `app-info-smoke.mjs` also asserts that this file imports the
+ * fixture, so a local copy cannot come back.
  */
 {
-  const expected = ["canUninstall", "executable", "installDir", "packaged", "portable", "userData"];
+  const expected = [...INSTALL_INFO_KEYS];
   const shapes = [
     ["installed", make({ packaged: true, resources: path.join(installed, "resources") })],
     ["portable", make({ packaged: true, resources: path.join(installed, "resources"), env: { PORTABLE_EXECUTABLE_DIR: tmp } })],

@@ -18,6 +18,8 @@ import { fileURLToPath } from "node:url";
 import {
   DEBT_MARKER,
   HISTORY_ALLOWED_SHA_CONTEXTS,
+  HISTORY_APPEND_RULE_TERMS,
+  HISTORY_NOTE_MARKER,
   MOVED_MARKER,
   PINNED_UPSTREAM,
   PIN_BLOCK_END,
@@ -35,6 +37,10 @@ import {
   findPinShapedCitations,
   findShaCitations,
   formatDrift,
+  historyAppendRule,
+  historyAppendViolations,
+  historyRoundNumbers,
+  historySections,
   historyShaRule,
   parseApiCommit,
   parseLsRemote,
@@ -47,6 +53,11 @@ import {
 const ROOT = path.resolve(import.meta.dirname, "..");
 const SYNC_DOC = path.join(ROOT, "docs", "OCR-UPSTREAM-SYNC.md");
 const HISTORY_DOC = path.join(ROOT, ...UPSTREAM_HISTORY_DOC.split("/"));
+
+// The text of the log above `line` (1-based). Used to read the archive's own
+// preamble: the rule about appending notes has to be stated there, before the
+// first archived section, not buried inside one of them.
+const historyLinesBefore = (history, line) => history.split(/\r?\n/).slice(0, line - 1).join("\n");
 
 const failures = [];
 const check = (name, ok, detail = "") => {
@@ -1090,6 +1101,184 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
   check(
     "...and the sync doc links back to the log, so the split is discoverable from either end",
     syncDoc.includes("upstream-history.md")
+  );
+}
+
+/* ---- what may still change in the archive, and what may not ----
+ * The archive is a live document: a later round sometimes has to append "and
+ * this is what that decision cost" to a section it did not write. Round 72 did
+ * that to round 71. That is legitimate — but it was unmarked, so nothing in this
+ * suite could tell it apart from a rewrite, and "which round wrote this
+ * sentence" stopped being answerable by reading the file.
+ *
+ * So the file now states its own rule (a section's body is written once; later
+ * rounds append one marked note at the end of that section; new sections go on
+ * top, so heading rounds decrease), and `historyAppendViolations` is that rule
+ * as a predicate. The checks below ask three things: the doc says the rule in
+ * the same words, the real archive obeys it *and* actually uses the note shape
+ * (a rule nobody exercises is vacuous), and a single edited line turns it red
+ * with the line number.
+ */
+{
+  const history = fs.readFileSync(HISTORY_DOC, "utf8");
+  const sections = historySections(history);
+  const rounds = historyRoundNumbers(history);
+  check(
+    "the audit log's sections all say which round they are, newest first",
+    sections.length >= 10 &&
+      rounds.length === sections.length &&
+      rounds.every((round, index) => index === 0 || round < rounds[index - 1]),
+    JSON.stringify(rounds)
+  );
+  // The rule has to be readable in the file, not only in this module: the next
+  // person to append a note opens the doc, not `tools/upstream-watch.mjs`.
+  const rule = historyAppendRule();
+  const preamble = historyLinesBefore(history, sections.length ? sections[0].line : 1);
+  check(
+    "the annex rule is one sentence naming the note shape, the ban on rewriting, and the order",
+    HISTORY_APPEND_RULE_TERMS.every((term) => rule.includes(term)) &&
+      HISTORY_APPEND_RULE_TERMS.includes("补记（第 N 轮）"),
+    rule
+  );
+  check(
+    "...and the log's own preamble says the same sentence, so the rule is not only in the audit script",
+    HISTORY_APPEND_RULE_TERMS.every((term) => preamble.includes(term)),
+    JSON.stringify(HISTORY_APPEND_RULE_TERMS.filter((term) => !preamble.includes(term)))
+  );
+  check(
+    "the real archive has no append violation",
+    historyAppendViolations(history).length === 0,
+    JSON.stringify(historyAppendViolations(history))
+  );
+  // "No violation" over an archive that never uses the note shape would pass for
+  // the wrong reason — nothing to place wrongly. The archive has at least one
+  // note, and it names a round later than its section's.
+  const noted = sections.filter((section) => section.notes.length > 0);
+  check(
+    "...and the archive really uses the note shape, on a round later than the section's",
+    noted.length >= 1 &&
+      noted.every(
+        (section) =>
+          section.notes.every(
+            (entry) => Number(HISTORY_NOTE_MARKER.exec(entry.text)[1]) > section.round
+          )
+      ),
+    JSON.stringify(noted.map((section) => [section.round, section.notes.map((n) => n.line)]))
+  );
+
+  // The predicate against mutations of the real file, one edited line each, so a
+  // red below cannot be explained by anything else in the copy.
+  const lines = history.split(/\r?\n/);
+  const oneLineApart = (copy) => {
+    const copyLines = copy.split(/\r?\n/);
+    return copyLines.length === lines.length &&
+      copyLines.filter((line, index) => line !== lines[index]).length === 1;
+  };
+  const noteSection = noted[0];
+  const noteEntry = noteSection && noteSection.notes[0];
+  const noteText = noteEntry ? lines[noteEntry.line - 1] : "";
+
+  // (a) a later round appending a note *and then* more prose: the addition is
+  // allowed, the rewrite after it is not.
+  // The note block ends where the next blank line is; the prose is appended
+  // *after* it, which is the shape of "I added one more sentence to last round's
+  // section" — the edit the rule forbids.
+  let noteBlockEnd = noteEntry ? noteEntry.line : 0;
+  while (noteEntry && noteBlockEnd < lines.length && lines[noteBlockEnd].trim() !== "") noteBlockEnd += 1;
+  const proseAfterNote = noteEntry
+    ? [
+        ...lines.slice(0, noteBlockEnd),
+        "",
+        "  这一句是补记之后又补的叙述。",
+        ...lines.slice(noteBlockEnd),
+      ].join("\n")
+    : "";
+  const afterProseViolations = noteEntry ? historyAppendViolations(proseAfterNote) : [];
+  check(
+    "prose added after a note is a violation, named at its own line",
+    noteEntry !== undefined &&
+      noteBlockEnd > noteEntry.line &&
+      proseAfterNote.split(/\r?\n/).length === lines.length + 2 &&
+      afterProseViolations.length === 1 &&
+      afterProseViolations[0].includes(`第 ${noteBlockEnd + 2} 行`) &&
+      afterProseViolations[0].includes("只许在段末追加补记"),
+    JSON.stringify({ note: noteEntry, blockEnd: noteBlockEnd, violations: afterProseViolations })
+  );
+
+  // (b) a note that claims its own section's round. One character apart from the
+  // note the archive really carries, so the answer flips on the rule and nothing
+  // else.
+  const selfDated = noteEntry
+    ? lines
+        .map((line, index) =>
+          index + 1 === noteEntry.line ? line.replace(/第\s*\d+\s*轮/, `第 ${noteSection.round} 轮`) : line
+        )
+        .join("\n")
+    : "";
+  const selfDatedViolations = noteEntry ? historyAppendViolations(selfDated) : [];
+  check(
+    "a note dated to its own section's round is a violation, named at that line",
+    noteEntry !== undefined &&
+      oneLineApart(selfDated) &&
+      selfDatedViolations.length === 1 &&
+      selfDatedViolations[0].includes(`第 ${noteEntry.line} 行`) &&
+      selfDatedViolations[0].includes("必须晚于该段轮次"),
+    JSON.stringify({ note: noteEntry, violations: selfDatedViolations })
+  );
+
+  // (c) the same note moved to the *top* of its section, which is where a
+  // "helpful" edit puts it: the note is fine on its own, the section's body after
+  // it is the thing the rule forbids touching.
+  const firstBody = noteSection && noteSection.body.find((entry) => entry.text.trim() !== "");
+  const noteFirst = noteEntry && firstBody
+    ? [
+        ...lines.slice(0, firstBody.line - 1),
+        noteText,
+        ...lines.slice(firstBody.line - 1, noteEntry.line - 1),
+        ...lines.slice(noteEntry.line),
+      ].join("\n")
+    : "";
+  const noteFirstViolations = noteEntry && firstBody ? historyAppendViolations(noteFirst) : [];
+  check(
+    "a note placed above the section's body is a violation:正文不再改写",
+    noteEntry !== undefined &&
+      firstBody !== undefined &&
+      noteFirst.split(/\r?\n/).length === lines.length &&
+      noteFirstViolations.length >= 1 &&
+      noteFirstViolations[0].includes("补记之后又出现叙述"),
+    JSON.stringify({ note: noteEntry, body: firstBody && firstBody.line, violations: noteFirstViolations })
+  );
+
+  // (d) the order of the sections. A round inserted *below* a newer one is the
+  // shape of "I added my section at the end of the file", which is what everyone
+  // does by reflex and what the archive's top-is-newest reading would hide.
+  const top = sections[0];
+  const reordered = top
+    ? lines
+        .map((line, index) => (index + 1 === top.line ? line.replace(/第\s*\d+\s*轮/, "第 1 轮") : line))
+        .join("\n")
+    : "";
+  const reorderedViolations = top ? historyAppendViolations(reordered) : [];
+  check(
+    "a section that no longer reads as newer than the one below it is a violation",
+    top !== undefined &&
+      oneLineApart(reordered) &&
+      reorderedViolations.length === 1 &&
+      reorderedViolations[0].includes(`第 ${sections[1].line} 行`) &&
+      reorderedViolations[0].includes("递减"),
+    JSON.stringify({ top: top && top.line, violations: reorderedViolations })
+  );
+  // ...and a note outside any section is nobody's note: it has no round to be
+  // later than, which is why the doc's preamble is not a place to add one.
+  const orphanNote = [...lines.slice(0, top ? top.line - 1 : 0), "**补记（第 99 轮）**：这落在前言里。", ...lines.slice(top ? top.line - 1 : 0)].join("\n");
+  const orphanViolations = historyAppendViolations(orphanNote);
+  check(
+    "a note in the preamble is a violation: there is no section for it to be later than",
+    top !== undefined &&
+      orphanViolations.length === 1 &&
+      orphanViolations[0].includes(`第 ${top.line} 行`) &&
+      orphanViolations[0].includes("没有可落的段"),
+    JSON.stringify(orphanViolations)
   );
 }
 

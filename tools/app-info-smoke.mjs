@@ -17,7 +17,7 @@ const require = createRequire(path.join(ROOT, "package.json"));
 const { formatAppInfo, readVersionOutput, versionAnswer, VERSION_PROBE_MS, VERSION_PROBE_GRACE_MS } = require(
   path.join(ROOT, "app-info.js")
 );
-const { createInstall } = require(path.join(ROOT, "install-info.js"));
+import { INSTALL_INFO_KEYS, stubInstall } from "./install-fixture.mjs";
 
 const failures = [];
 const check = (name, ok, detail = "") => {
@@ -233,6 +233,62 @@ const base = {
   );
 }
 
+/* ---- the shared stub fixture answers the six facts it promises ----
+ * The install facts below come from `tools/install-fixture.mjs`, which is also
+ * where `tools/install-info-smoke.mjs` gets its `app` / `shell` stubs. Sharing
+ * them is only worth anything if the fixture itself is under test: two suites
+ * agreeing about a fixture nobody checks is two suites agreeing about a typo.
+ *
+ * So the fixture is asked three questions here — the key set it produces, the
+ * values the canonical stub has (they are the ones the page fixtures in this
+ * file have always used), and whether both suites still import it. The last one
+ * is a source check on purpose: a copy of the stub parameters coming back into
+ * either suite is exactly the drift the shared file exists to stop, and it is
+ * invisible to every behaviour check in both files.
+ */
+{
+  const fixture = stubInstall().installInfo();
+  check(
+    "the shared fixture's stub answers exactly the six pinned install facts",
+    JSON.stringify(Object.keys(fixture).sort()) === JSON.stringify([...INSTALL_INFO_KEYS]),
+    JSON.stringify({ got: Object.keys(fixture).sort(), want: [...INSTALL_INFO_KEYS] })
+  );
+  check(
+    "...and with the canonical installed values the page fixtures below already use",
+    fixture.packaged === true &&
+      fixture.portable === false &&
+      fixture.installDir === base.installInfo.installDir &&
+      fixture.userData === base.installInfo.userData &&
+      fixture.executable === base.installInfo.executable &&
+      fixture.canUninstall === base.installInfo.canUninstall,
+    JSON.stringify({ fixture, base: base.installInfo })
+  );
+  // Both halves of "one fixture, two suites": `install-info-smoke.mjs` proves the
+  // module's behaviour, this file proves the payload's shape, and the stubs they
+  // build the module with are the same objects. A local `makeShell` / `makeApp`
+  // in either file is how a "small tweak" starts two fixtures drifting apart.
+  const suiteSources = ["app-info-smoke.mjs", "install-info-smoke.mjs"].map((name) => [
+    name,
+    fs.readFileSync(path.join(ROOT, "tools", name), "utf8"),
+  ]);
+  check(
+    "both suites build their install stubs from the shared fixture",
+    suiteSources.every(([, src]) => /from "\.\/install-fixture\.mjs"/.test(src)),
+    JSON.stringify(suiteSources.filter(([, src]) => !/install-fixture\.mjs/.test(src)).map(([name]) => name))
+  );
+  check(
+    "...and neither defines its own app or shell stub any more",
+    suiteSources.every(
+      ([, src]) => !/const (makeShell|makeApp|shellStub)\s*=/.test(src) && !/function (makeShell|makeApp)\s*\(/.test(src)
+    ),
+    JSON.stringify(
+      suiteSources
+        .filter(([, src]) => /const (makeShell|makeApp|shellStub)\s*=/.test(src) || /function (makeShell|makeApp)\s*\(/.test(src))
+        .map(([name]) => name)
+    )
+  );
+}
+
 /* ---- the payload's key set is pinned, install facts included ----
  * Every check above asserts *a* field; none of them asserts that the set of
  * fields is the one the settings page and `src/lib/types.ts` expect. `...installInfo`
@@ -241,25 +297,15 @@ const base = {
  * those fields by name, so a rename there is a blank row on the page while every
  * check here stays green.
  *
- * So the install facts are not hand-written here: they come from the real
- * `createInstall(...).installInfo()` (with stubs for `app`/`shell`, which is how
- * `tools/install-info-smoke.mjs` drives it), and the whole key set is compared
- * as one sorted list. A field added upstream in `install-info.js` turns this red
- * with the key that appeared, which is the moment to decide whether it should be
- * in the payload at all.
+ * So the install facts are not hand-written here: they come from the stub
+ * fixture's `installInfo()`, and the whole key set is compared as one sorted
+ * list. The `expected` list stays written out — it is the *payload* contract,
+ * not a copy of the fixture — so a key added in `install-info.js` makes this red
+ * with the key that appeared and the fixture check above red with the same key,
+ * and the two messages together say which side moved.
  */
 {
-  const install = createInstall({
-    app: {
-      isPackaged: true,
-      getPath: (name) =>
-        name === "userData" ? "/home/me/.config/app" : "/opt/app/app",
-    },
-    shell: { showItemInFolder: () => {}, openPath: async () => "" },
-    platform: "linux",
-    env: {},
-    resourcesPath: () => "/opt/app/resources",
-  });
+  const install = stubInstall();
   const installInfo = install.installInfo();
   const info = formatAppInfo({
     ...base,
