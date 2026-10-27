@@ -36,6 +36,43 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 补记落在这段之外。规则本身也必须写在这里（上面那句），否则它只存在于脚本里。
 
 ---
+## 上游状态（第 74 轮，2026-10-27）
+
+## 当前状态（第 74 轮，2026-10-27）
+
+第 74 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 两条通路都可达。**
+`git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
+refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
+（与第 49–73 轮同一个 commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
+`dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`；
+`npm view @alibaba-group/open-code-review version dist-tags` 仍是 `1.13.3` /
+`latest: 1.13.3`。desktop 的 `^1.13.3` 无需改动，**无移植项**。
+
+本轮不加新功能面，补的是三处「依赖的行为本身没有断言」的缺口：
+
+- **P0-1：`exec` 的预算真会 kill 子进程，现在是真子进程断言。** `app-info.js` 的双层
+  预算是「服务这一层到点 kill 子进程、`app-info` 这一层再兜一个截止时间」，而
+  `app-info-smoke.mjs` 的探测用例全部打桩 `exec`——「到点会 kill」这个承重点没有任何
+  断言。`audit:service` 新增一段：把本机 node 种成服务要找的可执行文件名（symlink /
+  hardlink / copy 依次尝试），参数是一段「先写下自己的 PID、再睡 60 秒」的脚本，用 300ms
+  预算调用 `exec`，然后断言三件事——调用在远早于 60 秒时返回、答案带 `timedOut`、以及
+  子进程写下的 PID 已不再是活进程（`kill(pid, 0)` + 最多 2 秒轮询）。同一条假 CLI 再跑
+  一次**不带预算**的短命令，证明「返回了」不是「本来就退出」。少了最后这条 PID 断言，
+  「kill 掉」与「只是不再等」在测试看来完全一样。
+- **P0-2：`installInfo()` 的 key-set 扩到每一个形态。** 上一轮已经把「恰好六个 key」
+  钉进了 `tools/install-fixture.mjs`，`audit:install` 也逐形态比对，但只覆盖 installed /
+  portable / dev。这轮补上「安装目录在、卸载器不在」和「安装目录已被删掉」两个形态：它们
+  正是最容易被一句「提前 return 一个别的对象」改坏的形状，而那时的第一处红会出现在
+  `app-info-smoke` 的 payload key-set，读者还要先分辨是 fixture 漂了还是模块漂了。
+- **P1-1：`app-info-smoke` 对注册体的断言改成按 IPC 通道找，不再按文件名找。** 原先是
+  `readFileSync("main.js")` + 正则，把注册搬进 `xxx-handler.js` 会以「找不到 main.js」
+  变红——那不是这条断言要守的决策。现在扫根目录的 `*.js` 找到 `ipcMain.handle("app:info")`
+  的模块，要求**恰好一个**模块注册这个通道，再取从注册到下一个 `ipcMain.handle/on` 之间
+  的正文，断言它 `readVersionOutput(`、`...probe`、`formatAppInfo(` 三件事都在、且不出现
+  `timedOut`（先剥注释）。两条都会红：改注册体、或在第二个模块里重复注册。
+
+---
+
 
 ## 上游状态（第 73 轮，2026-10-27）
 

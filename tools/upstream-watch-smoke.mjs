@@ -781,17 +781,38 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
     channel !== null,
     match ? match[2] : "missing"
   );
-  const tableAt = doc.indexOf("| 对照点 | 上游文件 |");
+  // Section locators match a *line* start, not the first occurrence of the text
+  // anywhere in the file. The doc's preamble quotes the very markers this suite
+  // looks for ("`### 核对通路账` 标题"、"`| 对照点 | 上游文件 |` 表头") to explain
+  // what the script reads and why — and a plain `indexOf` finds that sentence
+  // first, which turned the ledger's 29 rows into "0 row(s)" and made three
+  // checks red for a reason that had nothing to do with the ledger.
+  const locateLine = (text, needle) => {
+    const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const found = new RegExp(`^${escaped}`, "m").exec(text);
+    return found ? found.index : -1;
+  };
+  check(
+    "a locator finds the section's own line, not a quoted copy of it in prose",
+    locateLine(`正文引用了 ${"### 核对通路账"} 这个标题\n\n### 核对通路账\n| 47 | … |`, "### 核对通路账") ===
+      `正文引用了 ${"### 核对通路账"} 这个标题\n\n`.length,
+    JSON.stringify(
+      locateLine(`正文引用了 ${"### 核对通路账"} 这个标题\n\n### 核对通路账\n| 47 | … |`, "### 核对通路账")
+    )
+  );
+
+  const tableAt = locateLine(doc, "| 对照点 | 上游文件 |");
+  const fixedAt = locateLine(doc, "**本轮 HEAD 核对：");
   check(
     "the fixed line sits above the comparison table, not buried below it",
-    match !== null && tableAt !== -1 && doc.indexOf("本轮 HEAD 核对：") < tableAt,
-    `line=${match ? doc.indexOf("本轮 HEAD 核对：") : -1} table=${tableAt}`
+    match !== null && tableAt !== -1 && fixedAt !== -1 && fixedAt < tableAt,
+    `line=${fixedAt} table=${tableAt}`
   );
   // The ledger turns "this round was checked over npm only" into a row instead
   // of a paragraph. The rule the rows must obey is the useful part: npm can
   // report a release but not the default branch's commit, so an npm-only round
   // owes the HEAD check; git and the API can answer it, so they owe nothing.
-  const ledgerAt = doc.indexOf("### 核对通路账");
+  const ledgerAt = locateLine(doc, "### 核对通路账");
   check(
     "the sync doc carries the per-round check ledger",
     ledgerAt !== -1,

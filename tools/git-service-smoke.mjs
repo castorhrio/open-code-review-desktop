@@ -32,6 +32,22 @@ const check = (name, ok, detail = "") => {
   if (!ok) failures.push(name);
 };
 
+/* ---- the one assertion an unrecognised failure leans on ----
+ * `failed` is the branch a localised or newer git reaches, so the exit code in
+ * the sentence is the only part of that diagnostic a changed wording cannot take
+ * away — "读取 … 失败（git 退出码 128）：fatal: …" can be looked up, while the same
+ * sentence without the code cannot say what went wrong at all. It is written
+ * once, here, because a regex repeated at three call sites drifts at one of them
+ * and still reads as covered; the self-test below then proves the predicate goes
+ * red when the code is missing, which is the half that makes it a gate rather
+ * than a coincidence.
+ */
+const namesExitCode = (message, code = 128) =>
+  // The trailing `(?!\d)` because a bare prefix would make code 1 match "退出码 128" — the one
+  // confusion this assertion must not have, since 128 is the code a failed git
+  // exits with and 1 is what a caller would pass by accident.
+  new RegExp(`退出码\\s*${code}(?!\\d)`).test(String(message == null ? "" : message));
+
 /* ---- a throwaway repository with a dirty working copy and a second branch ---- */
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocr-git-"));
 // Async spawn, not spawnSync: spawnSync is refused outright with EBUSY in a
@@ -212,7 +228,7 @@ check("...and it keeps git's own words in the message", /git/i.test(unknownWordi
 // the same sentence without the code cannot.
 check(
   "...and it names git's exit code, the part a changed wording cannot take away",
-  /退出码\s*128/.test(unknownWording.error || ""),
+  namesExitCode(unknownWording.error),
   unknownWording.error || ""
 );
 /* All three reasons answer the same question, so all three echo the ref and the
@@ -353,7 +369,7 @@ fs.rmSync(notARepo, { recursive: true, force: true });
   }
   check(
     "every unrecognised wording reports git's exit code in the message",
-    failedAnswers.length >= 2 && failedAnswers.every((message) => /退出码\s*128/.test(message)),
+    failedAnswers.length >= 2 && failedAnswers.every((message) => namesExitCode(message)),
     JSON.stringify(failedAnswers)
   );
 
@@ -364,10 +380,50 @@ fs.rmSync(notARepo, { recursive: true, force: true });
     "a failure with no stderr still names the exit code and is a whole sentence",
     silent.res.ok === false &&
       silent.res.reason === "failed" &&
-      /退出码\s*128/.test(silent.res.error || "") &&
+      namesExitCode(silent.res.error) &&
       !silent.res.error.trim().endsWith("：") &&
       !silent.res.error.trim().endsWith(":"),
     silent.res.error || ""
+  );
+
+  // The case this suite is named for, asserted on its own rather than trusted to
+  // the loop above: a localised git produces a wording nothing here recognises,
+  // so the answer has to be `failed` *and* the sentence still has to name the
+  // exit code — that code is the only part of it a changed language cannot take
+  // away.
+  const localised = await classifyStderr("致命错误：无效的对象名称 'no-such-ref'");
+  check(
+    "a Chinese git's 无效的对象名称 lands on failed and still names the exit code",
+    localised.res.ok === false &&
+      localised.res.reason === "failed" &&
+      namesExitCode(localised.res.error),
+    `${localised.res.reason || ""} / ${localised.res.error || ""}`
+  );
+
+  /* ---- the exit-code assertion itself, in both directions ----
+   * The three checks above are only a gate if `namesExitCode` can say no. A regex
+   * loosened to "退出码" would accept a sentence that lost the number — which is
+   * exactly the sentence a refactor produces when it stops threading `code` into
+   * the message, and nothing else in this suite would notice. The two strings
+   * below are that same failure with and without the code, so the second red can
+   * only be the code.
+   */
+  const WITH_CODE = "读取 a.go（HEAD）失败（git 退出码 128）：fatal: not a git repository";
+  const WITHOUT_CODE = "读取 a.go（HEAD）失败：fatal: not a git repository";
+  check(
+    "the exit-code assertion accepts a failure sentence that carries git's code",
+    namesExitCode(WITH_CODE),
+    WITH_CODE
+  );
+  check(
+    "...and rejects the same sentence once the code is dropped, so the assertion can go red",
+    namesExitCode(WITHOUT_CODE) === false,
+    WITHOUT_CODE
+  );
+  check(
+    "...and it wants the code git really exited with, not any number in the sentence",
+    namesExitCode(WITH_CODE, 128) && namesExitCode(WITH_CODE, 1) === false,
+    JSON.stringify([namesExitCode(WITH_CODE, 128), namesExitCode(WITH_CODE, 1)])
   );
 }
 
