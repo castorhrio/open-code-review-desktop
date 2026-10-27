@@ -542,6 +542,34 @@ fs.rmSync(notARepo, { recursive: true, force: true });
     !("master" in relations),
     JSON.stringify(relations)
   );
+
+  /* ---- a ref name that is not a ref name ----
+   * `classifyRef` is handed names git printed (`inspect`'s `refs`), so a
+   * malformed one cannot arrive today. That is a constraint of the *caller*, not
+   * a promise of this function, and the difference matters the day a name starts
+   * coming straight from the renderer: `HEAD...<ref>` is string concatenation, so
+   * a name starting with `-`, or one that already contains a range operator,
+   * would be parsed by git as something other than "compare HEAD with this ref".
+   *
+   * Both cases are asked of a real git here, and both must answer "" — no
+   * relation. Which of the two guards inside the function answered (git refused
+   * with a non-zero exit, or printed a shape that is not two counts) is git's
+   * business and deliberately not asserted: the contract is "no relation", and
+   * that is what keeps the UI falling back to the working tree instead of picking
+   * a range that reviews nothing. `git --version` is printed alongside, not
+   * asserted, so the day a newer git answers differently the log says which git
+   * produced the answer.
+   */
+  const gitVersion = await gitSvc.git(["--version"], dir);
+  console.log(`        (fixture asked with ${gitVersion.stdout.trim() || "git (version unknown)"})`);
+  for (const bad of ["-x", "a...b"]) {
+    const rel = await gitSvc.classifyRef(dir, bad);
+    check(
+      `a ref name that is not a ref name answers no relation: ${JSON.stringify(bad)}`,
+      rel === "" && !["same", "ancestor", "descendant", "diverged"].includes(rel),
+      JSON.stringify(rel)
+    );
+  }
 }
 
 /* ---- named bases survive the cap ----

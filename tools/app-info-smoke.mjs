@@ -483,6 +483,43 @@ const base = {
     JSON.stringify(thrown)
   );
 
+  /* ---- "the service threw" and "the CLI said nothing" are two answers ----
+   * Empty output is the right *payload* for both — the page has one sentence for
+   * "no version" — but the two are different facts about the service, and while
+   * they were produced by a `.catch(() => …)` that returned the same literal as
+   * the empty case, nobody could tell which one happened. The difference now
+   * travels in `probeError`: a sentence on the answer when `exec` failed, `null`
+   * when it answered (empty or not). Both halves are asserted, because "an
+   * exception is recorded" means nothing without the case where there was no
+   * exception.
+   */
+  check(
+    "a probe that threw records what was thrown, so the exception is not lost as silence",
+    thrown.probeError === "spawn ENOTDIR",
+    JSON.stringify(thrown.probeError)
+  );
+  check(
+    "...and a probe that answered is *not* an exception: probeError is null",
+    normal.probeError === null && noBinary.probeError === null,
+    JSON.stringify([normal.probeError, noBinary.probeError])
+  );
+  check(
+    "...and the payload is the same either way: an exception still yields an empty version",
+    (() => {
+      const info = formatAppInfo({ ...base, binary: { path: "/opt/app/ocr" }, ...thrown });
+      return info.version === "" && info.binary === "/opt/app/ocr";
+    })(),
+    JSON.stringify(formatAppInfo({ ...base, binary: { path: "/opt/app/ocr" }, ...thrown }))
+  );
+  check(
+    "...and the diagnostic is named by formatAppInfo and dropped, not spread into the payload",
+    (() => {
+      const info = formatAppInfo({ ...base, binary: { path: "/opt/app/ocr" }, ...thrown });
+      return !("probeError" in info) && !("versionError" in info);
+    })(),
+    JSON.stringify(Object.keys(formatAppInfo({ ...base, binary: { path: "/opt/app/ocr" }, ...thrown })).sort())
+  );
+
   // The shape the budgets exist for: `exec` that never settles and ignores the
   // budget it was handed. Asserted on the clock, because "it returned" is the
   // whole promise — a probe that resolves the *right* object after a minute has
@@ -499,6 +536,11 @@ const base = {
     "a service that never answers is given up on at the deadline, not waited out",
     hung.versionStdout === "" && hung.versionStderr === "" && hung.timedOut === true,
     JSON.stringify(hung)
+  );
+  check(
+    "...and running out of time is not an exception either: probeError stays null",
+    hung.probeError === null,
+    JSON.stringify(hung.probeError)
   );
   check(
     "...and that happens after the budget and the grace, and well before a user would call the page broken",
@@ -596,6 +638,25 @@ const base = {
       serviceFlag.timedOut === true && serviceFlag.versionStdout === "",
       JSON.stringify(serviceFlag)
     );
+    // The other diagnostic the decision may carry: a rejection's message. It
+    // travels on the answer, and the payload built from that answer does not
+    // contain it — the same shape as `timedOut`, asserted on an input that
+    // really carries the key rather than on an absence of nothing.
+    const threw = versionAnswer(
+      { stdout: "", stderr: "", timedOut: false, probeError: "spawn ENOTDIR" },
+      false
+    );
+    check(
+      "a rejection's message travels on the answer, so it is not re-invented as silence",
+      threw.versionStdout === "" && threw.probeError === "spawn ENOTDIR",
+      JSON.stringify(threw)
+    );
+    const threwInfo = formatAppInfo({ ...base, binary: { path: "/opt/app/ocr" }, ...threw });
+    check(
+      "...and it stops at formatAppInfo: the payload has neither probeError nor an empty version field",
+      !("probeError" in threwInfo) && threwInfo.version === "" && threwInfo.binary === "/opt/app/ocr",
+      JSON.stringify(Object.keys(threwInfo).sort())
+    );
     // The decision has to be the one the probe actually makes. A copy of it
     // somewhere else would keep the function green while the probe ran a
     // different rule — so the wiring is asserted, not assumed.
@@ -618,6 +679,7 @@ const base = {
   // concrete set.
   const answeredInfo = formatAppInfo({ ...base, binary: { path: "/opt/app/ocr", source: "local" }, ...normal });
   const timedOutInfo = formatAppInfo({ ...base, binary: { path: "/opt/app/ocr", source: "local" }, ...hung });
+  const thrownInfo = formatAppInfo({ ...base, binary: { path: "/opt/app/ocr", source: "local" }, ...thrown });
   check(
     "formatAppInfo drops the probe's timedOut flag instead of shipping it",
     !("timedOut" in timedOutInfo) && !("versionTimedOut" in timedOutInfo),
@@ -627,6 +689,12 @@ const base = {
     "...and a timed-out answer has exactly the key set of one that answered",
     JSON.stringify(Object.keys(timedOutInfo).sort()) === JSON.stringify(Object.keys(answeredInfo).sort()),
     JSON.stringify([Object.keys(timedOutInfo).sort(), Object.keys(answeredInfo).sort()])
+  );
+  check(
+    "...and so does an answer whose `exec` threw — the diagnostics are not payload keys",
+    JSON.stringify(Object.keys(thrownInfo).sort()) === JSON.stringify(Object.keys(answeredInfo).sort()) &&
+      !("probeError" in thrownInfo),
+    JSON.stringify([Object.keys(thrownInfo).sort(), Object.keys(answeredInfo).sort()])
   );
   // The drop is a decision in `app-info.js` only while the registration does not
   // choose fields off the probe. Reading the registration is the only way to see
@@ -668,9 +736,17 @@ const base = {
     return next < 0 ? rest : rest.slice(0, next);
   };
   const body = registered.length === 1 ? handlerBody(registered[0].source) : "";
+  // Neither diagnostic may be named in the registration: `timedOut` and
+  // `probeError` are decided in `app-info.js`, and a handler that mentions either
+  // is a second decision point coming back (it would have to pick the field off
+  // the probe, which is exactly what `...probe` avoids).
   check(
-    "app:info reads the probe through readVersionOutput, hands the whole answer to formatAppInfo, and never names timedOut itself",
-    /readVersionOutput\(/.test(body) && /\.\.\.probe/.test(body) && /formatAppInfo\(/.test(body) && !/timedOut/.test(body),
+    "app:info reads the probe through readVersionOutput, hands the whole answer to formatAppInfo, and never names timedOut or probeError itself",
+    /readVersionOutput\(/.test(body) &&
+      /\.\.\.probe/.test(body) &&
+      /formatAppInfo\(/.test(body) &&
+      !/timedOut/.test(body) &&
+      !/probeError/.test(body),
     registered.length === 1 ? registered[0].file : "no single registration"
   );
 

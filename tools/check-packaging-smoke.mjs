@@ -22,7 +22,12 @@ import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
 
-import { DEFAULT_ENTRIES, findPackagingProblems, matchesPattern } from "./check-packaging.mjs";
+import {
+  DEFAULT_ENTRIES,
+  allowlistMatcher,
+  findPackagingProblems,
+  matchesPattern,
+} from "./check-packaging.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const pkg = createRequire(path.join(ROOT, "package.json"))("./package.json");
@@ -237,6 +242,84 @@ try {
       matchesPattern("out/index.html", "out/**"),
       matchesPattern("outside/index.html", "out/**"),
       matchesPattern("out.js", "out/**"),
+    ])
+  );
+
+  /* ---- the shapes a Windows checkout hands the matcher ----
+   * Every path the matcher is given in production is produced by
+   * `path.join`/`path.posix.join` on the machine the *build* runs on, so on
+   * Windows the separators are backslashes and a directory can arrive with a
+   * trailing one. The matcher's `norm()` handles both — and that was an
+   * unasserted convenience until now, which is the kind of thing that dies in a
+   * refactor of a two-line function: without the backslash folding, every
+   * packaged file on Windows would be reported as "not matched by build.files"
+   * and the gate would go red on a correct allowlist; without the trailing-slash
+   * case, `out/` would be called unpackaged while `out/index.html` is fine. Both
+   * are false alarms rather than holes, but a gate that cries wolf on one
+   * platform is a gate people switch off on that platform.
+   */
+  check(
+    "a backslash path is matched against a slash pattern",
+    matchesPattern("out\\index.html", "out/**") === true &&
+      matchesPattern("out\\lib\\index.js", "out/**") === true &&
+      matchesPattern("outside\\index.html", "out/**") === false,
+    JSON.stringify([
+      matchesPattern("out\\index.html", "out/**"),
+      matchesPattern("outside\\index.html", "out/**"),
+    ])
+  );
+  check(
+    "...and so is a directory that arrives with a trailing slash, or with a `./` in front",
+    matchesPattern("out/", "out/**") === true &&
+      matchesPattern("out\\", "out/**") === true &&
+      matchesPattern("./out/index.html", "out/**") === true,
+    JSON.stringify([
+      matchesPattern("out/", "out/**"),
+      matchesPattern("out\\", "out/**"),
+      matchesPattern("./out/index.html", "out/**"),
+    ])
+  );
+
+  /* ---- positives and negatives: which one wins ----
+   * `allowlistMatcher` is the ordering decision `findPackagingProblems` runs on
+   * every file, and the order is `negatives.some(...) && positives.some(...)`:
+   * **a `!` line wins over any positive that also matches it**. That is what
+   * makes `out/**` plus `!out/secret/**` mean "the built assets, without that
+   * subtree" instead of "both, so it depends on which is read first". The
+   * matcher only understands exact names and `dir/**` (see its own doc comment),
+   * so the overlap has to be written in those two shapes — a narrower exclusion
+   * inside an included directory is the `dir/**` form below.
+   *
+   * The real list has no overlapping pair today (its `!` lines exclude markdown
+   * files, `tools/`, `build/` and so on, none of which a positive covers), so
+   * this precedence only shows up the day someone adds a narrow exclusion inside
+   * an included directory — which is exactly when reading the wrong order would
+   * silently ship the excluded file.
+   */
+  const layered = allowlistMatcher(["out/**", "!out/secret/**"]);
+  const bothWays = (patterns) => allowlistMatcher(patterns)("out/app.js");
+  check(
+    "a `!` exclusion wins over a positive that also matches, whatever the order in the list",
+    layered("out/app.js") === true &&
+      layered("out/secret/key.pem") === false &&
+      bothWays(["!out/app.js", "out/**"]) === false &&
+      bothWays(["out/**", "!out/app.js"]) === false,
+    JSON.stringify([
+      layered("out/app.js"),
+      layered("out/secret/key.pem"),
+      bothWays(["!out/app.js", "out/**"]),
+      bothWays(["out/**", "!out/app.js"]),
+    ])
+  );
+  check(
+    "...and an exclusion of a subdirectory removes exactly that subtree",
+    layered("out/secret/key.pem") === false &&
+      layered("out/secret") === false &&
+      layered("out/public/key.pem") === true,
+    JSON.stringify([
+      layered("out/secret/key.pem"),
+      layered("out/secret"),
+      layered("out/public/key.pem"),
     ])
   );
 

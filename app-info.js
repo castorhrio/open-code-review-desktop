@@ -45,6 +45,16 @@ function formatAppInfo({
   // the absence in the payload — including the key set — so the day someone
   // decides the page should say "CLI 未在 N 秒内回话", it turns red here first.
   timedOut = false,
+  // The probe's other internal diagnostic, dropped for the same reason and with
+  // the same name-it-to-decide-it shape: `probeError` is what `readVersionOutput`
+  // records when the `exec` itself *failed* (a throw) rather than answered
+  // nothing. `version: ""` is still the answer either way — the page has one
+  // sentence for "no version" and a separate `binary` for "not found" — but
+  // folding an exception into silence is then a decision this line makes, not
+  // something a `.catch()` did on the way past. `tools/app-info-smoke.mjs` pins
+  // the absence in the payload, the key set against an answer that carried it,
+  // and the fact that the registration never picks fields off the probe.
+  probeError = null,
   configPath = "",
   docsUrl = "",
   appVersion = "",
@@ -53,6 +63,7 @@ function formatAppInfo({
 } = {}) {
   const binaryPath = binary && binary.path ? binary.path : null;
   void timedOut;
+  void probeError;
   return {
     binary: binaryPath,
     // "not found" has one answer here: no path, no source. Copying a stale
@@ -97,14 +108,41 @@ function formatAppInfo({
  * A probe that said nothing is not an error. `formatAppInfo` reads empty output
  * as "the CLI said nothing" (`version: ""`), which is what happened, and the page
  * still receives an every-field-complete object to render. The injected `exec` is
- * called as `exec(args, { timeoutMs })` and may throw; a throw is folded into
- * "said nothing" rather than propagated, because a rejected `app:info` blanks the
- * very page this function exists to keep readable.
+ * called as `exec(args, { timeoutMs })` and may throw; a throw answers empty
+ * output rather than propagating, because a rejected `app:info` blanks the very
+ * page this function exists to keep readable — but it answers empty output *and
+ * says that it threw* (`probeError`), so the folding is a decision recorded in
+ * the answer instead of a `.catch()` that quietly made `exec` and a silent CLI
+ * look the same.
  */
 const VERSION_PROBE_MS = 5000;
 const VERSION_PROBE_GRACE_MS = 500;
 
-const saidNothing = (timedOut) => ({ versionStdout: "", versionStderr: "", timedOut });
+// The one shape every probe answer has: three fields the caller may act on, plus
+// the internal `probeError` diagnostic (see `versionAnswer`). Built in one place
+// so "the answer's key set does not depend on how the wait ended" is true by
+// construction — `main.js` spreads the whole answer into `formatAppInfo`.
+const saidNothing = (timedOut) => ({
+  versionStdout: "",
+  versionStderr: "",
+  timedOut,
+  probeError: null,
+});
+
+// A rejection is a *fact about the service*, not the same fact as "the CLI
+// printed nothing": an `exec` that threw may be a programming error here, a
+// spawn that failed, or a service whose contract changed. Both answers are still
+// empty output — a rejected `app:info` blanks the settings page — so the
+// difference is carried in a field instead of being lost in the `.catch`. Kept
+// as a sentence (never `undefined`) so "there was an exception" is not confused
+// with "there was not one".
+const describeProbeError = (error) => {
+  const text =
+    error && typeof error === "object" && "message" in error
+      ? String(error.message || "")
+      : String(error == null ? "" : error);
+  return text || "exec rejected without a message";
+};
 
 /* ---- the one decision the probe ends with ----
  *
@@ -134,6 +172,12 @@ const versionAnswer = (answer, late) => {
     versionStdout: answer.stdout,
     versionStderr: answer.stderr,
     timedOut: answer.timedOut === true,
+    // `probeError` is *not* part of the payload: it exists so "we folded an
+    // exception into silence" is a recorded decision rather than an unnamed
+    // extra key, and `formatAppInfo` names and drops it. A deadline that won the
+    // race is not an exception, so it stays `null` there.
+    probeError:
+      typeof answer.probeError === "string" && answer.probeError ? answer.probeError : null,
   };
 };
 
@@ -169,8 +213,16 @@ async function readVersionOutput({
     )
     // Same shape as the mapped success: the race below reads `stdout`/`stderr`
     // off whichever settled first, so a rejection that answered in the *other*
-    // shape would surface as `undefined` output rather than as silence.
-    .catch(() => ({ stdout: "", stderr: "", timedOut: false }));
+    // shape would surface as `undefined` output rather than as silence. The
+    // exception is *not* dropped on the way: `probeError` carries its message, so
+    // "the service threw" and "the service said nothing" stay tellable apart in
+    // the answer while both still read as `version: ""` in the payload.
+    .catch((error) => ({
+      stdout: "",
+      stderr: "",
+      timedOut: false,
+      probeError: describeProbeError(error),
+    }));
   const answer = await Promise.race([probe, deadline]);
   clearTimeout(timer);
   // `late` wins even when both settled in the same tick: a service that ignores

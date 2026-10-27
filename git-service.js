@@ -92,6 +92,17 @@ async function resolveRef(repo, ref) {
  * because "no relation" only makes the UI fall back to the working tree,
  * while a relation read out of a shape that is not the documented one picks a
  * range that silently reviews nothing.
+ *
+ * A *legal ref name* is an upstream constraint of this function, not a promise
+ * it makes: `ref` comes from `inspect`'s own `refs` list (git's
+ * `%(refname:short)` output) or from `resolveRef`'s caller, so it is a name git
+ * printed, not one the renderer typed. The two guards above are what keeps that
+ * constraint from being load-bearing, though: a malformed name either makes git
+ * fail (`git rev-list HEAD...-x`: `fatal: ambiguous argument`, exit 128) or, if a
+ * future git accepted it, hands back a shape that is not two counts — both
+ * answer "" here. `tools/git-service-smoke.mjs` pins both names against real git
+ * so this is a fact rather than an intention: if `ref` ever starts arriving
+ * straight from the renderer, these are the lines that already hold.
  */
 async function classifyRef(repoRoot, ref) {
   const res = await git(["rev-list", "--count", "--left-right", `HEAD...${ref}`], repoRoot);
