@@ -199,6 +199,111 @@ check(
   badRefByPath.error || ""
 );
 
+/* ---- the sentence the table claims is the sentence git really prints ----
+ * `REF_READ_WORDINGS` is an assumption about a program this repo does not own,
+ * so it carries one hand-written `sample` per reason and the block further down
+ * feeds each sample back through `readFileAtRef`. That proves the table agrees
+ * with *itself*. It says nothing about git: the samples are strings somebody
+ * typed, and until now the only link to the real program was "the two real
+ * failures above happen to come back with the right `reason`" — which is the
+ * label, not the recognition behind it.
+ *
+ * So the same two failures are asked of git directly here — same `git()` and so
+ * the same `gitEnv()` (C locale), same repository — and the stderr it prints is
+ * handed to the very classifier `readFileAtRef` uses. The claims, one failure
+ * each:
+ *
+ *   - today's git still answers both failures with a single `fatal:` line and
+ *     exit 128 — the shape the samples are written in, stated out loud instead
+ *     of assumed by whoever writes the next sample;
+ *   - each sentence is recognised by exactly one patterned row, and that row is
+ *     the one the answer above came back as. "Exactly one" is the half a widened
+ *     pattern breaks: both sentences start with `fatal:`, so a row loosened to
+ *     that prefix matches both and every other check here stays green;
+ *   - the row that recognises the real sentence is the row the hand-written
+ *     sample lands on, so sample and reality cannot drift into different rows
+ *     while both keep their own `reason`.
+ *
+ * What is *not* covered stays written down in `docs/OCR-UPSTREAM-SYNC.md`: a
+ * failure these checks never produce (a submodule, some spelling git reserves for
+ * another case) is still a guess, which is why the fallback branch has to carry
+ * git's own words and exit code.
+ */
+{
+  // The product's own `git()`, so the stderr read here is produced under the same
+  // C locale `readFileAtRef` will use. Spawned asynchronously — `spawnSync` is
+  // refused outright in some sandboxes, and this suite has to run there too.
+  const realNotInRef = await gitSvc.git(["show", "HEAD:不存在/的路径"], dir);
+  const realNotARef = await gitSvc.git(["show", "not-a-real-ref:a.go"], dir);
+  const realCases = [
+    { reason: "missing", result: realNotInRef, answer: noSuchPath },
+    { reason: "bad-ref", result: realNotARef, answer: badRefByPath },
+  ];
+
+  const realStderr = (result) => String(result.stderr || "").trim();
+  for (const { reason, result } of realCases) {
+    const text = realStderr(result);
+    check(
+      `a real git still words ${reason} as one fatal: line at exit ${128}`,
+      result.code === 128 && text.startsWith("fatal:") && text.split(/\r?\n/).length === 1,
+      `code=${result.code} ${JSON.stringify(text)}`
+    );
+  }
+
+  // The recognition itself, asked row by row rather than through the label: a row
+  // that matched is what `classifyRefReadFailure` picks, and picking the right row
+  // for the wrong sentence is exactly what a pattern edit does quietly.
+  const patternedRows = gitSvc.REF_READ_WORDINGS.filter((row) => row.pattern !== null);
+  const rowsMatching = (stderr) =>
+    patternedRows.filter((row) => row.pattern.test(stderr)).map((row) => row.reason);
+
+  for (const { reason, result, answer } of realCases) {
+    const text = realStderr(result);
+    const matches = rowsMatching(text);
+    check(
+      `the ${reason} row, and only it, recognises the sentence git really prints`,
+      matches.length === 1 && matches[0] === reason,
+      `matched=${JSON.stringify(matches)} <- ${JSON.stringify(text)}`
+    );
+    // The wiring half: the classification the code pane receives is the same
+    // function applied to the same sentence — not a second reading of it
+    // somewhere further down the line.
+    const row = gitSvc.classifyRefReadFailure(text);
+    check(
+      `...and the answer the code pane gets is that classification, not a second reading`,
+      row.reason === reason && row.reason === answer.reason,
+      `${row.reason} / ${answer.reason} / ${JSON.stringify(text)}`
+    );
+    // Sample and reality, tied to one row: both strings have to come back from
+    // the same row object. Two rows sharing a `reason` is not possible today
+    // (the table's reasons are unique), but the row — not the string — is what
+    // decides a future sentence, so that is what is compared.
+    const sampledRow = gitSvc.REF_READ_WORDINGS.find((entry) => entry.reason === reason);
+    check(
+      `...and that row is the one the ${reason} sample lands on, so sample and reality cannot split`,
+      sampledRow !== undefined && gitSvc.classifyRefReadFailure(sampledRow.sample) === row,
+      sampledRow ? JSON.stringify(sampledRow.sample) : "no row with that reason"
+    );
+  }
+
+  // The "exactly one row" claim above is only a gate if a pattern could fail it.
+  // Both real sentences start with `fatal:` — the prefix a pattern gets widened
+  // to when someone wants a red to stop — so a fixture-independent failing state
+  // is available: a loose pattern matches both, while no row of the table does.
+  // Asserted on git's own output, so the demonstration cannot drift from what it
+  // demonstrates.
+  const loosePattern = /^fatal:/i;
+  check(
+    "...and a pattern loose enough to match both real sentences would break that claim",
+    loosePattern.test(realStderr(realNotInRef)) &&
+      loosePattern.test(realStderr(realNotARef)) &&
+      patternedRows.every(
+        (row) => !(row.pattern.test(realStderr(realNotInRef)) && row.pattern.test(realStderr(realNotARef)))
+      ),
+    JSON.stringify({ missing: realStderr(realNotInRef), badRef: realStderr(realNotARef) })
+  );
+}
+
 /* ---- a wording that matches nothing is a plain failure ----
  * The reasons above are read out of git's own stderr, and git's wording is
  * not the app's to control: a localised git, or a newer git, says it

@@ -36,6 +36,40 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 补记落在这段之外。规则本身也必须写在这里（上面那句），否则它只存在于脚本里。
 
 ---
+## 上游状态（第 82 轮，2026-10-27）
+
+第 82 轮复核：**HEAD 未变，结论仍是「无新内容」；API 与 npm 两条通路可达。**
+`git ls-remote https://github.com/alibaba/open-code-review.git` 本轮超时（`timeout` 返回
+124，与第 47–48 轮同因），改由 `api.github.com/repos/alibaba/open-code-review/commits/main`
+回答：HTTP 200，`sha` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`（与第 49–81 轮同一个
+commit，2026-10-20 的 `fix(tool): report an empty code_comment batch instead of success
+(#1773)`）；`npm view @alibaba-group/open-code-review version` 仍是 `1.13.3`。tag 一处本轮
+没有独立核对——`refs/heads/main` 未变即「无新 commit」，registry 的 `latest` 未变即「无新
+发布」。desktop 的 `^1.13.3` 无需改动，**无移植项**。
+
+本轮把两件「注释里承认过、但没有断言钉住」的假设变成会红的检查：
+
+- **P0-1：`readFileAtRef` 的 stderr 措辞假设外化成 `REF_READ_WORDINGS` 表。** 此前是两条
+  正则内联在分类分支里，配一句注释坦白「这匹配的是 git 的英文措辞，没人检查这个假设」。
+  现在三行数据、每行带 `reason` / `pattern` / `sample`：`bad-ref`、`missing`、兜底
+  （`pattern: null`，必须是最后一行且唯一）。分类改成遍历表：第一个命中的 `pattern` 赢，
+  都不命中就是兜底。smoke 把每行的 `sample` 真喂回 `readFileAtRef`（仍是 stub 掉的
+  `spawn`），要求拿回该行自己的 `reason`；再要求「带 sample 的行覆盖全部三种答案」、
+  兜底行唯一且最后。删掉 `bad-ref` 正则里的 `bad revision`，那格当场红并点名 sample 与
+  实际答案；删掉 `missing` 的 sample，覆盖率那格红——两条都验过。这也纠正了下文一句旧话：
+  「没有任何 audit 会因为措辞而变红」不再成立，**表自己的主张**现在有断言；仍然没人钉的
+  是「git 明天还这么说」（sample 是手写字符串）。
+- **P0-2：核对通路账的末行绑定到提交信息的轮次。** 账的行规则（通路 / 欠账 / 连续 / 末行
+  与固定行一致）此前全都只读文档自己：一轮提交了却没记账，文档依然完全合法，只是比提交
+  落后一轮。现在 `ledgerRoundViolations()` 用 `git log -1 --format=%s` 里的「第 N 轮」对账，
+  允许账末行是 N（已提交）或 N+1（先改文档、后提交）；比 N 少就是漏记，句子点名两边的
+  轮次并提醒「没核对也要记一行」。smoke 从真文档里删掉末行、拿该行轮次当提交信息喂进去，
+  断言红且同时说出两个数字；另有三格把它钉紧：领先两轮、提交信息里没有轮次、账是空的。
+
+两条都在 `git-service.js` / `tools/git-service-smoke.mjs` / `tools/upstream-watch.mjs` /
+`tools/upstream-watch-smoke.mjs` 与本文件内，不碰 CLI 参数、配置读写与 IPC 注册体；
+`audit:service` / `audit:config` / `audit:git` / `audit:upstream` 本轮全绿。
+
 ## 上游状态（第 81 轮，2026-10-27）
 
 第 81 轮复核：**HEAD 未变，结论仍是「无新内容」；API 与 npm 两条通路可达。**

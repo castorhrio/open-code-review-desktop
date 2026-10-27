@@ -30,13 +30,17 @@ const { isInside } = require("./path-guard");
 // change between calls (the checks point `GIT_CEILING_DIRECTORIES` at a throwaway
 // directory, for instance), and a snapshot taken at load would silently ignore it.
 //
-// This is a deliberate trade, not a guarantee: no audit turns red when git changes
-// its wording (the fixtures are hand-written strings), so the fallback branch has to
-// stay diagnosable instead. What the audit *does* hold is that each wording the
-// table claims is really produced by the pattern beside it (`REF_READ_WORDINGS`
-// carries one sample per reason). The full statement of that cost — what is
-// asserted, what can only be re-read by hand — is in `docs/OCR-UPSTREAM-SYNC.md` 的
-// 『能自动变红的地方，和不能的地方』. Read it before touching the patterns.
+// What the checks hold is two different things, and it used to be written down as
+// one: `REF_READ_WORDINGS` carries one sample per reason, so each pattern really
+// recognises the wording beside it, and `tools/git-service-smoke.mjs` also feeds
+// the stderr a *real* git prints for these same failures through the same
+// classifier — so a git whose sentence stops matching turns `audit:git` red
+// instead of quietly landing on the fallback branch. What is still a trade: the
+// samples are hand-written, and a failure this program never exercises (a
+// submodule, whatever spelling git uses for some other case) is not covered at
+// all. That half is why the fallback branch has to stay diagnosable, and why the
+// cost is written out in `docs/OCR-UPSTREAM-SYNC.md` 的『能自动变红的地方，和不能
+// 的地方』. Read it before touching the patterns.
 const gitEnv = () => ({ ...process.env, LC_ALL: "C", LANG: "C" });
 // Exported so the check can ask it directly, without a spawned git in the way
 // (`tools/git-service-smoke.mjs`). The part worth asserting is the *shape* of
@@ -236,12 +240,16 @@ async function inspect(repo) {
  * and it requires the three reasons to all be present, so a broken pattern or a
  * deleted row goes red on the row that carries it.
  *
- * What the samples do *not* do is make the wordings true: they are hand-written
- * strings, so a git that renames its message tomorrow still lands on the
- * fallback branch, silently. That is the accepted cost, stated in
- * `docs/OCR-UPSTREAM-SYNC.md`『能自动变红的地方，和不能的地方』 — the compensation is
- * that the fallback answer carries git's own first stderr line and its exit
- * code, the one part of the failure that does not depend on language.
+ * *Today's* git is checked from the other side as well: the smoke check reads
+ * the stderr a real git prints for these same two failures and requires the row
+ * above to be the only one that recognises it, so a git whose sentence stops
+ * matching turns `audit:git` red rather than sliding into the fallback. Neither
+ * half covers a failure the checks never produce (a submodule, a different
+ * spelling git reserves for some other case), and the samples are still strings
+ * somebody typed — so the fallback answer has to carry git's own first stderr
+ * line and its exit code, the one part of the failure that does not depend on
+ * language. The whole cost is stated in `docs/OCR-UPSTREAM-SYNC.md`『能自动变红的
+ * 地方，和不能的地方』.
  *
  * Row order matters: the first row whose `pattern` matches wins, and the single
  * row with `pattern: null` is the fallback for every wording nobody listed. It
@@ -281,6 +289,13 @@ const REF_READ_WORDINGS = Object.freeze([
 // The row a stderr belongs to: the first pattern that matches, else the fallback.
 // `pattern !== null` rather than a truthiness test, so the "no pattern means
 // fallback" rule is spelled out where it is relied on.
+//
+// Exported so `tools/git-service-smoke.mjs` can ask *which row* answered a
+// sentence it captured from a real git — the same function `readFileAtRef` uses
+// two lines later, so the row the check names is the row the code pane would
+// get. Asking only for the answer's `reason` would be the weaker question: it
+// reads the label, while the drift this needs to catch lives in the patterns
+// underneath it.
 const classifyRefReadFailure = (stderr) =>
   REF_READ_WORDINGS.find(
     (wording) => wording.pattern !== null && wording.pattern.test(stderr)
@@ -394,6 +409,7 @@ module.exports = {
   readFileWindow,
   readFileAtRef,
   REF_READ_WORDINGS,
+  classifyRefReadFailure,
   resolveRef,
   classifyRef,
   gitEnv,

@@ -35,7 +35,7 @@ tag v1.13.3
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 82 轮：`git ls-remote` 在 90 秒内超时，退出码 124；`api.github.com` 的 `commits/main` 退出码 0 且 `sha` 与 pin 一致；`refs/tags/v1.13.3` 本轮未独立核对；npm 为 `1.13.3`；通路：api）**
+**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 83 轮：`git ls-remote` 在 90 秒内超时，退出码 124；`api.github.com` 的 `commits/main` 退出码 0 且 `sha` 与 pin 一致；`refs/tags/v1.13.3` 本轮未独立核对；npm 为 `1.13.3`；通路：api）**
 
 ### 核对通路账
 
@@ -90,6 +90,7 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 | 80 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；`classifyRef` 的计数改成「十进制数字」严格匹配（堵住 `parseInt` 前缀把畸形形状猜成关系）、`gitEnv` 导出并直测 spread / 只读调用方环境 / 逐调用新鲜 | — |
 | 81 | 2026-10-27 | api | `375f64c` / `v1.13.3`，无新内容；git 超时（124）、API 作答；npm `1.13.3`；`classifyRef` 去掉多余的数值换算（超大计数不再答「无关系」）、`gitEnv` 的接线探针改走 `readFileAtRef`、同步文档的「上一轮」压成指针并进断言 | — |
 | 82 | 2026-10-27 | api | `375f64c` / `v1.13.3`，无新内容；git 超时（124）、API 作答；npm `1.13.3`；`readFileAtRef` 的 stderr 措辞假设外化成 `REF_READ_WORDINGS` 表并按 sample 断言、核对通路账的末行绑定到提交信息的轮次 | — |
+| 83 | 2026-10-27 | api | `375f64c` / `v1.13.3`，无新内容；git 超时（124）、API 作答；npm `1.13.3`；真 git 的 stderr 与 `REF_READ_WORDINGS` 逐行对账（只被一行认出、与 sample 同一行）、`createRunner` → `runUpstreamWatch` 的「git 超时 → API 作答」按文本断言 | — |
 
 ### 对照表（上游前进时要重读的五处）
 
@@ -97,9 +98,9 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
 对应行并把轮次与日期改成本轮。
 
-**第 46–82 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
+**第 46–83 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
 npm 通路可达，第 56 轮 git 超时但 API 可达，第 63–64 轮本文件无通路记录，第 68 轮 git
-超时但 API 可达，第 69–76、79–80 轮 git 可达，第 77 轮本文件无通路记录，第 78、81–82 轮
+超时但 API 可达，第 69–76、79–80 轮 git 可达，第 77 轮本文件无通路记录，第 78、81–83 轮
 git 超时但 API 可达），所以下表 5 行的
 「最近一次对照」停在第 45 轮是
 **没有理由重看**，不是忘了看：
@@ -145,41 +146,50 @@ git 超时但 API 可达），所以下表 5 行的
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。搬完这里只留一句
    指针——「本文件只留当前一轮」不是约定而是断言（`previousRoundPointerViolations`）。
 
-## 当前状态（第 82 轮，2026-10-27）
+## 当前状态（第 83 轮，2026-10-27）
 
-第 82 轮复核：**HEAD 未变，结论仍是「无新内容」；API 与 npm 两条通路可达。**
+第 83 轮复核：**HEAD 未变，结论仍是「无新内容」；API 与 npm 两条通路可达。**
 `git ls-remote https://github.com/alibaba/open-code-review.git` 本轮超时（`timeout` 返回
 124，与第 47–48 轮同因），改由 `api.github.com/repos/alibaba/open-code-review/commits/main`
-回答：HTTP 200，`sha` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`（与第 49–81 轮同一个
-commit，2026-10-20 的 `fix(tool): report an empty code_comment batch instead of success
-(#1773)`）；`npm view @alibaba-group/open-code-review version` 仍是 `1.13.3`。tag 一处本轮
-没有独立核对——`refs/heads/main` 未变即「无新 commit」，registry 的 `latest` 未变即「无新
-发布」。desktop 的 `^1.13.3` 无需改动，**无移植项**。
+回答：HTTP 200，`sha` 仍是 `375f64c`（与第 49–82 轮同一个 commit）；`npm view
+@alibaba-group/open-code-review version` 仍是 `1.13.3`。tag 一处本轮没有独立核对——
+`refs/heads/main` 未变即「无新 commit」，registry 的 `latest` 未变即「无新发布」。desktop
+的 `^1.13.3` 无需改动，**无移植项**。
 
-本轮把两件「注释里承认过、但没有断言钉住」的假设变成会红的检查：
+本轮把上一轮承认的那半个缺口补上，并给 78/81/82 三轮真实发生过的那条路径加一格断言：
 
-- **P0-1：`readFileAtRef` 的 stderr 措辞假设外化成 `REF_READ_WORDINGS` 表。** 此前是两条
-  正则内联在分类分支里，配一句注释坦白「这匹配的是 git 的英文措辞，没人检查这个假设」。
-  现在三行数据、每行带 `reason` / `pattern` / `sample`：`bad-ref`、`missing`、兜底
-  （`pattern: null`，必须是最后一行且唯一）。分类改成遍历表：第一个命中的 `pattern` 赢，
-  都不命中就是兜底。smoke 把每行的 `sample` 真喂回 `readFileAtRef`（仍是 stub 掉的
-  `spawn`），要求拿回该行自己的 `reason`；再要求「带 sample 的行覆盖全部三种答案」、
-  兜底行唯一且最后。删掉 `bad-ref` 正则里的 `bad revision`，那格当场红并点名 sample 与
-  实际答案；删掉 `missing` 的 sample，覆盖率那格红——两条都验过。这也纠正了下文一句旧话：
-  「没有任何 audit 会因为措辞而变红」不再成立，**表自己的主张**现在有断言；仍然没人钉的
-  是「git 明天还这么说」（sample 是手写字符串）。
-- **P0-2：核对通路账的末行绑定到提交信息的轮次。** 账的行规则（通路 / 欠账 / 连续 / 末行
-  与固定行一致）此前全都只读文档自己：一轮提交了却没记账，文档依然完全合法，只是比提交
-  落后一轮。现在 `ledgerRoundViolations()` 用 `git log -1 --format=%s` 里的「第 N 轮」对账，
-  允许账末行是 N（已提交）或 N+1（先改文档、后提交）；比 N 少就是漏记，句子点名两边的
-  轮次并提醒「没核对也要记一行」。smoke 从真文档里删掉末行、拿该行轮次当提交信息喂进去，
-  断言红且同时说出两个数字；另有三格把它钉紧：领先两轮、提交信息里没有轮次、账是空的。
+- **P0-1：真 git 的 stderr 现在也要过表。** 第 82 轮把措辞假设外化成
+  `REF_READ_WORDINGS`（每行带 `reason` / `pattern` / `sample`），但 `sample` 是手写字符串，
+  证明的只是「表同意自己」。本轮 `tools/git-service-smoke.mjs` 用**同一个 `git()`**（因此
+  同一个 `gitEnv()`，仍是 C locale）、同一个临时仓库，问 git 要这两个失败的真 stderr，再交给
+  `readFileAtRef` 用的**同一个分类器**（`classifyRefReadFailure`，本轮为此导出）。三格三件事：
+  ① 真 git 仍以一行 `fatal: …`、退出码 128 回答这两个失败（这是 sample 的写法声明的前提）：
+  `fatal: path '不存在/的路径' does not exist in 'HEAD'` 与
+  `fatal: invalid object name 'not-a-real-ref'.`；② 每句话只被**一个**带 pattern 的行认出来，
+  且就是答案里那一行；③ 认出真话的行，与手写 `sample` 落到的行是**同一个行对象**——sample
+  与现实不可能各走一行还各自「对」。第四格是这三格的自测：两句真话都以 `fatal:` 开头，所以
+  「放宽成前缀」那种改法会同时命中两行，而表里没有任何一行会——断言写在 git 自己的输出上。
+  验过会红：把 `missing` 的 pattern 改成 `/^fatal:/i`，`bad-ref` 那格立刻点名
+  `matched=["bad-ref","missing"]`，随后每一格依赖「唯一命中」的检查一起红。
+  下文「能自动变红的地方」那句「没有任何 audit 会因为 git 改措辞而变红」因此**不再成立**，
+  已就地改写成它现在的真实边界：今天这套 git 的这两句话被钉住了，**别的失败**（子模块、
+  git 为其它情形保留的拼写）仍没人钉。
+- **P0-2：`createRunner` → `runUpstreamWatch` 那条线，按**文本**断言。** 第 59 轮起 git→API
+  的回落在**对象**上已被断言（`channel: "api"`），但轮次里人看到的是句子，中间还隔着
+  `upstreamDrift` → `formatDrift` 两道：`channel` 在路上丢了，对象仍绿而句子会印「通路：none」，
+  于是一次核对过的轮次读起来像欠账。现在注入 `git` 返回 `{error: ETIMEDOUT}`、API 返回 pin，
+  走完整条 `runUpstreamWatch`，断言句子带「通路：api」、不带 `[UPSTREAM-DEBT]`、不带
+  `[UPSTREAM-MOVED]`、**也不带那条失败通路的原因**（`ETIMEDOUT` 不许漏进安静句子里，
+  否则「无 marker = 没事要做」这个 grep 就不成立），退出码 0；另一格两条路都失败：句子以
+  `[UPSTREAM-DEBT]` 开头、带「通路：none」、两条原因都在、退出码仍 0。验过会红：把
+  `runUpstreamWatch` 里透传的 `channel` 写死成 `"git"`，第一格当场点名
+  `"channel":"git"` 与整句文本。
 
-两条都在 `git-service.js` / `tools/git-service-smoke.mjs` / `tools/upstream-watch.mjs` /
-`tools/upstream-watch-smoke.mjs` 与本文件内，不碰 CLI 参数、配置读写与 IPC 注册体；
-`audit:service` / `audit:config` / `audit:git` / `audit:upstream` 本轮全绿。
+两条都在 `git-service.js` / `tools/git-service-smoke.mjs` 与本文件里（P0-2 只动
+`tools/upstream-watch-smoke.mjs` 的断言），不碰 CLI 参数、配置读写与 IPC 注册体；改写了的
+那句话在下面「能自动变红的地方，和不能的地方」一节。`audit:git` / `audit:upstream` 本轮全绿。
 
-上一轮（第 81 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-81-轮2026-10-27)，归档之后本文件不留第二份。
+上一轮（第 82 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-82-轮2026-10-27)，归档之后本文件不留第二份。
 
 ## 上游真变了怎么办（命令驱动，而不是「记得看一眼」）
 ```bash
@@ -232,14 +242,16 @@ pin 或 ls-remote 给出的 SHA 短于 40 位时一律判「跳过」并说明�
 **`git-service.js` 的 `readFileAtRef` 按 stderr 措辞分类，代价在这里写清楚。** 它用两组
 正则把 `git show` 的失败分成 `bad-ref`（引用不存在）与 `missing`（文件不在那个快照里），
 两者都对用户说不同的话。这两组正则匹配的是 git 的英文措辞，所以模块固定了
-`LC_ALL=C` / `LANG=C`（本地化 git 说的 `致命错误：无效的对象名称` 会落进通用分支）；而
-`tools/git-service-smoke.mjs` 的九条夹具是**手写字符串**，不是从真 git 抓的。也就是说：
-`audit:git` 证明的是「这些措辞今天仍匹配」，**不是**「git 明天还这么说」——git 换了措辞
-时，夹具照旧全绿，真实分类静默落到 `failed`。这是有意接受的：把一条真实 git 的 stderr
-钉进断言，会让套件在某些 git 版本上红，而那不是本仓能修的东西。代价的补偿是通用分支
-必须可诊断——它带上 git 自己的首行 stderr 与退出码，退出码是这条路上唯一不随语言变的
-部分。评审时若想动这两组正则，请同时想清楚这一点：**没有任何 audit 会因为 git 改措辞
-而变红**，只能靠人读这里的措辞与本段的记录。对应代码见 `git-service.js` 顶部 `gitEnv()`
+`LC_ALL=C` / `LANG=C`（本地化 git 说的 `致命错误：无效的对象名称` 会落进通用分支）。断言
+分两层，而且两层问的不是同一个问题：`tools/git-service-smoke.mjs` 的九条夹具是**手写
+字符串**，它们证明「表同意自己」；第 83 轮起同一份 smoke 还会拿**真 git**打印的这两句
+stderr（`missing` / `bad-ref` 各一句）过同一个分类器，要求每句只被一个带 pattern 的行认
+出来、且与对应 `sample` 落在同一行。所以现在的边界是：**今天这套 git 的这两句话被钉住
+了**——git 换了这两句措辞，`audit:git` 会红（这不是「本仓修不了」的红：改的是本仓的
+pattern）。仍然没人钉的是**别的失败**：子模块、git 为其它情形保留的拼写、以及 git 从不
+在这三处发出的措辞，都只能靠人读。代价的补偿照旧是通用分支必须可诊断——它带上 git 自己
+的首行 stderr 与退出码，退出码是这条路上唯一不随语言变的部分。评审时若想动这两组正则，
+请同时想清楚这两层各自覆盖什么，以及本节记录的那半个缺口。对应代码见 `git-service.js` 顶部 `gitEnv()`
 注释（那里写了为什么固定 C locale、以及为什么代价的补偿是通用分支必须带退出码）。
 
 **但 audit 变红不等于覆盖完整**：下面这几处只有人工对照，改坏了不会让任何 audit 变红。

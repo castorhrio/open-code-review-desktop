@@ -541,6 +541,68 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
     JSON.stringify({ result: apiFallback, calls })
   );
 
+  // The cell above asks the *object* `createRunner` returns. What a round actually
+  // shows is the sentence `runUpstreamWatch` prints from it, and that path has its
+  // own seam (`upstreamDrift` → `formatDrift`) between the road that answered and
+  // the words on screen: a `channel` dropped on the way through would still leave
+  // the object green and print `通路：none`, i.e. a checked round that reads like a
+  // debt-carrying one. So the same injected pair is driven end to end here, and
+  // what is asserted is the text, not the object.
+  reset();
+  const viaApiText = await runUpstreamWatch(
+    runnerFor({
+      git: () => ({ error: new Error("ETIMEDOUT") }),
+      api: () => apiOk,
+    })
+  );
+  check(
+    "a timed-out git answered by the API prints 通路：api with no debt marker, at exit 0",
+    viaApiText.verdict.state === "pinned" &&
+      viaApiText.verdict.channel === "api" &&
+      viaApiText.text.includes("通路：api") &&
+      !viaApiText.text.includes(DEBT_MARKER) &&
+      viaApiText.code === 0 &&
+      calls.git === 1 &&
+      calls.api === 1,
+    JSON.stringify({ verdict: viaApiText.verdict, code: viaApiText.code, text: viaApiText.text, calls })
+  );
+  // A checked-and-unchanged round is the quiet case: the road that failed must
+  // not leak into its sentence either. "通路：api（git: ETIMEDOUT）" would read as
+  // debt in the words while carrying no marker, and no marker is exactly what a
+  // grep for "nothing to do" relies on.
+  check(
+    "...and the failed road's reason stays out of it, so the quiet sentence stays quiet",
+    !viaApiText.text.includes("ETIMEDOUT") &&
+      !viaApiText.text.includes(MOVED_MARKER) &&
+      viaApiText.text.split(/\r?\n/).filter(Boolean).length === 1,
+    JSON.stringify(viaApiText.text)
+  );
+  check(
+    "...and the sentence is the formatted verdict, not a second rendering of it",
+    viaApiText.text === formatDrift(viaApiText.verdict),
+    viaApiText.text
+  );
+  // The other road, end to end as well: neither road answering has to read as
+  // debt *and* still be exit 0 — the two halves of "an unreachable GitHub is an
+  // answer, not a failure" for the case that really happens (the git timeout).
+  reset();
+  const viaNothing = await runUpstreamWatch(
+    runnerFor({
+      git: () => ({ error: new Error("ETIMEDOUT") }),
+      api: () => ({ ok: false, failure: "GitHub API HTTP 503", channel: "none" }),
+    })
+  );
+  check(
+    "neither road answering prints [UPSTREAM-DEBT] with 通路：none, still at exit 0",
+    viaNothing.verdict.state === "skipped" &&
+      viaNothing.text.startsWith(DEBT_MARKER) &&
+      viaNothing.text.includes("通路：none") &&
+      viaNothing.text.includes("ETIMEDOUT") &&
+      viaNothing.text.includes("GitHub API HTTP 503") &&
+      viaNothing.code === 0,
+    JSON.stringify({ verdict: viaNothing.verdict, code: viaNothing.code })
+  );
+
   reset();
   const gitThrew = await runnerFor({
     git: () => {
