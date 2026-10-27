@@ -846,8 +846,18 @@ for (const platform of ["darwin", "linux"]) {
  * `app:info` spreads this object into the IPC payload, and `src/lib/types.ts`
  * reads those names, so a rename or an addition is a blank row on the settings
  * page. The key set is pinned once per install shape — the facts are the same
- * six whether the copy is installed, portable or a dev build, only their values
- * differ.
+ * six whether the copy is installed, portable, a dev build, an install whose
+ * uninstaller has gone missing, or an install directory that has since been
+ * deleted, only their values differ.
+ *
+ * The last two shapes are here because the five fields they fill differently are
+ * exactly the ones a "just return early" edit would replace with a different
+ * object: a root without an uninstaller answers `canUninstall: false` through
+ * the same six-key literal, and a deleted root still names its `installDir`.
+ * Pinning only the three happy-ish shapes would let a shape-specific return
+ * literal appear, and the first red would be `app-info-smoke.mjs`'s payload
+ * key-set — where the reader has to work out whether the fixture or the module
+ * moved.
  *
  * The list itself lives in `tools/install-fixture.mjs`, next to the stubs this
  * suite builds the module from, so this check and `app-info-smoke.mjs`'s payload
@@ -862,6 +872,12 @@ for (const platform of ["darwin", "linux"]) {
     ["installed", make({ packaged: true, resources: path.join(installed, "resources") })],
     ["portable", make({ packaged: true, resources: path.join(installed, "resources"), env: { PORTABLE_EXECUTABLE_DIR: tmp } })],
     ["dev", make({ packaged: false, resources: path.join(installed, "resources") })],
+    // The same install root as `installed`, but without the uninstaller file the
+    // scan looks for.
+    ["uninstaller missing", make({ packaged: true, resources: path.join(bare, "resources") })],
+    // A root that is named by the info but is not on disk any more (the same
+    // path the 「安装目录已经不存在」 block above asks about).
+    ["install directory deleted", make({ packaged: true, resources: path.join(tmp, "uninstalled", "resources") })],
   ];
   for (const [label, tools] of shapes) {
     const keys = Object.keys(tools.installInfo()).sort();

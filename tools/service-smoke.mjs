@@ -3050,6 +3050,93 @@ check(
   svc.spawnFailure({ code: "EACCES", message: "permission denied" }, present, dir) === "permission denied"
 );
 
+/* ---- an exec budget really kills the child it gave up on ----
+ * `app-info.js`'s version probe is built on this: `readVersionOutput()` hands
+ * `exec` a `timeoutMs` and relies on the child being *killed* at that point, not
+ * merely abandoned. The probe's own checks stub `exec`, so the one behaviour that
+ * makes the double budget ("the service kills the child; app-info also stops
+ * waiting") safe had no assertion behind it: a `setTimeout` that resolved the
+ * promise without killing anything would leave a hung CLI process behind on every
+ * settings-page open, and every suite here would stay green.
+ *
+ * So the fake binary is this machine's own node, planted under the name the
+ * service looks for, and its argument is a script that writes its PID down and
+ * then sleeps for a minute. The budget is asserted three ways: the call comes back
+ * long before the child would have, the answer says `timedOut`, and the PID the
+ * child wrote is no longer a live process. The last one is what "killed" means;
+ * without it the check cannot tell a killed child from a promise that simply
+ * stopped waiting.
+ */
+{
+  const tree = resolveTree("timeout");
+  const bin = path.join(tree, "node_modules", PLATFORM_PACKAGE, "bin", BINARY_FILE);
+  fs.mkdirSync(path.dirname(bin), { recursive: true });
+  let plantedBy = "symlink";
+  try {
+    fs.symlinkSync(process.execPath, bin);
+  } catch (_) {
+    try {
+      fs.linkSync(process.execPath, bin);
+      plantedBy = "hardlink";
+    } catch (_) {
+      fs.copyFileSync(process.execPath, bin);
+      plantedBy = "copy";
+    }
+  }
+  const childSvc = require(path.join(tree, "service.cjs"));
+  // Same blinding as the resolution checks above: only the tree may answer, so a
+  // global npm install cannot decide which binary gets spawned.
+  childSvc.fileExists = (p) => String(p).startsWith(tree);
+
+  const pidFile = path.join(tree, "child.pid");
+  const hang = "require('fs').writeFileSync(process.env.OCR_EXEC_PIDFILE, String(process.pid)); setTimeout(() => {}, 60000);";
+  const budget = 300;
+  const startedAt = Date.now();
+  const res = await childSvc.exec(["-e", hang], tree, { OCR_EXEC_PIDFILE: pidFile }, { timeoutMs: budget });
+  const elapsed = Date.now() - startedAt;
+  let pid = 0;
+  try {
+    pid = Number(fs.readFileSync(pidFile, "utf8").trim());
+  } catch (_) {}
+  const alive = (p) => {
+    try {
+      process.kill(p, 0);
+      return true;
+    } catch (err) {
+      return err.code === "EPERM";
+    }
+  };
+  let stillThere = pid > 0 && alive(pid);
+  for (let i = 0; i < 40 && stillThere; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    stillThere = alive(pid);
+  }
+  check(
+    "a budget ends the call instead of waiting out a CLI that never exits",
+    res.timedOut === true && elapsed >= budget - 100 && elapsed < 5000,
+    JSON.stringify({ elapsed, budget, plantedBy })
+  );
+  check(
+    "...and the child it gave up on is really gone, not merely un-awaited",
+    pid > 0 && !stillThere,
+    JSON.stringify({ pid, stillThere })
+  );
+  check(
+    "...and a killed child is reported as signalled, not as a clean exit",
+    res.code !== 0,
+    JSON.stringify({ code: res.code })
+  );
+  // The negative control: the same fake binary, no budget. Without it, "the call
+  // returned" above could be explained by a child that exits on its own.
+  const quick = await childSvc.exec(["-e", "process.stdout.write('alive')"], tree);
+  check(
+    "...while a call with no budget is not killed: the same fake CLI answers normally",
+    quick.code === 0 && quick.stdout === "alive" && !("timedOut" in quick),
+    JSON.stringify(quick)
+  );
+  fs.rmSync(tree, { recursive: true, force: true });
+}
+
 /* ---- cleanup ---- */
 for (const d of [dir, notRepo, home]) fs.rmSync(d, { recursive: true, force: true });
 

@@ -628,21 +628,50 @@ const base = {
     JSON.stringify(Object.keys(timedOutInfo).sort()) === JSON.stringify(Object.keys(answeredInfo).sort()),
     JSON.stringify([Object.keys(timedOutInfo).sort(), Object.keys(answeredInfo).sort()])
   );
-  // The drop is a decision in `app-info.js` only while `main.js` does not choose
-  // fields off the probe. Reading the registration is the only way to see that
-  // (it is Electron-only code), and the assertion is deliberately about the
-  // *name*: a `timedOut` in `main.js` is a second decision point coming back.
-  // Comments are stripped first: the registration explains this decision in
-  // prose, and a check that also forbade the *word* would make the comment the
-  // thing to delete.
-  const mainSrc = fs
-    .readFileSync(path.join(ROOT, "main.js"), "utf8")
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/\/\/.*$/gm, "");
+  // The drop is a decision in `app-info.js` only while the registration does not
+  // choose fields off the probe. Reading the registration is the only way to see
+  // that (it is Electron-only code), and the assertion is deliberately about the
+  // *name*: a `timedOut` in the handler is a second decision point coming back.
+  //
+  // It finds the handler by its IPC channel across the root modules, not by
+  // reading `main.js` by name. The check is about what the registration does, and
+  // those registrations have moved before; a file-name assertion turns "moved to
+  // `xxx-handler.js`" into "main.js not found", which says nothing about the
+  // decision this check exists for. Two registrations of the same channel are
+  // their own failure: then the assertion would only be reading one of them.
+  //
+  // Comments are stripped before the body is read: the registration explains this
+  // decision in prose, and a check that also forbade the *word* would make the
+  // comment the thing to delete.
+  const stripComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  const registered = fs
+    .readdirSync(ROOT)
+    .filter((file) => file.endsWith(".js"))
+    .map((file) => ({
+      file,
+      source: stripComments(fs.readFileSync(path.join(ROOT, file), "utf8")),
+    }))
+    .filter(({ source }) => /ipcMain\.handle\(\s*["']app:info["']/.test(source));
   check(
-    "app:info hands the whole probe answer to formatAppInfo, and never names timedOut itself",
-    /\.\.\.probe/.test(mainSrc) && !/timedOut/.test(mainSrc),
-    "main.js"
+    "exactly one root module registers app:info",
+    registered.length === 1,
+    registered.map(({ file }) => file).join(", ") || "none"
+  );
+  // The body runs from the registration to the next registration in that module.
+  // It does not parse JavaScript; it delimits the one block this check is about,
+  // which is all a source-level assertion can honestly do.
+  const handlerBody = (source) => {
+    const start = source.search(/ipcMain\.handle\(\s*["']app:info["']/);
+    if (start < 0) return "";
+    const rest = source.slice(start + 1);
+    const next = rest.search(/ipcMain\.(?:handle|on|removeHandler)\(/);
+    return next < 0 ? rest : rest.slice(0, next);
+  };
+  const body = registered.length === 1 ? handlerBody(registered[0].source) : "";
+  check(
+    "app:info reads the probe through readVersionOutput, hands the whole answer to formatAppInfo, and never names timedOut itself",
+    /readVersionOutput\(/.test(body) && /\.\.\.probe/.test(body) && /formatAppInfo\(/.test(body) && !/timedOut/.test(body),
+    registered.length === 1 ? registered[0].file : "no single registration"
   );
 
   // The defaults have to be usable, and the grace has to be *after* the budget:

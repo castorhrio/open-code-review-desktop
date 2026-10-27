@@ -37,6 +37,46 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 
 ---
 
+## 上游状态（第 73 轮，2026-10-27）
+
+第 73 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 两条通路都可达。**
+`git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
+refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
+（与第 49–72 轮同一个 commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
+`dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`（`--tags` 里最高版本仍是 `v1.13.3`）；
+`npm view @alibaba-group/open-code-review version dist-tags` 仍是 `1.13.3` /
+`latest: 1.13.3`。desktop 的 `^1.13.3` 无需改动，**无移植项**。
+
+本轮不加新功能面，做的是上一轮简报里的两条 P0 与一条 P1，主题都是「同一件事写了两遍，
+而第二遍没人看着」：
+
+- **P0-1：`app:info` 与 `install:info` 的桩参数合并成一份 fixture。** 两条断言说过同一个
+  key 集合：`tools/install-info-smoke.mjs` 钉 `installInfo()` 的六个字段，
+  `tools/app-info-smoke.mjs` 钉 `app:info` 的 payload 键集（`installInfo()` 被展开进去）。
+  两处注释都写着「与另一处互相钉住」，但桩参数（`app` / `shell`）在两边各有一份拷贝，
+  任一处漂移会让两条断言朝相反方向报红，且不说哪份是新的。现在桩与六项事实一起搬进
+  `tools/install-fixture.mjs`：`INSTALL_INFO_KEYS`、`makeApp`、`makeShell`、
+  `installStubs`、`stubInstall`。`install-info-smoke` 仍然自己回答文件系统问题（真临时
+  目录、注入 `exists`/`readdir`/`dirname`）——那才是它测的行为；共享的是桩的形状与
+  六项事实的名字。`app-info-smoke` 另外钉三件事：fixture 的桩恰好答六个 key、值就是页面
+  夹具一直在用的那套、并且两个 suite 都还从这个文件 import（源码断言——本地再抄一份桩
+  正是这件事要停掉的行为，而它在两边的行为断言里都看不见）。
+- **P0-2：`git-service.js` 的 stderr 分类代价写进「能自动变红的地方，和不能的地方」。**
+  见下面那一节新增的一段：分类读的是 git 自己的措辞，`audit:git` 的九条 stderr 是手写
+  字符串，所以断言证明的只是「今天的措辞仍匹配」，不是「git 明天还这么说」。这就是它的
+  代价，写下来，免得下一轮再提一遍。
+- **P1-1：`docs/upstream-history.md` 的追加规则，从习惯变成断言。** 第 72 轮给第 71 轮
+  正文补了一句「这一支的代价」——改动是对的，但没有痕迹，于是「这句话是哪一轮写的」
+  只能靠回忆。现在那份文件开头写明自己是**可追溯的活文档**：正文写入后不再改写，后续
+  轮次只能在段末追加一段 `**补记（第 N 轮）**`，N 必须晚于该段轮次，新轮次正文加在最
+  上面（段落轮次递减）。规则的可执行形式是 `tools/upstream-watch.mjs` 的
+  `historyAppendViolations()`：`audit:upstream` 要求它对真实归档返回空数组、要求归档里
+  至少真有一条补记（否则「没有违例」是空话），并用「只改一行」的副本逐条验证它会红——
+  补记之后又出现叙述、补记写成本段自己的轮次、补记被挪到正文之前、段落顺序被改乱、
+  补记落在任何段落之外。第 72 轮那条补记已按新形状改成段末的 `**补记（第 72 轮）**`。
+
+---
+
 ## 上游状态（第 72 轮，2026-10-27）
 
 第 72 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 两条通路都可达。**
