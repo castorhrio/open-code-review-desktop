@@ -66,20 +66,21 @@ function formatAppInfo({
   void probeError;
   return {
     // The install facts are spread *first*, so a field of theirs that happens to
-    // share a name with one of this function's own fields cannot replace it.
-    // The seven fields below are the answers `app:info` itself gives: `version`
-    // comes out of `readVersion` (the probe's budgets already decided what could
-    // be read) and `binarySource` is deliberately nulled when there is no path.
+    // share a name with one of this function's own answers cannot replace it.
+    // The keys below are the answers `app:info` itself gives: `version` comes
+    // out of `readVersion` (the probe's budgets already decided what could be
+    // read) and `binarySource` is deliberately nulled when there is no path.
     // An install fact called `binary` or `version` is not a better answer to
     // those questions — it is a name collision — so it loses, and the payload
     // keeps saying what this function decided.
     //
     // The cost is stated rather than hidden: a colliding install field vanishes
-    // without a word. `tools/app-info-smoke.mjs` asks this shape directly
-    // (`installInfo: { binary: "evil", version: "9.9.9" }`) and requires those
-    // fields to keep the computed values, so the day someone moves the spread
-    // back below them — the natural edit if `installInfo` reads as "more fields
-    // to add" — the test is what says the decision changed.
+    // without a word. `tools/app-info-smoke.mjs` reads the collision surface off
+    // this function's own return keys (not off a hand-written list of seven) and
+    // gives each of them an `evil-*` value through `installInfo`, requiring the
+    // computed value to survive — so the day someone moves the spread back below
+    // them, the natural edit if `installInfo` reads as "more fields to add", the
+    // test is what says the decision changed.
     ...(installInfo || {}),
     binary: binaryPath,
     // "not found" has one answer here: no path, no source. Copying a stale

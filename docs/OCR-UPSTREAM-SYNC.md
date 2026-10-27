@@ -35,7 +35,7 @@ tag v1.13.3
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 86 轮：`git ls-remote` 超时 124，改走 `api.github.com` 的 `commits/main`，`sha` 与 pin 一致；npm 为 `1.13.3`；tag 未独立核对；通路：api）**
+**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 87 轮：`git ls-remote` 退出码 0，`refs/heads/main` 与 pin 一致；`refs/tags/v1.13.3` 仍为最高 tag；npm 为 `1.13.3`；tag 对象未独立重读；通路：git）**
 
 ### 核对通路账
 
@@ -94,6 +94,7 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 | 84 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；`installInfo` 撞名双向断言、上游自测入口改 argv、文档新增编辑规则清单并进断言 | — |
 | 85 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；`app:info` 的 body 抽成 `handleAppInfo` / `assembleAppInfo`，用 getter 探针直测 spread | — |
 | 86 | 2026-10-27 | api | `375f64c` / `v1.13.3`，无新内容；git 超时（124）、API 作答；npm `1.13.3`；编辑规则拆成「给人读的约定」与「给 audit 看的约束」并逐条反向断言 | — |
+| 87 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；`formatAppInfo` 撞名面扩到全部返回键、归档禁止整串引用 pin | — |
 
 ### 对照表（上游前进时要重读的五处）
 
@@ -101,9 +102,9 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
 对应行并把轮次与日期改成本轮。
 
-**第 46–86 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
+**第 46–87 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
 npm 通路可达，第 56 轮 git 超时但 API 可达，第 63–64 轮本文件无通路记录，第 68 轮 git
-超时但 API 可达，第 69–76、79–80、84–85 轮 git 可达，第 77 轮本文件无通路记录，第 78、81–83、86 轮
+超时但 API 可达，第 69–76、79–80、84–85、87 轮 git 可达，第 77 轮本文件无通路记录，第 78、81–83、86 轮
 git 超时但 API 可达），所以下表 5 行的
 「最近一次对照」停在第 45 轮是
 **没有理由重看**，不是忘了看：
@@ -172,37 +173,39 @@ git 超时但 API 可达），所以下表 5 行的
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。搬完这里只留一句
    指针——「本文件只留当前一轮」不是约定而是断言（`previousRoundPointerViolations`）。
 
-## 当前状态（第 86 轮，2026-10-27）
+## 当前状态（第 87 轮，2026-10-27）
 
-第 86 轮复核：**HEAD 未变，结论仍是「无新内容」；API 与 npm 可达，git 通路本轮超时。**
-`git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main` 本轮超时
-（`timeout` 返回 124，与第 47–48、83 轮同因），改由 `npm run upstream:check` 走
-`api.github.com/repos/alibaba/open-code-review/commits/main` 作答：`sha` 仍是 `375f64c`
-（与第 49–85 轮同一个 commit，通路 `api`）；`npm view @alibaba-group/open-code-review version`
-仍是 `1.13.3`。tag 一处本轮没有独立核对——`refs/heads/main` 未变即「无新 commit」，
-registry 的 `latest` 未变即「无新发布」。desktop 的 `^1.13.3` 无需改动，**无移植项**。
+第 87 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 可达。**
+`git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main` 本轮退出码 0，
+`375f64c` 与 pin 一致（与第 49–86 轮同一个 commit）；`git ls-remote --tags --refs` 仍以
+`refs/tags/v1.13.3` 为最高版本，`npm view @alibaba-group/open-code-review version` 仍是
+`1.13.3`（tag 对象本轮没有独立重读——branch 未变即「无新 commit」，registry 的 `latest`
+未变即「无新发布」）。desktop 的 `^1.13.3` 无需改动，**无移植项**。
 
-控制仓简报里的 P0-1、P0-2、P1-1 在前两轮已全部落地（`handleAppInfo` 的 spread 直测、
-`Object.create(null)` 的 resolve 断言、`bridge-contract` 的 arity 检查）。本轮做简报的
-下一条 P1，并把随之而来的 pin 双写取舍记进加固日志。
+本轮按控制仓简报收口两条「会红」的边界，都不改运行期行为：
 
-- **P1-2：人读区的编辑规则拆成两节。** 旧清单六条里，只有「本文件只留当前一轮」「归档
-  只追加补记」「每轮通路账记一行」是**人要做的动作**；其余三条（机器可读区只由脚本维护、
-  pin 恰好三处、别把锚点字面量抄进人读区）其实是 `tools/upstream-watch.mjs` 常量的
-  说明书，抄在文档里就是第二份会过期的拷贝。现在 `docAuthoringRuleViolations` 要求：
-  父节下恰好一个「给人读的编辑约定」（至少 3 条编号规则）与一个「给 audit:upstream 看的
-  约束」，顺序固定，且后者必须点名 `tools/upstream-watch.mjs`。smoke 用六种「只改一处」
-  的副本各自验证会红：删父节、删任一小节、交换两小节、把整节挪到当前状态之后、把人的
-  清单删到两条、以及在约束节里抹掉脚本指针。
-- **P2：pin 双写的取舍入档。** `docs/hardening-log.md` 记下「pin 在
-  `tools/upstream-watch.mjs` 与本文各写一份、靠 `audit:upstream` 双向比对」这一选择，
-  以及何时该改成单一来源。
+- **P0-1：`formatAppInfo` 的撞名面从「七个计算字段」扩到「全部返回键」。**
+  `tools/app-info-smoke.mjs` 不再从手写清单取键，而是从
+  `formatAppInfo({ installInfo: {} })` 的返回对象直接读；每个键各给一个 `evil-<key>` 值
+  塞进 `installInfo`，断言全部保住计算值。共享的 `APP_INFO_COMPUTED_KEYS` 仍保留
+  （`install-info-smoke.mjs` 用它证明模块不提供撞名），但新增一格要求它恰好等于这组返回
+  键——清单落后于返回值时先红。验过会红：把 `...installInfo` 挪到计算字段之后，七个键
+  逐一变成 `evil-*`，失败信息列全。
+- **P0-2：`docs/upstream-history.md` 不许整串引用 pin。**
+  新增 `historyPinLeakViolations`：按 `PINNED_UPSTREAM.sha` 的整串逐行查，命中即点名行号；
+  7 位前缀、别的 commit / tag 对象的整串仍然允许。pin 常量不是整串时直接报错，避免
+  `includes()` 永远不中而让规则空过。归档里原有的 25 处整串 pin 一并改成 7 位前缀（与文件
+  开头早已写下的「历史段里的 SHA 是 7 位前缀或 tag 对象」一致）；这是本轮唯一的归档正文
+  改动，取舍记在 `docs/hardening-log.md`。反向控制：在归档第一行插入整串 pin，断言点名
+  第 1 行且只改了一行。
 
-改动只在 `tools/upstream-watch.mjs`、`tools/upstream-watch-smoke.mjs`、`docs/hardening-log.md`
-与本文件；不碰 CLI 参数、配置读写、运行期行为或本文件的机器可读区（除本轮自己的 pin 行与账）。
-`audit:upstream` / `audit:static` 本轮全绿。
+改动只在 `app-info.js`（注释）、`tools/app-info-smoke.mjs`、`tools/install-info-smoke.mjs`、
+`tools/install-fixture.mjs`（注释）、`tools/upstream-watch.mjs`、`tools/upstream-watch-smoke.mjs`、
+`docs/hardening-log.md`、`docs/upstream-history.md` 与本文件；不碰 `main.js`、`src/**`、
+CLI 参数、配置读写或 `git show` 分类。`audit:appinfo` / `audit:upstream` / `audit:static`
+本轮全绿。
 
-上一轮（第 85 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-85-轮2026-10-27)，归档之后本文件不留第二份。
+上一轮（第 86 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-86-轮2026-10-27)，归档之后本文件不留第二份。
 
 ## 上游真变了怎么办（命令驱动，而不是「记得看一眼」）
 ```bash

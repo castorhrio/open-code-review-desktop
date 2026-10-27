@@ -5,9 +5,10 @@
 以及「核对通路账」表 —— 每轮核对的结论只写在那里一行，逐轮正文（查了什么、通路是哪条）
 归档在这里。
 
-本文件里**没有**也不该有 pin 声明：历史段里的 SHA 是 7 位前缀或 tag 对象，与整串 40 位的
-pin 不是同一种东西。`tools/upstream-watch-smoke.mjs` 断言本文件不含任何 pin 声明、也不含
-pin 块，这样它就不会某天被当成第二个权威源。
+本文件里**没有** pin 声明，也**不许整串引用 pin**：历史段里的 SHA 是 7 位前缀或 tag 对象。
+`tools/upstream-watch-smoke.mjs` 断言本文件不含任何 pin 声明、不含 pin 块，且
+`PINNED_UPSTREAM.sha` 的整串一次都不出现（`historyPinLeakViolations`，第 87 轮起）——pin 的
+整串只在同步文档里声明，这里只写 7 位前缀，这样它就不会某天被当成第二个权威源。
 
 搬家原因（第 62 轮）：13 段「上游状态（…第 N 轮）」堆在一份还要承载 pin 与对照表的文件里。
 `audit:upstream` 要求 pin 在 `OCR-UPSTREAM-SYNC.md` 里恰好出现三次，历史段里的旧 SHA 是那
@@ -36,6 +37,36 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 补记落在这段之外。规则本身也必须写在这里（上面那句），否则它只存在于脚本里。
 
 ---
+## 上游状态（第 86 轮，2026-10-27）
+
+第 86 轮复核：**HEAD 未变，结论仍是「无新内容」；API 与 npm 可达，git 通路本轮超时。**
+`git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main` 本轮超时
+（`timeout` 返回 124，与第 47–48、83 轮同因），改由 `npm run upstream:check` 走
+`api.github.com/repos/alibaba/open-code-review/commits/main` 作答：`sha` 仍是 `375f64c`
+（与第 49–85 轮同一个 commit，通路 `api`）；`npm view @alibaba-group/open-code-review version`
+仍是 `1.13.3`。tag 一处本轮没有独立核对——`refs/heads/main` 未变即「无新 commit」，
+registry 的 `latest` 未变即「无新发布」。desktop 的 `^1.13.3` 无需改动，**无移植项**。
+
+控制仓简报里的 P0-1、P0-2、P1-1 在前两轮已全部落地（`handleAppInfo` 的 spread 直测、
+`Object.create(null)` 的 resolve 断言、`bridge-contract` 的 arity 检查）。本轮做简报的
+下一条 P1，并把随之而来的 pin 双写取舍记进加固日志。
+
+- **P1-2：人读区的编辑规则拆成两节。** 旧清单六条里，只有「本文件只留当前一轮」「归档
+  只追加补记」「每轮通路账记一行」是**人要做的动作**；其余三条（机器可读区只由脚本维护、
+  pin 恰好三处、别把锚点字面量抄进人读区）其实是 `tools/upstream-watch.mjs` 常量的
+  说明书，抄在文档里就是第二份会过期的拷贝。现在 `docAuthoringRuleViolations` 要求：
+  父节下恰好一个「给人读的编辑约定」（至少 3 条编号规则）与一个「给 audit:upstream 看的
+  约束」，顺序固定，且后者必须点名 `tools/upstream-watch.mjs`。smoke 用六种「只改一处」
+  的副本各自验证会红：删父节、删任一小节、交换两小节、把整节挪到当前状态之后、把人的
+  清单删到两条、以及在约束节里抹掉脚本指针。
+- **P2：pin 双写的取舍入档。** `docs/hardening-log.md` 记下「pin 在
+  `tools/upstream-watch.mjs` 与本文各写一份、靠 `audit:upstream` 双向比对」这一选择，
+  以及何时该改成单一来源。
+
+改动只在 `tools/upstream-watch.mjs`、`tools/upstream-watch-smoke.mjs`、`docs/hardening-log.md`
+与本文件；不碰 CLI 参数、配置读写、运行期行为或本文件的机器可读区（除本轮自己的 pin 行与账）。
+`audit:upstream` / `audit:static` 本轮全绿。
+
 ## 上游状态（第 85 轮，2026-10-27）
 
 第 85 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 均可核对。**
@@ -76,7 +107,7 @@ desktop 的 `^1.13.3` 无需改动，**无移植项**。
 
 第 84 轮复核：**HEAD 未变，结论仍是「无新内容」；git、API 与 npm 均可核对。**
 `git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main` 本轮退出码 0，
-`375f64cd6f67a48a135da83cfcf59c52669a09cb` 与 pin 一致（与第 49–83 轮同一个 commit）；
+`375f64c` 与 pin 一致（与第 49–83 轮同一个 commit）；
 `api.github.com/repos/alibaba/open-code-review/commits/main` 给出同一个 `sha`；`npm view
 @alibaba-group/open-code-review version` 仍是 `1.13.3`。tag 一处本轮没有独立核对——
 `refs/heads/main` 未变即「无新 commit」，registry 的 `latest` 未变即「无新发布」。desktop
@@ -158,7 +189,7 @@ desktop 的 `^1.13.3` 无需改动，**无移植项**。
 第 82 轮复核：**HEAD 未变，结论仍是「无新内容」；API 与 npm 两条通路可达。**
 `git ls-remote https://github.com/alibaba/open-code-review.git` 本轮超时（`timeout` 返回
 124，与第 47–48 轮同因），改由 `api.github.com/repos/alibaba/open-code-review/commits/main`
-回答：HTTP 200，`sha` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`（与第 49–81 轮同一个
+回答：HTTP 200，`sha` = `375f64c`（与第 49–81 轮同一个
 commit，2026-10-20 的 `fix(tool): report an empty code_comment batch instead of success
 (#1773)`）；`npm view @alibaba-group/open-code-review version` 仍是 `1.13.3`。tag 一处本轮
 没有独立核对——`refs/heads/main` 未变即「无新 commit」，registry 的 `latest` 未变即「无新
@@ -192,7 +223,7 @@ commit，2026-10-20 的 `fix(tool): report an empty code_comment batch instead o
 第 81 轮复核：**HEAD 未变，结论仍是「无新内容」；API 与 npm 两条通路可达。**
 `git ls-remote https://github.com/alibaba/open-code-review.git` 本轮超时（`timeout` 返回
 124，与第 47–48 轮同因），改由 `api.github.com/repos/alibaba/open-code-review/commits/main`
-回答：HTTP 200，`sha` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`（与第 49–80 轮同一个
+回答：HTTP 200，`sha` = `375f64c`（与第 49–80 轮同一个
 commit，2026-10-20 的 `fix(tool): report an empty code_comment batch instead of success
 (#1773)`）；`npm view @alibaba-group/open-code-review version` 仍是 `1.13.3`。tag 一处本轮
 没有独立核对——`refs/heads/main` 未变即「无新 commit」，registry 的 `latest` 未变即「无新
@@ -230,7 +261,7 @@ commit，2026-10-20 的 `fix(tool): report an empty code_comment batch instead o
 
 第 80 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 两条通路都可达。**
 `git ls-remote https://github.com/alibaba/open-code-review.git HEAD refs/heads/main
-refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
+refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64c`
 （与第 49–79 轮同一个 commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
 `dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`；`npm view @alibaba-group/open-code-review version`
 仍是 `1.13.3`。desktop 的 `^1.13.3` 无需改动，**无移植项**。
@@ -262,7 +293,7 @@ refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfc
 
 第 79 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 两条通路都可达。**
 `git ls-remote https://github.com/alibaba/open-code-review.git HEAD refs/tags/v1.13.3`
-退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`（与第 49–78 轮同一个
+退出码 0，`refs/heads/main` = `375f64c`（与第 49–78 轮同一个
 commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
 `dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`；`npm view @alibaba-group/open-code-review version`
 仍是 `1.13.3`。desktop 的 `^1.13.3` 无需改动，**无移植项**。
@@ -296,7 +327,7 @@ commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
 `git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
 refs/tags/v1.13.3` 本轮在 120 秒预算内没有返回（`timeout` 退出码 124，无输出），
 `api.github.com/repos/alibaba/open-code-review/commits/main` 退出码 0，
-`sha` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`（与第 49–76 轮同一个 commit）；
+`sha` = `375f64c`（与第 49–76 轮同一个 commit）；
 `npm view @alibaba-group/open-code-review version dist-tags` 仍是 `1.13.3` /
 `latest: 1.13.3`（tag 一处本轮没有独立重读，由 `main` 顶端未变与 npm 版本未变共同说明）。
 desktop 的 `^1.13.3` 无需改动，**无移植项**。第 77 轮的提交没有更新本文件，因此本轮在
@@ -339,7 +370,7 @@ desktop 的 `^1.13.3` 无需改动，**无移植项**。第 77 轮的提交没�
 
 第 76 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 两条通路都可达。**
 `git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
-refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
+refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64c`
 （与第 49–75 轮同一个 commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
 `dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`；
 `npm view @alibaba-group/open-code-review version dist-tags` 仍是 `1.13.3` /
@@ -382,7 +413,7 @@ refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfc
 
 第 75 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 两条通路都可达。**
 `git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
-refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
+refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64c`
 （与第 49–74 轮同一个 commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
 `dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`；
 `npm view @alibaba-group/open-code-review version dist-tags` 仍是 `1.13.3` /
@@ -423,7 +454,7 @@ refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfc
 
 第 74 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 两条通路都可达。**
 `git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
-refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
+refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64c`
 （与第 49–73 轮同一个 commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
 `dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`；
 `npm view @alibaba-group/open-code-review version dist-tags` 仍是 `1.13.3` /
@@ -459,7 +490,7 @@ refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfc
 
 第 73 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 两条通路都可达。**
 `git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
-refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
+refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64c`
 （与第 49–72 轮同一个 commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
 `dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`（`--tags` 里最高版本仍是 `v1.13.3`）；
 `npm view @alibaba-group/open-code-review version dist-tags` 仍是 `1.13.3` /
@@ -499,7 +530,7 @@ refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfc
 
 第 72 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 两条通路都可达。**
 `git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
-refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
+refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64c`
 （与第 49–71 轮同一个 commit），`--tags` 里最高版本仍是 `v1.13.3`；
 `npm view @alibaba-group/open-code-review version dist-tags` 仍是 `1.13.3` /
 `latest: 1.13.3`。desktop 的 `^1.13.3` 无需改动，**无移植项**。
@@ -541,7 +572,7 @@ refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfc
 
 第 71 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 两条通路都可达。**
 `git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
-refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
+refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64c`
 （与第 49–70 轮同一个 commit），`--tags` 里最高版本仍是 `v1.13.3`；
 `npm view @alibaba-group/open-code-review version dist-tags` 仍是 `1.13.3` /
 `latest: 1.13.3`。desktop 的 `^1.13.3` 无需改动，**无移植项**。
@@ -592,7 +623,7 @@ refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfc
 
 第 70 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 两条通路都可达。**
 `git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
-refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
+refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64c`
 （与第 49–69 轮同一个 commit），`--tags` 里最高版本仍是 `v1.13.3`；
 `npm view @alibaba-group/open-code-review version dist-tags` 仍是 `1.13.3` /
 `latest: 1.13.3`。desktop 的 `^1.13.3` 无需改动，**无移植项**。
@@ -635,7 +666,7 @@ refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfc
 
 第 69 轮复核：**HEAD 未变，结论仍是「无新内容」；git 通路本轮可达。**
 `git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
-refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
+refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64c`
 （与第 49–68 轮同一个 commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
 `dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`（`--tags` 里最高版本仍是 `v1.13.3`）；
 `npm view @alibaba-group/open-code-review version dist-tags` 仍是 `1.13.3` /
@@ -672,7 +703,7 @@ refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfc
 `git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
 refs/tags/v1.13.3` 本轮超时（退出码 124），改走 GitHub API：
 `api.github.com/repos/alibaba/open-code-review/commits/main` 给出
-`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`（与第 49–67 轮同一个
+`refs/heads/main` = `375f64c`（与第 49–67 轮同一个
 commit），`git/ref/tags/v1.13.3` 仍指向 annotated tag 对象
 `dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`，`releases/latest` 仍是 `v1.13.3`；
 `npm view @alibaba-group/open-code-review version dist-tags` 仍是 `1.13.3` /
@@ -702,7 +733,7 @@ commit），`git/ref/tags/v1.13.3` 仍指向 annotated tag 对象
 
 第 67 轮复核：**两条通路一致，结论仍是「无新内容」**。
 `git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
-refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
+refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64c`
 （与第 49–66 轮同一个 commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
 `dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`；`npm view @alibaba-group/open-code-review
 version dist-tags` 仍是 `1.13.3` / `latest: 1.13.3`。desktop 的 `^1.13.3` 无需改动，
@@ -738,7 +769,7 @@ version dist-tags` 仍是 `1.13.3` / `latest: 1.13.3`。desktop 的 `^1.13.3` �
 
 第 66 轮复核：**两条通路一致，结论仍是「无新内容」**。
 `git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
-refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
+refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64c`
 （与第 49–65 轮同一个 commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
 `dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`；`npm view @alibaba-group/open-code-review
 version dist-tags` 仍是 `1.13.3` / `latest: 1.13.3`。desktop 的 `^1.13.3` 无需改动，
@@ -771,7 +802,7 @@ version dist-tags` 仍是 `1.13.3` / `latest: 1.13.3`。desktop 的 `^1.13.3` �
 
 第 65 轮复核：**三条通路一致，结论仍是「无新内容」**。
 `git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
-refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
+refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64c`
 （与第 49–64 轮同一个 commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
 `dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`；`npm view @alibaba-group/open-code-review
 version dist-tags` 仍是 `1.13.3` / `latest: 1.13.3`。desktop 的 `^1.13.3` 无需改动，
@@ -798,7 +829,7 @@ version dist-tags` 仍是 `1.13.3` / `latest: 1.13.3`。desktop 的 `^1.13.3` �
 
 第 62 轮复核：**两条通路一致，结论仍是「无新内容」**。
 `git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
-refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
+refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64c`
 （与第 49–61 轮同一个 commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
 `dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`。desktop 的 `^1.13.3` 无需改动，**无移植项**。
 
@@ -817,7 +848,7 @@ refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfc
 
 第 61 轮复核：**通路可达，结论仍是「无新内容」**。
 `git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
-refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
+refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64c`
 （与第 49–60 轮同一个 commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
 `dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`。desktop 的 `^1.13.3` 无需改动，
 **无移植项**。
@@ -845,7 +876,7 @@ refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfc
 
 第 60 轮复核：**三条通路都可达，结论仍是「无新内容」**。
 `git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
-refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
+refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64c`
 （与第 49–59 轮同一个 commit），`refs/tags/v1.13.3` = `dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`
 （annotated tag 对象，指向同一 commit）；`api.github.com/repos/alibaba/open-code-review/commits/main`
 给出同一 SHA，`/releases/latest` 仍是 `v1.13.3`。desktop 的 `^1.13.3` 无需改动，
@@ -868,7 +899,7 @@ refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfc
 
 第 59 轮复核：**三条通路都可达，结论仍是「无新内容」**。
 `git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
-refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
+refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64c`
 （与第 49–58 轮同一个 commit），`refs/tags/v1.13.3` = `dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`
 （annotated tag 对象，指向同一 commit）；`api.github.com/repos/alibaba/open-code-review/commits/main`
 给出同一 SHA；`npm view @alibaba-group/open-code-review version dist-tags` = `1.13.3` /
@@ -894,7 +925,7 @@ refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfc
 
 第 58 轮复核：**三条通路都可达，结论仍是「无新内容」**。
 `git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
-refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
+refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64c`
 （与第 49–57 轮同一个 commit），`refs/tags/v1.13.3` = `dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`
 （annotated tag 对象，指向同一 commit）；`npm view @alibaba-group/open-code-review
 version dist-tags` = `1.13.3` / `latest: 1.13.3`。desktop 的 `^1.13.3` 无需改动，
@@ -923,7 +954,7 @@ version dist-tags` = `1.13.3` / `latest: 1.13.3`。desktop 的 `^1.13.3` 无需�
 
 第 57 轮复核：**三条通路都可达，结论仍是「无新内容」**。
 `git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main` =
-`375f64cd6f67a48a135da83cfcf59c52669a09cb`（与第 49–56 轮同一个 commit）；
+`375f64c`（与第 49–56 轮同一个 commit）；
 `api.github.com/repos/alibaba/open-code-review/commits/main` 给出同一 SHA；
 `npm view @alibaba-group/open-code-review version dist-tags` = `1.13.3` /
 `latest: 1.13.3`，release 仍是 `v1.13.3`。desktop 的 `^1.13.3` 无需改动，**无移植项**。
@@ -947,7 +978,7 @@ version dist-tags` = `1.13.3` / `latest: 1.13.3`。desktop 的 `^1.13.3` 无需�
 `git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
 refs/tags/v1.13.3` 60s 超时（`timeout` 返回 124，与第 47–48、52–54 轮同因）；
 `curl https://api.github.com/repos/alibaba/open-code-review/commits/main` 返回
-`sha` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`（2026-10-20
+`sha` = `375f64c`（2026-10-20
 `fix(tool): report an empty code_comment batch instead of success (#1773)`），
 `/releases/latest` = `v1.13.3`（2026-10-22，`target_commitish: main`）；
 `npm view @alibaba-group/open-code-review version dist-tags` = `1.13.3` / `latest: 1.13.3`。

@@ -262,39 +262,54 @@ const base = {
  * `installInfo` altogether and this block would stay green.
  */
 {
-  // All seven fields, not a sample of them: the decision under test is "every
-  // field this function computes wins", and a check that named only `binary`
-  // and `version` would stay green while `platform` or `docsUrl` was replaced
-  // by an install fact. The values are impossible ones (`"evil"`, `"9.9.9"`,
-  // `"evil-os"`), so a failure prints which side won instead of two strings
+  // The collision surface is **every key this function returns**, read off the
+  // function instead of off a hand-written list of "computed" names. The
+  // decision under test is "every field this function answers for itself wins
+  // over an install fact of the same name"; a list covering only the fields that
+  // exist today would stay green if someone added another and forgot to extend
+  // it. Deriving the keys here makes a new field part of the test the day it is
+  // added, and the check below ties the shared `APP_INFO_COMPUTED_KEYS` (also
+  // imported by `install-info-smoke.mjs`) to that same set, so the other side
+  // cannot keep asserting against a shorter list.
+  const reference = formatAppInfo({
+    ...base,
+    binary: { path: "/opt/app/ocr", source: "local" },
+    versionStdout: "open-code-review 1.13.3\n",
+  });
+  const ownKeys = Object.keys(
+    formatAppInfo({
+      ...base,
+      // No install facts: what remains is the answer this function computes.
+      installInfo: {},
+      binary: { path: "/opt/app/ocr", source: "local" },
+      versionStdout: "open-code-review 1.13.3\n",
+    })
+  ).sort();
+  check(
+    "the shared computed-key list is exactly formatAppInfo's own return keys",
+    JSON.stringify(ownKeys) === JSON.stringify([...APP_INFO_COMPUTED_KEYS].sort()),
+    JSON.stringify({ got: [...APP_INFO_COMPUTED_KEYS].sort(), want: ownKeys })
+  );
+  check(
+    "...and that set still contains the four fields an install fact could plausibly shadow",
+    ["configPath", "docsUrl", "appVersion", "platform"].every((key) =>
+      ownKeys.includes(key)
+    ),
+    JSON.stringify(ownKeys)
+  );
+  // Every own key, each with a different value. `evil-<key>` cannot equal any
+  // computed answer, so a failure prints which side won instead of two strings
   // that happen to match.
-  const computedValues = {
-    binary: "/opt/app/ocr",
-    binarySource: "local",
-    version: "1.13.3",
-    configPath: base.configPath,
-    docsUrl: base.docsUrl,
-    appVersion: base.appVersion,
-    platform: base.platform,
-  };
   const colliding = {
     ...base.installInfo,
-    binary: "evil",
-    binarySource: "evil-source",
-    version: "9.9.9",
-    configPath: "/evil/config.json",
-    docsUrl: "https://evil.example/docs",
-    appVersion: "6.6.6",
-    platform: "evil-os",
+    ...Object.fromEntries(ownKeys.map((key) => [key, `evil-${key}`])),
   };
   check(
-    "the collision fixture names all seven computed fields, each with a different value",
-    JSON.stringify([...APP_INFO_COMPUTED_KEYS].sort()) ===
-      JSON.stringify(Object.keys(computedValues).sort()) &&
-      APP_INFO_COMPUTED_KEYS.every(
-        (key) => key in colliding && colliding[key] !== computedValues[key]
-      ),
-    JSON.stringify({ keys: APP_INFO_COMPUTED_KEYS, colliding })
+    "the collision fixture names every returned key, each with a different value",
+    ownKeys.every(
+      (key) => key in colliding && colliding[key] !== reference[key]
+    ),
+    JSON.stringify({ keys: ownKeys, colliding })
   );
   const shadowed = formatAppInfo({
     ...base,
@@ -302,15 +317,13 @@ const base = {
     versionStdout: "open-code-review 1.13.3\n",
     installInfo: colliding,
   });
-  const lost = APP_INFO_COMPUTED_KEYS.filter(
-    (key) => shadowed[key] !== computedValues[key]
-  );
+  const lost = ownKeys.filter((key) => shadowed[key] !== reference[key]);
   check(
-    "every field formatAppInfo computes keeps its own value when installInfo collides with all seven",
+    "every key formatAppInfo returns keeps its own value when installInfo collides with all of them",
     lost.length === 0,
     JSON.stringify({
       lost: Object.fromEntries(
-        lost.map((key) => [key, { got: shadowed[key], want: computedValues[key] }])
+        lost.map((key) => [key, { got: shadowed[key], want: reference[key] }])
       ),
     })
   );

@@ -51,6 +51,7 @@ import {
   historyRoundNumbers,
   historySections,
   historyShaRule,
+  historyPinLeakViolations,
   ledgerRoundViolations,
   machineReadableBlockViolations,
   parseApiCommit,
@@ -1674,6 +1675,59 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
     "...and every citation there is classified as a plain citation, not as a declaration",
     historyCitations.every((citation) => citation.shape === null),
     JSON.stringify(historyCitations.filter((citation) => citation.shape !== null))
+  );
+
+  // The values, not the shapes: the pin itself is the one commit the archive may
+  // not quote whole. It is referred to by its 7-character prefix, which is
+  // readable and cannot be mistaken for the pin's declaration; a whole copy would
+  // be a second authority nobody compares against (the same failure the
+  // declaration-shape rule exists to prevent). This is a value rule, so it is
+  // asked of `PINNED_UPSTREAM.sha` rather than of a line shape.
+  const archiveLines = history.split(/\r?\n/);
+  const pinPrefix = PINNED_SHA.slice(0, 7);
+  const pinLeaks = historyPinLeakViolations(history);
+  check(
+    "the archive never quotes the pin whole",
+    pinLeaks.length === 0,
+    pinLeaks.length ? JSON.stringify(pinLeaks) : `prefix ${pinPrefix}`
+  );
+  check(
+    "...and it does refer to the pin by its 7-character prefix, so the clean answer is not vacuous",
+    history.includes(pinPrefix),
+    `${history.split(pinPrefix).length - 1} occurrence(s) of ${pinPrefix}`
+  );
+  check(
+    "...while whole SHAs that are not the pin stay allowed",
+    historyCitations.some((citation) => citation.sha !== PINNED_SHA) &&
+      historyPinLeakViolations("`refs/heads/main` = `" + "e".repeat(40) + "`").length === 0,
+    JSON.stringify([...new Set(historyCitations.map((citation) => citation.sha))])
+  );
+  check(
+    "an upper-case whole pin is the same leak, not a different string",
+    historyPinLeakViolations("`" + PINNED_SHA.toUpperCase() + "`").length === 1,
+    "case folding"
+  );
+  check(
+    "a pin constant that is not a whole commit cannot pass vacuously",
+    historyPinLeakViolations("no pin here", pinPrefix).length === 1,
+    JSON.stringify(historyPinLeakViolations("no pin here", pinPrefix))
+  );
+  // The reverse control on the real archive: insert the whole pin on one line
+  // and require the failure to name that line, with one line changed.
+  const leakedLine = `第 99 轮：\`refs/heads/main\` = \`${PINNED_SHA}\``;
+  const leakedArchive = archiveLines
+    .map((line, index) => (index === 0 ? leakedLine : line))
+    .join("\n");
+  const leakHits = historyPinLeakViolations(leakedArchive);
+  check(
+    "inserting the whole pin into the archive goes red, naming that line",
+    leakHits.length === 1 && /^第 1 行/.test(leakHits[0]),
+    JSON.stringify(leakHits)
+  );
+  check(
+    "...and exactly one line changed, so the red cannot be explained by anything else",
+    leakedArchive.split(/\r?\n/).filter((line, index) => line !== archiveLines[index]).length === 1,
+    `changed=${leakedArchive.split(/\r?\n/).filter((line, index) => line !== archiveLines[index]).length}`
   );
   // The same predicate, pointed at the sync doc, must find exactly the three
   // declarations — otherwise the archive's clean answer above could just mean

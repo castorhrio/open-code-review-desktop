@@ -919,10 +919,12 @@ for (const platform of ["darwin", "linux"]) {
       collisions,
     })
   );
-  // Without a complete list, "no collision" passes over nothing. The seven
-  // names are written out here as the contract, and `app-info-smoke.mjs`
-  // separately ties the same list to the payload's non-install half — so a
-  // field dropped from the list is red on one side or the other.
+  // Without a complete list, "no collision" passes over nothing. The names are
+  // written out here as the contract; `app-info-smoke.mjs` separately derives
+  // the same set from `formatAppInfo({ installInfo: {} })` and requires
+  // `APP_INFO_COMPUTED_KEYS` to equal it — so a field dropped from the list is
+  // red on one side or the other, and the collision proof there runs over the
+  // derived set rather than over this list.
   const computed = [
     "appVersion",
     "binary",

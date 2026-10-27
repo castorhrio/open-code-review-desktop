@@ -792,23 +792,29 @@ export const docAuthoringRuleViolations = (doc) => {
 // ---- what the archive may quote, and what only the sync doc may declare ----
 //
 // `docs/upstream-history.md` quotes upstream commits in prose — whole
-// 40-character SHAs included (the round's `refs/heads/main`, the annotated tag
-// object id). That is *not* a pin declaration, and the archive is deliberately
-// allowed to do it: a commit *is* 40 hex characters, so any check written as
-// "find the 40 hex characters" sees those lines too.
+// 40-character SHAs included (a non-pin round's `refs/heads/main`, the annotated
+// tag object id). That is *not* a pin declaration, and the archive is
+// deliberately allowed to do it: a commit *is* 40 hex characters, so any check
+// written as "find the 40 hex characters" sees those lines too.
 //
-// So the rule is stated as two halves instead of one regex:
+// The pin itself is the exception, and it is a separate rule from "declaration
+// shape": the archive may refer to it, but only by its 7-character prefix. A
+// whole copy in the archive is a second authority nobody compares against — the
+// same failure a second declaration shape would be — while a prefix is enough
+// to read and cannot be mistaken for the pin. `historyPinLeakViolations` is that
+// rule, stated over the pinned value instead of over a line shape.
+//
+// So the archive's contract is three-layered:
 //
 //   allowed   — a whole SHA cited in prose (`refs/heads/main` = `<sha>`), the
 //               tag object a tag points at, and the paragraph explaining why the
 //               pin stores 40 characters rather than a readable prefix;
-//   forbidden — any of the declaration shapes in `PIN_PLACES`: the machine
-//               block, the fixed "本轮 HEAD 核对" line, the prose sentence that
-//               introduces `upstream:check`. Declarations live in the sync doc
-//               and nowhere else, exactly once per place.
+//   allowed   — the pin itself by its 7-character prefix;
+//   forbidden — any of the declaration shapes in `PIN_PLACES`, and the pinned
+//               SHA quoted whole anywhere.
 //
-// `findShaCitations` answers which of the two a line is, so the smoke test can
-// assert the archive's rule itself instead of inferring it from "no pin was
+// `findShaCitations` answers which of the first two a line is, so the smoke test
+// can assert the archive's rule itself instead of inferring it from "no pin was
 // found" — that inference also passes once `findDocPins` stops matching shapes
 // at all. Both lists are exported so a failure can print the rule, not just the
 // violation.
@@ -816,6 +822,7 @@ export const HISTORY_ALLOWED_SHA_CONTEXTS = Object.freeze([
   "轮次叙述里直接引用某个 commit（`refs/heads/main` = `<40 位>`）",
   "叙述里引用 annotated tag 对象 id（`refs/tags/vN.N.N` 指向的那个）",
   "解释 pin 为什么存全 40 位、而不是 7 位前缀的规则段落",
+  "pin 本身只用 7 位前缀引用（它的整串只在同步文档里声明一次）",
 ]);
 
 // The rule as one readable sentence, built from the two lists so it cannot go
@@ -823,7 +830,7 @@ export const HISTORY_ALLOWED_SHA_CONTEXTS = Object.freeze([
 // place and keeps the "40 位" allowance.
 export const historyShaRule = () =>
   `归档允许整串 40 位 SHA 的自由引用（${HISTORY_ALLOWED_SHA_CONTEXTS.join("；")}），` +
-  `但任何一行都不许用 pin 声明形状（${PIN_PLACES.join("、")}）：声明只写在同步文档里，每处恰好一次。`;
+  `但任何一行都不许用 pin 声明形状（${PIN_PLACES.join("、")}），也不许整串引用 pin 本身：声明只写在同步文档里，每处恰好一次。`;
 
 // A whole commit, not a longer hex run: the lookarounds keep a 41-character blob
 // from being read as a 40-character commit with a stray digit beside it, which
@@ -1082,6 +1089,37 @@ export const ledgerRoundViolations = (ledgerRounds, headSubject) => {
 // Empty is the answer `docs/upstream-history.md` must give.
 export const findPinShapedCitations = (doc) =>
   findShaCitations(doc).filter((citation) => citation.shape !== null);
+
+// The archive's *other* half, and not a question about line shapes: a whole
+// pinned SHA in prose is an allowed shape (it is just a commit) but a forbidden
+// value. `findShaCitations` cannot tell it apart from any other citation, so the
+// rule is stated against `PINNED_UPSTREAM.sha` directly. A 7-character prefix is
+// allowed — it is how the archive refers to the pin — and so is any whole SHA
+// that is not the pin (another commit, a tag object).
+//
+// The pinned value is validated first: a shortened or malformed constant would
+// make `includes()` match nothing, and "no leak found" would then be the answer
+// for every archive. That is the one failure mode this rule must not have, so it
+// fails loudly instead.
+export const historyPinLeakViolations = (doc, pinned = PINNED_UPSTREAM.sha) => {
+  const pin = String(pinned == null ? "" : pinned).toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(pin)) {
+    return [
+      `pin 常量不是整串 40 位 SHA（${JSON.stringify(pinned)}）：本条按整串比较，` +
+        "没有整串就无从判断归档是否泄漏了 pin",
+    ];
+  }
+  const prefix = pin.slice(0, 7);
+  return String(doc || "")
+    .split(/\r?\n/)
+    .map((text, index) => ({ line: index + 1, text }))
+    .filter(({ text }) => text.toLowerCase().includes(pin))
+    .map(
+      ({ line }) =>
+        `第 ${line} 行整串引用了 pin（${prefix}…）：归档只许写 7 位前缀，` +
+        "pin 的整串只在同步文档里声明一次"
+    );
+};
 
 // Turns a list of doc declarations into the lines the caller prints on failure.
 // The shape ("文档第 X 行（where）：value vs 常量 pin") is fixed here rather than

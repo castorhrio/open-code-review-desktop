@@ -43,15 +43,21 @@ export const INSTALL_INFO_KEYS = Object.freeze([
 ]);
 
 /**
- * The seven fields `formatAppInfo()` computes for itself, sorted. `app:info`
- * spreads `installInfo()` *before* them, so an install fact with one of these
- * names would silently lose to the computed value. That is the decision
- * (computed wins), but it must stay a decision on both sides: this list lets
- * `install-info-smoke.mjs` assert the module never *offers* a colliding name,
- * and `app-info-smoke.mjs` assert the collision still resolves the other way
- * even if one appears. Hand-written, for the same reason as
- * `INSTALL_INFO_KEYS`: it is the contract, not a reflection of whatever the
- * module happens to return.
+ * The names `formatAppInfo()` returns *for itself*, sorted — i.e. the payload's
+ * non-install half. `app:info` spreads `installInfo()` before them, so an
+ * install fact with one of these names would silently lose to the computed
+ * value. That is the decision (computed wins), but it must stay a decision on
+ * both sides: this list lets `install-info-smoke.mjs` assert the module never
+ * *offers* a colliding name, and `app-info-smoke.mjs` assert the collision still
+ * resolves the other way even if one appears.
+ *
+ * The list is hand-written because it is a contract, not a reflection of
+ * whatever the module happens to return — but it is no longer the *only* copy:
+ * `app-info-smoke.mjs` derives the same set from `formatAppInfo({ installInfo: {} })`
+ * and requires this list to equal it, then runs the collision proof over the
+ * derived set. A field added to the return object therefore has to be named here
+ * (or the equality check goes red), and is covered by the collision proof even
+ * before that edit.
  */
 export const APP_INFO_COMPUTED_KEYS = Object.freeze([
   "appVersion",
