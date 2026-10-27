@@ -8,8 +8,9 @@ const { isInside } = require("./path-guard");
 
 // Every git command runs in the C locale, deliberately.
 //
-// Two of the classifications below (`readFileAtRef`'s `bad-ref` / `missing`) read
-// git's *stderr wording*, and wording is not this program's to control: on a
+// Two of the classifications below (`readFileAtRef`'s `bad-ref` / `missing`, both
+// defined in `REF_READ_WORDINGS`) read git's *stderr wording*, and wording is not
+// this program's to control: on a
 // Chinese (or any other localised) desktop, git says "fatal: 无效的对象名称" and
 // "fatal: 路径 ... 不存在", neither of which matches an English pattern. Both
 // failures then fall through to the generic branch, so a file that is simply not
@@ -31,10 +32,11 @@ const { isInside } = require("./path-guard");
 //
 // This is a deliberate trade, not a guarantee: no audit turns red when git changes
 // its wording (the fixtures are hand-written strings), so the fallback branch has to
-// stay diagnosable instead. The full statement of that cost — what is asserted, what
-// can only be re-read by hand — is in `docs/OCR-UPSTREAM-SYNC.md` 的
-// 『能自动变红的地方，和不能的地方』. Read it before touching the patterns in
-// `readFileAtRef`.
+// stay diagnosable instead. What the audit *does* hold is that each wording the
+// table claims is really produced by the pattern beside it (`REF_READ_WORDINGS`
+// carries one sample per reason). The full statement of that cost — what is
+// asserted, what can only be re-read by hand — is in `docs/OCR-UPSTREAM-SYNC.md` 的
+// 『能自动变红的地方，和不能的地方』. Read it before touching the patterns.
 const gitEnv = () => ({ ...process.env, LC_ALL: "C", LANG: "C" });
 // Exported so the check can ask it directly, without a spawned git in the way
 // (`tools/git-service-smoke.mjs`). The part worth asserting is the *shape* of
@@ -216,6 +218,75 @@ async function inspect(repo) {
 }
 
 /**
+ * How a failed `git show` is classified — the assumption, written as data.
+ *
+ * `readFileAtRef` has to tell "the ref does not resolve" apart from "the path is
+ * not in that snapshot", and git does not say which at the exit code: it says it
+ * in stderr, in English, in sentences this program does not own. So the three
+ * answers are laid out here, each with the wording it exists for.
+ *
+ * The point of the table is the `sample` field. The patterns below are an
+ * assumption about a program we do not control, and until this table existed
+ * that assumption only lived in two regex literals plus a paragraph of prose
+ * admitting nobody checks it: a pattern edited into matching nothing fell
+ * through to the generic branch, where a file that is simply not in the
+ * reviewed snapshot was reported as "读取 … 失败" — a failure with no reason, and
+ * every check stayed green. `tools/git-service-smoke.mjs` now feeds each row's
+ * `sample` back through `readFileAtRef` and requires the row's own `reason`,
+ * and it requires the three reasons to all be present, so a broken pattern or a
+ * deleted row goes red on the row that carries it.
+ *
+ * What the samples do *not* do is make the wordings true: they are hand-written
+ * strings, so a git that renames its message tomorrow still lands on the
+ * fallback branch, silently. That is the accepted cost, stated in
+ * `docs/OCR-UPSTREAM-SYNC.md`『能自动变红的地方，和不能的地方』 — the compensation is
+ * that the fallback answer carries git's own first stderr line and its exit
+ * code, the one part of the failure that does not depend on language.
+ *
+ * Row order matters: the first row whose `pattern` matches wins, and the single
+ * row with `pattern: null` is the fallback for every wording nobody listed. It
+ * is last, and it is the only one without a pattern (asserted by the smoke
+ * check) — a second pattern-less row would make the answer depend on order for
+ * no reason, and a pattern-less row anywhere but last would swallow the others.
+ */
+const REF_READ_WORDINGS = Object.freeze([
+  Object.freeze({
+    reason: "bad-ref",
+    pattern: /unknown revision|invalid object|bad revision|ambiguous argument/i,
+    sample: "fatal: bad revision 'no-such-ref'",
+    message: ({ ref }) => `无法解析 ${ref}`,
+  }),
+  Object.freeze({
+    reason: "missing",
+    pattern: /does not exist|exists on disk, but not in|no such path/i,
+    sample: "fatal: path 'a.go' does not exist in 'HEAD'",
+    message: ({ ref, relPath }) => `在 ${ref} 中找不到 ${relPath}`,
+  }),
+  Object.freeze({
+    // The fallback: every wording the two patterns above do not recognise. The
+    // sentence has to be diagnosable *without* the classification, so it carries
+    // git's own first line and its exit code — without the code, "读取 … 失败：
+    // fatal: …" leaves the reader with a sentence they cannot look up; with it,
+    // the sentence can be matched against the git that produced it. The exit code
+    // is also the one part of a git failure that does not depend on the message
+    // language at all.
+    reason: "failed",
+    pattern: null,
+    sample: "fatal: couldn't find 'a.go' in 'HEAD'",
+    message: ({ ref, relPath, first, code }) =>
+      `读取 ${ref} 中的 ${relPath} 失败（git 退出码 ${code}）：${first || "没有任何 stderr"}`,
+  }),
+]);
+
+// The row a stderr belongs to: the first pattern that matches, else the fallback.
+// `pattern !== null` rather than a truthiness test, so the "no pattern means
+// fallback" rule is spelled out where it is relied on.
+const classifyRefReadFailure = (stderr) =>
+  REF_READ_WORDINGS.find(
+    (wording) => wording.pattern !== null && wording.pattern.test(stderr)
+  ) || REF_READ_WORDINGS[REF_READ_WORDINGS.length - 1];
+
+/**
  * Read a file as it was at a ref.
  *
  * `git show` reports a path that is not in the ref and a ref that does not
@@ -239,26 +310,18 @@ async function readFileAtRef(repo, relPath, ref, startLine, endLine, pad) {
   const res = await git(["show", `${ref}:${relPath}`], repo);
   if (res.code !== 0) {
     const err = res.stderr.trim();
-    if (/unknown revision|invalid object|bad revision|ambiguous argument/i.test(err))
-      return { ok: false, reason: "bad-ref", ref, path: relPath, error: `无法解析 ${ref}` };
-    if (/does not exist|exists on disk, but not in|no such path/i.test(err))
-      return { ok: false, reason: "missing", ref, path: relPath, error: `在 ${ref} 中找不到 ${relPath}` };
-    // The two wordings above are git's, not this program's: a localised or newer
-    // git says it differently, and every such spelling lands here. So this
-    // sentence has to be diagnosable *without* the classification — it carries
-    // git's own first line and its exit code. Without the code, "读取 … 失败：
-    // fatal: …" leaves the reader with a sentence they cannot look up; with it,
-    // the same sentence can be matched against the git that produced it. The
-    // exit code is also the one part of a git failure that does not depend on
-    // the message language at all.
+    // Which reason this is, and every sentence this reader can produce, is the
+    // table's business: the patterns are a guess about git's wording, so they
+    // are data with samples rather than two literals buried in this branch.
+    const wording = classifyRefReadFailure(err);
     const first = err.split(/\r?\n/)[0] || "";
     const code = typeof res.code === "number" ? res.code : -1;
     return {
       ok: false,
-      reason: "failed",
+      reason: wording.reason,
       ref,
       path: relPath,
-      error: `读取 ${ref} 中的 ${relPath} 失败（git 退出码 ${code}）：${first || "没有任何 stderr"}`,
+      error: wording.message({ ref, relPath, first, code }),
     };
   }
   const all = res.stdout.split(/\r?\n/);
@@ -330,6 +393,7 @@ module.exports = {
   readFile,
   readFileWindow,
   readFileAtRef,
+  REF_READ_WORDINGS,
   resolveRef,
   classifyRef,
   gitEnv,

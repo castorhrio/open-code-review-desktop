@@ -425,6 +425,77 @@ fs.rmSync(notARepo, { recursive: true, force: true });
     namesExitCode(WITH_CODE, 128) && namesExitCode(WITH_CODE, 1) === false,
     JSON.stringify([namesExitCode(WITH_CODE, 128), namesExitCode(WITH_CODE, 1)])
   );
+
+  /* ---- the wording assumption is a table, and the table is checked ----
+   * `git-service.js` now carries `REF_READ_WORDINGS`: one row per reason, each
+   * with the stderr wording that reason exists for. That moves the assumption
+   * from "two regex literals plus a comment admitting nobody checks them" into
+   * data the suite can feed back through `readFileAtRef`.
+   *
+   * What the four checks below are for, one failure each:
+   *
+   *   - the shape rule ("exactly one row without a pattern, and it is last") is
+   *     what makes classification order-independent: a second pattern-less row
+   *     would make the answer depend on where it sits, and one anywhere but last
+   *     would swallow every row after it;
+   *   - a row without a sample is a reason with no proof of the wording it
+   *     exists for — that is the row quietly going unchecked;
+   *   - each row's own sample must come back as that row's reason. This is the
+   *     red that a broken pattern produces: the sample falls through to the
+   *     fallback, and the failure names the row, the sample and the reason it
+   *     got instead of the one it should have;
+   *   - all three reasons must be covered *by rows that carry a sample*, so
+   *     deleting the `missing` row (or just its sample) turns "the assumption is
+   *     fully stated" red instead of silently shrinking the table.
+   *
+   * The hand-written list above is breadth (six known wordings, three unknown
+   * ones); these rows are the table's own claim about itself. Both are needed:
+   * the list proves the classifier knows more than one spelling, the samples
+   * prove each row's pattern is the thing that does it.
+   */
+  const wordingTable = gitSvc.REF_READ_WORDINGS;
+  const patternless = Array.isArray(wordingTable) ? wordingTable.filter((row) => row.pattern === null) : [];
+  check(
+    "the wording table has exactly one fallback row, it sits last, and every other row has a pattern",
+    Array.isArray(wordingTable) &&
+      wordingTable.length >= 3 &&
+      patternless.length === 1 &&
+      wordingTable[wordingTable.length - 1] === patternless[0] &&
+      wordingTable.slice(0, -1).every((row) => row.pattern instanceof RegExp),
+    JSON.stringify(Array.isArray(wordingTable) ? wordingTable.map((row) => [row.reason, row.pattern === null]) : wordingTable)
+  );
+  const sampledRows = Array.isArray(wordingTable)
+    ? wordingTable.filter((row) => typeof row.sample === "string" && row.sample.trim().length > 0)
+    : [];
+  check(
+    "every wording row carries a sample sentence and its own reason",
+    sampledRows.length === (Array.isArray(wordingTable) ? wordingTable.length : 0) &&
+      wordingTable.every((row) => typeof row.reason === "string" && row.reason.trim().length > 0) &&
+      new Set(wordingTable.map((row) => row.reason)).size === wordingTable.length,
+    JSON.stringify(
+      Array.isArray(wordingTable)
+        ? wordingTable.filter((row) => typeof row.sample !== "string" || !row.sample.trim()).map((row) => row.reason)
+        : wordingTable
+    )
+  );
+  const misreadSamples = [];
+  for (const row of sampledRows) {
+    const { res } = await classifyStderr(row.sample);
+    if (res.ok !== false || res.reason !== row.reason) {
+      misreadSamples.push(`${row.sample} -> ${res.reason || "(none)"}（应为 ${row.reason}）`);
+    }
+  }
+  check(
+    "each row's sample wording is classified as that row's reason",
+    sampledRows.length >= 3 && misreadSamples.length === 0,
+    misreadSamples.join(" | ") || `${sampledRows.length} sample(s)`
+  );
+  const coveredReasons = new Set(sampledRows.map((row) => row.reason));
+  check(
+    "...and the rows with samples cover all three answers, so none is only reachable by luck",
+    ["bad-ref", "missing", "failed"].every((reason) => coveredReasons.has(reason)) && coveredReasons.size === 3,
+    JSON.stringify([...coveredReasons])
+  );
 }
 
 /* ---- the four answers, one by one ----

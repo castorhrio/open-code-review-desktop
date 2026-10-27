@@ -45,12 +45,14 @@ import {
   historyRoundNumbers,
   historySections,
   historyShaRule,
+  ledgerRoundViolations,
   machineReadableBlockViolations,
   parseApiCommit,
   parseLsRemote,
   pinPlaceCoverage,
   previousRoundPointerViolations,
   headingSlug,
+  roundFromCommitSubject,
   runUpstreamWatch,
   tableRowCoverage,
   upstreamDrift,
@@ -884,6 +886,82 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
     ledgerRounds.every((round) => Number.isInteger(round)) && gaps.length === 0,
     JSON.stringify({ rounds: ledgerRounds.length, first: ledgerRounds[0], last: ledgerRounds[ledgerRounds.length - 1], gaps })
   );
+  /* ---- the ledger is bound to the round in the commit subject ----
+   * Every ledger check above reads the doc alone, so a round that updated the
+   * code and forgot the ledger left a doc that was still perfectly valid — one
+   * round older than the commit that carried it, with no row missing by any
+   * count. The binding is to the one place the round number cannot be forgotten
+   * without being visible: this repo's commit subjects always say 「第 N 轮」.
+   *
+   * The accepted window (ledger last = N or N+1 relative to HEAD's subject) is
+   * explained in `ledgerRoundViolations`; the short version is that the doc is
+   * written before the commit, so an in-progress round legitimately sits one
+   * ahead, while one *behind* is the shape of a round that landed without
+   * recording anything — the exact failure the ledger exists to catch.
+   */
+  const headLog = spawnSync("git", ["log", "-1", "--format=%s"], {
+    cwd: ROOT,
+    encoding: "utf8",
+    timeout: 10000,
+  });
+  const headSubject =
+    headLog.error || headLog.status !== 0 ? "" : String(headLog.stdout || "").trim();
+  const headRound = roundFromCommitSubject(headSubject);
+  check(
+    "the current commit's subject names its round, which is what the ledger is bound to",
+    headRound !== null,
+    headLog.error ? `git log 读不到：${headLog.error.message}` : JSON.stringify(headSubject)
+  );
+  const roundViolations = ledgerRoundViolations(ledgerRounds, headSubject);
+  check(
+    "the ledger ends on this commit's round (this one, or the next while the doc is written)",
+    roundViolations.length === 0,
+    roundViolations.join("；") ||
+      `HEAD 第 ${headRound} 轮 / 账末第 ${ledgerRounds[ledgerRounds.length - 1]} 轮`
+  );
+  // The failure the binding exists for, as one deleted line: drop the last row
+  // and ask with the subject of the commit that should have carried it. Built
+  // this way it stays the same mutation before and after this round's commit
+  // (pre-commit the dropped round is the pending one, post-commit it is HEAD's).
+  const droppedRound = ledgerRounds[ledgerRounds.length - 1];
+  const droppedLedger = ledgerRoundViolations(
+    ledgerRounds.slice(0, -1),
+    `fix: 某处改动（第 ${droppedRound} 轮上游核对：无新内容）`
+  );
+  check(
+    "dropping the round's own row goes red, naming the commit's round and the ledger's",
+    droppedLedger.length === 1 &&
+      droppedLedger[0].includes(`第 ${droppedRound} 轮`) &&
+      droppedLedger[0].includes(`停在 ${droppedRound - 1} 轮`),
+    JSON.stringify(droppedLedger)
+  );
+  check(
+    "...and it says what to do instead, so 'nothing to record' does not read as 'skip the row'",
+    droppedLedger.length === 1 && droppedLedger[0].includes(DEBT_MARKER),
+    JSON.stringify(droppedLedger)
+  );
+  // The other direction of the window, and the two shapes that are not rounds at
+  // all. Without these the accepted window could widen to "any number below the
+  // ledger" and the mutation above would still pass.
+  const twoAhead = ledgerRoundViolations([80, 82], "第 80 轮");
+  check(
+    "a ledger two rounds ahead of the commit is red, not silently accepted",
+    twoAhead.length === 1 && twoAhead[0].includes("领先 2 轮"),
+    JSON.stringify(twoAhead)
+  );
+  const noRound = ledgerRoundViolations([80, 81], "chore: 没有轮次的提交信息");
+  check(
+    "a subject with no round is its own red, not a default that compares against 0",
+    noRound.length === 1 && noRound[0].includes("读不出") &&
+      roundFromCommitSubject("chore: 没有轮次的提交信息") === null &&
+      roundFromCommitSubject("") === null,
+    JSON.stringify(noRound)
+  );
+  check(
+    "an empty ledger is red rather than vacuously in agreement",
+    ledgerRoundViolations([], "第 82 轮").length === 1,
+    JSON.stringify(ledgerRoundViolations([], "第 82 轮"))
+  );
   // The reading list is generated from `ROWS_TO_REREAD`; the table is hand-
   // written. Asking "does each label appear somewhere in the doc" (the previous
   // shape of this check) passes while the table has a sixth row nobody will ever
@@ -1118,6 +1196,15 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
   );
 
   const pointerLine = docLines.find((line) => /^上一轮（第\s*(\d+)\s*轮）的正文见/.test(line));
+  // The round the live pointer names, read from the doc rather than written
+  // here: the mutations below have to keep pointing at the real pointer, and a
+  // hard-coded round stops being applied the moment the pointer moves on (which
+  // is once per round). Then (c) would silently become a no-op copy and go red
+  // for the wrong reason — the same class of "assumption nobody checks" this
+  // round is about.
+  const pointerRound = pointerLine
+    ? Number(/^上一轮（第\s*(\d+)\s*轮）的正文见/.exec(pointerLine)[1])
+    : null;
   check(
     "...and the pointer it keeps is a sentence, not a section: no heading, one line",
     pointerLine !== undefined && !/^#{1,6}\s/.test(pointerLine),
@@ -1136,12 +1223,22 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
 
   // (a) the previous round's body comes back — the shape this rule exists for.
   const restored = [...docLines];
-  restored.splice(endLine + 1, 0, "", "## 上一轮（第 79 轮，2026-10-27）", "", "第 79 轮的正文又抄了一遍。");
+  restored.splice(
+    endLine + 1,
+    0,
+    "",
+    `## 上一轮（第 ${pointerRound} 轮，2026-10-27）`,
+    "",
+    `第 ${pointerRound} 轮的正文又抄了一遍。`
+  );
   const restoredViolations = previousRoundPointerViolations(restored.join("\n"), history);
   check(
     "a previous-round section copied back into the human half goes red, naming that line",
     restoredViolations.length >= 1 &&
-      restoredViolations.some((v) => v.includes("上一轮（第 79 轮）") && v.includes(String(endLine + 3))),
+      pointerRound !== null &&
+      restoredViolations.some(
+        (v) => v.includes(`上一轮（第 ${pointerRound} 轮）`) && v.includes(String(endLine + 3))
+      ),
     restoredViolations.join("；")
   );
 
@@ -1156,7 +1253,12 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
   );
 
   // (c) a pointer to a round the archive does not have.
-  const wrongRound = doc.replace(pointerLine, pointerLine.replace(/第\s*79\s*轮/, "第 999 轮"));
+  const wrongRound = doc.replace(
+    pointerLine,
+    pointerRound === null
+      ? pointerLine
+      : pointerLine.replace(new RegExp(`第\\s*${pointerRound}\\s*轮`), "第 999 轮")
+  );
   const wrongRoundViolations = previousRoundPointerViolations(wrongRound, history);
   check(
     "a pointer to a round that was never archived goes red, naming the round",
@@ -1168,11 +1270,18 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
   // at the top of the archive file instead of on that section.
   const wrongAnchor = doc.replace(pointerLine, pointerLine.replace(/upstream-history\.md#[^)]+/, "upstream-history.md#上游状态"));
   const wrongAnchorViolations = previousRoundPointerViolations(wrongAnchor, history);
+  // The anchor the right round *should* carry, taken from the archive's own
+  // heading for that round (not from a copy of the date typed here).
+  const pointerSection =
+    pointerRound === null ? undefined : historySections(history).find((entry) => entry.round === pointerRound);
+  const pointerHeading =
+    pointerSection === undefined ? "" : history.split(/\r?\n/)[pointerSection.line - 1] || "";
   check(
     "an anchor that is not the archived heading's slug goes red, naming both anchors",
     wrongAnchorViolations.length === 1 &&
       wrongAnchorViolations[0].includes("`#上游状态`") &&
-      wrongAnchorViolations[0].includes("`#上游状态第-79-轮2026-10-27`"),
+      pointerHeading !== "" &&
+      wrongAnchorViolations[0].includes(`\`#${headingSlug(pointerHeading)}\``),
     wrongAnchorViolations.join("；")
   );
 

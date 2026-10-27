@@ -36,6 +36,45 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 补记落在这段之外。规则本身也必须写在这里（上面那句），否则它只存在于脚本里。
 
 ---
+## 上游状态（第 81 轮，2026-10-27）
+
+第 81 轮复核：**HEAD 未变，结论仍是「无新内容」；API 与 npm 两条通路可达。**
+`git ls-remote https://github.com/alibaba/open-code-review.git` 本轮超时（`timeout` 返回
+124，与第 47–48 轮同因），改由 `api.github.com/repos/alibaba/open-code-review/commits/main`
+回答：HTTP 200，`sha` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`（与第 49–80 轮同一个
+commit，2026-10-20 的 `fix(tool): report an empty code_comment batch instead of success
+(#1773)`）；`npm view @alibaba-group/open-code-review version` 仍是 `1.13.3`。tag 一处本轮
+没有独立核对——`refs/heads/main` 未变即「无新 commit」，registry 的 `latest` 未变即「无新
+发布」。desktop 的 `^1.13.3` 无需改动，**无移植项**。
+
+本轮按上一轮留下的三件事收口，主题都是「一行检查在防什么，必须有答案」：
+
+- **P0-1：`classifyRef` 里那两行 `Number.isFinite` 定案为「不是防御，是多做的换算」，删掉。**
+  上一轮把计数改成十进制数字严格匹配后，那两行看着不可达——其实可达，只是要一个 309 位以上
+  的计数（`Number.parseInt("9".repeat(400))` 是 `Infinity`）。但它防的那件事本来就不该发生：
+  四种关系只问「哪一半是零」。所以现在**不做任何数值换算**，`isZeroCount()` 直接读数字
+  （`/^0+$/`）。smoke 补两格超大计数（24 位与 400 位）：两者都仍答一个关系；把 `parseInt`
+  放回去，400 位那格当场答 `""`（`Infinity` 进 `isFinite` 守卫）、四格普通计数仍绿——已这样
+  验过。「这一行在防什么」的答案现在是：什么都不防，它是多余的。
+- **P0-2：`gitEnv` 的 spawn 接线探针从「问 `git()`」改成「问 `readFileAtRef`」。**
+  第 80 轮正文说这条探针还在——它确实在，但问的是 `fresh.git(["--version"])`：证明的是
+  `git()` 会带 `gitEnv()`，不是**代码面板那条读文件的路**会。把 `spawn("git", ["show", …])`
+  内联进 `readFileAtRef`（参数都现成，看着像无害的简化）会让分类悄悄脱离 C locale，而旧探针
+  照旧全绿。现在探针走一次真的 `readFileAtRef`，从 `spawn` 的 options 里读回 `LC_ALL` /
+  `LANG` / `PATH` / `cwd`，并断言那次调用真的带了 `show`——已按上面的内联验过会红（三格）。
+  那个函数因此有了两条互补的断言：`gitEnv()` 问返回值，本探针问接线。
+- **P1-1：「本文件只留当前一轮」从散文变成断言。** 人读区此前的「上一轮（第 79 轮）」是完整
+  正文，与 `upstream-history.md` 里的第 79 轮段重复，而文件开头就写着「只留当前一轮」。正文按
+  规则搬进归档，这里只留一句指针；同时新增 `previousRoundPointerViolations()`（在
+  `tools/upstream-watch.mjs`）：人读区不得再起「上一轮（第 N 轮）」的标题段、指针必须恰好一句、
+  指针说的那一轮必须在归档里真有段落、锚点必须等于那段标题算出来的 slug（否则点过去落在归档
+  文件顶部，看着像点成功了）。smoke 用四条「只改一处」的副本逐条验红。
+
+三条都在 `git-service.js` / `tools/git-service-smoke.mjs` / `tools/upstream-watch.mjs` /
+`tools/upstream-watch-smoke.mjs` 与本文件内，不碰 CLI 参数、配置读写与 IPC 注册体；
+`audit:service` / `audit:config` / `audit:git` / `audit:upstream` 本轮全绿。
+
+---
 ## 上游状态（第 80 轮，2026-10-27）
 
 第 80 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 两条通路都可达。**

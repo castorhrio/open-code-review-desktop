@@ -879,6 +879,74 @@ export const historyRoundNumbers = (doc) =>
     .map((section) => section.round)
     .filter((round) => round !== null);
 
+// ---- the ledger is bound to the round the commit subject names ----
+//
+// The ledger's rows have a rule (a real road, a debt cell that agrees with it,
+// consecutive rounds, no repeats) and its last row is tied to the fixed line —
+// but every one of those checks reads the doc alone. A round that updated the
+// code and forgot the ledger left the doc perfectly valid, just one round older
+// than the commit that carried it: the fixed line and the ledger still agreed
+// with each other, and the only symptom was the absence of a row nobody counted.
+// Rounds 63–64 and 77 were recorded as `none` + `[UPSTREAM-DEBT]` *after the
+// fact*, by later rounds that noticed; at commit time nothing said a word.
+//
+// So the binding is to the one place a round number cannot be forgotten without
+// being visible: this repo's commit subjects always say 「第 N 轮」. The audit
+// reads the current HEAD's subject, takes N, and requires the ledger's last row
+// to be N or N+1. The window is deliberate, not slack:
+//
+//   - the doc is written *before* the commit that carries it, so while a round
+//     is being prepared HEAD still names the previous round (N-1) and the ledger
+//     already ends on N — N+1 relative to HEAD is the normal in-progress state;
+//   - after the commit both are N;
+//   - N-1 relative to HEAD is refused, and that is the whole point: it is the
+//     shape of "this round landed and the ledger did not", which is exactly what
+//     the ledger exists to prevent. A round that genuinely has nothing to record
+//     writes a row saying so (the `none` rows are how that looks after the fact),
+//     it does not leave the previous round's row standing.
+//
+// The two red sentences name both numbers, because "账不对" sends the reader to a
+// 60-row table, while "提交信息说第 82 轮，通路账停在 81 轮" is one line to check.
+export const ROUND_IN_COMMIT_SUBJECT = /第\s*(\d+)\s*轮/;
+
+// The round a commit subject claims to be. `null` when there is none — an empty
+// subject (no git, a shallow copy) or a subject that does not follow the house
+// style. The caller decides what to do with that; this function refuses to guess
+// (a default of 0 would silently compare against a round that never existed).
+export const roundFromCommitSubject = (subject) => {
+  const hit = ROUND_IN_COMMIT_SUBJECT.exec(String(subject == null ? "" : subject));
+  return hit ? Number(hit[1]) : null;
+};
+
+// The rule as violations. `ledgerRounds` is the ledger's round column in
+// document order; `headSubject` is `git log -1 --format=%s`. Empty is the only
+// acceptable answer for the repo's own HEAD.
+export const ledgerRoundViolations = (ledgerRounds, headSubject) => {
+  const rounds = (ledgerRounds || []).filter((round) => Number.isInteger(round));
+  if (rounds.length === 0) {
+    return ["核对通路账里没有可读的轮次，无法与提交信息的轮次对账"];
+  }
+  const headRound = roundFromCommitSubject(headSubject);
+  if (headRound === null) {
+    return [
+      `提交信息里读不出「第 N 轮」（${JSON.stringify(String(headSubject == null ? "" : headSubject))}），` +
+        "通路账因此没有可对账的轮次",
+    ];
+  }
+  const last = rounds[rounds.length - 1];
+  if (last === headRound || last === headRound + 1) return [];
+  if (last < headRound) {
+    return [
+      `提交信息说第 ${headRound} 轮，通路账停在 ${last} 轮：这一轮的核对结论没有记账` +
+        "（没核对也要记一行，欠账写 [UPSTREAM-DEBT]）",
+    ];
+  }
+  return [
+    `提交信息说第 ${headRound} 轮，通路账却记到第 ${last} 轮：` +
+      `账比提交信息领先 ${last - headRound} 轮，只有本轮（或本轮之后一轮）可以提前记`,
+  ];
+};
+
 // The archive's half of the rule: citations wearing a declaration's clothes.
 // Empty is the answer `docs/upstream-history.md` must give.
 export const findPinShapedCitations = (doc) =>
