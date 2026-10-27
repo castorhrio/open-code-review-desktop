@@ -35,7 +35,7 @@ tag v1.13.3
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 79 轮：`git ls-remote` 退出码 0，`refs/heads/main` 与 pin 一致，`refs/tags/v1.13.3` 仍指向 tag 对象 `dd925205`；npm 为 `1.13.3`；通路：git）**
+**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 80 轮：`git ls-remote` 退出码 0，`refs/heads/main` 与 pin 一致，`refs/tags/v1.13.3` 仍指向 tag 对象 `dd925205`；npm 为 `1.13.3`；通路：git）**
 
 ### 核对通路账
 
@@ -80,6 +80,7 @@ tag v1.13.3
 | 77 | 2026-10-27 | none | 本文件没有核对记录（该轮未更新状态与账） | `[UPSTREAM-DEBT]` HEAD |
 | 78 | 2026-10-27 | api | `375f64c` / `v1.13.3`，无新内容；git 超时（124）、API 作答；npm `1.13.3`；版本探测的等待预算抽成 `versionWaitMs` 并补 grace/budget 边界与 `probeError` 的异常值形状 | — |
 | 79 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；`installInfo` 同名覆盖改成「顶层优先」并补反向断言、`describeProbeError` 补原型链两端、`versionWaitMs` 去掉只被测试读的 `grace` | — |
+| 80 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；`classifyRef` 的计数改成「十进制数字」严格匹配（堵住 `parseInt` 前缀把畸形形状猜成关系）、`gitEnv` 导出并直测 spread / 只读调用方环境 / 逐调用新鲜 | — |
 
 ### 对照表（上游前进时要重读的五处）
 
@@ -87,9 +88,9 @@ tag v1.13.3
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
 对应行并把轮次与日期改成本轮。
 
-**第 46–79 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
+**第 46–80 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
 npm 通路可达，第 56 轮 git 超时但 API 可达，第 63–64 轮本文件无通路记录，第 68 轮 git
-超时但 API 可达，第 69–76、79 轮 git 可达，第 77 轮本文件无通路记录，第 78 轮 git 超时但
+超时但 API 可达，第 69–76、79–80 轮 git 可达，第 77 轮本文件无通路记录，第 78 轮 git 超时但
 API 可达），所以下表 5 行的
 「最近一次对照」停在第 45 轮是
 **没有理由重看**，不是忘了看：
@@ -134,7 +135,39 @@ API 可达），所以下表 5 行的
 4. **不要**静默忽略上游 release：每轮把结论写进下面「当前状态」，并把上一轮的正文搬到
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。
 
-## 当前状态（第 79 轮，2026-10-27）
+## 当前状态（第 80 轮，2026-10-27）
+
+第 80 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 两条通路都可达。**
+`git ls-remote https://github.com/alibaba/open-code-review.git HEAD refs/heads/main
+refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
+（与第 49–79 轮同一个 commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
+`dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`；`npm view @alibaba-group/open-code-review version`
+仍是 `1.13.3`。desktop 的 `^1.13.3` 无需改动，**无移植项**。
+
+本轮不再扩纯函数抽取，回到 `git-service.js` 里两处「相信一个自己控制不了的输入」的地方，
+各补一条会红的断言——两条都先验过「改回旧写法就红」：
+
+- **P0-1：`classifyRef` 的计数改成「十进制数字」严格匹配。** 原来两半交给
+  `Number.parseInt` 再查 `Number.isFinite`，而 `parseInt` 接受数字**前缀**：`"3x 0"` 读成
+  3 与 0（`ancestor`）、`"0 3x"` 读成 0 与 3（`descendant`）、`"0x10 0"` 读成 0 与 0——
+  **`same`**，正是这个函数唯一不能错的那个答案（「两分支是同一个 commit」）；负号同理
+  （`"-1 0"` → `ancestor`），而 `rev-list` 根本印不出负计数。现在两半先过 `/^\d+$/`，
+  形状不对一律答 `""`，`inspect` 就不把该 ref 放进 `relations`、UI 回落到工作区。
+  smoke 新增六格畸形形状（`3x` / `0x10` / 负号 / 小数），与已有的四格合法形状同表；
+  把严格匹配换回 `parseInt`，这六格当场红、四格合法形状仍绿——已这样验过。
+- **P0-2：`gitEnv` 导出并直测。** 固定 `LC_ALL=C` / `LANG=C` 是 `readFileAtRef` 两条
+  英文分类的前提，此前只有「真跑一次 git、从 `spawn` 的 options 里读回 env」这一条路：
+  它证明键到了 `spawn`，但证明不了展开语义与「每次调用新建」——删掉 `...process.env`
+  后 `git` 仍能靠默认路径被找到，探针照样成功。现在直接问导出的 `gitEnv()`：在
+  `zh_CN.UTF-8` 的环境里两个键仍是 `C`，且**调用方的 `process.env` 未被改写**（排除
+  「改完再返回同一个对象」）；`PATH` 与一个自造的调用方变量都还在（spread 的语义）；
+  两次调用之间改变量，第二次能看见（不是模块加载时的快照）。去掉 spread，三格红；已验过。
+  同一段还留着「键确实进了 `spawn` options」那条探针，两者互补：一个问函数，一个问接线。
+
+两条都在 `git-service.js` 与 `tools/git-service-smoke.mjs` 内，不碰 CLI 参数、配置读写与
+`readFileAtRef` 的 stderr 分类；`audit:service` / `audit:config` / `audit:git` 本轮全绿。
+
+## 上一轮（第 79 轮，2026-10-27）
 
 第 79 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 两条通路都可达。**
 `git ls-remote https://github.com/alibaba/open-code-review.git HEAD refs/tags/v1.13.3`
@@ -165,52 +198,6 @@ commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
 
 沿用第 78 轮的结论：这三条都在 `app-info.js` 与 `tools/app-info-smoke.mjs` 内，不碰 CLI 参数、
 配置读写与 `git show` 分类，`audit:service` / `audit:config` / `audit:git` 不受影响。
-
-## 上一轮（第 78 轮，2026-10-27）
-
-第 78 轮复核：**HEAD 未变，结论仍是「无新内容」；本轮 git 超时、API 作答，npm 一致。**
-`git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
-refs/tags/v1.13.3` 本轮在 120 秒预算内没有返回（`timeout` 退出码 124，无输出），
-`api.github.com/repos/alibaba/open-code-review/commits/main` 退出码 0，
-`sha` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`（与第 49–76 轮同一个 commit）；
-`npm view @alibaba-group/open-code-review version dist-tags` 仍是 `1.13.3` /
-`latest: 1.13.3`（tag 一处本轮没有独立重读，由 `main` 顶端未变与 npm 版本未变共同说明）。
-desktop 的 `^1.13.3` 无需改动，**无移植项**。第 77 轮的提交没有更新本文件，因此本轮在
-通路账里补了一行 `none` 与它欠下的 HEAD 核对；本轮这次 API 核对只清本轮的账。
-
-本轮继续补已经抽出来的纯函数的分支覆盖，不再扩大抽取范围。上一轮把「抛错」与「沉默」
-分开记在 `probeError` 之后，剩下没被问过的是**等待本身**和**异常值的形状**：
-
-- **P0：等待预算抽成 `versionWaitMs`，四种非法 grace 与四种非法 budget 各断一次。**
-  `readVersionOutput` 里那两行原本是内联的：`Number.isFinite(timeoutMs) && timeoutMs > 0`
-  与 `Number.isFinite(graceMs) && graceMs >= 0`。它们各自决定一个数字，而这两个数字的
-  形状只有在 `setTimeout` 里才看得见——`setTimeout(Infinity)` 在 Node 里立刻触发，所以
-  「读到的最长等待」实际是最短的等待。现在计算收进导出的 `versionWaitMs({ timeoutMs,
-  graceMs })`，返回 `{ budget, grace, wait }`：非法 budget 回落默认值，非法 grace 回落
-  默认 grace，`wait` 由两者相加。smoke 逐条问四格（负 / `NaN` / `Infinity` /
-  `undefined`），断言 `wait === budget + VERSION_PROBE_GRACE_MS`；再断言 `graceMs: 0`
-  是被遵守的（`wait === budget`，不能被并进非法值）；再对一组输入扫一遍不变量
-  `wait >= budget`——「deadline 绝不落在子进程自己的预算之内」是这两行存在的理由。
-  正常 pair（40+60=100）也断了一次，否则四条回落用例在两个常量相等时可能恒真。
-- **P0：接线与交给 `exec` 的预算一起断言。** 纯函数绿不代表探针用它：smoke 先要求
-  `app-info.js` 里恰好是 `const { budget, wait } = versionWaitMs({ timeoutMs, graceMs });`，
-  再让 `exec` 立即返回，断言 `timeoutMs: 0` 时服务收到的是 `VERSION_PROBE_MS` 而不是
-  `0`——非法值必须在交给子进程之前就被换掉，否则 `exec` 会按 `NaN`/`0` 去设自己的 timer。
-  另有一格在时钟上：`timeoutMs: 30, graceMs: -10` 的挂死服务必须在 30+默认 grace 之后
-  才被判 `timedOut`；若负 grace 漏进 `setTimeout`，等待会是 20ms，早于子进程自己的 30ms
-  预算，这条会先红。
-- **P1：`exec` 不是函数、异常值没有句子，也各有一格。** `readVersionOutput` 的第一个
-  early return 是 `!binaryPath || typeof exec !== "function"`，此前只测了「没有 binary」
-  那一半；现在补「有 binary 但 `exec: null`」，断言答案是 `timedOut: false` 的空输出——
-  没人可问是接线错了，不该报成「CLI 很慢」。`describeProbeError` 也补了三种被拒值：
-  裸字符串原样成为句子；`new Error("")` 与**没有 `message` 的普通对象**落到同一句
-  `exec rejected without a message`。最后一格顺带修了一个小洞：普通对象原先被
-  `String()` 成 `"[object Object]"`，那是一个值但不是一条诊断（没有可查的东西），
-  现在与空消息同答。三种都断言 `timedOut === false`，因为「抛错」不是「超时」。
-
-上游那三条自动变红的网（`audit:service` / `audit:config` / `audit:git`）本轮不受影响：
-本轮改的是版本探测的等待与诊断，不碰 CLI 参数、配置读写和 `git show` 分类。
-
 ## 上游真变了怎么办（命令驱动，而不是「记得看一眼」）
 ```bash
 npm run audit:service   # CLI 参数构建 / 四种模式的输出解析 / resolver 查找顺序的投影

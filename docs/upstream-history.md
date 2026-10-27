@@ -36,6 +36,83 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 补记落在这段之外。规则本身也必须写在这里（上面那句），否则它只存在于脚本里。
 
 ---
+## 上游状态（第 79 轮，2026-10-27）
+
+第 79 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 两条通路都可达。**
+`git ls-remote https://github.com/alibaba/open-code-review.git HEAD refs/tags/v1.13.3`
+退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`（与第 49–78 轮同一个
+commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
+`dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`；`npm view @alibaba-group/open-code-review version`
+仍是 `1.13.3`。desktop 的 `^1.13.3` 无需改动，**无移植项**。
+
+本轮仍不扩大纯函数抽取范围，只补上一轮抽出来的那两个函数里最后没被问过的形状：
+
+- **P0-1：`formatAppInfo` 的 `installInfo` 同名覆盖定案为「顶层优先」。** 原来
+  `...installInfo` 展开在最后，一个叫 `binary` / `version` / `configPath` 的安装事实会**静默**
+  顶掉刚算出来的值，而载荷的 key 集因为同名不变，钉 key 集的断言看不见它。现在展开挪到最前：
+  字段同名是撞名，不是更好的答案，撞名的安装字段被丢弃。smoke 用
+  `installInfo: { binary: "evil", version: "9.9.9", binarySource: "evil", configPath: "/evil/…" }`
+  逐字断言四个字段保住计算值、key 集不变、且不撞名的安装事实照旧随行（否则「顶层优先」可以
+  用「索性丢掉 installInfo」实现而这条仍绿）。把展开挪回下面，这条会直接红——已这样验过。
+- **P0-2：`describeProbeError` 的原型链两端各补一格。** `"message" in error` 走原型链是
+  **决定**：`Error` 子类可以把 `message` 做成原型上的 getter，`hasOwnProperty` 会把这种合法错误
+  判成「没有消息」，所以断言 `Object.create({ message: "inherited" })` 落到 `"inherited"`，而
+  普通 `Error` 仍答自己的 message。另一端 `Object.create(null)` 没有 `toString`，`String(it)`
+  会**抛**——这行跑在 `.catch` 里，抛出去就是 `app:info` 被拒、设置页空白，所以取值加了守卫，
+  这一格断言它答固定句子而不是拒绝（去掉守卫，这条当场红）。
+- **P1-3：`versionWaitMs` 的 `grace` 字段去掉。** 它只有一个读者——本文件的测试——正是第
+  71/72 轮从载荷里清掉的那种「只被断言存在」的字段。现在答案就是 `{ budget, wait }` 两个数
+  （smoke 断言 key 集恰好这两个），「grace 回落到了默认值」改成问 `wait - budget`，也就是真正
+  进 `setTimeout` 的那个量。
+
+沿用第 78 轮的结论：这三条都在 `app-info.js` 与 `tools/app-info-smoke.mjs` 内，不碰 CLI 参数、
+配置读写与 `git show` 分类，`audit:service` / `audit:config` / `audit:git` 不受影响。
+
+## 上游状态（第 78 轮，2026-10-27）
+
+第 78 轮复核：**HEAD 未变，结论仍是「无新内容」；本轮 git 超时、API 作答，npm 一致。**
+`git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
+refs/tags/v1.13.3` 本轮在 120 秒预算内没有返回（`timeout` 退出码 124，无输出），
+`api.github.com/repos/alibaba/open-code-review/commits/main` 退出码 0，
+`sha` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`（与第 49–76 轮同一个 commit）；
+`npm view @alibaba-group/open-code-review version dist-tags` 仍是 `1.13.3` /
+`latest: 1.13.3`（tag 一处本轮没有独立重读，由 `main` 顶端未变与 npm 版本未变共同说明）。
+desktop 的 `^1.13.3` 无需改动，**无移植项**。第 77 轮的提交没有更新本文件，因此本轮在
+通路账里补了一行 `none` 与它欠下的 HEAD 核对；本轮这次 API 核对只清本轮的账。
+
+本轮继续补已经抽出来的纯函数的分支覆盖，不再扩大抽取范围。上一轮把「抛错」与「沉默」
+分开记在 `probeError` 之后，剩下没被问过的是**等待本身**和**异常值的形状**：
+
+- **P0：等待预算抽成 `versionWaitMs`，四种非法 grace 与四种非法 budget 各断一次。**
+  `readVersionOutput` 里那两行原本是内联的：`Number.isFinite(timeoutMs) && timeoutMs > 0`
+  与 `Number.isFinite(graceMs) && graceMs >= 0`。它们各自决定一个数字，而这两个数字的
+  形状只有在 `setTimeout` 里才看得见——`setTimeout(Infinity)` 在 Node 里立刻触发，所以
+  「读到的最长等待」实际是最短的等待。现在计算收进导出的 `versionWaitMs({ timeoutMs,
+  graceMs })`，返回 `{ budget, grace, wait }`：非法 budget 回落默认值，非法 grace 回落
+  默认 grace，`wait` 由两者相加。smoke 逐条问四格（负 / `NaN` / `Infinity` /
+  `undefined`），断言 `wait === budget + VERSION_PROBE_GRACE_MS`；再断言 `graceMs: 0`
+  是被遵守的（`wait === budget`，不能被并进非法值）；再对一组输入扫一遍不变量
+  `wait >= budget`——「deadline 绝不落在子进程自己的预算之内」是这两行存在的理由。
+  正常 pair（40+60=100）也断了一次，否则四条回落用例在两个常量相等时可能恒真。
+- **P0：接线与交给 `exec` 的预算一起断言。** 纯函数绿不代表探针用它：smoke 先要求
+  `app-info.js` 里恰好是 `const { budget, wait } = versionWaitMs({ timeoutMs, graceMs });`，
+  再让 `exec` 立即返回，断言 `timeoutMs: 0` 时服务收到的是 `VERSION_PROBE_MS` 而不是
+  `0`——非法值必须在交给子进程之前就被换掉，否则 `exec` 会按 `NaN`/`0` 去设自己的 timer。
+  另有一格在时钟上：`timeoutMs: 30, graceMs: -10` 的挂死服务必须在 30+默认 grace 之后
+  才被判 `timedOut`；若负 grace 漏进 `setTimeout`，等待会是 20ms，早于子进程自己的 30ms
+  预算，这条会先红。
+- **P1：`exec` 不是函数、异常值没有句子，也各有一格。** `readVersionOutput` 的第一个
+  early return 是 `!binaryPath || typeof exec !== "function"`，此前只测了「没有 binary」
+  那一半；现在补「有 binary 但 `exec: null`」，断言答案是 `timedOut: false` 的空输出——
+  没人可问是接线错了，不该报成「CLI 很慢」。`describeProbeError` 也补了三种被拒值：
+  裸字符串原样成为句子；`new Error("")` 与**没有 `message` 的普通对象**落到同一句
+  `exec rejected without a message`。最后一格顺带修了一个小洞：普通对象原先被
+  `String()` 成 `"[object Object]"`，那是一个值但不是一条诊断（没有可查的东西），
+  现在与空消息同答。三种都断言 `timedOut === false`，因为「抛错」不是「超时」。
+
+上游那三条自动变红的网（`audit:service` / `audit:config` / `audit:git`）本轮不受影响：
+本轮改的是版本探测的等待与诊断，不碰 CLI 参数、配置读写和 `git show` 分类。
+
 ## 上游状态（第 76 轮，2026-10-27）
 
 第 76 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 两条通路都可达。**

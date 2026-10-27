@@ -499,7 +499,30 @@ fs.rmSync(notARepo, { recursive: true, force: true });
   // not a number, a missing half, and no output at all. None of them may be
   // answered with a relation — an unrecognised shape is "no relation", and
   // "no relation" is not one of the four.
-  for (const stdout of ["garbage", "1", "0", "0 x", "", "1 2 3"]) {
+  //
+  // The last six are the `Number.parseInt` hole, and they are why the counts are
+  // matched as digits rather than parsed: `parseInt` accepts a *prefix*, so
+  // "3x 0" read as 3-and-0 (`ancestor`), "0 3x" as 0-and-3 (`descendant`), and
+  // "0x10 0" as 0-and-0 — `same`, the one answer that says "these are the same
+  // commit". A sign or a decimal point is no shape either, and would otherwise
+  // be read as a relation too ("-1 0" -> `ancestor`). Put `parseInt` back in
+  // place of the digit test and these go red while the four known shapes stay
+  // green — which is exactly how this hole survived until now.
+  const badShapes = [
+    "garbage",
+    "1",
+    "0",
+    "0 x",
+    "",
+    "1 2 3",
+    "3x 0",
+    "0 3x",
+    "0x10 0",
+    "-1 0",
+    "0 -2",
+    "3.9 0",
+  ];
+  for (const stdout of badShapes) {
     const { rel } = await classifyStdout(stdout);
     check(
       `a shape that is not a pair of counts answers no relation: ${JSON.stringify(stdout)}`,
@@ -728,6 +751,57 @@ check(
   check("git is spawned with LANG=C", env.LANG === "C", String(env.LANG));
   check("the rest of the environment is kept", env.PATH === process.env.PATH, String(env.PATH || "").slice(0, 40));
   check("git is still spawned asynchronously, not with spawnSync", calls.length === 1 && typeof opts.cwd === "string", `${calls.length} spawn(s)`);
+}
+
+/* ---- the two keys, asked of the function that builds them ----
+ * The block above proves the pinned locale reaches `spawn`; it is also the only
+ * thing that proved the *spread* survives, and it does so through a real git
+ * call (a missing PATH would fail the probe for an unrelated-looking reason).
+ * So `gitEnv` itself is asked directly, while the ambient locale is still
+ * Chinese (set above, restored below):
+ *
+ *   - the two keys are overridden even though the caller's environment says
+ *     something else — and the caller's environment is *not* mutated, which is
+ *     what separates "return a copy" from "set process.env and hand it back";
+ *   - a caller's own variable survives: PATH is what finds `git` at all, and
+ *     `GIT_CEILING_DIRECTORIES` is how the `not a repository` fixture above
+ *     keeps git from finding a repository further up the tree. Losing the
+ *     spread leaves every classification check green and silently breaks the
+ *     spawn, which is the failure this asks about;
+ *   - it is built per call, not once at load: a caller may change its
+ *     environment between calls (the ceiling fixture does), and a snapshot
+ *     taken at load would ignore that without any check noticing.
+ */
+{
+  const PROBE = "OCR_GIT_ENV_PROBE";
+  const savedProbe = process.env[PROBE];
+  try {
+    process.env[PROBE] = "before";
+    const first = gitSvc.gitEnv();
+    process.env[PROBE] = "after";
+    const second = gitSvc.gitEnv();
+
+    check("gitEnv() pins LC_ALL to C over the ambient locale", first.LC_ALL === "C", String(first.LC_ALL));
+    check("gitEnv() pins LANG to C over the ambient locale", first.LANG === "C", String(first.LANG));
+    check(
+      "...and leaves the caller's environment alone, it returns a copy",
+      process.env.LC_ALL === "zh_CN.UTF-8" && process.env.LANG === "zh_CN.UTF-8",
+      `${process.env.LC_ALL} / ${process.env.LANG}`
+    );
+    check(
+      "...and keeps the caller's own variables, PATH included",
+      first.PATH === process.env.PATH && first[PROBE] === "before",
+      `${String(first.PATH || "").slice(0, 30)} / ${first[PROBE]}`
+    );
+    check(
+      "...and is built per call, so a variable changed between calls is seen",
+      second[PROBE] === "after" && first[PROBE] === "before",
+      `${first[PROBE]} -> ${second[PROBE]}`
+    );
+  } finally {
+    if (savedProbe === undefined) delete process.env[PROBE];
+    else process.env[PROBE] = savedProbe;
+  }
 }
 
 if (savedLocale.LC_ALL === undefined) delete process.env.LC_ALL;

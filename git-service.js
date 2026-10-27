@@ -36,6 +36,14 @@ const { isInside } = require("./path-guard");
 // 『能自动变红的地方，和不能的地方』. Read it before touching the patterns in
 // `readFileAtRef`.
 const gitEnv = () => ({ ...process.env, LC_ALL: "C", LANG: "C" });
+// Exported so the check can ask it directly, without a spawned git in the way
+// (`tools/git-service-smoke.mjs`). The part worth asserting is the *shape* of
+// the expression above: the spread is what keeps PATH (how `git` is found at
+// all) and the caller's `GIT_CEILING_DIRECTORIES`; dropping it to
+// `{ LC_ALL: "C", LANG: "C" }` leaves every classification check green (Node
+// still finds `git` through its default exec path), so nothing else here would
+// notice; only this direct question does. Built per call, as the comment says —
+// the check reads it twice to hold that too.
 
 function git(args, cwd) {
   return new Promise((resolve) => {
@@ -66,6 +74,9 @@ async function resolveRef(repo, ref) {
   return res.code === 0 && sha ? { ok: true, sha } : { ok: false, error: `无法解析 ${ref}` };
 }
 
+// What a count may look like: decimal digits, nothing else. See `classifyRef`.
+const COUNT = /^\d+$/;
+
 /**
  * How a ref stands relative to HEAD, which is the only thing that decides
  * whether a `--from <ref> --to HEAD` comparison has anything in it.
@@ -87,11 +98,18 @@ async function resolveRef(repo, ref) {
  * not recognise has to answer "" rather than one of the four relations — a
  * guess here is a range that reviews no file, and says nothing about it.
  *
- * The shape is read strictly: exactly two counts. Anything else — a third
- * column, a missing half, a line that is not a number — answers "" as well,
- * because "no relation" only makes the UI fall back to the working tree,
- * while a relation read out of a shape that is not the documented one picks a
- * range that silently reviews nothing.
+ * The shape is read strictly: exactly two counts, each written as decimal
+ * digits. Anything else — a third column, a missing half, a word, a sign, a
+ * decimal point — answers "" as well, because "no relation" only makes the UI
+ * fall back to the working tree, while a relation read out of a shape that is
+ * not the documented one picks a range that silently reviews nothing.
+ *
+ * "Decimal digits" is checked as digits, not by handing each half to
+ * `Number.parseInt`: that function accepts a numeric *prefix*, so "3x" becomes
+ * 3 and "0x10" becomes 0 (base 10 stops at the `x`) — a shape git never prints
+ * would be answered `ancestor`, or even `same`, which is this function's one
+ * silent failure mode. `rev-list` cannot print a negative count either, so
+ * "-1 0" is no shape at all; parsed, it would read as `ancestor`.
  *
  * A *legal ref name* is an upstream constraint of this function, not a promise
  * it makes: `ref` comes from `inspect`'s own `refs` list (git's
@@ -108,7 +126,7 @@ async function classifyRef(repoRoot, ref) {
   const res = await git(["rev-list", "--count", "--left-right", `HEAD...${ref}`], repoRoot);
   if (res.code !== 0) return "";
   const parts = res.stdout.trim().split(/\s+/);
-  if (parts.length !== 2) return "";
+  if (parts.length !== 2 || !parts.every((part) => COUNT.test(part))) return "";
   const [left, right] = parts.map((n) => Number.parseInt(n, 10));
   if (!Number.isFinite(left) || !Number.isFinite(right)) return "";
   if (left === 0 && right === 0) return "same";
@@ -287,4 +305,13 @@ async function readFile(repo, relPath, { ref, startLine, endLine, pad } = {}) {
   return readFileWindow(repo, relPath, startLine, endLine, pad);
 }
 
-module.exports = { inspect, readFile, readFileWindow, readFileAtRef, resolveRef, classifyRef, git };
+module.exports = {
+  inspect,
+  readFile,
+  readFileWindow,
+  readFileAtRef,
+  resolveRef,
+  classifyRef,
+  gitEnv,
+  git,
+};
