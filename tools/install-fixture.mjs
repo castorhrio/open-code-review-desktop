@@ -52,15 +52,16 @@ export const INSTALL_INFO_KEYS = Object.freeze([
  * resolves the other way even if one appears.
  *
  * The list is the authority, not a reflection of whatever the module happens to
- * return. `app-info-smoke.mjs` asserts one direction only — every key
- * `formatAppInfo()` returns is named here — and runs the collision proof over
- * *this* list, not over the return value. A field added to the return object
- * without being named here is therefore red, while a name listed here that the
- * function does not return is harmless (the fixture then contributes an ordinary
- * install fact). Deriving the collision surface from the return value instead
- * would make the two sides provable from each other: add a field and the list
- * together and every check stays green while the new field's collision is never
- * tried.
+ * return. `app-info-smoke.mjs` runs the collision proof over *this* list, not
+ * over the return value, and asks the return object two questions: every key it
+ * returns must be named here, and every name here must be answered by at least
+ * one shape of the function. A field added to the return object without being
+ * named here is red on the first; a name left here after its field was deleted
+ * is red on the second. The second check is weak on purpose — it says no
+ * promised name is dead, not that the list equals one return value's keys.
+ * Deriving the collision surface from the return value instead would make the
+ * two sides provable from each other: add a field and the list together and
+ * every check stays green while the new field's collision is never tried.
  */
 export const APP_INFO_COMPUTED_KEYS = Object.freeze([
   "appVersion",

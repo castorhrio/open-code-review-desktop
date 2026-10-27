@@ -35,7 +35,7 @@ tag v1.13.3
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 88 轮：`git ls-remote` 超时、退出码 124，改由 GitHub API 核对 `refs/heads/main` 与 pin 一致；npm 仍为 `1.13.3`；tag 对象未独立重读；通路：api）**
+**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 89 轮：`git ls-remote` 退出码 0，`refs/heads/main` 与 pin 一致；`refs/tags/v1.13.3` 仍为最高 tag；npm 仍为 `1.13.3`；tag 对象未独立重读；通路：git）**
 
 ### 核对通路账
 
@@ -96,6 +96,7 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 | 86 | 2026-10-27 | api | `375f64c` / `v1.13.3`，无新内容；git 超时（124）、API 作答；npm `1.13.3`；编辑规则拆成「给人读的约定」与「给 audit 看的约束」并逐条反向断言 | — |
 | 87 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；`formatAppInfo` 撞名面扩到全部返回键、归档禁止整串引用 pin | — |
 | 88 | 2026-10-27 | api | `375f64c` / `v1.13.3`，无新内容；git 超时（124）、API 作答；npm `1.13.3`；`describeProbeError` 抛错 getter、`APP_INFO_COMPUTED_KEYS` 单向权威、兜底带出 `rawStderr` | — |
+| 89 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；计算键清单补「每个名字都被某次返回」、兜底 `error` 的原文摘要与真 git 兜底进断言 | — |
 
 ### 对照表（上游前进时要重读的五处）
 
@@ -103,9 +104,9 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
 对应行并把轮次与日期改成本轮。
 
-**第 46–88 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
+**第 46–89 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
 npm 通路可达，第 56 轮 git 超时但 API 可达，第 63–64 轮本文件无通路记录，第 68 轮 git
-超时但 API 可达，第 69–76、79–80、84–85、87 轮 git 可达，第 77 轮本文件无通路记录，第 78、81–83、86、88 轮
+超时但 API 可达，第 69–76、79–80、84–85、87、89 轮 git 可达，第 77 轮本文件无通路记录，第 78、81–83、86、88 轮
 git 超时但 API 可达），所以下表 5 行的
 「最近一次对照」停在第 45 轮是
 **没有理由重看**，不是忘了看：
@@ -174,46 +175,41 @@ git 超时但 API 可达），所以下表 5 行的
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。搬完这里只留一句
    指针——「本文件只留当前一轮」不是约定而是断言（`previousRoundPointerViolations`）。
 
-## 当前状态（第 88 轮，2026-10-27）
+## 当前状态（第 89 轮，2026-10-27）
 
-第 88 轮复核：**HEAD 未变，结论仍是「无新内容」；API 与 npm 可达，git 通路本轮超时。**
-`git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main` 本轮超时
-（`timeout` 返回 124，与第 83、86 轮同因），改由 `npm run upstream:check` 走
-`api.github.com/repos/alibaba/open-code-review/commits/main` 作答：`sha` 仍是 `375f64c`
-（与第 49–87 轮同一个 commit，通路 `api`）；`npm view @alibaba-group/open-code-review version`
-仍是 `1.13.3`。tag 一处本轮没有独立核对——`refs/heads/main` 未变即「无新 commit」，
-registry 的 `latest` 未变即「无新发布」。desktop 的 `^1.13.3` 无需改动，**无移植项**。
+第 89 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 可达。**
+`git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main` 本轮退出码 0，
+`375f64c` 与 pin 一致（与第 49–88 轮同一个 commit）；`git ls-remote --tags --refs` 仍以
+`refs/tags/v1.13.3` 为最高版本，`npm view @alibaba-group/open-code-review version` 仍是
+`1.13.3`（tag 对象本轮没有独立重读——branch 未变即「无新 commit」，registry 的 `latest`
+未变即「无新发布」）。desktop 的 `^1.13.3` 无需改动，**无移植项**。
 
-本轮按控制仓简报收口三条「外部世界变了不会红」的缺口，都不改运行期行为与 UI：
+本轮按控制仓简报收口两条「清单或文案漂移不会红」的缺口，都不改运行期行为与 UI：
 
-- **P0-1：`describeProbeError` 补上「`message` 是抛错 getter」这一格。**
-  `"message" in error` 走原型链，读取一个会抛的 getter 会让 `describeProbeError` 自己抛；
-  它运行在 `.catch` 里，抛出去就是设置页空白。该形状本来就由 try/catch 接住，但此前没有
-  断言：现在 `tools/app-info-smoke.mjs` 用
-  `Object.defineProperty({}, "message", { get() { throw … } })` 作拒绝值，要求
-  `probeError` 落回固定句 `exec rejected without a message`、`app:info` 不拒绝。反向控制：
-  去掉 try/catch，断言当场红并停在 `describeProbeError`。
-- **P0-2：`APP_INFO_COMPUTED_KEYS` 成为唯一权威，返回值只做单向断言。**
-  第 87 轮从返回键推导撞名面，与清单做等值断言；两侧同时改就仍能同绿。现在
-  `tools/app-info-smoke.mjs` 要求 `formatAppInfo` 的返回键 **⊆** `APP_INFO_COMPUTED_KEYS`
-  （多出来即红），撞名面从常量推导而不是从返回值推导；清单里多出一个函数未返回的名字
-  不报错（它只是作为普通安装字段随 `...installInfo` 走）。反向控制：给 `formatAppInfo`
-  加一个返回字段但不改常量，断言点名该字段并变红。
-- **P0-3：`readFileAtRef` 落到兜底分支时带出 git 原始 stderr。**
-  `REF_READ_WORDINGS` 的 sample 是手写的；git 改措辞或换 locale 时表全部 miss、答案仍是
-  `failed`，而 `audit:git` 原本照旧全绿。现在兜底分支把未 trim 的 stderr 放进返回对象的
-  `rawStderr`（只在该分支；不拼进用户可见的 `error`），并由 `tools/git-service-smoke.mjs`
-  用表外措辞 `fatal: something new` 断言 `reason === "failed"` 且 `rawStderr` 非空；同一
-  组断言还要求已识别措辞不带 `rawStderr`，否则该字段就不再标记「这是兜底」。反向控制：
-  去掉 `rawStderr`，断言当场红。
+- **P0-1：`APP_INFO_COMPUTED_KEYS` 补上「每个列出的名字都被某次返回」的弱约束。**
+  第 88 轮只断言「返回值 ⊆ 清单」，于是「从 `formatAppInfo` 删掉一个字段但忘删清单」是
+  静默的：单向检查只问返回键在不在清单里，没问清单里的名字还活不活。现在
+  `tools/app-info-smoke.mjs` 用三种形态（有 binary + 版本、无 binary、无 installInfo）拼出
+  实际返回键的并集，要求清单里每个名字至少出现一次；清单仍是权威，约束仍是弱的（不要求
+  每次调用的键集相同）。反向控制：从 `formatAppInfo` 的返回里删掉 `platform`，断言点名
+  `missingFromAnswers: ["platform"]` 并红。`tools/install-fixture.mjs` 的注释同步改成
+  「两个方向问的不是同一个问题」。
+- **P0-2：兜底分支的用户可见文案带上 git 原文摘要，并证明真 git 会走到这里。**
+  `error` 自第 82 轮起就带 git 首行与退出码，`rawStderr` 自第 88 轮起保存完整 stderr，
+  但「`error` 真的含原文」此前没有断言——把 `first` 换成固定句，所有检查仍绿。
+  `tools/git-service-smoke.mjs` 现在用两行表外措辞断言：`error` 含首行、不含第二行，
+  `rawStderr` 含第二行；再拿一个**真 git** 的非仓库失败（`fatal: not a git repository`）走
+  同一条 `readFileAtRef`，要求 `rawStderr` 非空、`error` 含其首行——这证明兜底不是只能被
+  stub 构造出来。（`gitEnv()` 固定 C locale，所以「非 C locale 更深地走到兜底」无法从
+  `readFileAtRef` 这一侧主动制造；真 git 的兜底证据改由这条未被识别的真实措辞提供。）
+  反向控制：把兜底 `message` 里的 `first` 去掉，两条断言当场红。
 
-改动只在 `app-info.js`（注释）、`tools/app-info-smoke.mjs`、`tools/install-fixture.mjs`
-（注释）、`tools/install-info-smoke.mjs`（注释）、`git-service.js`、
+改动只在 `tools/app-info-smoke.mjs`、`tools/install-fixture.mjs`（注释）、
 `tools/git-service-smoke.mjs`、`docs/hardening-log.md`、`docs/upstream-history.md`
-与本文件；不碰 `main.js`、`src/**`、CLI 参数、配置读写或 IPC 注册体。
+与本文件；不碰 `main.js`、`src/**`、CLI 参数、配置读写、IPC 注册体或运行期代码。
 `audit:appinfo` / `audit:git` / `audit:upstream` 本轮全绿（`audit:static` 随后整体复跑）。
 
-上一轮（第 87 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-87-轮2026-10-27)，归档之后本文件不留第二份。
+上一轮（第 88 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-88-轮2026-10-27)，归档之后本文件不留第二份。
 
 ## 上游真变了怎么办（命令驱动，而不是「记得看一眼」）
 ```bash
@@ -277,9 +273,11 @@ pattern）。仍然没人钉的是**别的失败**：子模块、git 为其它�
 的首行 stderr 与退出码，退出码是这条路上唯一不随语言变的部分。第 88 轮起，兜底分支还把
 **未 trim 的原始 stderr** 放在返回对象的 `rawStderr` 上（只在该分支，不拼进用户可见的
 `error`），`tools/git-service-smoke.mjs` 用一条表外措辞（`fatal: something new`）断言它
-非空、用一条已识别措辞断言它不出现——所以「分类悄悄退化」至少会留下证据。这条通道让
-退化**可被看见**，但没有把表 miss 变红：表外的措辞仍然按 `failed` 回答，只是 `rawStderr`
-不再是空的。评审时若想动这两组正则，
+非空、用一条已识别措辞断言它不出现。第 89 轮补上了另一半：`error` 必须含同一份 stderr 的
+**首行**（多行夹具同时要求不含第二行，第二行只在 `rawStderr` 里），并用一条**真 git** 的
+非仓库失败走同一条 `readFileAtRef`，要求 `rawStderr` 非空、`error` 含其首行——所以「兜底
+只能被 stub 构造」不再成立。这条通道让退化**可被看见**，但没有把表 miss 变红：表外的措辞
+仍然按 `failed` 回答，只是 `rawStderr` 不再是空的。评审时若想动这两组正则，
 请同时想清楚这两层各自覆盖什么，以及本节记录的那半个缺口。对应代码见 `git-service.js` 顶部 `gitEnv()`
 注释（那里写了为什么固定 C locale、以及为什么代价的补偿是通用分支必须带退出码与 `rawStderr`）。
 

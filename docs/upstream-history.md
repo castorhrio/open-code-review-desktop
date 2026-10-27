@@ -38,6 +38,45 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 
 ---
 
+## 上游状态（第 88 轮，2026-10-27）
+
+第 88 轮复核：**HEAD 未变，结论仍是「无新内容」；API 与 npm 可达，git 通路本轮超时。**
+`git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main` 本轮超时
+（`timeout` 返回 124，与第 83、86 轮同因），改由 `npm run upstream:check` 走
+`api.github.com/repos/alibaba/open-code-review/commits/main` 作答：`sha` 仍是 `375f64c`
+（与第 49–87 轮同一个 commit，通路 `api`）；`npm view @alibaba-group/open-code-review version`
+仍是 `1.13.3`。tag 一处本轮没有独立核对——`refs/heads/main` 未变即「无新 commit」，
+registry 的 `latest` 未变即「无新发布」。desktop 的 `^1.13.3` 无需改动，**无移植项**。
+
+本轮按控制仓简报收口三条「外部世界变了不会红」的缺口，都不改运行期行为与 UI：
+
+- **P0-1：`describeProbeError` 补上「`message` 是抛错 getter」这一格。**
+  `"message" in error` 走原型链，读取一个会抛的 getter 会让 `describeProbeError` 自己抛；
+  它运行在 `.catch` 里，抛出去就是设置页空白。该形状本来就由 try/catch 接住，但此前没有
+  断言：现在 `tools/app-info-smoke.mjs` 用
+  `Object.defineProperty({}, "message", { get() { throw … } })` 作拒绝值，要求
+  `probeError` 落回固定句 `exec rejected without a message`、`app:info` 不拒绝。反向控制：
+  去掉 try/catch，断言当场红并停在 `describeProbeError`。
+- **P0-2：`APP_INFO_COMPUTED_KEYS` 成为唯一权威，返回值只做单向断言。**
+  第 87 轮从返回键推导撞名面，与清单做等值断言；两侧同时改就仍能同绿。现在
+  `tools/app-info-smoke.mjs` 要求 `formatAppInfo` 的返回键 **⊆** `APP_INFO_COMPUTED_KEYS`
+  （多出来即红），撞名面从常量推导而不是从返回值推导；清单里多出一个函数未返回的名字
+  不报错（它只是作为普通安装字段随 `...installInfo` 走）。反向控制：给 `formatAppInfo`
+  加一个返回字段但不改常量，断言点名该字段并变红。
+- **P0-3：`readFileAtRef` 落到兜底分支时带出 git 原始 stderr。**
+  `REF_READ_WORDINGS` 的 sample 是手写的；git 改措辞或换 locale 时表全部 miss、答案仍是
+  `failed`，而 `audit:git` 原本照旧全绿。现在兜底分支把未 trim 的 stderr 放进返回对象的
+  `rawStderr`（只在该分支；不拼进用户可见的 `error`），并由 `tools/git-service-smoke.mjs`
+  用表外措辞 `fatal: something new` 断言 `reason === "failed"` 且 `rawStderr` 非空；同一
+  组断言还要求已识别措辞不带 `rawStderr`，否则该字段就不再标记「这是兜底」。反向控制：
+  去掉 `rawStderr`，断言当场红。
+
+改动只在 `app-info.js`（注释）、`tools/app-info-smoke.mjs`、`tools/install-fixture.mjs`
+（注释）、`tools/install-info-smoke.mjs`（注释）、`git-service.js`、
+`tools/git-service-smoke.mjs`、`docs/hardening-log.md`、`docs/upstream-history.md`
+与本文件；不碰 `main.js`、`src/**`、CLI 参数、配置读写或 IPC 注册体。
+`audit:appinfo` / `audit:git` / `audit:upstream` 本轮全绿（`audit:static` 随后整体复跑）。
+
 ## 上游状态（第 87 轮，2026-10-27）
 
 第 87 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 可达。**

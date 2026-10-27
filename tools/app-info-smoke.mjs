@@ -263,13 +263,22 @@ const base = {
  */
 {
   // The authoritative list is `APP_INFO_COMPUTED_KEYS` in
-  // `tools/install-fixture.mjs`, and the assertion here is deliberately
-  // one-way: every key this function returns must be named by that list. The
-  // other direction — a listed key the function does not return — is not an
-  // error, because the list is a contract written independently of the
-  // implementation. That independence is the whole point: if both sides were
-  // derived from each other, a field added to the return object and to the list
-  // would stay green while the collision proof silently stopped covering it.
+  // `tools/install-fixture.mjs`, and the checks below ask it two different
+  // questions. The first is one-way: every key this function returns must be
+  // named by that list, so a field cannot be added without naming the collision
+  // it creates. The second is deliberately weaker than an equality check: every
+  // *listed* name must be answered by at least one shape this function can take.
+  // It does not derive the list from a single return value (the list stays the
+  // authority), but it does catch the other drift — a field deleted from the
+  // return object while its name stays listed. Without it that edit is silent:
+  // the one-way check only asks "is every returned key listed", and a listed
+  // name that is never returned is exactly what it does not see.
+  //
+  // The shapes below vary the two inputs that change the answer's content (a
+  // binary with a version, no binary at all, no install facts), so a field that
+  // only appears under one of them is still covered. The completeness check is
+  // weak by design: it asks that no promised name is dead, not that every call
+  // returns the same key set.
   //
   // The reference answer uses `installInfo: {}` (an explicit empty object), not
   // `undefined`: this block is about "which keys does the function compute", and
@@ -290,6 +299,27 @@ const base = {
     JSON.stringify({
       got: ownKeys,
       missingFromList: ownKeys.filter((key) => !computedKeys.includes(key)),
+    })
+  );
+  // The other drift direction: a name the list still promises but the function
+  // no longer answers. One shape would be enough today, because every key is a
+  // literal in the return object; the shapes are varied anyway so the check
+  // keeps asking "can this name ever be answered" if a shape-dependent field
+  // appears later.
+  const answeredKeys = [
+    ...new Set(
+      [
+        reference,
+        formatAppInfo({ ...base, installInfo: {}, binary: { path: null, source: null } }),
+        formatAppInfo({ ...base, installInfo: undefined, binary: undefined }),
+      ].flatMap((info) => Object.keys(info))
+    ),
+  ].sort();
+  check(
+    "...and every listed name is answered by at least one formatAppInfo shape",
+    computedKeys.every((key) => answeredKeys.includes(key)),
+    JSON.stringify({
+      missingFromAnswers: computedKeys.filter((key) => !answeredKeys.includes(key)),
     })
   );
   check(
@@ -331,9 +361,10 @@ const base = {
   );
   // A collision is a name overlap, not an extra field: the payload is exactly
   // the computed keys plus the install facts that did not overlap. Built from the
-  // inputs rather than from the "no install facts" answer, so a listed key the
-  // function does not return (a stale entry) is expected to travel as an ordinary
-  // install fact instead of turning this check red for an unrelated reason.
+  // inputs rather than from the "no install facts" answer, so this check stays
+  // about the payload's shape: if the list ever carries a stale name, that name
+  // travels as an ordinary install fact here while the completeness check above
+  // is what goes red — the failure lands on the assertion that is about it.
   const expectedPayloadKeys = [...new Set([...ownKeys, ...Object.keys(colliding)])].sort();
   check(
     "...and a collision adds no key: the payload is the computed keys plus the install facts",

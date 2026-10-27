@@ -354,6 +354,23 @@ check(
   [noSuchPath, badRefByPath, unknownWording].every((answer) => answer.ok === false && Boolean(answer.ref) && Boolean(answer.path)),
   JSON.stringify([noSuchPath, badRefByPath, unknownWording].map((answer) => [answer.reason, answer.ref, answer.path]))
 );
+// The fallback asserted against the sentence a *real* git printed, not a stub
+// sample: the stub block below proves the branch formats git's words, but only a
+// real failure shows the branch is reached at all. `error` carries the first
+// line because that is what the pane shows; `rawStderr` carries the untrimmed
+// text for a log. Both come from the same call, and the C locale `gitEnv()`
+// pins is what makes the recognised fragment stable.
+const realUnknownRaw = String(unknownWording.rawStderr || "");
+const realUnknownFirst = realUnknownRaw.trim().split(/\r?\n/)[0] || "";
+check(
+  "a real git failure outside a repository reaches the fallback with git's own words",
+  unknownWording.ok === false &&
+    unknownWording.reason === "failed" &&
+    realUnknownRaw.includes("not a git repository") &&
+    realUnknownFirst.length > 0 &&
+    unknownWording.error.includes(realUnknownFirst),
+  JSON.stringify({ error: unknownWording.error, rawStderr: unknownWording.rawStderr })
+);
 fs.rmSync(notARepo, { recursive: true, force: true });
 
 /* ---- each reason is a sentence, and sentences drift ----
@@ -534,6 +551,31 @@ fs.rmSync(notARepo, { recursive: true, force: true });
       knownNoRaw.res.reason === "missing" &&
       !("rawStderr" in knownNoRaw.res),
     JSON.stringify({ reason: knownNoRaw.res.reason, rawStderr: knownNoRaw.res.rawStderr })
+  );
+
+  /* ---- the fallback's reader-facing sentence keeps git's own first line ----
+   * `rawStderr` is for a log; the code pane shows `error`. Carrying the whole
+   * stderr there would make a localised multi-line failure unreadable, but
+   * dropping it entirely leaves "读取 … 失败" — a sentence the reader cannot look
+   * up, which is the exact shape this branch used to have. So the fallback keeps
+   * the *first* stderr line as its summary, and only the summary: the rest stays
+   * on `rawStderr`. Both halves are asserted, because "carries the fragment" and
+   * "does not become the whole stderr" are two different ways this line can rot.
+   */
+  const twoLines = await classifyStderr("fatal: something new\nfatal: second line");
+  check(
+    "the fallback's reader-facing error carries git's first stderr line",
+    twoLines.res.ok === false &&
+      twoLines.res.reason === "failed" &&
+      twoLines.res.error.trim().length > 0 &&
+      twoLines.res.error.includes("fatal: something new"),
+    twoLines.res.error || ""
+  );
+  check(
+    "...and only that line: the rest of git's stderr stays on rawStderr",
+    twoLines.res.error.includes("second line") === false &&
+      String(twoLines.res.rawStderr || "").includes("fatal: second line"),
+    JSON.stringify({ error: twoLines.res.error, rawStderr: twoLines.res.rawStderr })
   );
 
   /* ---- the exit-code assertion itself, in both directions ----
