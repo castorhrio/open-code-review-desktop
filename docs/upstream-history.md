@@ -38,6 +38,40 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 
 ---
 
+## 上游状态（第 95 轮，2026-10-27）
+
+第 95 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 均可核对。**
+`375f64cd…` 与 pin 一致（与第 49–94 轮同一个 commit），`git ls-remote --tags --refs` 仍以
+`refs/tags/v1.13.3` 为最高版本，`npm view @alibaba-group/open-code-review version` 仍是
+`1.13.3`。**无移植项**。
+
+本轮只动 `main.js` 的两处「说出口」，主题是「同一句话不要只用读源码来断言」：
+
+- **P0-2：`reportSenderLoss`。** 原来「队列上限丢了几条」整段写在 `did-finish-load` 的
+  回调里，测试只能按文本问「`lost > 0` 附近有没有 `send("run:log", { line: … })`」——
+  这句话对「永远不执行的分支」也是绿的，对「挪进一个函数」是红的。现在搬进
+  `main-wiring.js`（`send` 注入），`main.js` 只留 `reportSenderLoss({ ...windowSender
+  .markReady(), limit: windowSender.limit, send })`；`lost === 0` 不说话、`lost > 0` 只说
+  一次、通道是 `run:log`、payload 只有 `{ line }`、句子带条数与上限——都由
+  `tools/main-wiring-smoke.mjs` 直测，并把「换通道 / 换键 / 丢掉计数 / `if (lost)`」
+  四种写法定否。
+- **P1-1：`reportProbeError`。** 同一模式收口 `onProbeError` 的真实 sink：句子、通道与
+  `{ line }` 在 `main-wiring.js` 里被直测（含「空消息仍有话说」「没有 `send` 不抛」
+  「`console.warn` / 另一个通道 / 丢掉消息」三种反例），`main.js` 只剩
+  `onProbeError: (message) => reportProbeError({ message, send })`，
+  `tools/app-info-smoke.mjs` 改问这条接线。
+- **P0-1：`markReady()` 的 `sent` 语义。** JSDoc 写明 `sent` 是**本次调用**送出的条数
+  （中断后的一次 `markReady()` 只报剩余部分，两次答案相加才是队列原长），并补一条反向
+  控制：`survivesInterruptedFlush` 对真模块要求「中断后继续 flush，全队列按序各一次」，
+  对「一失败就清空队列」的写法判红。
+
+改动在 `main-wiring.js`（新增）、`main.js`、`package.json`（`build.files` 与
+`audit:wiring`）、`tools/main-wiring-smoke.mjs`（新增）、`tools/window-sender-smoke.mjs`、
+`tools/app-info-smoke.mjs`、`window-sender.js`（仅注释）、`docs/upstream-history.md` 与
+本文件。评审逻辑、CLI 参数、配置读写路径与运行期行为均未动。`audit:static` 本轮全绿。
+
+---
+
 ## 上游状态（第 94 轮，2026-10-27）
 
 第 94 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 均可核对。**

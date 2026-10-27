@@ -35,7 +35,7 @@ tag v1.13.3
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 95 轮：`git ls-remote` 退出码 0，`refs/heads/main` 与 pin 一致；`refs/tags/v1.13.3` 仍为最高 tag，由 GitHub API 核对；npm 仍为 `1.13.3`；通路：git）**
+**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 96 轮：`git ls-remote` 退出码 0，`refs/heads/main` 与 pin 一致；`refs/tags/v1.13.3` 仍为最高 tag，由 `git ls-remote --tags` 核对；npm 仍为 `1.13.3`；通路：git）**
 
 ### 核对通路账
 
@@ -103,6 +103,7 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 | 93 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；窗口未就绪时的事件改成排队 + `did-finish-load` 后 flush（`window-sender.js`，超限丢最旧并回报条数）、依赖版本 ↔ pin tag 进断言、注释引用的章节按「恰好一处」判定 | — |
 | 94 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；sender 的三格边界（未就绪 + 队列非空再 send、已 ready 重复 markReady、flush 失败不污染 dropped）与 `main.js` 的 `lost > 0` 接线进断言；`dependencyPinViolations` 补「无版本号」「pin tag 非版本号」两类红；加载彻底失败的取舍进注释 | — |
 | 95 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；两处「说出口」抽成 `main-wiring.js`（`reportSenderLoss` / `reportProbeError`）并直测、`markReady()` 的 `sent` 改成按次计并补「中断后继续 flush」的反向控制 | — |
+| 96 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；sender 的「超限丢最旧」「非法 limit 落默认」与「未就绪不触碰 window」补反向控制、`main-wiring` 的非法上限 / 非法消息四格补反向控制 | — |
 
 ### 对照表（上游前进时要重读的五处）
 
@@ -110,9 +111,9 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
 对应行并把轮次与日期改成本轮。
 
-**第 46–95 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
+**第 46–96 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
 npm 通路可达，第 56 轮 git 超时但 API 可达，第 63–64 轮本文件无通路记录，第 68 轮 git
-超时但 API 可达，第 69–76、79–80、84–85、87、89、91–95 轮 git 可达，第 77 轮本文件无通路记录，第 78、81–83、86、88、90 轮
+超时但 API 可达，第 69–76、79–80、84–85、87、89、91–96 轮 git 可达，第 77 轮本文件无通路记录，第 78、81–83、86、88、90 轮
 git 超时（第 90 轮为 TLS 错误）但 API 可达），所以下表 5 行的
 「最近一次对照」停在第 45 轮是
 **没有理由重看**，不是忘了看：
@@ -181,39 +182,35 @@ git 超时（第 90 轮为 TLS 错误）但 API 可达），所以下表 5 行�
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。搬完这里只留一句
    指针——「本文件只留当前一轮」不是约定而是断言（`previousRoundPointerViolations`）。
 
-## 当前状态（第 95 轮，2026-10-27）
+## 当前状态（第 96 轮，2026-10-27）
 
-第 95 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 均可核对。**
-`375f64cd…` 与 pin 一致（与第 49–94 轮同一个 commit），`git ls-remote --tags --refs` 仍以
+第 96 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 均可核对。**
+`375f64cd…` 与 pin 一致（与第 49–95 轮同一个 commit），`git ls-remote --tags` 仍以
 `refs/tags/v1.13.3` 为最高版本，`npm view @alibaba-group/open-code-review version` 仍是
 `1.13.3`。**无移植项**。
 
-本轮只动 `main.js` 的两处「说出口」，主题是「同一句话不要只用读源码来断言」：
+本轮只动测试与文档，主题是「已落地的行为，边界要有会红的反向控制」：
 
-- **P0-2：`reportSenderLoss`。** 原来「队列上限丢了几条」整段写在 `did-finish-load` 的
-  回调里，测试只能按文本问「`lost > 0` 附近有没有 `send("run:log", { line: … })`」——
-  这句话对「永远不执行的分支」也是绿的，对「挪进一个函数」是红的。现在搬进
-  `main-wiring.js`（`send` 注入），`main.js` 只留 `reportSenderLoss({ ...windowSender
-  .markReady(), limit: windowSender.limit, send })`；`lost === 0` 不说话、`lost > 0` 只说
-  一次、通道是 `run:log`、payload 只有 `{ line }`、句子带条数与上限——都由
-  `tools/main-wiring-smoke.mjs` 直测，并把「换通道 / 换键 / 丢掉计数 / `if (lost)`」
-  四种写法定否。
-- **P1-1：`reportProbeError`。** 同一模式收口 `onProbeError` 的真实 sink：句子、通道与
-  `{ line }` 在 `main-wiring.js` 里被直测（含「空消息仍有话说」「没有 `send` 不抛」
-  「`console.warn` / 另一个通道 / 丢掉消息」三种反例），`main.js` 只剩
-  `onProbeError: (message) => reportProbeError({ message, send })`，
-  `tools/app-info-smoke.mjs` 改问这条接线。
-- **P0-1：`markReady()` 的 `sent` 语义。** JSDoc 写明 `sent` 是**本次调用**送出的条数
-  （中断后的一次 `markReady()` 只报剩余部分，两次答案相加才是队列原长），并补一条反向
-  控制：`survivesInterruptedFlush` 对真模块要求「中断后继续 flush，全队列按序各一次」，
-  对「一失败就清空队列」的写法判红。
+- **P0-1：超限丢最旧 + 非法 limit。** `tools/window-sender-smoke.mjs` 继续要求
+  `limit: 3` 下连发 5 条、`markReady()` 后留下最后 3 条且 `lost === 2`；新增反向控制：
+  一个越界就 `held.pop()` 的 sender（丢最新）同样报 `lost === 2`，但交出的行是
+  `1/2/3`，必须判红。非法 limit 列表补上字符串 `"3"`，并新增「把 limit 原样收下」的
+  sender 作为反例——它不会落回 `DEFAULT_PENDING_LIMIT`。
+- **P0-2：非法 limit / 非法 message。** `tools/main-wiring-smoke.mjs` 补四格：
+  `reportSenderLoss({ limit: 0 })` 与 `{ limit: -5 }` 的句子不带括号、仍含条数、不含
+  `undefined` / `NaN`；`reportProbeError({ message: undefined })` 与
+  `{ message: 42 }` 落 `未知错误` 兜底。两条反向控制分别是「只做
+  `Number.isSafeInteger` 不做 `> 0`」的上限判断（会印出 `（0 条）` / `（-5 条）`）与
+  「直接插值 message」的写法（会印出 `undefined` / `42`）。
+- **P1-3：未就绪不触碰 window。** 测试窗口新增 `calls()` 计数；未就绪时 `send` 一条，
+  要求 `webContents.send` 的调用数为 0（不只是「没收到」），并用一个「照发不误」的
+  sender 证明这个 0 不是计数器本身失效。
 
-改动在 `main-wiring.js`（新增）、`main.js`、`package.json`（`build.files` 与
-`audit:wiring`）、`tools/main-wiring-smoke.mjs`（新增）、`tools/window-sender-smoke.mjs`、
-`tools/app-info-smoke.mjs`、`window-sender.js`（仅注释）、`docs/upstream-history.md` 与
-本文件。评审逻辑、CLI 参数、配置读写路径与运行期行为均未动。`audit:static` 本轮全绿。
+改动只在 `tools/window-sender-smoke.mjs`、`tools/main-wiring-smoke.mjs` 与两份上游
+文档。评审逻辑、CLI 参数、配置读写路径与运行期行为均未动。`audit:sender` /
+`audit:wiring` / `audit:upstream` 本轮全绿。
 
-上一轮（第 94 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-94-轮2026-10-27)，归档之后本文件不留第二份。
+上一轮（第 95 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-95-轮2026-10-27)，归档之后本文件不留第二份。
 
 ## 上游真变了怎么办（命令驱动，而不是「记得看一眼」）
 ```bash
@@ -222,6 +219,9 @@ npm run audit:config    # `ocr llm providers` 表与 config.json 的读写假设
 npm run audit:git       # `git show` 的分类与按 ref 读文件
 ```
 任一条变红就是「需要评估的上游变更」：先看红在哪条断言，再对照上面的 CLI/配置暴露点判断。
+
+pin 前进时，对照表 5 行要在同一个提交里一次性重读完毕；建议那一次不要同时做别的改造，
+因为「哪些行看过了」全靠这一份记录。
 
 ### `upstream:check` 与三处 pin 声明（第三处声明就在这里）
 

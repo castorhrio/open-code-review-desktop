@@ -47,6 +47,7 @@ const makeWindow = ({ sendThrows = () => null, destroyed = false } = {}) => {
   const win = {
     received,
     state,
+    calls: () => calls,
     isDestroyed: () => state.destroyed,
     webContents: {
       send: (channel, payload) => {
@@ -149,8 +150,16 @@ const label = (entry) => `${entry.channel}:${entry.payload.line ?? JSON.stringif
   const queued = sender.send("run:log", { line: "第二条" });
   check(
     "an unready sender that is already holding lines queues the next one instead of delivering it",
-    queued === false && sender.pending() === 2 && loadedButUnready.received.length === 0,
-    JSON.stringify({ queued, pending: sender.pending(), received: loadedButUnready.received.length })
+    queued === false &&
+      sender.pending() === 2 &&
+      loadedButUnready.received.length === 0 &&
+      loadedButUnready.calls() === 0,
+    JSON.stringify({
+      queued,
+      pending: sender.pending(),
+      received: loadedButUnready.received.length,
+      calls: loadedButUnready.calls(),
+    })
   );
   sender.markReady();
   check(
@@ -326,16 +335,83 @@ const label = (entry) => `${entry.channel}:${entry.payload.line ?? JSON.stringif
     JSON.stringify(again)
   );
 
+  // ...and the question is about the *tail*. A sender that drops the newest
+  // line when the bound is crossed also ends with three lines and `lost === 2`;
+  // only the lines themselves separate "the ones a reader can still act on"
+  // from "the ones that happened to arrive first".
+  const newestWithinBound = (make) => {
+    let current = null;
+    const sender = make(() => current);
+    ["1", "2", "3", "4", "5"].forEach((line) => sender.send("run:log", { line }));
+    current = makeWindow();
+    const announcement = sender.markReady();
+    return {
+      lines: current.received.map(label),
+      sent: announcement.sent,
+      lost: announcement.lost,
+    };
+  };
+  const keepsTheTail = (result) =>
+    JSON.stringify(result.lines) === JSON.stringify(["run:log:3", "run:log:4", "run:log:5"]) &&
+    result.sent === 3 &&
+    result.lost === 2;
+  const boundedSender = (getWindow) => createWindowSender({ currentWindow: getWindow, limit: 3 });
+  /** Holds the lines, but when the bound is crossed it drops the newest one. */
+  const keepOldestSender = (getWindow) => {
+    const held = [];
+    const limit = 3;
+    let dropped = 0;
+    return {
+      limit,
+      send: (channel, payload) => {
+        held.push([channel, payload]);
+        while (held.length > limit) {
+          held.pop();
+          dropped += 1;
+        }
+        return false;
+      },
+      markReady: () => {
+        const win = getWindow();
+        let sent = 0;
+        while (held.length) {
+          const [channel, payload] = held.shift();
+          win.webContents.send(channel, payload);
+          sent += 1;
+        }
+        const lost = dropped;
+        dropped = 0;
+        return { sent, lost };
+      },
+      markUnready: () => {},
+    };
+  };
+  check(
+    "...and the real sender keeps the newest lines when the bound is crossed",
+    keepsTheTail(newestWithinBound(boundedSender)),
+    JSON.stringify(newestWithinBound(boundedSender))
+  );
+  check(
+    "...and a sender that drops the newest line instead fails that question, even with the same count",
+    !keepsTheTail(newestWithinBound(keepOldestSender)),
+    JSON.stringify(newestWithinBound(keepOldestSender))
+  );
+
   // A limit that is not a positive integer falls back to the default rather
   // than to "unbounded" (a typo turning the memory bound off) or to 0 (a queue
   // that throws every line away, which is the old bug with extra steps).
-  const odd = [0, -5, 1.5, "9", null].map(
-    (limit) => createWindowSender({ currentWindow: () => null, limit }).limit
-  );
+  const oddLimits = [0, -5, 1.5, "3", "9", null];
+  const fallsBackToDefault = (make) =>
+    oddLimits.every((limit) => make(limit).limit === DEFAULT_PENDING_LIMIT);
   check(
     "a limit that is not a positive integer falls back to the default bound",
-    odd.every((limit) => limit === DEFAULT_PENDING_LIMIT),
-    JSON.stringify({ odd, default: DEFAULT_PENDING_LIMIT })
+    fallsBackToDefault((limit) => createWindowSender({ currentWindow: () => null, limit })),
+    JSON.stringify({ oddLimits, default: DEFAULT_PENDING_LIMIT })
+  );
+  check(
+    "...and a sender that takes the limit at face value does not fall back",
+    !fallsBackToDefault((limit) => ({ limit })),
+    JSON.stringify(oddLimits)
   );
 }
 
@@ -464,6 +540,41 @@ check(
   "...and a sender that drops the rest of the queue on a failed flush fails that question",
   JSON.stringify(survivesInterruptedFlush(clearingSender)) !== JSON.stringify(SURVIVES),
   JSON.stringify(survivesInterruptedFlush(clearingSender))
+);
+
+/** Sends into whatever window exists, ready or not. */
+const eagerSender = (getWindow) => ({
+  limit: DEFAULT_PENDING_LIMIT,
+  send: (channel, payload) => {
+    const win = getWindow();
+    if (win) win.webContents.send(channel, payload);
+    return true;
+  },
+  markReady: () => {},
+  markUnready: () => {},
+});
+
+// "Not received" and "not touched" are different claims. `flush()` returns
+// before it asks for the window while unready, so an unready send must leave
+// `webContents.send`'s call count at zero — a future line inserted in front of
+// `deliver()` could still keep the payload out of `received` and only show up
+// here.
+const touchedWhileUnready = (make) => {
+  const win = makeWindow();
+  const sender = make(() => win);
+  sender.markUnready();
+  sender.send("run:log", { line: "页面还没加载" });
+  return win.calls();
+};
+check(
+  "the real sender does not touch the window at all while the page is unready",
+  touchedWhileUnready(realSender) === 0,
+  `calls=${touchedWhileUnready(realSender)}`
+);
+check(
+  "...and a sender that delivers anyway is caught, so the zero is about the door and not the counter",
+  touchedWhileUnready(eagerSender) === 1,
+  `calls=${touchedWhileUnready(eagerSender)}`
 );
 
 /* ---- 7. main.js only wires it ----

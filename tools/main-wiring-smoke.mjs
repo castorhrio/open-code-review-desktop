@@ -137,6 +137,49 @@ const stripComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\
     JSON.stringify(fallback[0]?.payload?.line)
   );
 
+  // 0 and -5 are the two shapes a `Number.isInteger` check would let through
+  // without `> 0`, and the sentence would then read "（0 条）" or "（-5 条）" —
+  // a bound that cannot exist. The count is still what matters; the bound is
+  // simply left out of the sentence.
+  const omitsUnusableBound = (report, limit) => {
+    const sent = [];
+    const told = report({
+      lost: 2,
+      limit,
+      send: (channel, payload) => sent.push({ channel, payload }),
+    });
+    const line = sent[0]?.payload?.line ?? "";
+    return (
+      told === true &&
+      sent.length === 1 &&
+      line.includes("2") &&
+      !line.includes("（") &&
+      !/undefined|null|NaN|-5/.test(line)
+    );
+  };
+  check(
+    "a bound of 0 or -5 is left out of the sentence rather than printed as a bound that cannot exist",
+    [0, -5].every((limit) => omitsUnusableBound(reportSenderLoss, limit)),
+    JSON.stringify([0, -5].map((limit) => omitsUnusableBound(reportSenderLoss, limit)))
+  );
+  const relaxedBoundReport = ({ lost, limit, send }) => {
+    const bound = Number.isSafeInteger(limit) ? limit : null;
+    const line =
+      bound === null
+        ? `[ui] 窗口就绪前有 ${lost} 条事件超出缓冲上限，已丢弃最早的那些`
+        : `[ui] 窗口就绪前有 ${lost} 条事件超出缓冲上限（${bound} 条），已丢弃最早的那些`;
+    send("run:log", { line });
+    return true;
+  };
+  check(
+    "...and a bound check without `> 0` would print the zero and the negative, which this assertion catches",
+    !omitsUnusableBound(relaxedBoundReport, 0) && !omitsUnusableBound(relaxedBoundReport, -5),
+    JSON.stringify({
+      zero: omitsUnusableBound(relaxedBoundReport, 0),
+      negative: omitsUnusableBound(relaxedBoundReport, -5),
+    })
+  );
+
   // A wiring mistake (no sender) must not take the load handler down with it:
   // this runs inside `did-finish-load`, where a throw is an unhandled error in
   // the main process and the window has just become usable.
@@ -189,6 +232,39 @@ const stripComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\
       typeof empty[0].payload.line === "string" &&
       empty[0].payload.line.trim().endsWith("：未知错误"),
     JSON.stringify(empty[0]?.payload?.line)
+  );
+
+  // The sink is handed whatever the caller has. `describeProbeError` answers
+  // with a string today, but `undefined` or a number here must not become
+  // "版本探测失败：undefined" / "版本探测失败：42" — an interpolation is not a
+  // fallback.
+  const saysUnknown = (report, message) => {
+    const sent = [];
+    const told = report({ message, send: (channel, payload) => sent.push({ channel, payload }) });
+    const line = sent[0]?.payload?.line ?? "";
+    return (
+      told === true &&
+      sent.length === 1 &&
+      typeof line === "string" &&
+      line.trim().endsWith("：未知错误")
+    );
+  };
+  check(
+    "an undefined or non-string message falls back to 未知错误",
+    [undefined, 42].every((message) => saysUnknown(reportProbeError, message)),
+    JSON.stringify([undefined, 42].map((message) => saysUnknown(reportProbeError, message)))
+  );
+  const uncheckedMessageReport = ({ message, send }) => {
+    send("run:log", { line: `[app:info] 版本探测失败：${message}` });
+    return true;
+  };
+  check(
+    "...and a report that interpolates the message unchecked would print both, which this assertion catches",
+    !saysUnknown(uncheckedMessageReport, undefined) && !saysUnknown(uncheckedMessageReport, 42),
+    JSON.stringify({
+      undefined: saysUnknown(uncheckedMessageReport, undefined),
+      number: saysUnknown(uncheckedMessageReport, 42),
+    })
   );
 
   let escaped = null;
