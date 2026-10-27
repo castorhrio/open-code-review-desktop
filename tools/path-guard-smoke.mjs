@@ -666,6 +666,56 @@ const check = (name, ok, detail = "") => {
       ["\\\\server\\share\\repo", pickedRepoOrEmpty("\\\\server\\share\\repo", win)],
     ])
   );
+
+  /* ---- the answer travels byte-for-byte, not resolved ----
+   * The gate above decides *whether* the answer may travel; it never rewrites
+   * what the user chose. "As given" is a stronger promise than "absolute", and
+   * the difference is exactly what a normalising call would take away: `..`
+   * collapsed, the `\\?\` long-path prefix dropped, the volume's own casing
+   * decided for the user. The renderer stores the answer as the repo and
+   * resolves every later path against it, so a rewritten path is a path the
+   * folder dialog never produced.
+   *
+   * The comparison is with `path.win32.resolve` — the normalisation this
+   * function deliberately does not do — so "it is absolute" cannot pass here:
+   * one of the samples is a path `resolve` *would* rewrite, and the assertion
+   * says which.
+   */
+  {
+    const windows = [
+      "\\\\server\\share\\repo", // the UNC share the dialog answers with
+      "\\\\server\\Share\\Repo", // the case is the user's, not the volume's
+      "\\\\?\\UNC\\server\\share\\repo", // the long-path prefix stays
+      "\\\\?\\C:\\Repo", // ...and so does the drive form of it
+      "C:\\Repo",
+      "C:\\Repo\\..\\Repo", // `..` is not collapsed: the dialog did not collapse it
+    ];
+    const rows = windows.map((input) => {
+      const given = pickedRepoOrEmpty(input, win);
+      return {
+        input,
+        given,
+        identical: given === input,
+        resolved: path.win32.resolve(input),
+      };
+    });
+    check(
+      "pick: every acceptable Windows answer comes back exactly as it was picked",
+      rows.every((row) => row.identical),
+      JSON.stringify(rows.map((row) => [row.input, row.given]))
+    );
+    check(
+      "...and one of them is a path `resolve` would have rewritten, so the rule is not merely \"absolute\"",
+      rows.some((row) => row.given !== row.resolved),
+      JSON.stringify(rows.filter((row) => row.given !== row.resolved).map((row) => [row.input, row.resolved]))
+    );
+    const posix = pickedRepoOrEmpty("/repo/../repo");
+    check(
+      "pick: the same on POSIX — the answer is not resolved either",
+      posix === "/repo/../repo" && posix !== path.posix.resolve("/repo/../repo"),
+      JSON.stringify({ given: posix, resolved: path.posix.resolve("/repo/../repo") })
+    );
+  }
   const forbidden = () => {
     throw new Error("must not be called");
   };

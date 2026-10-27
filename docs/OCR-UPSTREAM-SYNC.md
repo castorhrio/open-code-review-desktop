@@ -12,48 +12,47 @@
 4. **不要**静默忽略上游 release：每轮把结论写进下面「当前状态」，并把上一轮的正文搬到
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。
 
-## 当前状态（第 71 轮，2026-10-27）
+## 当前状态（第 72 轮，2026-10-27）
 
-第 71 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 两条通路都可达。**
+第 72 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 两条通路都可达。**
 `git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
 refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
-（与第 49–70 轮同一个 commit），`--tags` 里最高版本仍是 `v1.13.3`；
+（与第 49–71 轮同一个 commit），`--tags` 里最高版本仍是 `v1.13.3`；
 `npm view @alibaba-group/open-code-review version dist-tags` 仍是 `1.13.3` /
 `latest: 1.13.3`。desktop 的 `^1.13.3` 无需改动，**无移植项**。
 
-本轮不加新功能面，把上一轮最后两处「承诺还没有断言」的地方收口：
+本轮不加新功能面，只把上一轮三处「决定已经做出、但还缺机械保证」的收口补齐，并把
+上一轮没写完的代价说明补上：
 
-- **`timedOut` 的归属定案：`formatAppInfo` 接受它，然后丢掉它（选 b）。** 上一轮
-  的 `readVersionOutput` 会回答「是不是我们这边等到期了」，而 `main.js` 当时用解构
-  `const { versionStdout, versionStderr } = ...` 顺手把它扔了——一个没人决定、也没人
-  能测的丢弃。现在注册里改成 `const probe = await readVersionOutput(...)` +
-  `formatAppInfo({ binary, ...probe, ... })`，**字段取舍只发生在 `app-info.js` 一处**，
-  并且它是显式接收 `timedOut` 再 `void` 掉。选 b 而不是给 payload 加
-  `versionTimedOut`：设置页对「版本」只有一句话，而「CLI 到底找没找到」已经由
-  `binary` / `binarySource` 两列回答——多一个 boolean 就是一个没有任何渲染器读的
-  字段，只能被断言「存在」，不能承重。`tools/app-info-smoke.mjs` 因此钉三件事：
-  (1) `exec` 抛错 → 空输出且 `timedOut:false`；(2) `exec` 自己报 `timedOut:true` →
-  一路透传到外层；(3) `exec` 无视预算但**迟到返回** → 到点即答 `timedOut:true`
-  且迟到的 stdout 被丢弃。外加两条反向断言：把带 `timedOut:true` 的探测结果喂给
-  `formatAppInfo`，payload 里不许出现 `timedOut` / `versionTimedOut`，且 key 集合
-  与「正常作答」的回答逐字相同；`main.js`（去掉注释后）不许再出现 `timedOut`
-  这个词——出现就意味着决策点又被搬回注册里。
-- **`repo:pick` 与 `repo:pickInside` 共用同一道闸门。** `repo:pick` 以前把
-  `result.filePaths[0]` 直接回给渲染器，而渲染器把它当仓库存下来
-  （`pickRepo` 里 `if (dir) setRepo(dir)`），之后所有相对路径都对着渲染器的 cwd 解析
-  ——一个来自 `localStorage` 的陈旧 `last-repo` 就能把整个应用指到用户没选过的目录。
-  现在这条路径走 `pickedRepoOrEmpty`（`path-guard.js`，与 `repoIsPickable` 同一判据）：
-  不合格就答 `""`，与「用户点了取消」同一个答案，因为渲染器对二者的读法本来就一样
-  （都表示「别动我现在打开的仓库」），而第三种形状在渲染器里没有地方显示。路径
-  **原样返回，不 `resolve()`**：这个函数只决定这条答案能不能上路。`audit:path` 补三态
-  ——相对路径 → `""`、`C:repo`（盘符相对）→ `""`、`\\server\share\repo`（UNC 绝对）
-  → 原样保留——并加一条源码断言：`repo:pick` 的注册体里必须是
-  `pickedRepoOrEmpty(result.filePaths[0])`，不许再出现 `return result.filePaths[0]`。
-- **`audit:upstream` 的自跑子进程现在会承认「我根本没跑起来」。** `spawnSync` 失败
-  （`ENOENT`、脚本读不了）报的是 `status: null`，此前与「跑了、红了、`status === 1`」
-  在报告里长得一样。现在先断 `child.status !== null`，detail 里带 `child.error.message`，
-  让「没跑起来」和「跑起来红了」分开。P1-2（history 47–61 旧正文归档）与 P2 各项留给
-  下一轮。
+- **`formatAppInfo` 的「入参 key-set」钉上了——这是上一轮最要紧的那一条。** 上一轮把
+  `timedOut` 的取舍搬回 `app-info.js`：注册里改成 `...probe`，整个探测答案交给
+  `formatAppInfo`，由它决定哪些字段上路。这个承诺要成立，得有一道机械保证——**入参里
+  没人决定过的 key 不许进 payload**。`tools/app-info-smoke.mjs` 现在钉三件事：
+  (1) 带 `timedOut`、`versionTimedOut` 和一个无意义 key 的入参，payload 里一个都不许有；
+  (2) 这样的 payload 的 key 集合与「正常作答」逐字相同；(3) 被决定的那几个字段
+  （`version` / `binary` / `binarySource` / `configPath`）的值没变。另一支「把 `main.js`
+  改成显式三字段」没有选：那会把取舍点搬回注册里，正是上一轮要收口的东西。
+- **`readVersionOutput` 末尾「迟到就丢弃」的那条判断被拆成一个能问的单元。**
+  `app-info.js` 里的 `if (late || !answer) return saidNothing(true)` 有一半是**从外面造
+  不出来的形状**：`Promise.race` 结算给先落地的那个 promise，而 deadline 到 race 只走
+  一跳微任务、探测答案要走上 exec→map→catch→race 好几跳，所以 deadline 一旦触发就必然
+  已经赢了那场 race，`answer` 必是 `null`——「迟到了**而且**答案还在」在
+  `readVersionOutput` 外面根本到不了（实测过，不是推的）。一个没人能触发的分支就是
+  一个没人能相信的分支，所以判断本身被提成 `versionAnswer(answer, late)` 导出，
+  `audit:appinfo` 直接问它：迟到且答案还在 → 答案丢弃、答「等过了」；deadline 赢了
+  race → 同一个答案；按时到达 → 原样通过；服务自己的 `timedOut` → 透传。另加一条源码
+  断言钉住探测确实 `return versionAnswer(answer, late)`，免得函数与实现各走各的。
+- **`repo:pick` 的「原样返回」从一句话变成逐字断言。** 上一轮承诺 UNC 路径原样保留、
+  不 `resolve()`；原有三态断言（相对 → `""`、`C:repo` → `""`、UNC → 保留）里只有第三条
+  会红，而「保留」到底是原样还是归一没有独立断言。`audit:path` 现在逐条比对：返回值与
+  入参**逐字相同**（含大小写、含 `\\?\` 前缀），并与 `path.win32.resolve` 的结果对照，
+  明确点出 `C:\Repo\..\Repo` 这条就是「`resolve` 会改写、这里不改」的分界；POSIX 一侧
+  同样断言 `/repo/../repo` 不被折叠。
+- **上一轮「选 b」的代价写进正文。** 第 71 轮那段（现在在
+  [`upstream-history.md`](upstream-history.md)）补了一句：设置页在 CLI 迟答时只看到
+  `version: ""`，与 CLI 静默不可区分——这是有意的，因为 `binary` / `binarySource` 已经
+  能区分「没找到」与「找到了但没说话」，而「迟答」与「静默」对用户的可行动作相同（都
+  指向检查杀软 / 网络盘）。代价写清楚，下一轮才不会再把这个方案提一遍。
 
 ## 上游真变了怎么办（命令驱动，而不是「记得看一眼」）
 ```bash
@@ -123,7 +122,7 @@ pin 或 ls-remote 给出的 SHA 短于 40 位时一律判「跳过」并说明�
 没变**，所以每轮的结论仍要写进上面「当前状态」——跳过时至少留下 `[UPSTREAM-DEBT]` 与
 「核对通路账」里的一行欠账。
 
-**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 71 轮：`git ls-remote` 退出码 0，`refs/heads/main` 与 pin 一致；tag 与 npm 均为 `1.13.3`；通路：git）**
+**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 72 轮：`git ls-remote` 退出码 0，`refs/heads/main` 与 pin 一致；tag 与 npm 均为 `1.13.3`；通路：git）**
 
 ### 核对通路账
 
@@ -160,14 +159,15 @@ pin 或 ls-remote 给出的 SHA 短于 40 位时一律判「跳过」并说明�
 | 69 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；moved 分支自报 5 处对照点、清单与对照表双射断言 | — |
 | 70 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；`app:info` 版本探测加预算、恒绿归属纠正并加 exit 码自测 | — |
 | 71 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；`timedOut` 语义定案（丢弃并断言）、`repo:pick` 走同一道闸门、自跑子进程断言 | — |
+| 72 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；`formatAppInfo` 入参 key-set 钉住、`late` 判断拆成可问的单元、`pickedRepoOrEmpty` 逐字断言 | — |
 
 「最近一次对照」只写**那一项最近被人工重新核对**的轮次。该列没有列出本轮，表示本轮
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
 对应行并把轮次与日期改成本轮。
 
-**第 46–71 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
+**第 46–72 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
 npm 通路可达，第 56 轮 git 超时但 API 可达，第 63–64 轮本文件无通路记录，第 68 轮 git
-超时但 API 可达，第 69–71 轮 git 可达），所以下表 5 行的
+超时但 API 可达，第 69–72 轮 git 可达），所以下表 5 行的
 「最近一次对照」停在第 45 轮是
 **没有理由重看**，不是忘了看：
 它记录的是「最后一次有人逐行读上游源码」的轮次，而不是「最后一次确认上游没变」的轮次。

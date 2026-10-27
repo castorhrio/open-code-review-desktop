@@ -72,11 +72,9 @@ const PINNED_SHA = PINNED_UPSTREAM.sha;
 // derived from the pin, so "moved" cannot become "pinned" by editing one string.
 const OTHER_SHA = "abcdef0" + "0".repeat(33);
 // The pinned commit with a different tail. The first 7 characters are derived
-// from the pin on purpose — that is the collision shape under test; the other 33
-// are written out here, with no `f` in them, so the fixture cannot collapse into
-// the pin by construction. (An earlier version used `"f".repeat(33)` and a
-// comment claiming the whole value was written out; both were one edit away from
-// a fixture that silently stopped testing anything — see the guards below.)
+// from the pin on purpose — that is the collision shape under test; the tail is
+// hardcoded to 33 characters with no `f` in it, so the two halves add up to a
+// 40-character commit that cannot collapse into the pin by construction.
 const SAME_PREFIX_TAIL = "0123456789abcde0123456789abcde012";
 const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
 

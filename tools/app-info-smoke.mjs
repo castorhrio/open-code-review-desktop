@@ -14,7 +14,7 @@ import fs from "node:fs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const require = createRequire(path.join(ROOT, "package.json"));
-const { formatAppInfo, readVersionOutput, VERSION_PROBE_MS, VERSION_PROBE_GRACE_MS } = require(
+const { formatAppInfo, readVersionOutput, versionAnswer, VERSION_PROBE_MS, VERSION_PROBE_GRACE_MS } = require(
   path.join(ROOT, "app-info.js")
 );
 const { createInstall } = require(path.join(ROOT, "install-info.js"));
@@ -310,6 +310,62 @@ const base = {
   );
 }
 
+/* ---- an input key nobody decided on does not reach the payload ----
+ * The promise of the last round is that the decision about *which fields
+ * travel* lives in `app-info.js` and not in the registration: `main.js` hands
+ * over the whole probe answer (`...probe`) and this function decides what the
+ * settings page gets. That promise has a mechanical form, and this is it: the
+ * payload is assembled from named fields, so a key nobody decided on — the
+ * probe's `timedOut`, or anything a future caller spreads in — cannot appear
+ * in it.
+ *
+ * The key set above already pins what the payload *is*; what was missing is
+ * the other direction: that the payload cannot *grow* by accident. The two
+ * together are the guarantee. `main.js` spreading the whole answer is only
+ * safe because of this block, and this block is only meaningful because
+ * `main.js` spreads the whole answer.
+ */
+{
+  const standard = formatAppInfo({
+    ...base,
+    binary: { path: "/opt/app/ocr", source: "local" },
+    versionStdout: "1.13.3\n",
+  });
+  const polluted = formatAppInfo({
+    ...base,
+    binary: { path: "/opt/app/ocr", source: "local" },
+    versionStdout: "1.13.3\n",
+    // The three keys a careless change would introduce: the probe's own flag,
+    // the field name someone would give it in the payload, and a key with no
+    // meaning at all — the one that proves the rule is about *unknown* keys
+    // and not about a list of known-bad names.
+    timedOut: true,
+    versionTimedOut: true,
+    someKeyNobodyDecidedOn: "leaked",
+  });
+  const pollutedKeys = Object.keys(polluted).sort();
+  check(
+    "an input key nobody decided on does not reach the payload",
+    !("timedOut" in polluted) &&
+      !("versionTimedOut" in polluted) &&
+      !("someKeyNobodyDecidedOn" in polluted),
+    JSON.stringify(pollutedKeys)
+  );
+  check(
+    "...and the payload's key set is the one the same answer has without those keys",
+    JSON.stringify(pollutedKeys) === JSON.stringify(Object.keys(standard).sort()),
+    JSON.stringify([pollutedKeys, Object.keys(standard).sort()])
+  );
+  check(
+    "...and the fields that were decided on still carry their values",
+    polluted.version === standard.version &&
+      polluted.binary === standard.binary &&
+      polluted.binarySource === standard.binarySource &&
+      polluted.configPath === standard.configPath,
+    JSON.stringify({ version: polluted.version, binary: polluted.binary })
+  );
+}
+
 /* ---- the probe: bounded, and never a rejection ----
  * Everything above is about the *shape* of the answer; none of it covers the
  * wait before the answer exists. `app:info` is what the settings page renders
@@ -445,6 +501,65 @@ const base = {
     late.timedOut === true && late.versionStdout === "" && late.versionStderr === "",
     JSON.stringify(late)
   );
+
+  /* ---- the deadline's own decision, asked the question the race cannot pose ----
+   * The block above is the reachable shape: the deadline fired, so the race was
+   * won by the deadline and there was never an answer to drop. The *other* half
+   * of the guard — "an answer is there, and we had already stopped waiting" — is
+   * not reachable from here: `Promise.race` settles with whichever promise
+   * settles first, the deadline reaches the race in one microtask hop and the
+   * probe's answer needs several, so the deadline always wins that race. Left
+   * untested, that guard would be a line nobody could break and nobody could
+   * trust either — and it is the line that decides "a version that arrives
+   * after the page asked is not a version this handler can use".
+   *
+   * So the decision is asked directly, on the function that makes it. The
+   * answers below are the four facts the caller may act on: the wait ended, the
+   * late output is dropped, an answer that came in time travels unchanged, and
+   * the service's own flag is carried through.
+   */
+  {
+    const answeredLate = versionAnswer(
+      { stdout: "open-code-review 1.13.3\n", stderr: "", timedOut: false },
+      true
+    );
+    check(
+      "an answer that arrives after the deadline is dropped, and the answer says the wait ended",
+      answeredLate.versionStdout === "" &&
+        answeredLate.versionStderr === "" &&
+        answeredLate.timedOut === true,
+      JSON.stringify(answeredLate)
+    );
+    const deadlineWon = versionAnswer(null, false);
+    check(
+      "...and a deadline that won the race is the same answer",
+      deadlineWon.versionStdout === "" &&
+        deadlineWon.versionStderr === "" &&
+        deadlineWon.timedOut === true,
+      JSON.stringify(deadlineWon)
+    );
+    const inTime = versionAnswer({ stdout: "1.13.3\n", stderr: "", timedOut: false }, false);
+    check(
+      "an answer that came in time travels as it is",
+      inTime.versionStdout === "1.13.3\n" && inTime.versionStderr === "" && inTime.timedOut === false,
+      JSON.stringify(inTime)
+    );
+    const serviceFlag = versionAnswer({ stdout: "", stderr: "", timedOut: true }, false);
+    check(
+      "...and the service's own flag is carried through when it came in time",
+      serviceFlag.timedOut === true && serviceFlag.versionStdout === "",
+      JSON.stringify(serviceFlag)
+    );
+    // The decision has to be the one the probe actually makes. A copy of it
+    // somewhere else would keep the function green while the probe ran a
+    // different rule — so the wiring is asserted, not assumed.
+    const appInfoSrc = fs.readFileSync(path.join(ROOT, "app-info.js"), "utf8");
+    check(
+      "the probe ends in that decision, so the function under test is the one that runs",
+      /return versionAnswer\(answer, late\);/.test(appInfoSrc),
+      "app-info.js"
+    );
+  }
 
   // ...and the flag stops at `formatAppInfo`. The decision is (b): the payload
   // does *not* carry it. The settings page has one sentence for "the version"

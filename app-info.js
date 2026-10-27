@@ -106,6 +106,37 @@ const VERSION_PROBE_GRACE_MS = 500;
 
 const saidNothing = (timedOut) => ({ versionStdout: "", versionStderr: "", timedOut });
 
+/* ---- the one decision the probe ends with ----
+ *
+ * Two facts end the probe: what the CLI said, and whether we were still
+ * waiting when it said it. `late` is the second one — "we stopped waiting" —
+ * and it wins even when an answer is there: a service that ignored its budget
+ * has no chance to set the flag itself, and a version that arrives after the
+ * page asked is not a version this handler can use. `!answer` is the other
+ * half: the deadline won the race, so there is nothing to report at all.
+ *
+ * The decision is a function of its own because the interesting shape cannot
+ * be produced through `readVersionOutput`: `Promise.race` settles with
+ * whichever promise settles first, and the deadline reaches the race in one
+ * microtask hop while the probe's answer needs several (exec → map → catch →
+ * race), so whenever the deadline has fired it has already won that race and
+ * `answer` is `null` — "late *and* an answer" is unreachable from the outside
+ * (measured, not assumed: `tools/app-info-smoke.mjs` pins the reachable shapes
+ * and this one is asserted here instead).
+ *
+ * So the guard is asserted on the decision itself: `tools/app-info-smoke.mjs`
+ * calls it with an answer that is there and `late` set, and requires the
+ * answer to be dropped.
+ */
+const versionAnswer = (answer, late) => {
+  if (late || !answer) return saidNothing(true);
+  return {
+    versionStdout: answer.stdout,
+    versionStderr: answer.stderr,
+    timedOut: answer.timedOut === true,
+  };
+};
+
 async function readVersionOutput({
   binary,
   exec,
@@ -144,13 +175,16 @@ async function readVersionOutput({
   clearTimeout(timer);
   // `late` wins even when both settled in the same tick: a service that ignores
   // its budget has no chance to set `timedOut` itself, and "we stopped waiting"
-  // is what the caller needs to know.
-  if (late || !answer) return saidNothing(true);
-  return {
-    versionStdout: answer.stdout,
-    versionStderr: answer.stderr,
-    timedOut: answer.timedOut === true,
-  };
+  // is what the caller needs to know. The decision itself lives in
+  // `versionAnswer`, where it can be asked the question the race cannot
+  // produce (an answer that is there *and* a deadline that has fired).
+  return versionAnswer(answer, late);
 }
 
-module.exports = { formatAppInfo, readVersionOutput, VERSION_PROBE_MS, VERSION_PROBE_GRACE_MS };
+module.exports = {
+  formatAppInfo,
+  readVersionOutput,
+  versionAnswer,
+  VERSION_PROBE_MS,
+  VERSION_PROBE_GRACE_MS,
+};

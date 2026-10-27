@@ -18,6 +18,56 @@ pin 块，这样它就不会某天被当成第二个权威源。
 
 ---
 
+## 上游状态（第 71 轮，2026-10-27）
+
+第 71 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 两条通路都可达。**
+`git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
+refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
+（与第 49–70 轮同一个 commit），`--tags` 里最高版本仍是 `v1.13.3`；
+`npm view @alibaba-group/open-code-review version dist-tags` 仍是 `1.13.3` /
+`latest: 1.13.3`。desktop 的 `^1.13.3` 无需改动，**无移植项**。
+
+本轮不加新功能面，把上一轮最后两处「承诺还没有断言」的地方收口：
+
+- **`timedOut` 的归属定案：`formatAppInfo` 接受它，然后丢掉它（选 b）。** 上一轮
+  的 `readVersionOutput` 会回答「是不是我们这边等到期了」，而 `main.js` 当时用解构
+  `const { versionStdout, versionStderr } = ...` 顺手把它扔了——一个没人决定、也没人
+  能测的丢弃。现在注册里改成 `const probe = await readVersionOutput(...)` +
+  `formatAppInfo({ binary, ...probe, ... })`，**字段取舍只发生在 `app-info.js` 一处**，
+  并且它是显式接收 `timedOut` 再 `void` 掉。选 b 而不是给 payload 加
+  `versionTimedOut`：设置页对「版本」只有一句话，而「CLI 到底找没找到」已经由
+  `binary` / `binarySource` 两列回答——多一个 boolean 就是一个没有任何渲染器读的
+  字段，只能被断言「存在」，不能承重。`tools/app-info-smoke.mjs` 因此钉三件事：
+  (1) `exec` 抛错 → 空输出且 `timedOut:false`；(2) `exec` 自己报 `timedOut:true` →
+  一路透传到外层；(3) `exec` 无视预算但**迟到返回** → 到点即答 `timedOut:true`
+  且迟到的 stdout 被丢弃。外加两条反向断言：把带 `timedOut:true` 的探测结果喂给
+  `formatAppInfo`，payload 里不许出现 `timedOut` / `versionTimedOut`，且 key 集合
+  与「正常作答」的回答逐字相同；`main.js`（去掉注释后）不许再出现 `timedOut`
+  这个词——出现就意味着决策点又被搬回注册里。
+
+  **这一支的代价（补记，第 72 轮）**：因此设置页在 CLI 迟答时只会看到 `version: ""`，
+  与 CLI 静默不可区分；这是有意的——`binary`/`binarySource` 已能区分「没找到」与
+  「找到了但没说话」，而「迟答」与「静默」对用户的可行动作相同（都指向「检查杀软 /
+  网络盘」）。写在这里，是因为上一轮只写了「为什么不加字段」，没写「加了会怎样、
+  不加的代价是什么」：文档级的妥协需要显式承认，否则下一轮还会有人把这个方案提一遍。
+
+- **`repo:pick` 与 `repo:pickInside` 共用同一道闸门。** `repo:pick` 以前把
+  `result.filePaths[0]` 直接回给渲染器，而渲染器把它当仓库存下来
+  （`pickRepo` 里 `if (dir) setRepo(dir)`），之后所有相对路径都对着渲染器的 cwd 解析
+  ——一个来自 `localStorage` 的陈旧 `last-repo` 就能把整个应用指到用户没选过的目录。
+  现在这条路径走 `pickedRepoOrEmpty`（`path-guard.js`，与 `repoIsPickable` 同一判据）：
+  不合格就答 `""`，与「用户点了取消」同一个答案，因为渲染器对二者的读法本来就一样
+  （都表示「别动我现在打开的仓库」），而第三种形状在渲染器里没有地方显示。路径
+  **原样返回，不 `resolve()`**：这个函数只决定这条答案能不能上路。`audit:path` 补三态
+  ——相对路径 → `""`、`C:repo`（盘符相对）→ `""`、`\\server\share\repo`（UNC 绝对）
+  → 原样保留——并加一条源码断言：`repo:pick` 的注册体里必须是
+  `pickedRepoOrEmpty(result.filePaths[0])`，不许再出现 `return result.filePaths[0]`。
+- **`audit:upstream` 的自跑子进程现在会承认「我根本没跑起来」。** `spawnSync` 失败
+  （`ENOENT`、脚本读不了）报的是 `status: null`，此前与「跑了、红了、`status === 1`」
+  在报告里长得一样。现在先断 `child.status !== null`，detail 里带 `child.error.message`，
+  让「没跑起来」和「跑起来红了」分开。P1-2（history 47–61 旧正文归档）与 P2 各项留给
+  下一轮。
+
 ## 上游状态（最近检查：2026-10-27，第 70 轮）
 
 第 70 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 两条通路都可达。**
