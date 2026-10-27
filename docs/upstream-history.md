@@ -36,6 +36,42 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 补记落在这段之外。规则本身也必须写在这里（上面那句），否则它只存在于脚本里。
 
 ---
+## 上游状态（第 84 轮，2026-10-27）
+
+第 84 轮复核：**HEAD 未变，结论仍是「无新内容」；git、API 与 npm 均可核对。**
+`git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main` 本轮退出码 0，
+`375f64cd6f67a48a135da83cfcf59c52669a09cb` 与 pin 一致（与第 49–83 轮同一个 commit）；
+`api.github.com/repos/alibaba/open-code-review/commits/main` 给出同一个 `sha`；`npm view
+@alibaba-group/open-code-review version` 仍是 `1.13.3`。tag 一处本轮没有独立核对——
+`refs/heads/main` 未变即「无新 commit」，registry 的 `latest` 未变即「无新发布」。desktop
+的 `^1.13.3` 无需改动，**无移植项**。
+
+本轮按控制仓简报换方向：不加新的断言密度，而是把三处容易维护错的规则收敛。
+
+- **P0-1：`installInfo` 撞名从注释约定变成双向断言。** `formatAppInfo` 先展开
+  `installInfo`，再用七个计算字段覆盖，所以撞名字段会无声消失。`tools/app-info-smoke.mjs`
+  现在用一个与**全部七个**计算字段重名、且值都不同的对象喂进去，断言七个字段全部保住计算值
+  （不只是抽查 `binary` / `version`），并前置断言这个撞名对象确实覆盖了七个名字。
+  `tools/install-info-smoke.mjs` 从另一边钉：`installInfo()` 返回的六个名字不得与那七个
+  重名，且共享的 `APP_INFO_COMPUTED_KEYS` 必须覆盖完整的七个——否则「没有撞名」会在一张
+  空表上通过。验过会红：把 spread 挪到计算字段之后，七个字段逐一被 `evil` 值顶掉；
+  把 `userData` 改名成 `binary`，install 一侧点名 `collisions:["binary"]`。
+- **P0-2：`tools/upstream-watch-smoke.mjs` 的自测入口从环境变量改成命令行参数。**
+  原来两个变量（选中红色子进程 / 选中绿色子进程）在 CI 或用户环境撞名时会改变
+  `npm run audit:upstream` 的行为。现在是 `--selftest` / `--no-respawn` 两个精确 token，
+  并新增三格：无参数时两个开关都为假（不从环境推断）、近似拼写（`--selftest=1`、裸
+  `selftest`）不算开关、旧环境变量名不再出现在源码里。红色子进程只带 `--selftest`，
+  另有一格断言它没有重入 spawn；绿色子进程仍证明整轮套件不是天生红。
+- **P1-1：文档的编辑规则有了人读入口。** `docs/OCR-UPSTREAM-SYNC.md` 人读区开头新增
+  「写这份文档的规则」六条（不抄锚点字面量），`tools/upstream-watch.mjs` 的
+  `docAuthoringRuleViolations` 断言这一节存在、至少四条编号规则、且在当前状态之前；
+  smoke 用删标题、把标题挪到当前状态之后、把清单删到三条三种副本验证它会红。
+
+断言只动 `tools/app-info-smoke.mjs`、`tools/install-info-smoke.mjs`、
+`tools/install-fixture.mjs`、`tools/upstream-watch-smoke.mjs`、`tools/upstream-watch.mjs`
+与本文件，不碰 CLI 参数、配置读写、IPC 注册体或运行时行为。`audit:appinfo` /
+`audit:install` / `audit:upstream` 本轮全绿。
+
 ## 上游状态（第 83 轮，2026-10-27）
 
 第 83 轮复核：**HEAD 未变，结论仍是「无新内容」；API 与 npm 两条通路可达。**

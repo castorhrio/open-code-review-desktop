@@ -16,6 +16,8 @@ const ROOT = path.resolve(import.meta.dirname, "..");
 const require = createRequire(path.join(ROOT, "package.json"));
 const {
   formatAppInfo,
+  assembleAppInfo,
+  handleAppInfo,
   readVersionOutput,
   versionAnswer,
   versionWaitMs,
@@ -1056,6 +1058,140 @@ const base = {
       !("probeError" in thrownInfo),
     JSON.stringify([Object.keys(thrownInfo).sort(), Object.keys(answeredInfo).sort()])
   );
+  /* ---- the wiring: the probe's whole answer is the handler's input ----
+   * Everything above calls `formatAppInfo` with the probe already spread by the
+   * test. The question this block asks is the one the last round's checklist
+   * named as missing: does the *handler* spread it, or does the handler pick
+   * `versionStdout`/`versionStderr` off it and hand over a smaller object? The
+   * payload cannot tell — `formatAppInfo` drops the diagnostics either way — so
+   * the probe's diagnostic fields are getters here: whether they are read at all
+   * is observable only if the whole object crossed the seam.
+   *
+   * `assembleAppInfo` is that seam, and `handleAppInfo` is the body the
+   * registration now calls. Both are exercised; a source-level check would have
+   * accepted either spelling.
+   */
+  {
+    const getterProbe = (seen) => ({
+      get versionStdout() {
+        seen.push("versionStdout");
+        return "open-code-review 1.13.3\n";
+      },
+      get versionStderr() {
+        seen.push("versionStderr");
+        return "";
+      },
+      get timedOut() {
+        seen.push("timedOut");
+        return true;
+      },
+      get probeError() {
+        seen.push("probeError");
+        return "spawn ENOTDIR";
+      },
+    });
+
+    const read = [];
+    const wired = assembleAppInfo({
+      ...base,
+      binary: { path: "/opt/app/ocr", source: "local" },
+      probe: getterProbe(read),
+    });
+    check(
+      "the handler's assembly spreads the probe's whole answer, diagnostics included",
+      read.includes("timedOut") && read.includes("probeError"),
+      JSON.stringify(read)
+    );
+    check(
+      "...and those diagnostics still stop at formatAppInfo: the payload keeps the key set of a plain answer",
+      wired.version === "1.13.3" &&
+        !("timedOut" in wired) &&
+        !("probeError" in wired) &&
+        JSON.stringify(Object.keys(wired).sort()) ===
+          JSON.stringify(
+            Object.keys(
+              formatAppInfo({
+                ...base,
+                binary: { path: "/opt/app/ocr", source: "local" },
+                versionStdout: "open-code-review 1.13.3\n",
+              })
+            ).sort()
+          ),
+      JSON.stringify(Object.keys(wired).sort())
+    );
+
+    // The counterexample that gives the check its teeth: the natural bad edit —
+    // pick the two output fields — never reads the two diagnostics, so the same
+    // getters stay silent. If this control ever saw them, "they were read" would
+    // no longer distinguish a spread from a pick.
+    const picked = [];
+    const picker = getterProbe(picked);
+    formatAppInfo({
+      ...base,
+      binary: { path: "/opt/app/ocr" },
+      versionStdout: picker.versionStdout,
+      versionStderr: picker.versionStderr,
+    });
+    check(
+      "...and the check has teeth: a registration that picks versionStdout/versionStderr leaves timedOut/probeError unread",
+      !picked.includes("timedOut") && !picked.includes("probeError"),
+      JSON.stringify(picked)
+    );
+
+    // `handleAppInfo` is the body the registration calls, so it is asked end to
+    // end: the service adapter (four-argument exec), the ask-time facts, and the
+    // property this module exists for — a rejection becomes an answer instead of
+    // rejecting `app:info`.
+    const calls = [];
+    let installReads = 0;
+    const info = await handleAppInfo({
+      exec: (args, cwd, env, options) => {
+        calls.push({ args, cwd, env, options });
+        return Promise.reject(Object.create(null));
+      },
+      binaryResolution: () => ({ path: "/opt/app/ocr", source: "local" }),
+      configPath: base.configPath,
+      docsUrl: base.docsUrl,
+      appVersion: base.appVersion,
+      platform: base.platform,
+      installInfo: () => {
+        installReads += 1;
+        return base.installInfo;
+      },
+    });
+    check(
+      "handleAppInfo calls the service once with `version`, in the service's own signature, with the probe's budget in the fourth slot",
+      calls.length === 1 &&
+        JSON.stringify(calls[0].args) === '["version"]' &&
+        calls[0].cwd === undefined &&
+        calls[0].env === undefined &&
+        calls[0].options &&
+        calls[0].options.timeoutMs === VERSION_PROBE_MS,
+      JSON.stringify(calls)
+    );
+    check(
+      "a rejection with no prototype reaches the handler but not the caller: app:info still answers a complete payload",
+      info &&
+        info.version === "" &&
+        info.binary === "/opt/app/ocr" &&
+        info.binarySource === "local" &&
+        !("probeError" in info) &&
+        info.configPath === base.configPath &&
+        installReads === 1,
+      JSON.stringify({ info, installReads })
+    );
+
+    // The two blocks above meet only if `handleAppInfo` actually goes through
+    // `assembleAppInfo`; a handler that re-spread the probe itself would keep
+    // every check above green while the asserted line stopped running.
+    const appInfoSrc = fs.readFileSync(path.join(ROOT, "app-info.js"), "utf8");
+    check(
+      "the handler assembles through the one function whose spread is asserted",
+      /return assembleAppInfo\(\{/.test(appInfoSrc) && /\n\s*\.\.\.probe,/.test(appInfoSrc),
+      "app-info.js"
+    );
+  }
+
   // The drop is a decision in `app-info.js` only while the registration does not
   // choose fields off the probe. Reading the registration is the only way to see
   // that (it is Electron-only code), and the assertion is deliberately about the
@@ -1096,17 +1232,22 @@ const base = {
     return next < 0 ? rest : rest.slice(0, next);
   };
   const body = registered.length === 1 ? handlerBody(registered[0].source) : "";
-  // Neither diagnostic may be named in the registration: `timedOut` and
-  // `probeError` are decided in `app-info.js`, and a handler that mentions either
-  // is a second decision point coming back (it would have to pick the field off
-  // the probe, which is exactly what `...probe` avoids).
+  // The body now lives in `app-info.js` and is called above; what is left to get
+  // wrong here is a missing fact or a decision sneaking back in. Both are names:
+  // every fact the page shows must be handed over, and no probe field (or
+  // formatter) may be named, because either name means the registration has
+  // started deciding instead of wiring.
   check(
-    "app:info reads the probe through readVersionOutput, hands the whole answer to formatAppInfo, and never names timedOut or probeError itself",
-    /readVersionOutput\(/.test(body) &&
-      /\.\.\.probe/.test(body) &&
-      /formatAppInfo\(/.test(body) &&
-      !/timedOut/.test(body) &&
-      !/probeError/.test(body),
+    "app:info is wiring only: it calls handleAppInfo with the service exec and every fact the page shows, and names no probe field",
+    /handleAppInfo\(/.test(body) &&
+      /exec\s*:/.test(body) &&
+      /binaryResolution/.test(body) &&
+      /configPath/.test(body) &&
+      /docsUrl/.test(body) &&
+      /appVersion/.test(body) &&
+      /platform/.test(body) &&
+      /installInfo/.test(body) &&
+      !/versionStdout|versionStderr|timedOut|probeError|formatAppInfo/.test(body),
     registered.length === 1 ? registered[0].file : "no single registration"
   );
 

@@ -324,8 +324,78 @@ async function readVersionOutput({
   return versionAnswer(answer, late);
 }
 
+/* ---- the handler's whole body, so the wiring can be called ----
+ *
+ * `main.js` used to hold this assembly inside the `app:info` registration, so
+ * the only way to ask "does the probe's whole answer reach `formatAppInfo`, or
+ * does the handler pick two fields off it?" was to read the source or launch
+ * Electron. That choice is a decision — `probeError` and `timedOut` exist on the
+ * answer so this side can name them and drop them — and a decision should be
+ * callable, not read out of a regex.
+ *
+ * `assembleAppInfo` is the one line where the spread happens. It is separate
+ * from `handleAppInfo` because the interesting regression lives *here*
+ * (`...probe` rewritten as `versionStdout: probe.versionStdout, …`), and a probe
+ * whose diagnostic fields are getters makes "were they read at all?" observable
+ * from the outside (`tools/app-info-smoke.mjs` asks exactly that).
+ */
+const assembleAppInfo = ({
+  binary,
+  probe = {},
+  configPath = "",
+  docsUrl = "",
+  appVersion = "",
+  platform = "",
+  installInfo = {},
+} = {}) =>
+  formatAppInfo({
+    binary,
+    ...probe,
+    configPath,
+    docsUrl,
+    appVersion,
+    platform,
+    installInfo,
+  });
+
+// The body of `app:info`. `exec` keeps the service's four-argument signature
+// (`args, cwd, env, options`); the adapter to the probe's `(args, { timeoutMs })`
+// is made here rather than in the registration, so the one piece of wiring that
+// used to be untestable is covered by the same call. `binaryResolution` and
+// `installInfo` stay functions because the handler answered from the state at
+// ask time, not at registration time.
+const handleAppInfo = async ({
+  exec,
+  binaryResolution,
+  configPath = "",
+  docsUrl = "",
+  appVersion = "",
+  platform = "",
+  installInfo = {},
+} = {}) => {
+  const binary = typeof binaryResolution === "function" ? binaryResolution() : null;
+  const probe = await readVersionOutput({
+    binary,
+    exec:
+      typeof exec === "function"
+        ? (args, options) => exec(args, undefined, undefined, options)
+        : null,
+  });
+  return assembleAppInfo({
+    binary,
+    probe,
+    configPath,
+    docsUrl,
+    appVersion,
+    platform,
+    installInfo: typeof installInfo === "function" ? installInfo() : installInfo || {},
+  });
+};
+
 module.exports = {
   formatAppInfo,
+  assembleAppInfo,
+  handleAppInfo,
   readVersionOutput,
   versionAnswer,
   versionWaitMs,

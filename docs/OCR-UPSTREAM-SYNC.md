@@ -35,7 +35,7 @@ tag v1.13.3
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 84 轮：`git ls-remote` 退出码 0，`refs/heads/main` 与 pin 一致；`api.github.com` 的 `commits/main` 给出同一个 `sha`；`refs/tags/v1.13.3` 本轮未独立核对；npm 为 `1.13.3`；通路：git）**
+**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 85 轮：`git ls-remote` 退出码 0，`refs/heads/main` 与 pin 一致；`refs/tags/v1.13.3^{}` 指向同一个 commit；npm 为 `1.13.3`；通路：git）**
 
 ### 核对通路账
 
@@ -92,6 +92,7 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 | 82 | 2026-10-27 | api | `375f64c` / `v1.13.3`，无新内容；git 超时（124）、API 作答；npm `1.13.3`；`readFileAtRef` 的 stderr 措辞假设外化成 `REF_READ_WORDINGS` 表并按 sample 断言、核对通路账的末行绑定到提交信息的轮次 | — |
 | 83 | 2026-10-27 | api | `375f64c` / `v1.13.3`，无新内容；git 超时（124）、API 作答；npm `1.13.3`；真 git 的 stderr 与 `REF_READ_WORDINGS` 逐行对账（只被一行认出、与 sample 同一行）、`createRunner` → `runUpstreamWatch` 的「git 超时 → API 作答」按文本断言 | — |
 | 84 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；`installInfo` 撞名双向断言、上游自测入口改 argv、文档新增编辑规则清单并进断言 | — |
+| 85 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；`app:info` 的 body 抽成 `handleAppInfo` / `assembleAppInfo`，用 getter 探针直测 spread | — |
 
 ### 对照表（上游前进时要重读的五处）
 
@@ -99,9 +100,9 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
 对应行并把轮次与日期改成本轮。
 
-**第 46–84 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
+**第 46–85 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
 npm 通路可达，第 56 轮 git 超时但 API 可达，第 63–64 轮本文件无通路记录，第 68 轮 git
-超时但 API 可达，第 69–76、79–80、84 轮 git 可达，第 77 轮本文件无通路记录，第 78、81–83 轮
+超时但 API 可达，第 69–76、79–80、84–85 轮 git 可达，第 77 轮本文件无通路记录，第 78、81–83 轮
 git 超时但 API 可达），所以下表 5 行的
 「最近一次对照」停在第 45 轮是
 **没有理由重看**，不是忘了看：
@@ -168,43 +169,43 @@ git 超时但 API 可达），所以下表 5 行的
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。搬完这里只留一句
    指针——「本文件只留当前一轮」不是约定而是断言（`previousRoundPointerViolations`）。
 
-## 当前状态（第 84 轮，2026-10-27）
+## 当前状态（第 85 轮，2026-10-27）
 
-第 84 轮复核：**HEAD 未变，结论仍是「无新内容」；git、API 与 npm 均可核对。**
+第 85 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 均可核对。**
 `git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main` 本轮退出码 0，
-`375f64cd6f67a48a135da83cfcf59c52669a09cb` 与 pin 一致（与第 49–83 轮同一个 commit）；
-`api.github.com/repos/alibaba/open-code-review/commits/main` 给出同一个 `sha`；`npm view
-@alibaba-group/open-code-review version` 仍是 `1.13.3`。tag 一处本轮没有独立核对——
-`refs/heads/main` 未变即「无新 commit」，registry 的 `latest` 未变即「无新发布」。desktop
-的 `^1.13.3` 无需改动，**无移植项**。
+`375f64c` 与 pin 一致（与第 49–84 轮同一个 commit）；`git ls-remote --tags` 显示
+`refs/tags/v1.13.3^{}` 仍指向同一个 commit；`npm view @alibaba-group/open-code-review version`
+仍是 `1.13.3`。GitHub API 本轮没有另问一次——git 的 branch 与 tag 两条都答了问题。
+desktop 的 `^1.13.3` 无需改动，**无移植项**。
 
-本轮按控制仓简报换方向：不加新的断言密度，而是把三处容易维护错的规则收敛。
+本轮兑现控制仓简报里唯一还没落地的一项：`main.js` 的接线层此前只有正则断言
+（「handler 里有 `...probe`」），证明的是源码拼写，不是「探针的整个返回对象真的交给了
+`formatAppInfo`」。
 
-- **P0-1：`installInfo` 撞名从注释约定变成双向断言。** `formatAppInfo` 先展开
-  `installInfo`，再用七个计算字段覆盖，所以撞名字段会无声消失。`tools/app-info-smoke.mjs`
-  现在用一个与**全部七个**计算字段重名、且值都不同的对象喂进去，断言七个字段全部保住计算值
-  （不只是抽查 `binary` / `version`），并前置断言这个撞名对象确实覆盖了七个名字。
-  `tools/install-info-smoke.mjs` 从另一边钉：`installInfo()` 返回的六个名字不得与那七个
-  重名，且共享的 `APP_INFO_COMPUTED_KEYS` 必须覆盖完整的七个——否则「没有撞名」会在一张
-  空表上通过。验过会红：把 spread 挪到计算字段之后，七个字段逐一被 `evil` 值顶掉；
-  把 `userData` 改名成 `binary`，install 一侧点名 `collisions:["binary"]`。
-- **P0-2：`tools/upstream-watch-smoke.mjs` 的自测入口从环境变量改成命令行参数。**
-  原来两个变量（选中红色子进程 / 选中绿色子进程）在 CI 或用户环境撞名时会改变
-  `npm run audit:upstream` 的行为。现在是 `--selftest` / `--no-respawn` 两个精确 token，
-  并新增三格：无参数时两个开关都为假（不从环境推断）、近似拼写（`--selftest=1`、裸
-  `selftest`）不算开关、旧环境变量名不再出现在源码里。红色子进程只带 `--selftest`，
-  另有一格断言它没有重入 spawn；绿色子进程仍证明整轮套件不是天生红。
-- **P1-1：文档的编辑规则有了人读入口。** `docs/OCR-UPSTREAM-SYNC.md` 人读区开头新增
-  「写这份文档的规则」六条（不抄锚点字面量），`tools/upstream-watch.mjs` 的
-  `docAuthoringRuleViolations` 断言这一节存在、至少四条编号规则、且在当前状态之前；
-  smoke 用删标题、把标题挪到当前状态之后、把清单删到三条三种副本验证它会红。
+- **P0-1：`app:info` 的 handler body 抽成可调用的 `handleAppInfo`，并直测 spread。**
+  `app-info.js` 新增两个导出：`assembleAppInfo({ binary, probe, …facts })` 是唯一执行
+  `...probe` 的那一行；`handleAppInfo` 负责取 `binaryResolution()`、跑
+  `readVersionOutput`、调 `assembleAppInfo`，并把服务四参数
+  `exec(args, cwd, env, options)` 到探针 `exec(args, { timeoutMs })` 的适配也收进来。
+  `main.js` 的注册现在只剩 `ipcMain.handle("app:info", () => handleAppInfo({ … }))`。
+  `tools/app-info-smoke.mjs` 用**带 getter 的探针对象**问 `assembleAppInfo`：`timedOut`
+  与 `probeError` 是否被读取，只有真的发生 spread 才会为真；反面控制是「只取
+  `versionStdout`/`versionStderr`」的写法，同样两个 getter 保持沉默——证明这条断言分得清
+  spread 与挑选。另有三格问 `handleAppInfo` 本身：服务只被调用一次且参数是 `["version"]`、
+  预算落在第四个参数、`Object.create(null)` 的 rejection 仍 resolve 出完整 payload
+  （`installInfo` 只读一次）。验过会红：把 `...probe` 改成显式两个字段，spread 那格与
+  「handler 走 `assembleAppInfo`」那格当场红；还原后全绿。
+- **P0-2：`describeProbeError` 的「不 reject」断言**在上一轮已经落地
+  （`exec: () => Promise.reject(Object.create(null))` 的 resolve + 固定句），本轮复核后
+  保留，不重复加格。
+- **P1-1：`preload.js` ↔ `src/lib/api.ts` 的方法名 / 参数个数**同样已由
+  `tools/bridge-contract.mjs` 覆盖（双向名单、arity、逐参数落点），本轮复核后不动。
 
-断言只动 `tools/app-info-smoke.mjs`、`tools/install-info-smoke.mjs`、
-`tools/install-fixture.mjs`、`tools/upstream-watch-smoke.mjs`、`tools/upstream-watch.mjs`
-与本文件，不碰 CLI 参数、配置读写、IPC 注册体或运行时行为。`audit:appinfo` /
-`audit:install` / `audit:upstream` 本轮全绿。
+改动只在 `app-info.js`、`main.js`、`tools/app-info-smoke.mjs` 与本文件；不碰 CLI 参数、
+配置读写、`git show` 分类或本文件的机器可读区（除本轮自己的 pin 行与账）。
+`audit:appinfo` / `audit:bridge` / `audit:static` 本轮全绿。
 
-上一轮（第 83 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-83-轮2026-10-27)，归档之后本文件不留第二份。
+上一轮（第 84 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-84-轮2026-10-27)，归档之后本文件不留第二份。
 
 ## 上游真变了怎么办（命令驱动，而不是「记得看一眼」）
 ```bash

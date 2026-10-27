@@ -24,7 +24,7 @@ const {
   pickFileOptions,
 } = require("./path-guard");
 const { providersAnswer } = require("./provider-handler");
-const { formatAppInfo, readVersionOutput } = require("./app-info");
+const { handleAppInfo } = require("./app-info");
 
 const DOCS_URL = "https://open-codereview.ai/docs";
 
@@ -152,36 +152,25 @@ function buildMenu() {
 
 /* ---------------- ipc: app ---------------- */
 
-// The assembly lives in `app-info.js`: a value built inside a handler can only
-// be observed by launching Electron, and the absent-data shapes (no binary, a
-// version on stderr) are exactly the ones the settings page shows verbatim.
+// The whole body lives in `app-info.js` (`handleAppInfo`): a value assembled
+// inside a registration can only be observed by launching Electron, and the
+// decisions it makes — which probe fields reach the page, which are named and
+// dropped, how the service's four-argument `exec` becomes the probe's
+// `(args, { timeoutMs })` — are all assertable when they are callable.
 //
-// The version probe is bounded there as well, and that matters here more than
-// anywhere else: this handler answers the settings page, so a `ocr version` that
-// never returns is a blank page rather than a wrong field. `exec` keeps its own
-// (args, cwd, env, options) signature; the adapter is the one place the probe's
-// `{ timeoutMs }` becomes the service's fourth argument.
-ipcMain.handle("app:info", async () => {
-  const binary = ocr.binaryResolution();
-  // The probe's whole answer travels, `timedOut` included: which fields reach
-  // the settings page is decided in `formatAppInfo`, and it accepts that flag in
-  // order to drop it (see `app-info.js`). Picking `versionStdout`/`versionStderr`
-  // off the answer here — which is what this registration used to do — made the
-  // drop an accident of a destructuring pattern that no test could see.
-  const probe = await readVersionOutput({
-    binary,
-    exec: (args, options) => ocr.exec(args, undefined, undefined, options),
-  });
-  return formatAppInfo({
-    binary,
-    ...probe,
+// What is left here is the wiring, and that is the part this line must get
+// right: every fact the page shows, taken at ask time.
+ipcMain.handle("app:info", () =>
+  handleAppInfo({
+    exec: ocr.exec,
+    binaryResolution: () => ocr.binaryResolution(),
     configPath: ocr.CONFIG_PATH,
     docsUrl: DOCS_URL,
     appVersion: app.getVersion(),
     platform: process.platform,
-    installInfo: install.installInfo(),
-  });
-});
+    installInfo: () => install.installInfo(),
+  })
+);
 
 /* ---------------- ipc: install ---------------- */
 
