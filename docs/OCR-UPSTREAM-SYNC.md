@@ -35,7 +35,7 @@ tag v1.13.3
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 76 轮：`git ls-remote` 退出码 0，`refs/heads/main` 与 pin 一致；tag 与 npm 均为 `1.13.3`；通路：git）**
+**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 78 轮：`git ls-remote` 在 120 秒内超时，退出码 124；`api.github.com` 的 `commits/main` 退出码 0 且 `sha` 与 pin 一致；npm 为 `1.13.3`；通路：api）**
 
 ### 核对通路账
 
@@ -77,6 +77,8 @@ tag v1.13.3
 | 74 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；`exec` 超时 kill 进真子进程断言、`installInfo` key-set 扩到全部形态、注册体断言按通道找 | — |
 | 75 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；packaging 补「根目录 `*.js` 全在 `build.files`」并给自己一条会红的自测、`git-service` 通用分支的退出码断言抽成谓词并同样自测、本文件收敛成机器可读区 + 人读区 | — |
 | 76 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；机器可读区的形状进断言（`machineReadableBlockViolations` 三条反面用例）、packaging 闸门补「红的原因」断言与非字面量 require 的反向用例、`git-service` ↔ 本文件交叉引用 | — |
+| 77 | 2026-10-27 | none | 本文件没有核对记录（该轮未更新状态与账） | `[UPSTREAM-DEBT]` HEAD |
+| 78 | 2026-10-27 | api | `375f64c` / `v1.13.3`，无新内容；git 超时（124）、API 作答；npm `1.13.3`；版本探测的等待预算抽成 `versionWaitMs` 并补 grace/budget 边界与 `probeError` 的异常值形状 | — |
 
 ### 对照表（上游前进时要重读的五处）
 
@@ -84,9 +86,10 @@ tag v1.13.3
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
 对应行并把轮次与日期改成本轮。
 
-**第 46–76 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
+**第 46–78 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
 npm 通路可达，第 56 轮 git 超时但 API 可达，第 63–64 轮本文件无通路记录，第 68 轮 git
-超时但 API 可达，第 69–76 轮 git 可达），所以下表 5 行的
+超时但 API 可达，第 69–76 轮 git 可达，第 77 轮本文件无通路记录，第 78 轮 git 超时但
+API 可达），所以下表 5 行的
 「最近一次对照」停在第 45 轮是
 **没有理由重看**，不是忘了看：
 它记录的是「最后一次有人逐行读上游源码」的轮次，而不是「最后一次确认上游没变」的轮次。
@@ -130,45 +133,50 @@ npm 通路可达，第 56 轮 git 超时但 API 可达，第 63–64 轮本文�
 4. **不要**静默忽略上游 release：每轮把结论写进下面「当前状态」，并把上一轮的正文搬到
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。
 
-## 当前状态（第 76 轮，2026-10-27）
+## 当前状态（第 78 轮，2026-10-27）
 
-第 76 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 两条通路都可达。**
+第 78 轮复核：**HEAD 未变，结论仍是「无新内容」；本轮 git 超时、API 作答，npm 一致。**
 `git ls-remote https://github.com/alibaba/open-code-review.git refs/heads/main
-refs/tags/v1.13.3` 退出码 0，`refs/heads/main` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`
-（与第 49–75 轮同一个 commit），`refs/tags/v1.13.3` 仍指向 annotated tag 对象
-`dd925205e108304bd4dd6cc0f8e8b7cf8dee77ea`；
+refs/tags/v1.13.3` 本轮在 120 秒预算内没有返回（`timeout` 退出码 124，无输出），
+`api.github.com/repos/alibaba/open-code-review/commits/main` 退出码 0，
+`sha` = `375f64cd6f67a48a135da83cfcf59c52669a09cb`（与第 49–76 轮同一个 commit）；
 `npm view @alibaba-group/open-code-review version dist-tags` 仍是 `1.13.3` /
-`latest: 1.13.3`。desktop 的 `^1.13.3` 无需改动，**无移植项**。
+`latest: 1.13.3`（tag 一处本轮没有独立重读，由 `main` 顶端未变与 npm 版本未变共同说明）。
+desktop 的 `^1.13.3` 无需改动，**无移植项**。第 77 轮的提交没有更新本文件，因此本轮在
+通路账里补了一行 `none` 与它欠下的 HEAD 核对；本轮这次 API 核对只清本轮的账。
 
-本轮不加产品功能面，做的是把上一轮刚拆出来的两处「形状」变成断言，再补两条零风险的交叉引用：
+本轮继续补已经抽出来的纯函数的分支覆盖，不再扩大抽取范围。上一轮把「抛错」与「沉默」
+分开记在 `probeError` 之后，剩下没被问过的是**等待本身**和**异常值的形状**：
 
-- **P0-1：机器可读区自身的形状进了断言。** 上一轮把 pin 块、固定行、通路账、对照表收进
-  `<!-- machine-readable:start/end -->` 之间，但「人读区不许有第二份拷贝」只写在开头那句话里，
-  没有任何检查会看见第二份。现在 `tools/upstream-watch.mjs` 多一个纯函数
-  `machineReadableBlockViolations(doc)`：两个标记各恰好一次且 start 在前；区内五个锚点（pin 块
-  起止、固定行、通路账标题、对照表表头）各恰好一次；这五个锚点**不得**出现在终点之后——那
-  就是「不要在人读区再声明一次 pin」的机械形式。`tools/upstream-watch-smoke.mjs`
-  要求它对真实文档返回空数组，再用「只改一行」的副本逐条验证它会红：标记对拆成两处（多一个
-  start）、锚点被复制到人读区（在人读区多一行通路账标题）、两个标记顺序颠倒。三条反面用例都
-  断言了「与真实文档只差一行/两行」，否则「会红」可能是因为副本本身坏了。断言同时钉住人读区
-  确实是一段（不是空尾巴），且第三处 pin 声明（散文那处）仍在人读区——否则「终点之后没有
-  锚点」会因为人读区不存在而恒真。这条断言上线时就抓到了本节自己：正文原先照抄了通路账标题
-  与对照表表头这两个锚点的字面量，于是「人读区不得复制锚点」当场变红，改法是描述它们而不是
-  抄它们——同一件事以后每轮都会遇到，写正文时留意。
-- **P0-2：packaging 闸门「红的原因」也进了断言。** 上一轮那条「删掉任一行 `*.js` 白名单都要
-  红」只钉住「会红、且点名了那一行」，没钉住「红在漏打包这件事上」：将来 `build.files` 里多
-  一条 pattern 或挪一次目录，这条循环可能因为别的原因继续绿。现在同一条循环再断言失败句里
-  出现 `required at runtime` 或 `root module` 之一。同时把已知盲区写成反向用例：闸门用的是
-  正则扫描而不是 AST，`require(`./x`)` / `require("./" + "x")` 这类**非字面量** require 它看
-  不见——用例在临时目录里造出字面量与两种计算式各一条，断言「字面量进了图、计算式没进图、
-  闸门对它们一个字都不说」，再另造一条「根目录模块被计算式 require」证明根目录扫仍抓得到它
-  （报错用 `root module` 的措辞）。于是「运行时 require 必须写成字面量」这条约束有了断言，
-  而不是只剩一句注释。
-- **P1-1：两处交叉引用，外加一句行号说明。** `git-service.js` 顶部 `gitEnv()` 注释块末尾加了
-  一句指向本文件「能自动变红的地方，和不能的地方」；本文件那段关于 `readFileAtRef` 按 stderr
-  措辞分类的代价里加了一句指向 `git-service.js` 顶部 `gitEnv()` 注释——下一轮不必重新发现一遍。
-  对照表下方另补一句：pin 相同即 commit 相同，表里引用的上游行号（`llm_cmd.go:261`、
-  `providers.go:45`）必然仍指向同一段代码，**行号不是欠账，只有 pin 前进才是**。
+- **P0：等待预算抽成 `versionWaitMs`，四种非法 grace 与四种非法 budget 各断一次。**
+  `readVersionOutput` 里那两行原本是内联的：`Number.isFinite(timeoutMs) && timeoutMs > 0`
+  与 `Number.isFinite(graceMs) && graceMs >= 0`。它们各自决定一个数字，而这两个数字的
+  形状只有在 `setTimeout` 里才看得见——`setTimeout(Infinity)` 在 Node 里立刻触发，所以
+  「读到的最长等待」实际是最短的等待。现在计算收进导出的 `versionWaitMs({ timeoutMs,
+  graceMs })`，返回 `{ budget, grace, wait }`：非法 budget 回落默认值，非法 grace 回落
+  默认 grace，`wait` 由两者相加。smoke 逐条问四格（负 / `NaN` / `Infinity` /
+  `undefined`），断言 `wait === budget + VERSION_PROBE_GRACE_MS`；再断言 `graceMs: 0`
+  是被遵守的（`wait === budget`，不能被并进非法值）；再对一组输入扫一遍不变量
+  `wait >= budget`——「deadline 绝不落在子进程自己的预算之内」是这两行存在的理由。
+  正常 pair（40+60=100）也断了一次，否则四条回落用例在两个常量相等时可能恒真。
+- **P0：接线与交给 `exec` 的预算一起断言。** 纯函数绿不代表探针用它：smoke 先要求
+  `app-info.js` 里恰好是 `const { budget, wait } = versionWaitMs({ timeoutMs, graceMs });`，
+  再让 `exec` 立即返回，断言 `timeoutMs: 0` 时服务收到的是 `VERSION_PROBE_MS` 而不是
+  `0`——非法值必须在交给子进程之前就被换掉，否则 `exec` 会按 `NaN`/`0` 去设自己的 timer。
+  另有一格在时钟上：`timeoutMs: 30, graceMs: -10` 的挂死服务必须在 30+默认 grace 之后
+  才被判 `timedOut`；若负 grace 漏进 `setTimeout`，等待会是 20ms，早于子进程自己的 30ms
+  预算，这条会先红。
+- **P1：`exec` 不是函数、异常值没有句子，也各有一格。** `readVersionOutput` 的第一个
+  early return 是 `!binaryPath || typeof exec !== "function"`，此前只测了「没有 binary」
+  那一半；现在补「有 binary 但 `exec: null`」，断言答案是 `timedOut: false` 的空输出——
+  没人可问是接线错了，不该报成「CLI 很慢」。`describeProbeError` 也补了三种被拒值：
+  裸字符串原样成为句子；`new Error("")` 与**没有 `message` 的普通对象**落到同一句
+  `exec rejected without a message`。最后一格顺带修了一个小洞：普通对象原先被
+  `String()` 成 `"[object Object]"`，那是一个值但不是一条诊断（没有可查的东西），
+  现在与空消息同答。三种都断言 `timedOut === false`，因为「抛错」不是「超时」。
+
+上游那三条自动变红的网（`audit:service` / `audit:config` / `audit:git`）本轮不受影响：
+本轮改的是版本探测的等待与诊断，不碰 CLI 参数、配置读写和 `git show` 分类。
 
 ## 上游真变了怎么办（命令驱动，而不是「记得看一眼」）
 ```bash

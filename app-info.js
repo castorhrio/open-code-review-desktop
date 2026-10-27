@@ -137,11 +137,18 @@ const saidNothing = (timedOut) => ({
 // as a sentence (never `undefined`) so "there was an exception" is not confused
 // with "there was not one".
 const describeProbeError = (error) => {
+  // An Error (or anything carrying a `message`) is read from that field first;
+  // every other value is stringified. A rejected plain object stringifies to
+  // `"[object Object]"`, which is a value but not a diagnostic — it names
+  // nothing the reader can look up, so it gets the same sentence as an empty
+  // message. The rule is "there is always a sentence, and it is either what
+  // was thrown or the fact that nothing usable was": `undefined` and `""` are
+  // the only strings that must not come out of here.
   const text =
     error && typeof error === "object" && "message" in error
       ? String(error.message || "")
       : String(error == null ? "" : error);
-  return text || "exec rejected without a message";
+  return text && text !== "[object Object]" ? text : "exec rejected without a message";
 };
 
 /* ---- the one decision the probe ends with ----
@@ -181,6 +188,40 @@ const versionAnswer = (answer, late) => {
   };
 };
 
+/* ---- what the probe is allowed to wait, asked on its own ----
+ *
+ * Both budgets above arrive as arguments and neither is trusted: they come from
+ * a caller (and, in the app's case, from a default) and `setTimeout` reads a
+ * bad one in a way nobody wants. Two rules make an untrusted value usable:
+ *
+ *  - the budget handed to the child is the value if it is a positive finite
+ *    number, otherwise the default. Zero, a negative number, `NaN` and
+ *    `Infinity` are all "the caller did not say", not "wait no time" and not
+ *    "wait forever" — `setTimeout(Infinity)` fires immediately in Node, so
+ *    `Infinity` slipping through would be the shortest possible wait while
+ *    reading as the longest;
+ *  - the grace is added only when it is finite and non-negative, otherwise the
+ *    default is used. A negative grace must not be subtracted: the outer
+ *    deadline would then fire *inside* the child's own budget, which is the one
+ *    ordering the two budgets exist to keep (`wait >= budget`).
+ *
+ * It is a function of its own because the interesting shapes are the invalid
+ * ones: `readVersionOutput` has to *wait* for the deadline it computes, so
+ * asserting "a negative grace still waits the default" on the clock would take
+ * 5.5 seconds. Asked here, the answer is a number, and
+ * `tools/app-info-smoke.mjs` checks every invalid input against the same
+ * invariant instead of timing four of them.
+ */
+const versionWaitMs = ({ timeoutMs, graceMs } = {}) => {
+  const budget = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : VERSION_PROBE_MS;
+  const grace = Number.isFinite(graceMs) && graceMs >= 0 ? graceMs : VERSION_PROBE_GRACE_MS;
+  // Never less than the budget the child was given: answering "timed out" while
+  // the child is still inside its own budget would report a failure that has not
+  // happened yet. True by construction above; the check is the assertion that
+  // the two lines above stay that way.
+  return { budget, grace, wait: budget + grace };
+};
+
 async function readVersionOutput({
   binary,
   exec,
@@ -189,13 +230,11 @@ async function readVersionOutput({
 } = {}) {
   const binaryPath = binary && binary.path ? binary.path : null;
   // No binary, no question: asking one that is not there is how a stale version
-  // ends up attached to "not found".
+  // ends up attached to "not found". The same goes for an `exec` that is not a
+  // function: the deadline would answer `timedOut` for a service nobody could
+  // call, which reads as "the CLI is slow" instead of "this side is miswired".
   if (!binaryPath || typeof exec !== "function") return saidNothing(false);
-  const budget = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : VERSION_PROBE_MS;
-  // Never wait less than the budget the child was given: answering "timed out"
-  // while the child is still inside its own budget would report a failure that
-  // has not happened yet.
-  const wait = budget + (Number.isFinite(graceMs) && graceMs >= 0 ? graceMs : VERSION_PROBE_GRACE_MS);
+  const { budget, wait } = versionWaitMs({ timeoutMs, graceMs });
   let late = false;
   let timer = null;
   const deadline = new Promise((resolve) => {
@@ -237,6 +276,7 @@ module.exports = {
   formatAppInfo,
   readVersionOutput,
   versionAnswer,
+  versionWaitMs,
   VERSION_PROBE_MS,
   VERSION_PROBE_GRACE_MS,
 };

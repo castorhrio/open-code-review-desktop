@@ -14,9 +14,14 @@ import fs from "node:fs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const require = createRequire(path.join(ROOT, "package.json"));
-const { formatAppInfo, readVersionOutput, versionAnswer, VERSION_PROBE_MS, VERSION_PROBE_GRACE_MS } = require(
-  path.join(ROOT, "app-info.js")
-);
+const {
+  formatAppInfo,
+  readVersionOutput,
+  versionAnswer,
+  versionWaitMs,
+  VERSION_PROBE_MS,
+  VERSION_PROBE_GRACE_MS,
+} = require(path.join(ROOT, "app-info.js"));
 import { INSTALL_INFO_KEYS, stubInstall } from "./install-fixture.mjs";
 
 const failures = [];
@@ -589,6 +594,181 @@ const base = {
     late.timedOut === true && late.versionStdout === "" && late.versionStderr === "",
     JSON.stringify(late)
   );
+
+  /* ---- the wait itself: two untrusted numbers, one rule ----
+   * The deadline above is asserted on the clock, which is the right way to ask
+   * "we stopped waiting" but the wrong way to ask what `wait` is: proving "a
+   * negative grace still waits the default" on the clock costs 5.5 seconds, and
+   * four such checks would make this suite the slowest thing in `audit:static`.
+   * The computation is therefore its own exported function, and every invalid
+   * input is asked as a number. `readVersionOutput` is then asserted to be
+   * wired to that one function, so a second copy cannot keep this block green
+   * while the probe waits by another rule.
+   */
+  {
+    const exact = versionWaitMs({ timeoutMs: 40, graceMs: 60 });
+    check(
+      "the wait is the budget plus the grace when both are usable",
+      exact.budget === 40 && exact.grace === 60 && exact.wait === 100,
+      JSON.stringify(exact)
+    );
+    // Zero grace is a legitimate answer ("stop the moment the child's own budget
+    // runs out"), so it must not be folded into the default with the invalid
+    // ones. That is the whole reason the guard is `>= 0` and not `> 0`.
+    const noGrace = versionWaitMs({ timeoutMs: 40, graceMs: 0 });
+    check(
+      "a zero grace is obeyed: the wait is exactly the budget",
+      noGrace.grace === 0 && noGrace.wait === noGrace.budget,
+      JSON.stringify(noGrace)
+    );
+
+    // Every way a grace can fail to be a grace. `Infinity` is the interesting
+    // one: `setTimeout(Infinity)` fires immediately in Node, so a value that
+    // reads as "wait forever" would actually be the shortest wait in the file.
+    const badGraces = [
+      ["negative", -1],
+      ["NaN", Number.NaN],
+      ["Infinity", Number.POSITIVE_INFINITY],
+      ["undefined", undefined],
+    ];
+    for (const [label, graceMs] of badGraces) {
+      const answer = versionWaitMs({ timeoutMs: 40, graceMs });
+      check(
+        `an ${label} grace falls back to the default instead of shortening the wait (${label})`,
+        answer.grace === VERSION_PROBE_GRACE_MS && answer.wait === 40 + VERSION_PROBE_GRACE_MS,
+        JSON.stringify(answer)
+      );
+    }
+    // No grace argument at all is a different input from `graceMs: undefined`:
+    // one relies on the default parameter, the other on the guard inside. Both
+    // have to land on the same number.
+    const omittedGrace = versionWaitMs({ timeoutMs: 40 });
+    check(
+      "an omitted grace is the same answer as an undefined one",
+      omittedGrace.wait === 40 + VERSION_PROBE_GRACE_MS &&
+        omittedGrace.wait === versionWaitMs({ timeoutMs: 40, graceMs: undefined }).wait,
+      JSON.stringify(omittedGrace)
+    );
+
+    // The budget is handed to the child, so a bad one is worse than a bad wait:
+    // `exec` would be asked to kill the process after `NaN` milliseconds. All
+    // four shapes have to become the default, and the effect is visible at the
+    // call, not just in the number.
+    const badBudgets = [
+      ["zero", 0],
+      ["negative", -25],
+      ["NaN", Number.NaN],
+      ["Infinity", Number.POSITIVE_INFINITY],
+    ];
+    for (const [label, timeoutMs] of badBudgets) {
+      const answer = versionWaitMs({ timeoutMs, graceMs: 0 });
+      check(
+        `a ${label} budget falls back to the default and the wait follows it (${label})`,
+        answer.budget === VERSION_PROBE_MS && answer.wait === VERSION_PROBE_MS,
+        JSON.stringify(answer)
+      );
+    }
+    // The one invariant both guards exist for, over every shape above plus a
+    // valid pair and the no-argument call. Asserted as a sweep rather than once
+    // because "the deadline never fires inside the child's budget" is the
+    // promise, and any future branch has to keep it.
+    const sweep = [
+      { timeoutMs: 40, graceMs: 60 },
+      { timeoutMs: 40, graceMs: 0 },
+      { timeoutMs: 40, graceMs: -1 },
+      { timeoutMs: 40, graceMs: Number.POSITIVE_INFINITY },
+      { timeoutMs: Number.NaN, graceMs: Number.NaN },
+      { timeoutMs: Number.POSITIVE_INFINITY, graceMs: -1 },
+      {},
+    ].map((input) => ({ input, answer: versionWaitMs(input) }));
+    check(
+      "no input can make the deadline fire before the budget the child was given",
+      sweep.every(
+        ({ answer }) =>
+          Number.isFinite(answer.budget) &&
+          answer.budget > 0 &&
+          Number.isFinite(answer.wait) &&
+          answer.wait >= answer.budget
+      ),
+      JSON.stringify(sweep)
+    );
+
+    // The wiring, not a copy: the probe has to compute its two numbers with the
+    // function under test, and that is the only place `budget` may come from.
+    const appInfoSrc = fs.readFileSync(path.join(ROOT, "app-info.js"), "utf8");
+    check(
+      "the probe takes both of its numbers from that one function",
+      /const \{ budget, wait \} = versionWaitMs\(\{ timeoutMs, graceMs \}\);/.test(appInfoSrc),
+      "app-info.js"
+    );
+
+    // A bad budget is normalized *before* `exec` sees it. The injected service
+    // answers at once, so this check is about the argument, not the clock.
+    const handed = [];
+    await readVersionOutput({
+      binary: { path: "/opt/app/ocr" },
+      exec: (args, options) => {
+        handed.push(options && options.timeoutMs);
+        return Promise.resolve({ code: 0, stdout: "1.13.3\n", stderr: "" });
+      },
+      timeoutMs: 0,
+      graceMs: 0,
+    });
+    check(
+      "the service is handed the normalized budget, never the zero it was given",
+      handed.length === 1 && handed[0] === VERSION_PROBE_MS,
+      JSON.stringify(handed)
+    );
+
+    // One of the invalid grace values is also proven on the clock, because the
+    // pure function and the call site could disagree while both look right: a
+    // negative grace that reached `setTimeout` would stop waiting 20ms in,
+    // before the child's own 30ms budget had even run out.
+    const startedAtBadGrace = Date.now();
+    const badGrace = await readVersionOutput({
+      binary: { path: "/opt/app/ocr" },
+      exec: () => new Promise(() => {}),
+      timeoutMs: 30,
+      graceMs: -10,
+    });
+    const elapsedBadGrace = Date.now() - startedAtBadGrace;
+    check(
+      "a negative grace really waits the default, so the deadline stays outside the budget",
+      badGrace.timedOut === true && elapsedBadGrace >= 30 + VERSION_PROBE_GRACE_MS - 20,
+      `${elapsedBadGrace}ms for 30+${VERSION_PROBE_GRACE_MS}`
+    );
+
+    // An `exec` that is not a function is a miswiring, not a slow CLI: there is
+    // nobody to ask, so the probe says nothing and does not wait for a deadline
+    // to report a timeout it could have known immediately.
+    const noExec = await readVersionOutput({ binary: { path: "/opt/app/ocr" }, exec: null });
+    check(
+      "an exec that cannot be called answers empty output instead of timing out",
+      noExec.versionStdout === "" && noExec.versionStderr === "" && noExec.timedOut === false,
+      JSON.stringify(noExec)
+    );
+
+    // `describeProbeError`'s other shapes: whatever is rejected may be an Error,
+    // a bare string, an object with no message, or an Error with an empty one.
+    // All of them reach `probeError` as a sentence, because "the service threw"
+    // is a fact that must not become `undefined` on the way.
+    for (const [label, rejection, expected] of [
+      ["a bare string", "boom", "boom"],
+      ["an object with no message", {}, "exec rejected without a message"],
+      ["an Error with an empty message", new Error(""), "exec rejected without a message"],
+    ]) {
+      const answer = await readVersionOutput({
+        binary: { path: "/opt/app/ocr" },
+        exec: () => Promise.reject(rejection),
+        timeoutMs: 2000,
+      });
+      check(
+        `a rejection carrying ${label} still leaves a sentence in probeError`,
+        answer.probeError === expected && answer.timedOut === false,
+        JSON.stringify(answer.probeError)
+      );
+    }
+  }
 
   /* ---- the deadline's own decision, asked the question the race cannot pose ----
    * The block above is the reachable shape: the deadline fired, so the race was
