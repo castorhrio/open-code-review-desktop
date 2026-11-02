@@ -22,19 +22,74 @@
 归档段落的正文写入后不再改写：后续轮次只能在段末追加一段 `**补记（第 N 轮）**`，
 N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减。
 
-这条规则是给「第 71 轮的正文被第 72 轮补了一句代价」那件事补的：那次改动是对的，但它
-没有留下痕迹，于是「这句话是哪一轮写的」只能靠回忆。规则之后，一段文字只有两种来源——
-它自己那一轮写的正文，或者段末标明轮次的一条补记，没有第三种。所以：
+规则之后，一段文字只有两种来源：它自己那一轮写的正文，或段末标明轮次的一条补记——没有第三种。
+这条是给「第 71 轮的正文被第 72 轮补了一句代价、却没留下痕迹」补的，那件事记在第 72 轮那一段里。所以：
 
 - `**补记（第 N 轮）**` 是唯一的追加形状，行首就是这个标记，一条补记一段；
 - 补记必须落在**同一段的末尾**：一段里出现过补记之后，正文就结束了，后面不许再有叙述；
 - 补记的 N 必须晚于该段标题里的轮次，同一段的多条补记按轮次递增排列；
 - 新轮次的正文加在最上面（不是文件末尾），所以从上往下读，段落轮次递减。
 
-`tools/upstream-watch.mjs` 的 `historyAppendViolations()` 就是这四句话的判定式，
-`npm run audit:upstream` 要求它对本文档返回空数组，并逐条用「只改一行」的副本验证它会红：
-补记之后又出现叙述、补记写成本段自己的轮次、补记被挪到正文之前、段落顺序被改乱、
-补记落在这段之外。规则本身也必须写在这里（上面那句），否则它只存在于脚本里。
+`tools/upstream-watch.mjs` 的 `historyAppendViolations()` 就是这四句话的判定式：`npm run audit:upstream`
+要求它对本文档返回空数组，并逐条用「只改一行」的副本验证它会红（补记之后又出叙述、补记写成本段轮次、补记挪到正文之前、
+段落顺序被改乱、补记落在这段之外）。规则本身也必须写在这里，否则它只存在于脚本里。
+
+---
+
+## 上游状态（第 103 轮，2026-11-03）
+第 103 轮复核：**上游的发布版本前进了**——`v1.13.3` → `v1.13.4`（发布于 2026-11-02T15:19:48Z）。
+`git ls-remote` 的 TLS 被断开，HEAD 与 tag 都由 GitHub API 答上，npm `latest` 同为 `1.13.4`；
+新 tag 指的正是第 101 轮已经逐文件读过的 `76ab46a`，所以本轮要评估的不是新改动，而是**同一批
+改动第一次成为被封装的那个发布版本**。对照表 5 行在这一次提交里逐行重读完毕（每行的结论与
+依据写在最后一列），**pin 前进**：`PINNED_UPSTREAM`、pin 块、固定行、正文里的第三处声明、
+`package.json` 的 `^1.13.4`，以及 `npm install` 落下来的二进制——它自报
+`open-code-review v1.13.4 (76ab46a) linux/amd64`，与 pin 同一个 commit。
+
+- **两处 Go 源码改动都追到了本仓的消费点，「不在对照表里」不等于「与本仓无关」。**
+  `session show --json` 把空表从 `null` 改成 `[]`——本仓不调 `session show`，只用 `session list`；
+  `file_read_diff` 的未命中提示改成点名缺哪条路径（`Error: diff not found for: …`、
+  `Diffs exist for: …`）——那是回给模型的 tool 结果文本，而本仓按行首 `error:` 分类的两处
+  （`ocr-service.js` 的 `errorLines`、流式 `emit` 的过滤）读的都是 CLI 自己的 stderr。
+  所以**无移植项**：四个上游 commit 没有一个改变封装层看得见的内容。
+- **通路账里那个把表截成两段的空行删掉了，并进了断言。** 第 102 轮的账里，第 101 与 102 行之间
+  夹着一个空行：`ledgerRowsIn` 按形状扫这一节，跨过空行照常数到 56 行，而 Markdown 在空行处
+  结束表格——读者看到的表停在第 101 轮，第 102 行渲染成正文里的竖线。新增
+  `ledgerTableViolations`（表内出现空行即红，点名行号与两边的轮次，并说明读者丢掉哪几行），
+  表前表后的空行不算红（那是 Markdown 的正常收尾）。反向控制里最要紧的一条不是「它会红」，
+  而是**别的账都看不见它**：同一份被插入空行的文档，轮次连续、通路/欠账配套、「当前状态」绑定
+  照旧全绿——所以这条断言顺便钉住了它的前提（解析器确实读得穿空行）。
+- **跨平台的那条缺口用一次真实运行补上了一半，并且它当场抓到一个 harness 缺陷。** 升 pin 需要
+  真跑一遍才算验证，而这一轮的开发机是 Linux x64：`npm install` 下来的 1.13.4 二进制自报
+  `v1.13.4 (76ab46a) linux/amd64`，随后 `audit:config` / `audit:service` / `audit:git` /
+  `audit:providers`（真 CLI）、`audit:guards`（24 条）/ `audit:exit`（5 条）/ `audit:e2e`
+  （18 条，真 Electron + 真 CLI）、`audit:ui`（112 条）/ `audit:contrast`（978 处文本，0 处低于
+  AA）/ `audit:ui-scaled`（1.25 与 1.5 各 11 条）全绿，数字与未覆盖面记在
+  [`measurements.md`](measurements.md)。第一条变红的就是 `audit:guards`：这台机器的
+  `chrome-sandbox` 不是 setuid root，Chromium 在写任何报告之前就死在 `setuid_sandbox_host.cc`，
+  而 guards 的重试条件只认「报告里有 `bundle loads` 失败」这一种形状，于是它退出码 2 报
+  「Electron crashed」——`tools/e2e-flow.mjs` 早就把「根本没有报告」当成环境问题重试了，两个
+  harness 对同一种失败的说法不一致，就是「同一台机器上一条绿一条红」的来源。重试条件对齐之后
+  guards 同样全绿。这条记录**不覆盖** Linux / macOS 的打包产物、真显示器与 GPU、以及安装版的
+  自动更新——README 的 Known limitations / 已知限制 现在按这三档写。
+- **同一趟核对撞出一个更硬的问题：英文 README 让读者去下载根本不存在的包。** 12 个 Release
+  逐一看过，资产只有 `*-setup.exe` / `*-portable.exe` / `latest.yml` / blockmap——**从来没发布过
+  一份 macOS 或 Linux 构建**，而 `README.md` 的「Option C — macOS」「Option D — Linux」却写着
+  「打开 `*-mac-<arch>.dmg`」「`chmod +x` 那个 AppImage」，首屏还有一句「Builds ship for Windows,
+  macOS and Linux」。中文版是对的（只有 A 安装版 / B 绿色版 / C 源码）。现在两份都对齐成同一句话：
+  **发布面 = Windows，验证面 = Windows 端到端 + Linux 源码路径，macOS 从未构建也从未运行**；改动的
+  位置是 `README.md`（首屏那段、Install 里合成一段的 C/D、Status、Known limitations）、
+  `README.zh-CN.md`（首屏那段、版本状态、已知限制）与 `使用说明.md`（产物表的两行与「方式 C」的
+  一句前置说明）。这一条不是「加功能」，是把已经在 DoD 里的「非官方诚实」延伸到「发布面诚实」。
+- **把「每次升 pin 必红」的字面量换成真不变式。** smoke 里那条
+  `PINNED_UPSTREAM.tag === "v1.13.3"` 的标题写着「pin 仍指着对照表所依据的那个发布版本」，
+  但它从没打开过文档，而且 pin 每次合法前进都必须手改它——一个每次都要改的断言，最后一定被
+  改成绿的。现在它问的正是标题那句话：5 行的「最近一次对照」都必须引用当前 pin 的 tag，
+  反向控制把其中一行改回上一个 tag，要求红且点名那一行。
+
+改动只在 `package.json` / `package-lock.json` 的 CLI 版本、`tools/upstream-watch.mjs` 与它的 smoke、
+`tools/electron-guards.mjs` 的沙箱重试条件、两份 README 的验证范围措辞、`docs/measurements.md`，
+以及本文件与归档；评审逻辑、CLI 参数、配置读写路径与运行期行为均未变。
+上一轮（第 102 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-102-轮2026-11-02)，归档之后本文件不留第二份。
 
 ---
 

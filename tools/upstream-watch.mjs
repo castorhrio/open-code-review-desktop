@@ -1303,10 +1303,26 @@ export const productDocViolations = (readmes, readFile) => {
 //      links to an anchor in the same document, and that section still holds the
 //      long record (≥ 8 bullets). Without the floor the "sink" is a promise
 //      pointing at a heading whose list was deleted.
+//   5. 平台矩阵不在首屏 — no architecture name (`x64`), no package format
+//      (`dmg`, `AppImage`, `.deb`, `.exe`), no bullet per platform, anywhere in
+//      that first section. Each of those is a fact about *how this was built and
+//      tested*, and the first screen was spending two of its paragraphs on them
+//      while the same record sits complete under Known limitations. "Which
+//      platform is verified to what depth" belongs there; what belongs here is
+//      where you can run this and how sure it is.
 const OPENING_FLAGS = /--[A-Za-z][\w-]*/;
 const OPENING_WRAPPER_TERMS = Object.freeze(["wrapper", "封装", "gui for"]);
 const OPENING_FIRST_BULLETS = Object.freeze([3, 5]);
 const SINK_MIN_BULLETS = 8;
+// Architecture and package-format names: the two things a reader of the first
+// screen cannot use, because they only mean something once you are choosing a
+// download. `.exe` / `.deb` are matched on the dot so a sentence about "the exe
+// you ran" is not this rule's business while `*-setup.exe` is.
+const OPENING_MATRIX_TOKEN = /(?:\b(?:x64|x86_64|arm64|aarch64|dmg|AppImage)\b|\.debs?\b|\.exes?\b)/i;
+// Only asked of list items: "Windows: …" as a bullet is the matrix in its most
+// readable form, and prose that names one platform to say where the app runs is
+// what rule 5 asks *for*.
+const OPENING_PLATFORM_NAME = /(?:\bWindows\b|\bmacOS\b|\bMac OS\b|\bLinux\b)/i;
 
 const isBullet = (line) => /^\s*[-*+]\s+/.test(line);
 const level = (line) => {
@@ -1402,6 +1418,21 @@ export const firstScreenViolations = (readmes) => {
     if (status === null) {
       violations.push(`${source}：没有第一节（## 版本状态 / Status），首屏无从谈起`);
       continue;
+    }
+    // 5. the platform matrix, which is not a first-screen fact.
+    const matrix = [];
+    status.body.forEach((line, index) => {
+      const where = `第 ${status.start + 2 + index} 行`;
+      const token = OPENING_MATRIX_TOKEN.exec(line);
+      if (token) matrix.push(`${where}「${token[0]}」`);
+      else if (isBullet(line) && OPENING_PLATFORM_NAME.test(line)) matrix.push(`${where} 按平台列的一条`);
+    });
+    if (matrix.length) {
+      violations.push(
+        `${source}：首屏的「${status.heading.replace(/^#+\s*/, "")}」里出现平台验证矩阵（${matrix.join("；")}）——` +
+          "第一屏要回答的是「在哪能用、跑起来多稳」；哪个平台验证到哪一层、发布面上有什么包，" +
+          "Known limitations / 已知限制 那一节已经是完整记录了，写在这里读者先看到的是构建清单"
+      );
     }
     const bullets = status.body.filter(isBullet).length;
     if (bullets < OPENING_FIRST_BULLETS[0] || bullets > OPENING_FIRST_BULLETS[1]) {

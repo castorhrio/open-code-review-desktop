@@ -3031,7 +3031,13 @@ if (!flags.selftest && !flags.noRespawn) {
   );
 
   const unlinked = firstScreenViolations([
-    { path: "README.md", text: enText.replace("is listed under [Verified behaviour](#verified-behaviour)", "is listed further down this file") },
+    {
+      path: "README.md",
+      text: enText.replace(
+        "is listed under [Verified behaviour](#verified-behaviour); which platform that record covers, and which it does not, is under [Known limitations](#known-limitations)",
+        "is listed further down this file, platform by platform too"
+      ),
+    },
   ]);
   check(
     "a status block that stops pointing at the long list goes red: the sunk record must have an address",
@@ -3061,6 +3067,63 @@ if (!flags.selftest && !flags.noRespawn) {
     "...and the empty section really is a section on its own (the anchor still resolves, so the red is about the bullets)",
     /^##\s+Verified behaviour\s*$/m.test(emptied) && /\]\(#verified-behaviour\)/.test(emptied),
     String(statusOf(emptied).length)
+  );
+
+  // 5. the platform matrix. Until the previous round it filled the first screen's
+  // second paragraph in both READMEs — `x64`, installer + portable, the dated green
+  // run, "macOS has never been built" — which is the release-and-CI record, not an
+  // answer to "can I run this tomorrow". These mutations paste that record back.
+  const enMatrix = mutated(
+    "README.md",
+    "`v0.1.13`, running `ocr v1.13.4`",
+    "Verification is not uniform across platforms: **Windows x64 is the only end-to-end platform, and the only build Releases publishes** (`*-setup.exe` + portable); the `*.dmg` and the AppImage / `.deb` have never been produced.\n\n`v0.1.13`, running `ocr v1.13.4`"
+  );
+  check(
+    "pasting the platform matrix back into the first screen goes red, naming the token and the line",
+    enMatrix.length === 1 && enMatrix[0].includes("x64") && /第 \d+ 行/.test(enMatrix[0]),
+    enMatrix.join("；") || "no violation"
+  );
+
+  const zhMatrix = firstScreenViolations([
+    {
+      path: "README.zh-CN.md",
+      text: mutate("README.zh-CN.md", "`v0.1.13`（最新）", "**Windows x64 是唯一端到端验证过的平台**；Linux x64 上 2026-11-03 全绿，但没有产出过 AppImage 或 `.deb`；macOS 从未构建。\n\n`v0.1.13`（最新）").text,
+    },
+  ]);
+  check(
+    "...and the Chinese README's matrix is refused by the same rule, not a translation of it",
+    zhMatrix.length === 1 && zhMatrix[0].includes("x64") && zhMatrix[0].includes("版本状态"),
+    zhMatrix.join("；") || "no violation"
+  );
+
+  const platformBullet = mutated("README.md", "- **Your key stays yours**", "- **Windows and Linux** — one platform per bullet");
+  check(
+    "a bullet per platform goes red on its own (the count is still 5, so this is not the short-list rule)",
+    platformBullet.length === 1 && platformBullet[0].includes("按平台列的一条"),
+    platformBullet.join("；") || "no violation"
+  );
+
+  // The rule is about *where* the record sits. Written into Known limitations — the
+  // section that already holds it in full — the same sentence must stay green,
+  // otherwise this is a ban on the fact rather than on the first screen.
+  const limitationCopy = mutate(
+    "README.md",
+    "- Git must be on `PATH`.",
+    "- Windows x64 is the only end-to-end platform (`*-setup.exe` + portable; no `*.dmg`, no AppImage, no `.deb`).\n- Git must be on `PATH`."
+  );
+  const sunkIntoLimitations = firstScreenViolations([
+    {
+      path: "README.md",
+      text: limitationCopy.text,
+    },
+  ]);
+  check(
+    "...and the identical matrix under Known limitations stays green: the rule refuses the place, not the fact",
+    limitationCopy.hits === 1 &&
+      /x64/.test(limitationCopy.text) &&
+      !/x64/.test(statusOf(limitationCopy.text).join("\n")) &&
+      sunkIntoLimitations.length === 0,
+    sunkIntoLimitations.join("；") || "no violation"
   );
 }
 

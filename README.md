@@ -10,7 +10,7 @@ It runs the official [`alibaba/open-code-review`](https://github.com/alibaba/ope
 
 ## Status
 
-`v0.1.13` (latest) — usable, validated against the pinned CLI, `ocr v1.13.4`. Verification is not uniform across platforms: **Windows x64 is the only end-to-end platform, and the only build Releases publishes** (installer + portable); on Linux x64 the CLI-facing, real-Electron and UI suites all ran green on 2026-11-03 against that same binary, though no Linux package was produced or installed; **macOS has never been built or run at all**. What each of those covers — and what it does not — is spelled out under Known limitations.
+`v0.1.13`, running `ocr v1.13.4`, is what you can use today: built, installed and reviewed end to end on Windows, and every capability below has been run rather than promised.
 
 What you can count on today:
 
@@ -20,7 +20,7 @@ What you can count on today:
 - **Interrupted work continues** — resume from the official session, without paying twice for files already reviewed.
 - **Your key stays yours** — written through `ocr config set`; this app keeps no copy of it.
 
-Everything that has actually been verified — end to end, against the real CLI, inside a real Electron process — is listed under [Verified behaviour](#verified-behaviour). That list is long on purpose: it is a record, not a roadmap.
+Everything that has actually been verified — end to end, against the real CLI, inside a real Electron process — is listed under [Verified behaviour](#verified-behaviour); which platform that record covers, and which it does not, is under [Known limitations](#known-limitations). The first list is long on purpose: it is a record, not a roadmap.
 
 ## Why a GUI
 

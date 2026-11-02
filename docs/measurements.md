@@ -10,6 +10,7 @@ README 的 Status 段只写**能力**（能渲染 1200 条、有耗时上限断�
 | 2026-10 | 真实全量扫描，活服务商，1 个文件 | 4 条意见、103K token、3m36s | 结果页按该载荷渲染 |
 | 2026-10-13 | 真实全量扫描，12 个文件 | 8 条意见、173K token、1m41s；产出分节 `project_summary` | 要点带按该文本渲染，按上限截断并渐隐 |
 | 2026-10 | 真实单文件审查（`audit:service` 回放的 stderr 就是这一次） | 3m48s、6 条意见、10 次工具调用 | `tools/service-smoke.mjs` 的夹具里留着那份 stderr |
+| 2026-11-03 | 第 104 轮复跑：把 `audit:guards` 的重试判定抽成纯函数之后的门禁 | `audit:static` 23 项全绿；`audit:guards` 在真 Electron 里 24 条全绿，末行仍写「sandbox relaxed」——即第一次严格运行确实没写出报告、`--no-sandbox` 那条重试被真的走到，不只是被夹具模拟过 | `npm run audit:static`；`xvfb-run -a npm run audit:guards`（`PW_CHANNEL=bundled`，Electron 33.4.11，`ocr v1.13.4` 二进制） |
 | 2026-11-03 | 跨平台验证面：第 103 轮升 pin 到 `ocr v1.13.4` 时在 Linux x64 上真跑一遍 | `audit:guards` 24 条、`audit:exit` 5 条、`audit:e2e` 18 条（真 Electron + 真 CLI）、`audit:ui` 112 条、`audit:contrast` 978 处文本 0 处低于 AA、`audit:ui-scaled` 1.25 与 1.5 各 11 条，全绿；二进制自报 `v1.13.4 (76ab46a) linux/amd64` | `xvfb-run -a npm run audit:guards`（`PW_CHANNEL=bundled`），Electron 33.4.11 |
 
 上面那一行是**验证面**，不是又一个数字，所以它把「怎么跑出来的」也写清楚：这台机器没有 Edge，

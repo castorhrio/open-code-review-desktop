@@ -35,7 +35,7 @@ tag v1.13.4
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`76ab46ac20f08a8bd8ac38881a8a826c7cb6495f`（第 103 轮：`git ls-remote` 的 TLS 被断开、GitHub API 答上：`refs/heads/main` 仍是 `76ab46a`，与第 101–102 轮同一个 commit；但 `/tags` 里出现了 `v1.13.4`，release 发布于 2026-11-02T15:19:48Z，npm `latest` 同为 `1.13.4`——**tag 前进，pin 跟着前进**；通路：api）**
+**本轮 HEAD 核对：`76ab46ac20f08a8bd8ac38881a8a826c7cb6495f`（第 104 轮：`git ls-remote` 退出码 0，`refs/heads/main` 仍是 `76ab46a`，与第 101–103 轮同一个 commit；`git ls-remote --tags` 最高仍是 `v1.13.4`，其指向的就是同一个 commit，`/releases/latest` 与 npm `latest` 同为 `1.13.4`——**HEAD、tag、发布三条通路一致，pin 不前进**；通路：git）**
 
 ### 核对通路账
 
@@ -111,6 +111,7 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 | 101 | 2026-11-02 | git | **上游 HEAD 前进**：`216dcf5` → `76ab46a`（4 个 commit：Go / Node 版本与安全修复、GitHub Action 稳定性、`session show --json` 空表改 `[]`、`file_read_diff` 找不到路径时点名缺哪条）；`git ls-remote --tags` 返回空行（tag 通路本轮没答上来）、npm `1.13.3` 未变，**pin 不前进**；对照表 5 行的上游文件（`resolver.go`、`config_cmd.go`、`llm_cmd.go` / `providers.go`、`failure_class`）一个都没被这四个 commit 碰到，无移植项；新增 `tools/cjk-typography.mjs` + smoke（三条中文排版禁则、三格反向控制、改一个全角句号即点名文件与行号）挂进 `audit:static`，`engines.node` 抬到 `>=22.18` 与类型剥离的真实需求对齐 | — |
 | 102 | 2026-11-02 | git | `76ab46a` / `v1.13.3`，无新内容；npm `1.13.3`；两份 README 首屏从能力清单改成产品主意（一句话 + 3–5 条 + 长清单下沉到「已验证行为」/「Verified behaviour」），首屏形状进断言（`firstScreenViolations`：一句话、无 `--参数`、不说「封装」、3–5 条、链接到仍存≥8 条的那一节，逐条反向控制）；`package.json` 的 `description` 同样改口径 | — |
 | 103 | 2026-11-03 | api | **上游 tag 前进**：`v1.13.3` → `v1.13.4`（发布 2026-11-02T15:19:48Z，tag commit 就是第 101 轮已经读过的 `76ab46a`；4 个 commit 与安全修复 / Action 稳定性 / `session show --json` 空表改 `[]` / `file_read_diff` 未命中时点名缺的路径同批）；`git ls-remote` 因 TLS 失败（GnuTLS `-110`），HEAD 与 tag 都由 API 答上、npm `latest` 同为 `1.13.4`，**pin 前进**；对照表 5 行在这一次提交里逐行重读（51 个变更文件不含 `resolver.go`、`config_cmd.go`、`llm_cmd.go` / `providers.go`、`failure_class`，两处 Go 源码改动与本仓的两个消费点对上了）；通路账第 101/102 行之间那个把表截成两段的空行删掉，新增 `ledgerTableViolations` 钉住「表内不许有空行」并补反向控制（含一条证明别的账都看不见它）；升 pin 的那一遍真机验证跑在 Linux x64 上（CLI 层 / 真 Electron / UI 三套全绿，`audit:guards` 先红——它没把「没有报告」当环境问题，重试条件与 `e2e-flow` 对齐后转绿），顺带查出英文 README 在让读者下载 12 个 Release 里从未存在过的 macOS / Linux 包，两份 README 与 `使用说明.md` 的发布面、验证面措辞已对齐 | — |
+| 104 | 2026-11-03 | git | `76ab46a` / `v1.13.4` / npm `1.13.4`，三条通路答案一致、无新内容，**pin 不前进、无移植项**；两份 README 首屏第二段去 AI 味道（平台验证矩阵下沉到 Known limitations / 已知限制，那一节本就记着全部事实），`firstScreenViolations` 加第 5 条——第一节里出现架构名、包格式名或「按平台一条」的 bullet 即红，四条反向控制：粘回英文原矩阵、粘回中文原矩阵、把一个能力 bullet 换成平台 bullet（条数仍是 5，红的只能是新那条）、同一段矩阵写进「已知限制」必须仍绿（钉住这条管的是位置不是事实）；本文件人读区 192 → 137 行（逐轮正文归档 −27、散文减重 −28：规则与其边界留下，「这一条是怎么一格一格补上的」交回归档第 82、83、88、89 轮），顺带把「本节表格的 4 行」改成 5 行——对照表一直是 5 行；`tools/electron-guards.mjs` 的沙箱重试判定抽成导出的 `guardsRetryReason` / `guardsFailure`，新增 `tools/electron-guards-smoke.mjs` 作为 `audit:guards-retry` 挂进 `audit:static`（两次都没有报告就是崩溃，退 2 且结论不许再写「环境问题」） | — |
 
 ### 对照表（上游前进时要重读的五处）
 
@@ -186,12 +187,10 @@ tool 结果文本**（`Error: diff not found for: …`、`Diffs exist for: …`�
 
 ### 给 audit:upstream 看的约束
 
-这一节不再复述具体形状。机器可读区的标记与锚点、pin 恰好三处、通路账的通路与欠账对应、
-以及「别把锚点字面量抄进人读区」（照抄就是第二份锚点），权威定义都在
-`tools/upstream-watch.mjs` 的常量与 `machineReadableBlockViolations` /
-`docAuthoringRuleViolations` 等判定函数里。改文档时直接跑 `npm run audit:upstream`；
-红了会点名行号，再去那份代码里看这一条问的是什么。把规则抄一份到这里，只会多出一份
-没人核对、却先过期的拷贝。
+这一节不复述具体形状：机器可读区的标记与锚点、pin 恰好三处、通路账的通路与欠账配套、
+「别把锚点字面量抄进人读区」，权威定义都在 `tools/upstream-watch.mjs` 的常量与判定函数里。
+改文档就跑 `npm run audit:upstream`，红了它点名行号，再去那份代码里看这一条问的是什么——
+把规则再抄一份到这里，只会多一份没人核对、却先过期的拷贝。
 
 ## 关系
 - Desktop：https://github.com/castorhrio/open-code-review-desktop （服务器 `/opt/open-code-review-desktop`）
@@ -206,60 +205,32 @@ tool 结果文本**（`Error: diff not found for: …`、`Diffs exist for: …`�
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。搬完这里只留一句
    指针——「本文件只留当前一轮」不是约定而是断言（`previousRoundPointerViolations`）。
 
-## 当前状态（第 103 轮，2026-11-03）
-第 103 轮复核：**上游的发布版本前进了**——`v1.13.3` → `v1.13.4`（发布于 2026-11-02T15:19:48Z）。
-`git ls-remote` 的 TLS 被断开，HEAD 与 tag 都由 GitHub API 答上，npm `latest` 同为 `1.13.4`；
-新 tag 指的正是第 101 轮已经逐文件读过的 `76ab46a`，所以本轮要评估的不是新改动，而是**同一批
-改动第一次成为被封装的那个发布版本**。对照表 5 行在这一次提交里逐行重读完毕（每行的结论与
-依据写在最后一列），**pin 前进**：`PINNED_UPSTREAM`、pin 块、固定行、正文里的第三处声明、
-`package.json` 的 `^1.13.4`，以及 `npm install` 落下来的二进制——它自报
-`open-code-review v1.13.4 (76ab46a) linux/amd64`，与 pin 同一个 commit。
+## 当前状态（第 104 轮，2026-11-03）
+第 104 轮复核：**上游没有新内容。**`git ls-remote` 退出码 0，`refs/heads/main` 仍是 `76ab46a`
+（与第 101–103 轮同一个 commit）；`git ls-remote --tags` 最高仍是 `v1.13.4`，`/releases/latest`
+与 npm `latest` 同为 `1.13.4`。三条通路的答案一致，**pin 不前进、无移植项**，对照表 5 行因此
+不动；「最近一次对照停在上一轮」是什么意思，写在上面那张表的表头说明里——那不是欠账。
 
-- **两处 Go 源码改动都追到了本仓的消费点，「不在对照表里」不等于「与本仓无关」。**
-  `session show --json` 把空表从 `null` 改成 `[]`——本仓不调 `session show`，只用 `session list`；
-  `file_read_diff` 的未命中提示改成点名缺哪条路径（`Error: diff not found for: …`、
-  `Diffs exist for: …`）——那是回给模型的 tool 结果文本，而本仓按行首 `error:` 分类的两处
-  （`ocr-service.js` 的 `errorLines`、流式 `emit` 的过滤）读的都是 CLI 自己的 stderr。
-  所以**无移植项**：四个上游 commit 没有一个改变封装层看得见的内容。
-- **通路账里那个把表截成两段的空行删掉了，并进了断言。** 第 102 轮的账里，第 101 与 102 行之间
-  夹着一个空行：`ledgerRowsIn` 按形状扫这一节，跨过空行照常数到 56 行，而 Markdown 在空行处
-  结束表格——读者看到的表停在第 101 轮，第 102 行渲染成正文里的竖线。新增
-  `ledgerTableViolations`（表内出现空行即红，点名行号与两边的轮次，并说明读者丢掉哪几行），
-  表前表后的空行不算红（那是 Markdown 的正常收尾）。反向控制里最要紧的一条不是「它会红」，
-  而是**别的账都看不见它**：同一份被插入空行的文档，轮次连续、通路/欠账配套、「当前状态」绑定
-  照旧全绿——所以这条断言顺便钉住了它的前提（解析器确实读得穿空行）。
-- **跨平台的那条缺口用一次真实运行补上了一半，并且它当场抓到一个 harness 缺陷。** 升 pin 需要
-  真跑一遍才算验证，而这一轮的开发机是 Linux x64：`npm install` 下来的 1.13.4 二进制自报
-  `v1.13.4 (76ab46a) linux/amd64`，随后 `audit:config` / `audit:service` / `audit:git` /
-  `audit:providers`（真 CLI）、`audit:guards`（24 条）/ `audit:exit`（5 条）/ `audit:e2e`
-  （18 条，真 Electron + 真 CLI）、`audit:ui`（112 条）/ `audit:contrast`（978 处文本，0 处低于
-  AA）/ `audit:ui-scaled`（1.25 与 1.5 各 11 条）全绿，数字与未覆盖面记在
-  [`measurements.md`](measurements.md)。第一条变红的就是 `audit:guards`：这台机器的
-  `chrome-sandbox` 不是 setuid root，Chromium 在写任何报告之前就死在 `setuid_sandbox_host.cc`，
-  而 guards 的重试条件只认「报告里有 `bundle loads` 失败」这一种形状，于是它退出码 2 报
-  「Electron crashed」——`tools/e2e-flow.mjs` 早就把「根本没有报告」当成环境问题重试了，两个
-  harness 对同一种失败的说法不一致，就是「同一台机器上一条绿一条红」的来源。重试条件对齐之后
-  guards 同样全绿。这条记录**不覆盖** Linux / macOS 的打包产物、真显示器与 GPU、以及安装版的
-  自动更新——README 的 Known limitations / 已知限制 现在按这三档写。
-- **同一趟核对撞出一个更硬的问题：英文 README 让读者去下载根本不存在的包。** 12 个 Release
-  逐一看过，资产只有 `*-setup.exe` / `*-portable.exe` / `latest.yml` / blockmap——**从来没发布过
-  一份 macOS 或 Linux 构建**，而 `README.md` 的「Option C — macOS」「Option D — Linux」却写着
-  「打开 `*-mac-<arch>.dmg`」「`chmod +x` 那个 AppImage」，首屏还有一句「Builds ship for Windows,
-  macOS and Linux」。中文版是对的（只有 A 安装版 / B 绿色版 / C 源码）。现在两份都对齐成同一句话：
-  **发布面 = Windows，验证面 = Windows 端到端 + Linux 源码路径，macOS 从未构建也从未运行**；改动的
-  位置是 `README.md`（首屏那段、Install 里合成一段的 C/D、Status、Known limitations）、
-  `README.zh-CN.md`（首屏那段、版本状态、已知限制）与 `使用说明.md`（产物表的两行与「方式 C」的
-  一句前置说明）。这一条不是「加功能」，是把已经在 DoD 里的「非官方诚实」延伸到「发布面诚实」。
-- **把「每次升 pin 必红」的字面量换成真不变式。** smoke 里那条
-  `PINNED_UPSTREAM.tag === "v1.13.3"` 的标题写着「pin 仍指着对照表所依据的那个发布版本」，
-  但它从没打开过文档，而且 pin 每次合法前进都必须手改它——一个每次都要改的断言，最后一定被
-  改成绿的。现在它问的正是标题那句话：5 行的「最近一次对照」都必须引用当前 pin 的 tag，
-  反向控制把其中一行改回上一个 tag，要求红且点名那一行。
+本轮按控制仓简报做三个具名 pass，都不动产品行为：
 
-改动只在 `package.json` / `package-lock.json` 的 CLI 版本、`tools/upstream-watch.mjs` 与它的 smoke、
-`tools/electron-guards.mjs` 的沙箱重试条件、两份 README 的验证范围措辞、`docs/measurements.md`，
-以及本文件与归档；评审逻辑、CLI 参数、配置读写路径与运行期行为均未变。
-上一轮（第 102 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-102-轮2026-11-02)，归档之后本文件不留第二份。
+- **distill + clarify：两份 README 首屏第二段不再放平台验证矩阵。** 那一段讲的是「哪个平台验证到
+  哪一层」，是构建者的账；读者在第一屏要的是「我明天能不能用它」。现在只剩一句：`v0.1.13` 跑的
+  是 `ocr v1.13.4`，Windows 上从构建、安装到审查端到端跑通过，下面每条能力都是实跑出来的。矩阵
+  本体在 Known limitations / 已知限制 那一节，一条没少（第 103 轮刚把它写全）。形状进了
+  `firstScreenViolations` 的第 5 条：第一节里出现架构名、包格式名，或「按平台一条」的 bullet，就红。
+- **distill：本文件人读区从 192 行减到 137 行。** 其中 27 行是上一轮正文照例归档，28 行是真的减重：
+  「给 audit 看的约束」不再复述形状，「pin 存全 40 位」与「能自动变红的地方，和不能的地方」只留
+  规则与其真实边界，逐轮是怎么补上的那些叙述交回 [`upstream-history.md`](upstream-history.md)
+  对应的轮次——那儿是它们该在的地方，本文件也就少了一份会过期的拷贝。
+- **harden：`audit:guards` 的沙箱重试判定抽成纯函数。** 「没写出报告」在第一次严格运行里还算
+  环境问题，在 `--no-sandbox` 的重试之后就不算了。`tools/electron-guards.mjs` 现在导出
+  `guardsRetryReason` / `guardsFailure`，新增的 `tools/electron-guards-smoke.mjs` 用夹具钉住
+  「真崩溃不会被重试洗成绿」，并要求最后那句结论点名是崩溃、不许再写「环境问题」。
+
+改动只在两份 README、`tools/upstream-watch.mjs` 与它的 smoke、`tools/electron-guards.mjs`、新增的
+`tools/electron-guards-smoke.mjs`、`package.json` 的脚本表，以及本文件与归档；评审逻辑、CLI 参数、
+配置读写路径与运行期行为均未变。
+上一轮（第 103 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-103-轮2026-11-03)，归档之后本文件不留第二份。
 
 ## 上游真变了怎么办（命令驱动，而不是「记得看一眼」）
 ```bash
@@ -275,12 +246,8 @@ pin 前进时，对照表 5 行要在同一个提交里一次性重读完毕；�
 ### `upstream:check` 与三处 pin 声明（第三处声明就在这里）
 
 另有 `npm run upstream:check`：先比对 `refs/heads/main` 与本文件固定的整串 40 位 SHA `76ab46ac20f08a8bd8ac38881a8a826c7cb6495f`（正文里引用只写 `76ab46a` 前缀是为了好读；这一处与上面的块、下面的固定行同值，`audit:upstream` 三处一起核对）。
-相等打印一行并注明 `通路：git`；git 不通时自动改走 `api.github.com/commits/main`，
-成功则注明 `通路：api`（两条路问的是同一个 commit）。前进打印醒目提示并逐行列出上表 5 处对照点
-（**不失败**，仍要人读源码）；两条路都失败才明确打印「跳过」，前缀固定为
-`[UPSTREAM-DEBT]`、并写明两条路各自的原因，退出码恒为 0，因此可以挂在任何流程里而不会
-把网络问题当成上游变更。**grep `[UPSTREAM-DEBT]` 就是这张欠账表**；每轮的 `通路` 也应
-写进上面「核对通路账」。
+相等打印一行并注明 `通路：git`；git 不通时自动改走 `api.github.com/commits/main`，成功注明 `通路：api`——两条路问的是同一个 commit。前进时打印醒目提示并逐行列出上面那 5 处对照点，
+**但不失败**，仍要人读源码；两条路都失败才打印「跳过」，前缀固定为 `[UPSTREAM-DEBT]`、写明两条路各自的原因，退出码恒为 0，所以它能挂在任何流程里而不把网络问题当成上游变更。
 
 三种答案对应三种 grep，不必读句子：
 
@@ -290,21 +257,11 @@ pin 前进时，对照表 5 行要在同一个提交里一次性重读完毕；�
 | `[UPSTREAM-MOVED]` | 核对了，HEAD **前进了** | 重读它逐行打印的 5 处对照点，改 pin 与本文件 |
 | 两者都没有 | 核对了，**没变** | 无需动作 |
 
-「没变」刻意不带 marker：安静应该表示「没事要做」，任何 marker 都比安静更响。上面这张
-表由 `tools/upstream-watch-smoke.mjs` 的 marker 断言钉住（该带的带、不该带的不带）。
+「没变」刻意不带 marker：安静应该表示「没事要做」，任何 marker 都比安静更响；这张表由 `tools/upstream-watch-smoke.mjs` 的 marker 断言钉住（该带的带、不该带的不带）。
 
-`upstream:check` 依赖 `fetch` 与 `AbortSignal.timeout`，二者都在 Node 18 起稳定（哨兵跑在
-Node，不在 Electron 里）。但 `package.json` 的 `engines` 现在写 `>=22.18`：`tools/notices-smoke.mjs`
-与 `tools/ui-audit/fixtures.mjs` 直接 import `src/lib/notices.ts`，靠的是 Node 22.18 起不带 flag
-的类型剥离，`>=18` 曾比真实需求低了一个大版本（第 101 轮抬高）。
+哨兵跑在 Node 里，`engines.node` 因此写 `>=22.18`——它曾写 `>=18`，比真实需求低了一个大版本，抬上来的理由记在第 101 轮。
 
-**pin 存全 40 位是有意的**：pin 若只存 7 位前缀，`375f64c…` 换成另一个同样以
-`375f64c` 开头的 commit 会被判成「与对照表一致，无需重读」——那是这条句子唯一不能错的
-方向（下面 5 行会一直没人重读，而句子是绿的）。所以「相等」的语义就是整串 40 位相等；
-pin 或 ls-remote 给出的 SHA 短于 40 位时一律判「跳过」并说明原因，不做前缀匹配。
-`tools/upstream-watch-smoke.mjs` 用 pin 的前 7 位 + 写死的 33 位尾串（`0123456789abcde…`，
-不含 `f`）喂进去，要求判 `moved`；并前置断言这条夹具 ≠ pin——否则改 pin 时它会退化成
-「拿 pin 和 pin 比」，那条检查会继续绿着而什么都没测。
+**pin 存全 40 位是有意的**：只存 7 位前缀时，把 pin 换成另一个同样以该前缀开头的 commit 会被判成「与对照表一致，无需重读」，而那是这句话唯一不能错的方向——下面那 5 行会一直没人重读，句子却还是绿的。所以「相等」的语义就是整串 40 位相等；pin 或 `ls-remote` 给出的 SHA 短于 40 位时一律判「跳过」并说明原因，不做前缀匹配。
 
 ### 能自动变红的地方，和不能的地方
 
@@ -314,35 +271,23 @@ pin 或 ls-remote 给出的 SHA 短于 40 位时一律判「跳过」并说明�
 `entryByName` 指出同一条——所以上游改了「按哪个拼写找条目」，这条会先红。它红的时候先读
 上游 HEAD 的 `resolver.go`，改的是 `MATCH_RULES` 和这段模拟，不是把断言放宽。
 
-**`git-service.js` 的 `readFileAtRef` 按 stderr 措辞分类，代价在这里写清楚。** 它用两组
-正则把 `git show` 的失败分成 `bad-ref`（引用不存在）与 `missing`（文件不在那个快照里），
-两者都对用户说不同的话。这两组正则匹配的是 git 的英文措辞，所以模块固定了
-`LC_ALL=C` / `LANG=C`（本地化 git 说的 `致命错误：无效的对象名称` 会落进通用分支）。断言
-分两层，而且两层问的不是同一个问题：`tools/git-service-smoke.mjs` 的九条夹具是**手写
-字符串**，它们证明「表同意自己」；第 83 轮起同一份 smoke 还会拿**真 git**打印的这两句
-stderr（`missing` / `bad-ref` 各一句）过同一个分类器，要求每句只被一个带 pattern 的行认
-出来、且与对应 `sample` 落在同一行。所以现在的边界是：**今天这套 git 的这两句话被钉住
-了**——git 换了这两句措辞，`audit:git` 会红（这不是「本仓修不了」的红：改的是本仓的
-pattern）。仍然没人钉的是**别的失败**：子模块、git 为其它情形保留的拼写、以及 git 从不
-在这三处发出的措辞，都只能靠人读。代价的补偿照旧是通用分支必须可诊断——它带上 git 自己
-的首行 stderr 与退出码，退出码是这条路上唯一不随语言变的部分。第 88 轮起，兜底分支还把
-**未 trim 的原始 stderr** 放在返回对象的 `rawStderr` 上（只在该分支，不拼进用户可见的
-`error`），`tools/git-service-smoke.mjs` 用一条表外措辞（`fatal: something new`）断言它
-非空、用一条已识别措辞断言它不出现。第 89 轮补上了另一半：`error` 必须含同一份 stderr 的
-**首行**（多行夹具同时要求不含第二行，第二行只在 `rawStderr` 里），并用一条**真 git** 的
-非仓库失败走同一条 `readFileAtRef`，要求 `rawStderr` 非空、`error` 含其首行——所以「兜底
-只能被 stub 构造」不再成立。这条通道让退化**可被看见**，但没有把表 miss 变红：表外的措辞
-仍然按 `failed` 回答，只是 `rawStderr` 不再是空的。评审时若想动这两组正则，
-请同时想清楚这两层各自覆盖什么，以及本节记录的那半个缺口。对应代码见 `git-service.js` 顶部 `gitEnv()`
-注释（那里写了为什么固定 C locale、以及为什么代价的补偿是通用分支必须带退出码与 `rawStderr`）。
+**`git-service.js` 的 `readFileAtRef` 按 stderr 措辞分类，代价在这里写清楚。** 它用两组正则把 `git show`
+的失败分成 `bad-ref`（引用不存在）与 `missing`（文件不在那个快照里），两者对用户说的是不同的话；正则匹配
+的是 git 的英文措辞，所以模块固定 `LC_ALL=C` / `LANG=C`（本地化 git 的「致命错误：无效的对象名称」会
+落进通用分支）。今天的边界是：**这两句话被钉住了**——git 换了措辞 `audit:git` 会红，要改的是本仓的
+pattern；**没人钉的是别的失败**（子模块、git 为其它情形保留的拼写、git 从不在这两处发出的措辞），只能靠
+人读。补偿是通用分支必须可诊断：`error` 带 git 的首行与退出码——退出码是这条路上唯一不随语言变的部分——
+未 trim 的原文放在 `rawStderr`（只在兜底分支，不拼进用户可见的 `error`）。这两层各自覆盖什么、是一格
+一格怎么补上来的，记在归档第 82、83、88、89 轮；想动这两组正则，先连 `git-service.js` 顶部 `gitEnv()`
+的注释一起读。
 
 **但 audit 变红不等于覆盖完整**：下面这几处只有人工对照，改坏了不会让任何 audit 变红。
 
-**`upstream:check`（哨兵）的退出码恒为 0，只报告不失败——它的绿不是安全网；`audit:upstream` 跑的是本套断言（pin 三处声明、对照表双射、通路账），是会 `exit 1` 的那一半——恒绿不是安全网，所以红色的那一半必须真的红。** 上游漂移的唯一安全网
-是 `audit:service` / `audit:config` / `audit:git` 这三条，加上人工重读本节表格的 4 行；
-哨兵打印「跳过」（git 与 API 都不可达）时同样是绿的，**绿只说明这条命令跑过，不说明上游
-没变**，所以每轮的结论仍要写进上面「当前状态」——跳过时至少留下 `[UPSTREAM-DEBT]` 与
-「核对通路账」里的一行欠账。
+**`upstream:check`（哨兵）的退出码恒为 0，只报告不失败——它的绿不是安全网；`audit:upstream` 跑的是本套断言（pin 三处声明、对照表双射、通路账），是会 `exit 1` 的那一半——恒绿不是安全网，红的这一半必须真的红。**
+上游漂移的唯一安全网是 `audit:service` / `audit:config` / `audit:git` 这三条，加上人工重读本节
+表格的 5 行；哨兵打印「跳过」（git 与 API 都不可达）时同样是绿的——**绿只说明这条命令跑过，
+不说明上游没变**。所以每轮的结论仍要写进上面「当前状态」，跳过时至少留下 `[UPSTREAM-DEBT]`
+与「核对通路账」里的一行欠账。
 
 ## 建议命令（agent 在 `/opt/open-code-review-desktop`）
 ```bash
@@ -354,3 +299,4 @@ gh release list -R alibaba/open-code-review --limit 5
 ```
 
 也可对照本地若存在的 `/opt` 外 checkout；以 GitHub 上游为准。
+
