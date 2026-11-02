@@ -1152,7 +1152,7 @@ const expectNoDeadBand = async (page) => {  const m = await page.evaluate(() => 
   return out;
 };
 
-const browser = await chromium.launch({ channel: CHANNEL });
+const browser = await chromium.launch({ channel: CHANNEL || undefined });
 const page = await browser.newPage({ deviceScaleFactor: SCALE });
 await page.addInitScript(BRIDGE);
 page.on("console", (m) => {

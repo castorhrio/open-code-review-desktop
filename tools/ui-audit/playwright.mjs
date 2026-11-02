@@ -63,12 +63,19 @@ export async function loadPlaywright() {
 
 // Which browser binary to drive. The system channel avoids a ~150MB Chromium
 // download; override with PW_CHANNEL if the machine has a different one.
-export const CHANNEL = process.env.PW_CHANNEL || "msedge";
+// `PW_CHANNEL=bundled` means Playwright's own download — the only option on a
+// Linux box with no Edge/Chrome installed, and the reason a harness that only
+// ever ran on Windows could not be run at all elsewhere. An explicit `bundled`
+// is not the same as "unset": unset keeps the system browser, so the default
+// suite stays on the browser the app's users actually have.
+export const CHANNEL = process.env.PW_CHANNEL === "bundled" ? "" : process.env.PW_CHANNEL || "msedge";
 
 export function describeChannel() {
   return CHANNEL === "msedge" || CHANNEL === "chrome"
     ? `system ${CHANNEL}`
-    : `bundled/${CHANNEL}`;
+    : CHANNEL
+      ? `bundled/${CHANNEL}`
+      : "bundled chromium";
 }
 
 // Newest mtime under a file or a directory, so a build can be compared with the
