@@ -91,12 +91,30 @@ check("preload exposes at least one method", real.length > 0, `${real.length} me
 // ---------------------------------------------------------------------------
 const apiTs = fs.readFileSync(path.join(root, "src/lib/api.ts"), "utf8");
 const preloadSrc = fs.readFileSync(preloadPath, "utf8");
-const bridgeBody = apiTs.match(/export interface Bridge \{([\s\S]*?)\n\}/);
+
+// Reading the interface is a function of its text. Not only so the self-tests at
+// the bottom of this file can hand in a renamed copy, but so that "the parser
+// read this" and "the checks compared this" are the same reading: two copies of
+// a regular expression is how the parse and the comparison start disagreeing.
+const interfaceIn = (source) => {
+  const body = source.match(/export interface Bridge \{([\s\S]*?)\n\}/);
+  const bodyText = body ? body[1] : "";
+  return {
+    body,
+    declared: body
+      ? [...bodyText.matchAll(/^ {2}([A-Za-z_$][\w$]*)\s*[(<]/gm)].map((m) => m[1]).sort()
+      : [],
+    methodShaped: body
+      ? [...bodyText.matchAll(/^[ \t]+(?:readonly[ \t]+)?([A-Za-z_$][\w$]*)[ \t]*[(<]/gm)].map((m) => m[1])
+      : [],
+  };
+};
+
+const bridge = interfaceIn(apiTs);
+const bridgeBody = bridge.body;
 check("the Bridge interface is where this check expects it", Boolean(bridgeBody), bridgeBody ? "" : "could not find `export interface Bridge {` in src/lib/api.ts");
 
-const declared = bridgeBody
-  ? [...bridgeBody[1].matchAll(/^ {2}([A-Za-z_$][\w$]*)\s*[(<]/gm)].map((m) => m[1]).sort()
-  : [];
+const { declared, methodShaped } = bridge;
 
 // ---------------------------------------------------------------------------
 // The parser above is a claim, so it is checked like one.
@@ -121,10 +139,6 @@ const declared = bridgeBody
 //      `readonly`, so the two counts differing means the strict pattern missed a
 //      line that is visibly a method declaration. That is the drift this parser
 //      cannot see, made to fail out loud.
-const methodShaped = bridgeBody
-  ? [...bridgeBody[1].matchAll(/^[ \t]+(?:readonly[ \t]+)?([A-Za-z_$][\w$]*)[ \t]*[(<]/gm)].map((m) => m[1])
-  : [];
-
 check(
   "the Bridge interface declares at least one method",
   declared.length > 0,
@@ -144,14 +158,24 @@ check(
 // Both directions. A missing method is a runtime crash; an extra one is drift
 // that will become a crash the moment someone trusts it.
 // ---------------------------------------------------------------------------
-const missing = declared.filter((m) => !real.includes(m));
+// The two directions are one predicate, because a rename in the interface is both
+// answers at once (`info` becomes "exposed but not declared" *and* "declared but
+// not exposed"), and reporting them from one place keeps the pair from drifting
+// apart. It is also what the self-tests at the bottom feed a renamed copy of
+// `src/lib/api.ts` into, so "a renamed method goes red" is a fact about this code
+// rather than a hope about it.
+const bridgeNameViolations = ({ declared: wanted, exposed: have }) => ({
+  missing: wanted.filter((method) => !have.includes(method)),
+  undeclared: have.filter((method) => !wanted.includes(method)),
+});
+
+const { missing, undeclared } = bridgeNameViolations({ declared, exposed: real });
 check(
   "every method the renderer declares exists on the preload object",
   missing.length === 0,
   missing.length ? `declared but not exposed: ${missing.join(", ")} — calling one throws "is not a function"` : ""
 );
 
-const undeclared = real.filter((m) => !declared.includes(m));
 check(
   "every method the preload exposes is declared in the interface",
   undeclared.length === 0,
@@ -509,15 +533,47 @@ check(
 // resolves rather than an error anyone sees. Read the names out of the source:
 // the exposed methods are lazy closures, so nothing is invoked during load and
 // watching the stub would report an empty set (which it did, the first time).
-const invokeChannels = new Set([...preloadSrc.matchAll(/ipcRenderer\.invoke\(\s*"([^"]+)"/g)].map((m) => m[1]));
-const listenChannels = new Set([...preloadSrc.matchAll(/ipcRenderer\.on\(\s*"([^"]+)"/g)].map((m) => m[1]));
+//
+// The reading is a function of the two sources, not of today's files, for the
+// same reason the interface parse is: the self-tests at the bottom of this file
+// hand in a copy with one channel renamed and ask the very same predicate. A
+// regex copy written inside a test would prove the test's copy works, not this
+// one.
+const channelsIn = (preloadSource, mainSource) => {
+  const invokeChannels = new Set(
+    [...preloadSource.matchAll(/ipcRenderer\.invoke\(\s*"([^"]+)"/g)].map((match) => match[1])
+  );
+  const listenChannels = new Set(
+    [...preloadSource.matchAll(/ipcRenderer\.on\(\s*"([^"]+)"/g)].map((match) => match[1])
+  );
+  const handled = new Set([...mainSource.matchAll(/ipcMain\.handle\(\s*"([^"]+)"/g)].map((match) => match[1]));
+  // `send(` also matches `webContents.send(`, so both spellings are covered.
+  // A channel may also be sent *through a constant* — the exit channel is named
+  // in `run-diagnostics.js` and sent as `send(RUN_EXIT_CHANNEL, payload)`, so the
+  // main process does not spell it at all. Those bindings are resolved here: a
+  // channel that moved into a constant must not look like a channel nobody sends
+  // (which is what happened the first time this arrangement was introduced).
+  const channelConstants = new Map(
+    [...mainSource.matchAll(/\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*"([^"]+)"/g)].map((match) => [match[1], match[2]])
+  );
+  const sent = new Set([
+    ...[...mainSource.matchAll(/\bsend\(\s*"([^"]+)"/g)].map((match) => match[1]),
+    ...[...mainSource.matchAll(/\bsend\(\s*([A-Za-z_$][\w$]*)\b/g)]
+      .map((match) => channelConstants.get(match[1]))
+      .filter(Boolean),
+  ]);
+  return { invokeChannels, listenChannels, handled, sent, channelConstants };
+};
 
-check("preload invokes at least one channel", invokeChannels.size > 0, `${invokeChannels.size} channels`);
-check("preload listens on at least one channel", listenChannels.size > 0, `${listenChannels.size} channels`);
-
-// Hyphens are part of the verb (`menu:open-repo`), so the verb allows them.
-const badChannels = [...invokeChannels, ...listenChannels].filter((c) => !/^[a-z][a-z0-9]*:[A-Za-z][A-Za-z0-9-]*$/.test(c));
-check("every IPC channel is namespaced `domain:verb`", badChannels.length === 0, badChannels.join(", "));
+// The four ways the two sides can disagree about a channel, each answer naming
+// the channels themselves — "the wiring is wrong" sends the reader to 37
+// registrations across nine files.
+const channelWiringViolations = ({ invokeChannels, listenChannels, handled, sent }) => ({
+  unhandled: [...invokeChannels].filter((channel) => !handled.has(channel)).sort(),
+  orphans: [...handled].filter((channel) => !invokeChannels.has(channel)).sort(),
+  neverSent: [...listenChannels].filter((channel) => !sent.has(channel)).sort(),
+  sentToNobody: [...sent].filter((channel) => !listenChannels.has(channel)).sort(),
+});
 
 // The handler and sender sides are spread across the main-process modules, so
 // read all of them: `ipcMain.handle("update:*")` lives in update-service.js, and
@@ -528,45 +584,39 @@ check("every IPC channel is namespaced `domain:verb`", badChannels.length === 0,
 const mainModules = fs.readdirSync(root).filter((f) => f.endsWith(".js") && f !== "preload.js");
 const mainSrc = mainModules.map((f) => fs.readFileSync(path.join(root, f), "utf8")).join("\n");
 
-const handled = new Set([...mainSrc.matchAll(/ipcMain\.handle\(\s*"([^"]+)"/g)].map((m) => m[1]));
-// `send(` also matches `webContents.send(`, so both spellings are covered.
-// A channel may also be sent *through a constant* — the exit channel is named
-// in `run-diagnostics.js` and sent as `send(RUN_EXIT_CHANNEL, payload)`, so the
-// main process does not spell it at all. Those bindings are resolved here: a
-// channel that moved into a constant must not look like a channel nobody sends
-// (which is what happened the first time this arrangement was introduced).
-const channelConstants = new Map(
-  [...mainSrc.matchAll(/\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*"([^"]+)"/g)].map((m) => [m[1], m[2]])
-);
-const sent = new Set([
-  ...[...mainSrc.matchAll(/\bsend\(\s*"([^"]+)"/g)].map((m) => m[1]),
-  ...[...mainSrc.matchAll(/\bsend\(\s*([A-Za-z_$][\w$]*)\b/g)]
-    .map((m) => channelConstants.get(m[1]))
-    .filter(Boolean),
-]);
+const { invokeChannels, listenChannels, handled, sent, channelConstants } = channelsIn(preloadSrc, mainSrc);
 
-const unhandled = [...invokeChannels].filter((c) => !handled.has(c)).sort();
+check("preload invokes at least one channel", invokeChannels.size > 0, `${invokeChannels.size} channels`);
+check("preload listens on at least one channel", listenChannels.size > 0, `${listenChannels.size} channels`);
+
+// Hyphens are part of the verb (`menu:open-repo`), so the verb allows them.
+const badChannels = [...invokeChannels, ...listenChannels].filter((c) => !/^[a-z][a-z0-9]*:[A-Za-z][A-Za-z0-9-]*$/.test(c));
+check("every IPC channel is namespaced `domain:verb`", badChannels.length === 0, badChannels.join(", "));
+
+const { unhandled, orphans, neverSent, sentToNobody } = channelWiringViolations({
+  invokeChannels,
+  listenChannels,
+  handled,
+  sent,
+});
 check(
   "every channel preload invokes has an ipcMain handler",
   unhandled.length === 0,
   unhandled.length ? `no handler for: ${unhandled.join(", ")} — the promise never settles` : ""
 );
 
-const orphans = [...handled].filter((c) => !invokeChannels.has(c)).sort();
 check(
   "every ipcMain handler has a caller in preload",
   orphans.length === 0,
   orphans.length ? `handler with no preload caller: ${orphans.join(", ")}` : ""
 );
 
-const neverSent = [...listenChannels].filter((c) => !sent.has(c)).sort();
 check(
   "every channel preload listens on is sent by main",
   neverSent.length === 0,
   neverSent.length ? `nothing sends: ${neverSent.join(", ")} — the listener is dead` : ""
 );
 
-const sentToNobody = [...sent].filter((c) => !listenChannels.has(c)).sort();
 check(
   "every channel main sends has a listener in preload",
   sentToNobody.length === 0,
@@ -654,6 +704,162 @@ check(
     .filter(Boolean)
     .join(" | ")
 );
+
+// ---------------------------------------------------------------------------
+// The predicates are functions, so they can be asked about copies.
+// ---------------------------------------------------------------------------
+// Everything above compares the real files, and a green comparison cannot say
+// one thing out loud: that it would have gone red. `missing.length === 0` is
+// equally true when the two sides agree and when the reader read nothing. The
+// count checks guard the parse; the checks below guard the *comparison*, each on
+// a copy differing from the real source in exactly one place — the discipline
+// `upstream-watch-smoke.mjs` applies to the sync doc. A rename on either side of
+// the bridge has to produce a red that names the renamed thing, because that
+// red is the only notice anyone gets when the renderer starts calling something
+// the main process no longer answers.
+{
+  const interfaceText = bridgeBody[0];
+  const empty = (values) => [...values].length === 0;
+
+  // (1) one method renamed on the interface's side.
+  const renamedMethod = declared[0];
+  const moved = interfaceIn(
+    apiTs.replace(
+      interfaceText,
+      interfaceText.replace(new RegExp(`(^|\\n) {2}${renamedMethod}\\b`), `$1  ${renamedMethod}Renamed`)
+    )
+  );
+  check(
+    "a copy of the interface with one method renamed is read as that rename",
+    moved.declared.includes(`${renamedMethod}Renamed`) && !moved.declared.includes(renamedMethod),
+    JSON.stringify({ read: moved.declared.length, real: declared.length })
+  );
+
+  const oneSided = bridgeNameViolations({ declared: moved.declared, exposed: real });
+  check(
+    "...and the comparison goes red on both sides of that one rename, each naming its own method",
+    oneSided.missing.length === 1 &&
+      oneSided.missing[0] === `${renamedMethod}Renamed` &&
+      oneSided.undeclared.length === 1 &&
+      oneSided.undeclared[0] === renamedMethod,
+    JSON.stringify(oneSided)
+  );
+
+  // (2) the mirror: the same rename on the exposed side. One predicate answers
+  // both directions, so this is the same code path reporting the flipped pair —
+  // not a second copy of the comparison written to look convincing.
+  const mirror = bridgeNameViolations({
+    declared,
+    exposed: real.map((name) => (name === renamedMethod ? `${renamedMethod}Renamed` : name)),
+  });
+  check(
+    "...and the same rename on the exposed side swaps which answer names what",
+    mirror.missing.length === 1 &&
+      mirror.missing[0] === renamedMethod &&
+      mirror.undeclared.length === 1 &&
+      mirror.undeclared[0] === `${renamedMethod}Renamed`,
+    JSON.stringify(mirror)
+  );
+
+  // (3) the parser-drift check has a red of its own. Reformat the body to four
+  // spaces: the strict pattern reads nothing, the loose one still sees every
+  // declaration. Waiting for a real reformat to discover that gap is how a suite
+  // ends up reporting full marks for an interface it no longer parses.
+  const drifted = interfaceIn(apiTs.replace(interfaceText, interfaceText.replace(/^ {2}/gm, "    ")));
+  check(
+    "a reformat the strict pattern cannot read is a count mismatch, not an empty interface",
+    drifted.declared.length === 0 && drifted.methodShaped.length === declared.length,
+    JSON.stringify({ strict: drifted.declared.length, loose: drifted.methodShaped.length })
+  );
+
+  // (4) a channel renamed on the renderer's side only: the invoke now reaches a
+  // handler nobody registered, and the handler it left behind has no caller.
+  // Both answers have to come out of one reading of the two sources.
+  const renamedChannel = [...invokeChannels].sort()[0];
+  const rendererRenamed = preloadSrc.replace(
+    new RegExp(`ipcRenderer\\.invoke\\(\\s*"${renamedChannel}"`),
+    'ipcRenderer.invoke("probe:renamed"'
+  );
+  const rewired = channelWiringViolations(channelsIn(rendererRenamed, mainSrc));
+  check(
+    "a channel renamed in preload is named as unhandled, and the handler it abandoned is named as an orphan",
+    rewired.unhandled.length === 1 &&
+      rewired.unhandled[0] === "probe:renamed" &&
+      rewired.orphans.length === 1 &&
+      rewired.orphans[0] === renamedChannel &&
+      empty(rewired.neverSent) &&
+      empty(rewired.sentToNobody),
+    JSON.stringify(rewired)
+  );
+
+  // (5) the arrangement the constant resolution exists for: a channel the main
+  // process never spells, only sends through a constant. Retarget that constant
+  // and the listener goes dead *and* the send goes somewhere nobody listens.
+  // Which channel has that shape is read from the sources rather than hardcoded,
+  // so this does not quietly stop testing anything if a literal sender for the
+  // same channel shows up tomorrow.
+  const constantBreaks = [...channelConstants]
+    .filter(([, value]) => listenChannels.has(value))
+    .map(([name, value]) => ({
+      name,
+      value,
+      broken: channelWiringViolations(
+        channelsIn(
+          preloadSrc,
+          mainSrc.replace(new RegExp(`\\bconst\\s+${name}\\s*=\\s*"${value}"`), `const ${name} = "probe:renamed"`)
+        )
+      ),
+    }))
+    .filter((entry) => entry.broken.neverSent.includes(entry.value));
+  check(
+    "...and retargeting a constant-only send is red on both ends: the listener is dead, the send has no listener",
+    constantBreaks.length > 0 &&
+      constantBreaks.every((entry) => entry.broken.sentToNobody.includes("probe:renamed")),
+    JSON.stringify(constantBreaks.map((entry) => `${entry.name} -> ${entry.value}`))
+  );
+
+  // (6) the four answers are independent. A pair that agrees produces none of
+  // them; a pair that crosses all four names each in its own answer. Without the
+  // second half, a predicate that only ever reported `orphans` would still let
+  // today's files pass.
+  const set = (values) => new Set(values);
+  const agreed = channelWiringViolations({
+    invokeChannels: set(["a:b"]),
+    listenChannels: set(["c:d"]),
+    handled: set(["a:b"]),
+    sent: set(["c:d"]),
+  });
+  const crossed = channelWiringViolations({
+    invokeChannels: set(["a:x"]),
+    listenChannels: set(["c:y"]),
+    handled: set(["a:z"]),
+    sent: set(["c:w"]),
+  });
+  check(
+    "agreeing sources produce no violation and crossed ones name all four answers separately",
+    empty(agreed.unhandled) &&
+      empty(agreed.orphans) &&
+      empty(agreed.neverSent) &&
+      empty(agreed.sentToNobody) &&
+      JSON.stringify(crossed) ===
+        JSON.stringify({ unhandled: ["a:x"], orphans: ["a:z"], neverSent: ["c:y"], sentToNobody: ["c:w"] }),
+    JSON.stringify({ agreed, crossed })
+  );
+
+  // (7) what an unread source looks like: four empty sets, and therefore four
+  // vacuous greens. That is why the two `at least one channel` checks above are
+  // floors rather than commentary.
+  const nothing = channelsIn("", "");
+  check(
+    "an unread source yields empty sets, which is exactly why the floors above are not commentary",
+    empty(nothing.invokeChannels) &&
+      empty(nothing.listenChannels) &&
+      empty(nothing.handled) &&
+      empty(nothing.sent) &&
+      empty(Object.values(channelWiringViolations(nothing)).flat()),
+    JSON.stringify(channelWiringViolations(nothing))
+  );
+}
 
 console.log(`\n${passed.length} ok, ${failed.length} failed`);
 if (failed.length) {

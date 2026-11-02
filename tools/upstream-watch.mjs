@@ -854,6 +854,132 @@ export const docAuthoringRuleViolations = (doc) => {
   return violations;
 };
 
+// ---- how the ledger is read, in one place ----
+//
+// The smoke test needs the ledger's rows (通路 / 欠账 是否配套), and the rule
+// below needs the round the ledger stops at. Two readers of one table, so the
+// table is parsed once, here: the second copy of "rows between 「核对通路账」 and
+// the next `###`" is how the two answers start disagreeing about which rows
+// exist at all.
+export const LEDGER_HEADING = "### 核对通路账";
+
+// The ledger's rows as cell arrays, in document order. `""` (or a doc without
+// that heading) yields no rows rather than rows borrowed from another table.
+export const ledgerRowsIn = (doc) => {
+  const lines = String(doc == null ? "" : doc).split(/\r?\n/);
+  const start = lines.findIndex((line) => line.trim().startsWith(LEDGER_HEADING));
+  if (start === -1) return [];
+  let end = lines.length;
+  for (let index = start + 1; index < lines.length; index += 1) {
+    if (/^#{1,4}\s/.test(lines[index])) {
+      end = index;
+      break;
+    }
+  }
+  return lines
+    .slice(start, end)
+    .filter((line) => /^\|\s*\d+\s*\|/.test(line))
+    .map((line) => line.split("|").slice(1, -1).map((cell) => cell.trim()));
+};
+
+// ---- the human half's sections are counted, not assumed ----
+//
+// Every rule above asks the human half for one *thing it must contain*: the
+// editing checklist, one pointer, a current-state body ending in a full
+// sentence. None of them asks whether a section is still there at all. Delete
+// `## 关系` and the pins, the ledger, the table, the checklist all stay exactly
+// as they were — the audit reports full marks on a file that lost the one place
+// answering "which repository is which". Demote it to `###`, or paste it twice,
+// and nothing says so either; a second copy of 「规则」 is precisely the
+// "one rule living in two places" failure this doc's append-only rule exists to
+// prevent, one level up.
+//
+// The four names are the sections a reader needs in order to orient: where the
+// two repos live, what each round owes, what the answer is *now*, and how to edit
+// the file. The rest of the human half (`## 上游真变了怎么办`, `## 建议命令`) is
+// prose a reader can find by scrolling, and renaming it breaks no entry point —
+// so it is deliberately not in this list, which is a floor, not a table of
+// contents.
+//
+// The second question is which round the current-state section is. 「当前状态」
+// whose body still belongs to an earlier round reads like this round's answer:
+// the truncation rule cannot see it (the body is complete prose, just stale) and
+// the fixed line's round is already pinned to the ledger. 第 97 轮 slipped this
+// way — the ledger gained a row, the section kept 第 96 轮's text, and both
+// halves were internally consistent.
+export const HUMAN_SECTIONS = Object.freeze([
+  { name: "关系", why: "上游仓库与本仓仓库在这里区分，读者第一个要问的就是「哪个是哪个」" },
+  { name: "规则", why: "每轮核对上游要做什么，这里是人读侧唯一的入口" },
+  { name: "当前状态", why: "本轮的结论（pin 在哪、上游动了没有）写在这一节，别处不算" },
+  { name: "改这份文档之前", why: "改这个文件的人在 audit 脚本之外唯一能找到的规则清单" },
+]);
+
+export const humanSectionViolations = (doc) => {
+  const lines = String(doc == null ? "" : doc).split(/\r?\n/);
+  const endAt = lines.findIndex((line) => line.includes(MACHINE_READABLE_END));
+  // Where the human half starts is `machineReadableBlockViolations`'s question:
+  // a missing or duplicated end marker is answered there, with the marker's line
+  // numbers, rather than reported a second time here as "four sections missing".
+  if (endAt === -1) return [];
+
+  const human = lines.slice(endAt + 1);
+  // A position inside `human` turned back into a document line.
+  const at = (index) => index + endAt + 2;
+  const headingPattern = (name) => new RegExp(`^##\\s*${name}(?=[\\s（(]|$)`);
+  const linesNamed = (name) => {
+    const pattern = headingPattern(name);
+    const found = [];
+    human.forEach((line, index) => {
+      if (pattern.test(line.trim())) found.push(at(index));
+    });
+    return found;
+  };
+
+  const violations = [];
+  for (const section of HUMAN_SECTIONS) {
+    const found = linesNamed(section.name);
+    if (found.length === 1) continue;
+    if (found.length === 0) {
+      // The heading may still exist on the other side of the end marker: that is
+      // a section that moved into the machine-readable region, and it reads
+      // nothing like "someone deleted it".
+      const elsewhere = [];
+      const pattern = headingPattern(section.name);
+      lines.slice(0, endAt + 1).forEach((line, index) => {
+        if (pattern.test(line.trim())) elsewhere.push(index + 1);
+      });
+      violations.push(
+        `人读区没有「## ${section.name}」一节（应为恰好 1 次）：${section.why}。` +
+          (elsewhere.length
+            ? `它在机器可读区里（第 ${elsewhere.join("、")} 行）——整节被搬进给 audit 读的那一半，人读区就空了`
+            : "整节不见了，而这一节的内容没有别处可以代替")
+      );
+      continue;
+    }
+    violations.push(
+      `人读区里「## ${section.name}」出现 ${found.length} 次（应为 1 次）：第 ${found.join("、")} 行——` +
+        `「${section.name}」只该有一份，第二份是哪一份过期了没人说得清`
+    );
+  }
+
+  // The current-state section's round against the ledger's last row. Only asked
+  // when both are readable: a missing heading is the loop's answer, an empty
+  // ledger is the smoke test's, and guessing here would report the wrong cause.
+  const stateLine = human.find((line) => headingPattern("当前状态").test(line.trim())) || "";
+  const stateRound = /第\s*(\d+)\s*轮/.exec(stateLine);
+  const ledgerRounds = ledgerRowsIn(lines.join("\n")).map((row) => Number(row[0]));
+  const lastLedger = ledgerRounds.length ? ledgerRounds[ledgerRounds.length - 1] : null;
+  if (stateRound && lastLedger !== null && Number(stateRound[1]) !== lastLedger) {
+    violations.push(
+      `「当前状态」标题停在第 ${stateRound[1]} 轮，通路账末行已到第 ${lastLedger} 轮：` +
+        "标题写着较旧的一轮，正文也就是那一轮的，读者却会把它当成本轮的结论——" +
+        "本轮正文写完后，把上一轮整段搬到归档"
+    );
+  }
+
+  return violations;
+};
+
 // ---- a truncated document must not read as a finished one ----
 //
 // Every other check in this module reads the doc for a *shape it wants*: three

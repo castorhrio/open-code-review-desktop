@@ -1457,6 +1457,167 @@ check(
   );
 }
 
+/* ---- three same-spelled entries: the count has to come from the entries ----
+ * Every case above stops at two entries, and two is the number a branch can hide
+ * a mistake behind. Three things in `spellingClashMessage` are written so that
+ * one and two behave and three might not: the count interpolated into the
+ * sentence, the `listed` join over the entries, and `sameSection` (a Set size,
+ * easy to re-implement as `entries.length > 1`). A `listed` built with
+ * `.slice(0, 2)`, a literal "2 条", or that swapped `sameSection` test is right
+ * for one and two entries and wrong for three — and three is reachable: the file
+ * can hold a name typed three ways over months of edits, and with the registry
+ * silent both sections are scanned, so three spellings can also straddle them.
+ *
+ * Three shapes, one per branch, each asserted on the entry *pairs* (which
+ * spelling sits in which section, in the order they were found) and on both
+ * places the count is printed — not on the join's punctuation, which is wording
+ * a rewrite is allowed to change.
+ */
+{
+  // The form's own spelling is a fourth variant, so the exact-match scan (which
+  // keeps a re-save legal) does not cancel the clash.
+  const FORM = "deEpSeek";
+
+  // (1) three spellings, one section, table answered.
+  const threeInOne = { providers: { deepseek: { api_key: "sk-1" }, DeepSeek: { api_key: "sk-2" }, DEEPSEEK: { api_key: "sk-3" } } };
+  const answered = answeredPresets(["deepseek", "openai"]);
+  const oneSection = spellingClash(threeInOne, FORM, answered);
+  const oneSectionAnswer = oneSection ? spellingClashMessage(oneSection, FORM, answered) : null;
+  check(
+    "three spellings in the section the run reads are all three collected, in order",
+    oneSectionAnswer !== null &&
+      JSON.stringify(oneSectionAnswer.entries) ===
+        JSON.stringify([
+          { name: "deepseek", section: "providers" },
+          { name: "DeepSeek", section: "providers" },
+          { name: "DEEPSEEK", section: "providers" },
+        ]),
+    oneSectionAnswer ? JSON.stringify(oneSectionAnswer.entries) : JSON.stringify(oneSection)
+  );
+  check(
+    "...and both places the count is printed read it from the entries, not from a literal two",
+    oneSectionAnswer !== null &&
+      oneSectionAnswer.message.includes("3 条只差大小写的条目") &&
+      oneSectionAnswer.message.includes("这 3 条都在 providers 段") &&
+      !oneSectionAnswer.message.includes("2 条"),
+    oneSectionAnswer && oneSectionAnswer.message
+  );
+  check(
+    "...and every spelling is named, so none of the three is left holding a Key nobody reads",
+    oneSectionAnswer !== null &&
+      ["deepseek", "DeepSeek", "DEEPSEEK"].every((spelling) => oneSectionAnswer.message.includes(spelling)),
+    oneSectionAnswer && oneSectionAnswer.message
+  );
+  check(
+    "...and the one-section shape still offers nothing to press and claims nothing about a table",
+    oneSectionAnswer !== null &&
+      !oneSectionAnswer.message.includes("刷新") &&
+      !oneSectionAnswer.message.includes("重装") &&
+      !oneSectionAnswer.message.includes("没能读到") &&
+      !oneSectionAnswer.message.includes("服务表读回来是空的") &&
+      oneSectionAnswer.message.endsWith("保存。"),
+    oneSectionAnswer && oneSectionAnswer.message
+  );
+
+  // (2) three spellings, two sections, table silent — the branch where the
+  // section really is unknown, and where the two silences differ in what to do.
+  const threeAcrossTwo = {
+    providers: { deepseek: { api_key: "sk-1" }, DEEPSEEK: { api_key: "sk-2" } },
+    customProviders: { DeepSeek: { api_key: "sk-3" } },
+  };
+  const silent = spellingClash(threeAcrossTwo, FORM, SILENT_PRESETS);
+  const silentAnswer = silent ? spellingClashMessage(silent, FORM, SILENT_PRESETS) : null;
+  check(
+    "with the registry silent, spellings from both sections are collected together",
+    silentAnswer !== null &&
+      JSON.stringify(silentAnswer.entries) ===
+        JSON.stringify([
+          { name: "deepseek", section: "providers" },
+          { name: "DEEPSEEK", section: "providers" },
+          { name: "DeepSeek", section: "custom_providers" },
+        ]),
+    silentAnswer ? JSON.stringify(silentAnswer.entries) : JSON.stringify(silent)
+  );
+  check(
+    "...and three entries across two sections are not described as one section",
+    silentAnswer !== null &&
+      !silentAnswer.message.includes("都在 providers 段") &&
+      silentAnswer.message.includes("3 条只差大小写的条目") &&
+      !silentAnswer.message.includes("2 条"),
+    silentAnswer && silentAnswer.message
+  );
+  const hollowAnswer = silent ? spellingClashMessage(silent, FORM, HOLLOW_PRESETS) : null;
+  check(
+    "...and the two silences stay distinguishable at three entries: a failed read may be retried, a hollow one may not",
+    silentAnswer !== null &&
+      hollowAnswer !== null &&
+      silentAnswer.message.includes("没成功") &&
+      silentAnswer.message.includes("刷新") &&
+      !silentAnswer.message.includes("重装") &&
+      hollowAnswer.message.includes("读回来是空的") &&
+      hollowAnswer.message.includes("重装"),
+    [silentAnswer && silentAnswer.message, hollowAnswer && hollowAnswer.message].join(" // ")
+  );
+
+  // (3) the shape `spellingClash` cannot produce: three sections *and* an
+  // answered table. Reached by handing the exported pure function what a future
+  // caller might, it must say only what is true of the entries.
+  const threeSectionsAnswered = spellingClashMessage(
+    {
+      name: "deepseek",
+      section: "providers",
+      others: [
+        { name: "DeepSeek", section: "custom_providers" },
+        { name: "DEEPSEEK", section: "models" },
+      ],
+    },
+    FORM,
+    answered
+  );
+  check(
+    "three spellings in three sections with an answered table name all three and press nothing",
+    JSON.stringify(threeSectionsAnswered.entries) ===
+      JSON.stringify([
+        { name: "deepseek", section: "providers" },
+        { name: "DeepSeek", section: "custom_providers" },
+        { name: "DEEPSEEK", section: "models" },
+      ]) &&
+      ["deepseek", "DeepSeek", "DEEPSEEK"].every((spelling) => threeSectionsAnswered.message.includes(spelling)) &&
+      threeSectionsAnswered.message.includes("这 3 条分布在不同的配置段里") &&
+      !threeSectionsAnswered.message.includes("都在 providers 段") &&
+      !threeSectionsAnswered.message.includes("刷新") &&
+      !threeSectionsAnswered.message.includes("重装") &&
+      threeSectionsAnswered.message.endsWith("保存。"),
+    threeSectionsAnswered.message
+  );
+
+  // Through the handler: three spellings in the file refuse the save before any
+  // write, and the page is shown this very sentence — the count and the three
+  // names travel together out of `spellingClashMessage`.
+  const stub = makeStub({
+    providers: { deepseek: { api_key: "sk-1" }, DeepSeek: { api_key: "sk-2" }, DEEPSEEK: { api_key: "sk-3" } },
+  });
+  const h = make(stub);
+  const res = await h.save(null, { provider: FORM, isCustom: false, apiKey: "sk-new", setActive: true });
+  const refused = refusalOf(res, stub, FORM, answered);
+  check("the handler refuses a save that would split three entries", res.ok === false && stub.setCalls === 0, JSON.stringify({ ok: res.ok, calls: stub.setCalls }));
+  check(
+    "...and names all three entries on the way",
+    entriesAre(refused, [
+      { name: "deepseek", section: "providers" },
+      { name: "DeepSeek", section: "providers" },
+      { name: "DEEPSEEK", section: "providers" },
+    ]),
+    JSON.stringify(refused.entries)
+  );
+  check("...and shows the pure function's sentence word for word", refused.saidVerbatim, res.error);
+  check(
+    "...while all three Keys stay where they were",
+    ["deepseek", "DeepSeek", "DEEPSEEK"].every((spelling) => stub.state.providers[spelling]?.api_key === `sk-${["deepseek", "DeepSeek", "DEEPSEEK"].indexOf(spelling) + 1}`),
+    JSON.stringify(stub.state.providers)
+  );
+}
+
 /* ---- a dotted custom name is one name, not two segments ----
  * `my.gateway` already has a `custom_providers` entry, so upstream accepts the
  * field write and routes it there. The key has to stay `providers.my.gateway.

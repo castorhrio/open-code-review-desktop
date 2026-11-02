@@ -248,3 +248,7 @@ Run these before and after any layout, token, or main-process change. Several re
 ## Not affiliated
 
 Not an official Alibaba project, and not endorsed by it. `ocr` and its binary are covered by their own Apache-2.0 license; see [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE). Build and usage details for contributors: [`使用说明.md`](使用说明.md) (中文).
+
+## Product bar (Definition of Done, 2026-10-31)
+
+Contributors and the coding agent: read [`docs/PRODUCT-DOD.md`](docs/PRODUCT-DOD.md) (mirrored on the build host at `/opt/agent-scheduler/docs/product-dod/open-code-review-desktop-dod.md`). The next change may only come from an unchecked DoD item, user feedback, or a regression / broken link / compliance / upstream-pin break. Once every DoD item is checked, stop adding features — items outside the DoD are not to be invented.

@@ -35,7 +35,7 @@ tag v1.13.3
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 97 轮：`git ls-remote` 退出码 0，`refs/heads/main` 与 pin 一致；`refs/tags/v1.13.3` 仍为最高 tag，由 `git ls-remote --tags` 核对；npm 仍为 `1.13.3`；通路：git）**
+**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 98 轮：`git ls-remote` 退出码 0，`refs/heads/main` 已到 `216dcf5`，比 pin 前进 3 个 commit；`refs/tags/v1.13.3` 仍为最高 tag，由 `git ls-remote --tags` 核对；npm 仍为 `1.13.3`，发布的版本没动，所以 pin 不前进；通路：git）**
 
 ### 核对通路账
 
@@ -105,6 +105,7 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 | 95 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；两处「说出口」抽成 `main-wiring.js`（`reportSenderLoss` / `reportProbeError`）并直测、`markReady()` 的 `sent` 改成按次计并补「中断后继续 flush」的反向控制 | — |
 | 96 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；sender 的「超限丢最旧」「非法 limit 落默认」与「未就绪不触碰 window」补反向控制、`main-wiring` 的非法上限 / 非法消息四格补反向控制 | — |
 | 97 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；`describeProbeError` 的无原型拒绝补到 sink 端（payload 与句子两端同问）、文档截断进断言（未闭合围栏 / 停在半句 / 标题收尾 / 当前状态无正文） | — |
+| 98 | 2026-11-02 | git | **上游 HEAD 前进**：`375f64c` → `216dcf5`（3 个 commit：Go / Node 版本、GitHub Action 稳定性、`session show --json` 的空表改成 `[]`）；`refs/tags/v1.13.3` 与 npm `1.13.3` 均未变，**pin 不前进**；对照表 5 行的上游文件都没被这三个 commit 碰到，而 `session` 的 JSON 形状不在这 5 行里（本仓只调 `session list`，已容忍 `null`）；人读区必需标题各恰好一次 + 「当前状态」轮次 ↔ 账末行进断言（`humanSectionViolations`）、`bridge-contract` 的接口与通道双射补反向控制 | — |
 
 ### 对照表（上游前进时要重读的五处）
 
@@ -112,9 +113,9 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
 对应行并把轮次与日期改成本轮。
 
-**第 46–96 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
+**第 46–97 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
 npm 通路可达，第 56 轮 git 超时但 API 可达，第 63–64 轮本文件无通路记录，第 68 轮 git
-超时但 API 可达，第 69–76、79–80、84–85、87、89、91–96 轮 git 可达，第 77 轮本文件无通路记录，第 78、81–83、86、88、90 轮
+超时但 API 可达，第 69–76、79–80、84–85、87、89、91–97 轮 git 可达，第 77 轮本文件无通路记录，第 78、81–83、86、88、90 轮
 git 超时（第 90 轮为 TLS 错误）但 API 可达），所以下表 5 行的
 「最近一次对照」停在第 45 轮是
 **没有理由重看**，不是忘了看：
@@ -126,6 +127,13 @@ git 超时（第 90 轮为 TLS 错误）但 API 可达），所以下表 5 行�
 也就因此，**表里引用的上游行号不需要重看**：pin 相同意味着 commit 相同，同一个 commit
 里的 `llm_cmd.go:261`、`providers.go:45` 必然仍指向同一段代码——行号不是欠账，**只有 pin
 前进才是**。把「行号可能过期」当成待办，等于把同一个事实重新发现一遍。
+
+第 98 轮是这条界线第一次真的被踩到：`refs/heads/main` 前进到 `216dcf5`（比 pin 多 3 个
+commit），而 tag 与 npm 都还是 `v1.13.3` / `1.13.3`，所以 **pin 不动、本表 5 行也不动**。
+本表描述的是**被封装的那个发布版本**的行为，默认分支上尚未发布的改动不构成欠账；那三个
+commit 的文件清单也证实这一点——`internal/llm/resolver.go`、`config_cmd.go`、`llm_cmd.go` /
+`providers.go`、`failure_class` 一个都没被改到。这里的 SHA 一律写 7 位前缀（全串只在上面
+三处声明 pin），三个 commit 的清单与结论写在人读区的「当前状态」。
 
 | 对照点 | 上游文件 | 人工看什么 | 最近一次对照（轮次 / 日期） |
 | --- | --- | --- | --- |
@@ -183,35 +191,50 @@ git 超时（第 90 轮为 TLS 错误）但 API 可达），所以下表 5 行�
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。搬完这里只留一句
    指针——「本文件只留当前一轮」不是约定而是断言（`previousRoundPointerViolations`）。
 
-## 当前状态（第 96 轮，2026-10-27）
+## 当前状态（第 98 轮，2026-11-02）
 
-第 96 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 均可核对。**
-`375f64cd…` 与 pin 一致（与第 49–95 轮同一个 commit），`git ls-remote --tags` 仍以
-`refs/tags/v1.13.3` 为最高版本，`npm view @alibaba-group/open-code-review version` 仍是
-`1.13.3`。**无移植项**。
+第 98 轮复核：**上游默认分支前进了，发布版本没有。**`git ls-remote` 退出码 0，
+`refs/heads/main` 已是 `216dcf5`（比 pin 多 3 个 commit：Go / Node 版本升级、GitHub Action
+稳定性、`session show --json` 把空表打成 `[]`），而 `refs/tags` 最高仍是 `v1.13.3`、npm
+仍是 `1.13.3`。本程序封装的是**发布出来的那个二进制**，所以 **pin 不前进**，对照表 5 行
+也没有欠账——那三个 commit 的文件清单里没有一个 5 行引用的上游文件（`resolver.go` /
+`config_cmd.go` / `llm_cmd.go` / `providers.go` / `failure_class` 均未出现）。**无移植项**。
 
-本轮只动测试与文档，主题是「已落地的行为，边界要有会红的反向控制」：
+留一条给未来：`216dcf5`（#1792）改的是 `session show --json` 的空 `items`（原来是 `null`，
+现在是无条件 `[]`）。本仓不调 `session show`，调的是 `session list --json`，它在 pin 上仍
+打印 `null`，`ocr-service.js` 的 `Array.isArray(...) ? ... : []` 已经把两种形状都兜住，所以
+这条改动今天对我们没有影响。但**这个形状不在对照表 5 行里**：pin 真前进那天，除了 5 行还
+要多读 `cmd/opencodereview/session_cmd.go` 一次，并把 `ocr session list --json` 的空表实际
+跑一遍确认——上游正在逐个把 `null` 改成 `[]`，`show` 与 `comments` 已经改了。
 
-- **P0-1：超限丢最旧 + 非法 limit。** `tools/window-sender-smoke.mjs` 继续要求
-  `limit: 3` 下连发 5 条、`markReady()` 后留下最后 3 条且 `lost === 2`；新增反向控制：
-  一个越界就 `held.pop()` 的 sender（丢最新）同样报 `lost === 2`，但交出的行是
-  `1/2/3`，必须判红。非法 limit 列表补上字符串 `"3"`，并新增「把 limit 原样收下」的
-  sender 作为反例——它不会落回 `DEFAULT_PENDING_LIMIT`。
-- **P0-2：非法 limit / 非法 message。** `tools/main-wiring-smoke.mjs` 补四格：
-  `reportSenderLoss({ limit: 0 })` 与 `{ limit: -5 }` 的句子不带括号、仍含条数、不含
-  `undefined` / `NaN`；`reportProbeError({ message: undefined })` 与
-  `{ message: 42 }` 落 `未知错误` 兜底。两条反向控制分别是「只做
-  `Number.isSafeInteger` 不做 `> 0`」的上限判断（会印出 `（0 条）` / `（-5 条）`）与
-  「直接插值 message」的写法（会印出 `undefined` / `42`）。
-- **P1-3：未就绪不触碰 window。** 测试窗口新增 `calls()` 计数；未就绪时 `send` 一条，
-  要求 `webContents.send` 的调用数为 0（不只是「没收到」），并用一个「照发不误」的
-  sender 证明这个 0 不是计数器本身失效。
+本轮只动断言，主题是「接线与文档的形状不能只靠读源码相信」：
 
-改动只在 `tools/window-sender-smoke.mjs`、`tools/main-wiring-smoke.mjs` 与两份上游
-文档。评审逻辑、CLI 参数、配置读写路径与运行期行为均未动。`audit:sender` /
-`audit:wiring` / `audit:upstream` 本轮全绿。
+- **P0-1：桥的双射有反向控制了。** `tools/bridge-contract.mjs` 里接口的读法与通道的读法
+  都收成一个函数（`interfaceIn` / `channelsIn`），下面新增八格自测：把 `src/lib/api.ts` 的
+  一个方法改名喂进去，`missing` 与 `undeclared` 各点名自己那一侧；暴露侧同样改名则两个答案
+  互换；把接口缩进改成四空格，严格正则读空而宽松正则仍数到 42 条，「没有成员被跳过」那条
+  断言于是有它自己的红；把 `preload.js` 的一个通道改名，`unhandled` 与 `orphans` 同时点名
+  新旧两个拼写；把 `RUN_EXIT_CHANNEL` 的值改指别处，`neverSent` 与 `sentToNobody` 双端变红
+  ——这一格专门盯「main 侧经常量发出的通道」，正则丢了常量解析就会把它读成没人发的事件。
+- **P0-2：人读区的形状进断言。** `tools/upstream-watch.mjs` 新增 `humanSectionViolations`：
+  「关系 / 规则 / 当前状态 / 改这份文档之前」四节在人读区各恰好一次，缺一节、降级成 `###`、
+  被复制两份、或整节被搬进机器可读区，都点名行号；另加一条「当前状态标题的轮次必须等于通路
+  账末行」。通路账的行改由 `ledgerRowsIn` 一处解析，烟测与规则读同一张表。这条断言第一次跑
+  就把本仓自己的断链抓出来了：第 97 轮加了账的一行，却没有重写本节，标题停在第 96 轮——
+  两边各自都自洽，所以此前没有任何一条规则看得见它。第 96 轮的正文已按约定搬到
+  `docs/upstream-history.md`，本节不留第二份。
+- **P1-3：三条同拼写条目。** `tools/config-handler-smoke.mjs` 补 `spellingClashMessage` 的
+  三入口三种形状（三条同段、两条一段加一条另一段且表静默、三条分三段），每格按 `entries`
+  的配对断言、并要求句子里两处计数都来自条目数；一个把 `listed` 截成前两条的实现会在这里
+  变红（已用临时改动验过：两条用例全绿、三条用例红），把 `sameSection` 写成
+  `entries.length > 1` 也一样红——两条的时候不暴露的分叉，三条才暴露。
 
-上一轮（第 95 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-95-轮2026-10-27)，归档之后本文件不留第二份。
+改动只在 `tools/bridge-contract.mjs`、`tools/upstream-watch.mjs`、
+`tools/upstream-watch-smoke.mjs`、`tools/config-handler-smoke.mjs` 与两份上游文档；产品代码
+未动（`config-handler.js` 只是被临时改坏用于自测，已还原）。评审逻辑、CLI 参数、配置读写
+路径与运行期行为均未变。
+
+上一轮（第 96 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-96-轮2026-10-27)，归档之后本文件不留第二份。
 
 ## 上游真变了怎么办（命令驱动，而不是「记得看一眼」）
 ```bash

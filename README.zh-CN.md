@@ -123,3 +123,6 @@ preload.js               contextBridge 接口
 ## 归属声明
 
 非阿里巴巴官方项目，也未获其背书。`ocr` 及其二进制适用其自身的 Apache-2.0 许可；详见 [`LICENSE`](LICENSE) 与 [`NOTICE`](NOTICE)。
+
+## 产品过线标准（2026-10-31）
+必读 `docs/PRODUCT-DOD.md`（同源 `/opt/agent-scheduler/docs/product-dod/open-code-review-desktop-dod.md`）。下一刀只许 DoD 未勾选 ∪ 反馈 ∪ 已有 TODO/next-iteration 中落在 DoD 内的项；DoD 勾满 → 停手（回归/断链/合规）。禁止发明 DoD 外功能。

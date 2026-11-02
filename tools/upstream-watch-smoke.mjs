@@ -47,6 +47,10 @@ import {
   docAuthoringRuleViolations,
   docTruncationViolations,
   DANGLING_LINE_ENDINGS,
+  HUMAN_SECTIONS,
+  humanSectionViolations,
+  LEDGER_HEADING,
+  ledgerRowsIn,
   findDocPins,
   findPinShapedCitations,
   findShaCitations,
@@ -1022,17 +1026,22 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
   // of a paragraph. The rule the rows must obey is the useful part: npm can
   // report a release but not the default branch's commit, so an npm-only round
   // owes the HEAD check; git and the API can answer it, so they owe nothing.
-  const ledgerAt = locateLine(doc, "### 核对通路账");
+  const ledgerAt = locateLine(doc, LEDGER_HEADING);
   check(
     "the sync doc carries the per-round check ledger",
     ledgerAt !== -1,
     String(ledgerAt)
   );
-  const ledgerSection = ledgerAt !== -1 && tableAt !== -1 ? doc.slice(ledgerAt, tableAt) : "";
-  const ledgerRows = ledgerSection
-    .split("\n")
-    .filter((line) => /^\|\s*\d+\s*\|/.test(line))
-    .map((line) => line.split("|").slice(1, -1).map((cell) => cell.trim()));
+  // The rows are parsed by the module, not by a second copy of "the lines
+  // between this heading and the next one": `humanSectionViolations` reads this
+  // same table to learn which round the ledger stops at, and two parsers of one
+  // table is how the two answers start disagreeing about which rows exist.
+  const ledgerRows = ledgerRowsIn(doc);
+  check(
+    "the ledger the smoke reads is the ledger the rule reads, and it is not empty",
+    ledgerRows.length > 0 && ledgerRows.every((row) => /^\d+$/.test(row[0])),
+    `${ledgerRows.length} row(s)`
+  );
   check(
     "the ledger has a row for every round in the network-debt era",
     ledgerRows.length >= 10,
@@ -1854,6 +1863,149 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
       unfinished.split(/\r?\n/).filter((line) => line.trim().startsWith("```")).length ===
         docLines.filter((line) => line.trim().startsWith("```")).length,
     "fence counts differ"
+  );
+}
+
+/* ---- the human half's sections: are they there, once, and this round's? ----
+ * Every rule above asks the human half for something it must *contain*. None
+ * asks whether a section is still *there*: delete `## 关系` and the pins, the
+ * ledger, the table, the checklist and the pointer all stay exactly as they
+ * were, so the audit reports full marks on a file that lost the one place
+ * answering "which repository is which". `humanSectionViolations` counts the
+ * required headings instead of assuming them, and adds the one question the
+ * truncation rule cannot ask — a current-state body can be complete prose and
+ * still belong to an earlier round. That is literally what happened in 第 97 轮:
+ * the ledger gained a row, the section kept 第 96 轮's heading, and both halves
+ * were internally consistent.
+ *
+ * Each copy below differs from the real document in one place, so a red can
+ * only be explained by the mutation that caused it.
+ */
+{
+  const doc = fs.readFileSync(SYNC_DOC, "utf8");
+  const docLines = doc.split(/\r?\n/);
+  const headingAt = (name) =>
+    docLines.findIndex((line) => new RegExp(`^##\\s*${name}(?=[\\s（(]|$)`).test(line.trim()));
+
+  check(
+    "the human half carries every required section exactly once, and its current-state round is the ledger's last",
+    humanSectionViolations(doc).length === 0,
+    humanSectionViolations(doc).join("；") || "no violation"
+  );
+
+  // The list is a floor, so it needs something to stand on: every entry must
+  // name a `## ` heading the real document really has once, with a reason long
+  // enough for the red to be actionable. A stale name would keep this green
+  // forever while pointing at a section nobody writes.
+  check(
+    "every required section is a real `## ` heading in the document, each with a reason worth printing",
+    HUMAN_SECTIONS.length >= 4 &&
+      HUMAN_SECTIONS.every(
+        (section) =>
+          section.name.length > 0 &&
+          section.why.length >= 8 &&
+          headingAt(section.name) !== -1 &&
+          docLines.filter(
+            (line) => new RegExp(`^##\\s*${section.name}(?=[\\s（(]|$)`).test(line.trim())
+          ).length === 1
+      ),
+    JSON.stringify(HUMAN_SECTIONS.map((section) => `${section.name}:${headingAt(section.name) + 1}`))
+  );
+
+  // (a) the whole section gone.
+  const relationAt = headingAt("关系");
+  const dropped = humanSectionViolations([...docLines.slice(0, relationAt), ...docLines.slice(relationAt + 1)].join("\n"));
+  check(
+    "deleting a required section goes red, names it, and says the content has no other home",
+    relationAt !== -1 &&
+      dropped.length === 1 &&
+      dropped[0].includes("## 关系") &&
+      dropped[0].includes("整节不见了") &&
+      dropped[0].includes("恰好 1 次"),
+    dropped.join("；") || "no violation"
+  );
+
+  // (b) demoted a level: `###` is a subsection, so the human half no longer has
+  // the section even though a line with that name is on the page.
+  const rulesAt = headingAt("规则");
+  const demotedLines = [...docLines];
+  demotedLines[rulesAt] = docLines[rulesAt].replace(/^##/, "###");
+  const demotedViolations = humanSectionViolations(demotedLines.join("\n"));
+  check(
+    "a required heading demoted to a subsection counts as missing, not as present",
+    rulesAt !== -1 &&
+      demotedLines.filter((line, index) => line !== docLines[index]).length === 1 &&
+      demotedViolations.length === 1 &&
+      demotedViolations[0].includes("## 规则"),
+    demotedViolations.join("；") || "no violation"
+  );
+
+  // (c) pasted twice — the "one rule living in two places" failure, which is
+  // this file's own append-only rule seen from above.
+  const duplicatedLines = [...docLines];
+  duplicatedLines.splice(rulesAt + 1, 0, docLines[rulesAt]);
+  const duplicateViolations = humanSectionViolations(duplicatedLines.join("\n"));
+  check(
+    "a second copy of a required section goes red and names both lines",
+    duplicateViolations.length === 1 &&
+      duplicateViolations[0].includes("出现 2 次") &&
+      duplicateViolations[0].includes(`第 ${rulesAt + 1}、${rulesAt + 2} 行`),
+    duplicateViolations.join("；") || "no violation"
+  );
+
+  // (d) the section moved *into* the machine-readable region: the heading is on
+  // the page, so "整节不见了" would be a lie, and the reader would go looking
+  // for a deletion instead of for the marker it crossed.
+  const endAt = docLines.findIndex((line) => line.includes(MACHINE_READABLE_END));
+  const movedHead = docLines[relationAt];
+  const withoutHead = [...docLines.slice(0, relationAt), ...docLines.slice(relationAt + 1)];
+  // The marker is located *after* the removal, because the section being moved
+  // sits below it: taking the original index would slice a range that runs
+  // backwards and quietly duplicate every line between the two.
+  const markerIndex = withoutHead.findIndex((line) => line.includes(MACHINE_READABLE_END));
+  const movedLines = [...withoutHead.slice(0, markerIndex), movedHead, ...withoutHead.slice(markerIndex)];
+  const movedIndex = markerIndex;
+  const movedViolations = humanSectionViolations(movedLines.join("\n"));
+  check(
+    "a section that crossed into the machine-readable region is reported as moved, with the line it landed on",
+    endAt !== -1 &&
+      markerIndex !== -1 &&
+      movedViolations.length === 1 &&
+      movedViolations[0].includes("## 关系") &&
+      movedViolations[0].includes("机器可读区") &&
+      movedViolations[0].includes(`第 ${movedIndex + 1} 行`) &&
+      !movedViolations[0].includes("整节不见了"),
+    movedViolations.join("；") || "no violation"
+  );
+
+  // (e) the stale round — the shape 第 97 轮 left behind.
+  const stateAt = headingAt("当前状态");
+  const ledgerLast = Number(ledgerRowsIn(doc).slice(-1)[0][0]);
+  const staleLines = [...docLines];
+  staleLines[stateAt] = docLines[stateAt].replace(/第\s*\d+\s*轮/, `第 ${ledgerLast - 1} 轮`);
+  const staleViolations = humanSectionViolations(staleLines.join("\n"));
+  check(
+    "a current-state heading naming an earlier round than the ledger goes red, printing both numbers",
+    stateAt !== -1 &&
+      staleLines.filter((line, index) => line !== docLines[index]).length === 1 &&
+      staleViolations.length === 1 &&
+      staleViolations[0].includes(`第 ${ledgerLast - 1} 轮`) &&
+      staleViolations[0].includes(`第 ${ledgerLast} 轮`),
+    staleViolations.join("；") || "no violation"
+  );
+
+  // (f) and the deferral: with no readable end marker, "where does the human
+  // half start" is not this rule's question. Answering it here too would report
+  // one broken file as four missing sections, pointing at the wrong cause.
+  const noMarker = docLines.filter((line) => !line.includes(MACHINE_READABLE_END)).join("\n");
+  check(
+    "without the end marker the rule stays quiet, and the marker's own rule is the one that speaks",
+    humanSectionViolations(noMarker).length === 0 &&
+      humanSectionViolations("").length === 0 &&
+      machineReadableBlockViolations(noMarker).length > 0,
+    `${humanSectionViolations(noMarker).length} section violation(s) / ${
+      machineReadableBlockViolations(noMarker).length
+    } marker violation(s)`
   );
 }
 

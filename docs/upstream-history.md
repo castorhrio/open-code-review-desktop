@@ -38,6 +38,36 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 
 ---
 
+## 上游状态（第 96 轮，2026-10-27）
+
+第 96 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 均可核对。**
+`375f64cd…` 与 pin 一致（与第 49–95 轮同一个 commit），`git ls-remote --tags` 仍以
+`refs/tags/v1.13.3` 为最高版本，`npm view @alibaba-group/open-code-review version` 仍是
+`1.13.3`。**无移植项**。
+
+本轮只动测试与文档，主题是「已落地的行为，边界要有会红的反向控制」：
+
+- **P0-1：超限丢最旧 + 非法 limit。** `tools/window-sender-smoke.mjs` 继续要求
+  `limit: 3` 下连发 5 条、`markReady()` 后留下最后 3 条且 `lost === 2`；新增反向控制：
+  一个越界就 `held.pop()` 的 sender（丢最新）同样报 `lost === 2`，但交出的行是
+  `1/2/3`，必须判红。非法 limit 列表补上字符串 `"3"`，并新增「把 limit 原样收下」的
+  sender 作为反例——它不会落回 `DEFAULT_PENDING_LIMIT`。
+- **P0-2：非法 limit / 非法 message。** `tools/main-wiring-smoke.mjs` 补四格：
+  `reportSenderLoss({ limit: 0 })` 与 `{ limit: -5 }` 的句子不带括号、仍含条数、不含
+  `undefined` / `NaN`；`reportProbeError({ message: undefined })` 与
+  `{ message: 42 }` 落 `未知错误` 兜底。两条反向控制分别是「只做
+  `Number.isSafeInteger` 不做 `> 0`」的上限判断（会印出 `（0 条）` / `（-5 条）`）与
+  「直接插值 message」的写法（会印出 `undefined` / `42`）。
+- **P1-3：未就绪不触碰 window。** 测试窗口新增 `calls()` 计数；未就绪时 `send` 一条，
+  要求 `webContents.send` 的调用数为 0（不只是「没收到」），并用一个「照发不误」的
+  sender 证明这个 0 不是计数器本身失效。
+
+改动只在 `tools/window-sender-smoke.mjs`、`tools/main-wiring-smoke.mjs` 与两份上游
+文档。评审逻辑、CLI 参数、配置读写路径与运行期行为均未动。`audit:sender` /
+`audit:wiring` / `audit:upstream` 本轮全绿。
+
+---
+
 ## 上游状态（第 95 轮，2026-10-27）
 
 第 95 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 均可核对。**
