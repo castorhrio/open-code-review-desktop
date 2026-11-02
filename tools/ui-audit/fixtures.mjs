@@ -18,6 +18,38 @@ const ocr = require(path.join(ROOT, "ocr-service.js"));
 const wiring = require(path.join(ROOT, "main-wiring.js"));
 
 /**
+ * The rule that decides what may enter the notice bar, imported rather than
+ * transcribed.
+ *
+ * `expectedNotices` below answers "which rows should the bar hold" by *calling*
+ * `src/lib/notices.ts`, so the fixture's answer comes from the same function the
+ * renderer bundles. That is what makes the audit's reverse control mean
+ * something: `audit.mjs` mutates the compiled predicate in a copy of the bundle,
+ * and the expectation computed here stays strict, so the mutant is the only
+ * thing that changed.
+ *
+ * Node reads TypeScript by stripping types (>= 22.18, unflagged). The import is
+ * guarded so an older Node fails with one sentence instead of a syntax error
+ * three frames deep in a module the reader was not editing.
+ */
+// Node announces the strip once per process — a MODULE_TYPELESS_PACKAGE_JSON
+// warning about this repo's extensionless `package.json`, not about this import,
+// and it prints three lines on every harness run. Filtered here so the harness
+// output stays readable; every other warning still reaches the console.
+const defaultWarningPrinters = process.listeners("warning");
+process.removeAllListeners("warning");
+process.on("warning", (w) => {
+  if (w.code !== "MODULE_TYPELESS_PACKAGE_JSON") defaultWarningPrinters.forEach((print) => print(w));
+});
+const notices = await import("../../src/lib/notices.ts").catch((err) => {
+  console.error(
+    `The notice fixtures read src/lib/notices.ts, which needs Node >= 22.18 (this is ${process.version}): ${err.message}`
+  );
+  process.exit(2);
+});
+export const { NOTICE_MARK, logSource, noticeText } = notices;
+
+/**
  * The two sentences `main-wiring.js` writes when the app could not do
  * something, produced by *calling* it rather than transcribed here.
  *
@@ -79,10 +111,152 @@ export const NOTICE_SERIES = (lost) => {
 
 /** 1, 2, 1: the middle line is a repeat of the first, which must not become a
  *  second row and must not jump to the end. */
-const NOTICE_MANY_PAYLOADS = [...NOTICE_SERIES(1), ...NOTICE_SERIES(2), ...NOTICE_SERIES(1)];
+export const NOTICE_MANY_PAYLOADS = [...NOTICE_SERIES(1), ...NOTICE_SERIES(2), ...NOTICE_SERIES(1)];
 
 /** Four distinct sentences, one past `NOTICE_LIMIT` (3): the oldest leaves. */
-const NOTICE_OVERFLOW_PAYLOADS = [1, 2, 3, 4].flatMap((lost) => NOTICE_SERIES(lost));
+export const NOTICE_OVERFLOW_PAYLOADS = [1, 2, 3, 4].flatMap((lost) => NOTICE_SERIES(lost));
+
+/**
+ * How many rows the bar may hold, read from `src/store.tsx` rather than copied.
+ *
+ * The shot asserts "the bar shows exactly this many" — so a copy here would let
+ * the bar grow and the expectation grow with it while both disagreed with the
+ * bound the product documents. Read as text because this is a Node harness, not
+ * the renderer; a rename turns this into one sentence naming the missing
+ * declaration instead of a shot that silently asserts nothing.
+ */
+export const NOTICE_LIMIT = (() => {
+  const src = fs.readFileSync(path.join(ROOT, "src/store.tsx"), "utf8");
+  const found = /export const NOTICE_LIMIT = (\d+);/.exec(src);
+  if (!found) {
+    console.error("src/store.tsx no longer declares `export const NOTICE_LIMIT = <n>;` — the notice bound cannot be read");
+    process.exit(2);
+  }
+  return Number(found[1]);
+})();
+
+/** The CLI's lookalike, filed the way `run-handler.js` files every run line. */
+const LOOKALIKE_PAYLOAD = { id: "run-1", line: CLI_NOTICE_LOOKALIKE };
+
+/**
+ * The sentence a produced line has to be shown as, computed **without** asking
+ * the rule under test.
+ *
+ * An expectation computed with `noticeText`/`logSource` would be right for a
+ * *bundle* that disagrees with the source — and worthless against a *rule* that
+ * is wrong, because a weakened `src/lib/notices.ts` weakens the expectation with
+ * it. The notice shots compare against rows built from this instead, which knows
+ * only what `main-wiring.js` produced, and `audit.mjs` closes the loop by serving
+ * a deliberately weakened bundle and requiring the same comparison to go red.
+ */
+export const sentenceOf = (line) => String(line ?? "").trim().slice(NOTICE_MARK.length).trim();
+
+/** The lookalike as the bar would render it — the marker is stripped, so
+ *  grepping the bar for `CLI_NOTICE_LOOKALIKE` verbatim would miss it. */
+export const LOOKALIKE_SENTENCE = sentenceOf(CLI_NOTICE_LOOKALIKE);
+
+/** The sentence that must be gone once four arrive (`NOTICE_LIMIT` is 3). */
+export const NOTICE_DROPPED_SENTENCE = sentenceOf(NOTICE_SERIES(1)[0].line);
+
+/**
+ * The rows the bar should hold for a list of `run:log` payloads.
+ *
+ * Deliberately **not** computed by calling `src/lib/notices.ts`: an expectation
+ * that runs the rule under test weakens with it, and two parties agreeing is not
+ * an assertion. So the rows come from the producer's text alone (strip the
+ * marker, trim), and the rule's own halves are pinned separately — in the
+ * `premises` block below for the direction that matters, and in
+ * `tools/notices-smoke.mjs` call by call.
+ */
+const rowsFrom = (payloads) => {
+  const rows = [];
+  for (const payload of payloads) {
+    const text = sentenceOf(payload.line);
+    if (text && !rows.includes(text)) rows.push(text);
+  }
+  return rows.slice(-NOTICE_LIMIT);
+};
+
+export const NOTICE_ROWS = {
+  single: rowsFrom(NOTICE_PAYLOADS),
+  many: rowsFrom(NOTICE_MANY_PAYLOADS),
+  overflow: rowsFrom(NOTICE_OVERFLOW_PAYLOADS),
+};
+
+/**
+ * A copy of the built bundle with `logSource` weakened to answer `app` for
+ * everything — the rule this repo had while the marker alone was the test.
+ *
+ * The site is the compiled predicate, which is the one place in the bundle that
+ * says "a line with no run id is the app's own":
+ *
+ *     function <x>(e){let t=e?.id;return typeof t===`string`&&t?`run`:`app`}
+ *
+ * The minifier renames the function and the local, so the mutation matches the
+ * return expression, which the minifier cannot rename. Exactly one replacement is
+ * required: zero means the expression is no longer in the bundle (the rule got
+ * inlined another way, or `notices.ts` changed shape), and a mutation that was
+ * never applied would leave a reverse control that passes by doing nothing — the
+ * exact failure this harness exists to prevent. So zero stops with a message
+ * pointing at the expression to re-read.
+ */
+export const WEAKENED_OUT = path.join(ROOT, ".tmp-audit", "out-weakened");
+
+export function weakenedBundle() {
+  fs.rmSync(WEAKENED_OUT, { recursive: true, force: true });
+  fs.cpSync(OUT, WEAKENED_OUT, { recursive: true });
+  const NEEDLE = "?`run`:`app`";
+  let applied = 0;
+  for (const name of fs.readdirSync(path.join(WEAKENED_OUT, "assets"))) {
+    if (!name.endsWith(".js")) continue;
+    const file = path.join(WEAKENED_OUT, "assets", name);
+    const parts = fs.readFileSync(file, "utf8").split(NEEDLE);
+    if (parts.length === 1) continue;
+    applied += parts.length - 1;
+    fs.writeFileSync(file, parts.join("?`app`:`app`"));
+  }
+  if (applied !== 1) {
+    console.error(
+      `The notice reverse control could not be built: the built bundle contains ${applied} occurrence(s) of the compiled ` +
+        `logSource truthy branch (?\`run\`:\`app\`), but exactly 1 is required.\n` +
+        "Re-read src/lib/notices.ts and the compiled predicate in out/assets/*.js; a reverse control that mutates nothing is a green that proves nothing."
+    );
+    process.exit(2);
+  }
+  return WEAKENED_OUT;
+}
+
+/**
+ * The premises every notice shot rests on, checked before the first screenshot.
+ *
+ * The rows above are built from the producer's text and never call the parser, so
+ * a weakened `src/lib/notices.ts` would not weaken them — but it would also not
+ * be *noticed* here, since this file only ships a bundle. So the rule's two halves
+ * are pinned in the direction that matters before the first screenshot: the app's
+ * own sentences carry no run id, the CLI's lookalike does, and the lookalike
+ * therefore is not a notice. A rule that answers "app" for everything fails this
+ * before any shot runs — and the same rule is pinned call by call in
+ * `tools/notices-smoke.mjs`, which `audit:static` runs.
+ */
+{
+  const premises = [
+    [logSource(NOTICE_PAYLOADS[0]) === "app", "a sentence the app says about itself must carry no run id"],
+    [logSource(LOOKALIKE_PAYLOAD) === "run", "a line filed under a run must read as that run's transcript"],
+    [noticeText(CLI_NOTICE_LOOKALIKE, "run") === null, "a CLI line that begins with the marker must not become a notice"],
+    [
+      NOTICE_LINES.every((line) => line.startsWith(NOTICE_MARK)),
+      `both sentences main-wiring.js writes must start with ${NOTICE_MARK} — the marker the renderer reads`,
+    ],
+  ];
+  const broken = premises.filter(([ok]) => !ok).map(([, what]) => what);
+  if (broken.length) {
+    console.error(
+      `The notice fixture's premise no longer holds: ${broken.join("; ")}.\n` +
+        "The shots would then be asserting the wrong bar, so this stops before a green can be read as one."
+    );
+    process.exit(2);
+  }
+}
 
 /**
  * stderr from one real single-file review (`ocr review` on a throwaway repo:
@@ -1314,7 +1488,15 @@ try {
 export const STORAGE = { "last-repo": "/home/x/work/payments-api", "guide-dismissed": "1", "ocr-theme-pref": "system" };
 
 
-export function serve(port) {
+/**
+ * A static server over the built bundle.
+ *
+ * `root` defaults to `out/`, which is what every shot uses. The notice shots'
+ * reverse control serves a *copy* of it with one compiled predicate weakened, so
+ * the same harness can ask "what would the bar look like if the rule were
+ * wrong" without a second build.
+ */
+export function serve(port, root = OUT) {
   return new Promise((resolve) => {
     const server = http.createServer((req, res) => {
       const url = (req.url || "/").split("?")[0];
@@ -1326,8 +1508,8 @@ export function serve(port) {
         return;
       }
       const rel = url === "/" ? "index.html" : url.replace(/^\/+/, "");
-      const file = path.join(OUT, rel);
-      if (!file.startsWith(OUT) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
+      const file = path.join(root, rel);
+      if (!file.startsWith(root) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
         res.writeHead(404);
         res.end("not found");
         return;

@@ -168,6 +168,7 @@ npm run audit:static    # typecheck + packaging + install + bridge + config + di
 npm run audit:app       # build + ui + ui-scaled + contrast + guards + exit + e2e + secrets
 npm run audit:packaging # every runtime module is in the build.files allowlist
 npm run audit:bridge    # preload.js and the Bridge interface agree, both ways
+npm run audit:notices   # what may enter the notice bar, and the call site that joins it
 npm run audit:diagnostics # what the app keeps about a run the CLI does not persist
 npm run audit:service   # the real CLI: arg building and output parsing, all 4 modes
 npm run audit:git       # the code pane reads the reviewed snapshot, not the worktree

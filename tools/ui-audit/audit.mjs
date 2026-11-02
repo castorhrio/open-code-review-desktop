@@ -5,7 +5,21 @@
 // `npm run build` first — `requireBuilt()` refuses a bundle older than `src/`).
 import fs from "node:fs";
 import path from "node:path";
-import { SHOTS, BRIDGE, STORAGE, serve, OTHER_REPO_PATH, SOLO_REPO_PATH, BASE_REPO_PATH } from "./fixtures.mjs";
+import {
+  SHOTS,
+  BRIDGE,
+  STORAGE,
+  serve,
+  OTHER_REPO_PATH,
+  SOLO_REPO_PATH,
+  BASE_REPO_PATH,
+  CLI_NOTICE_LOOKALIKE,
+  LOOKALIKE_SENTENCE,
+  NOTICE_DROPPED_SENTENCE,
+  NOTICE_LIMIT,
+  NOTICE_ROWS,
+  weakenedBundle,
+} from "./fixtures.mjs";
 import { loadPlaywright, CHANNEL, describeChannel, requireBuilt } from "./playwright.mjs";
 
 requireBuilt();
@@ -352,6 +366,11 @@ const selectFirstFinding = async (page) => {
 };
 
 const server = await serve(PORT);
+// The notice shots' reverse control: the same app with one compiled predicate
+// weakened on purpose (see `weakenedBundle` in the fixtures). Built here, before
+// the first shot, because a mutation that could not be applied is a build
+// problem — not something to discover after sixty screenshots.
+const noticeWeakServer = await serve(PORT + 1, weakenedBundle());
 fs.mkdirSync(SHOTS, { recursive: true });
 const passed = [];
 const failed = [];
@@ -3339,8 +3358,189 @@ await shoot(page, "101-results-open-file-failed", {
   },
 });
 
+// ---------------------------------------------------------------------------
+// The notice bar.
+//
+// The two sentences `main-wiring.js` writes about work it could not do — dropped
+// queued events, a probe that threw — used to exist only as `run:log` lines, i.e.
+// only in a drawer that starts collapsed. The bar lifts them onto the screen, and
+// the rule that decides *what* may be lifted is the interesting half: `run:log`
+// also carries the CLI's own lines, so a CLI line that happens to begin with the
+// marker must stay in the drawer. Nothing asserted any of that: the fixtures
+// existed, `?notice=1` replayed them, and no shot consumed them.
+//
+// These three shots assert the bar by comparing it against sentences the *main
+// process* produced (see `NOTICE_ROWS`), so the comparison cannot move with the
+// rule, and the block at the end serves a bundle whose rule was weakened in
+// exactly the historical way to prove the comparison still goes red.
+// ---------------------------------------------------------------------------
+
+/**
+ * What the bar is holding, found by its accessible name and not by position.
+ *
+ * By name on purpose: sonner's toaster is the other live region on this screen,
+ * and two unnamed live regions cannot be told apart by an assertion — or by a
+ * reader being told which one spoke. `aria-label="应用提示"` is what makes the bar
+ * locatable; a toast must never answer to it.
+ */
+const observeNotices = (page) =>
+  page.evaluate(() => {
+    const bars = [...document.querySelectorAll('[role="status"][aria-label="应用提示"]')];
+    const bar = bars[0] || null;
+    const toaster = document.querySelector("[data-sonner-toaster]");
+    const rows = bar ? [...bar.children].map((r) => (r.innerText || "").replace(/\s+/g, " ").trim()) : [];
+    return {
+      bars: bars.length,
+      rows,
+      // The drawer is the record: every `run:log` line verbatim, including the
+      // ones the bar refuses. Closing a notice must not erase it, which is why
+      // this is collected in the same observation as the rows.
+      drawer: [...document.querySelectorAll("pre")].map((pre) => pre.textContent || "").join("\n"),
+      inToaster: Boolean(bar && toaster && toaster.contains(bar)),
+      toasterName: toaster ? toaster.getAttribute("aria-label") : null,
+    };
+  });
+
+/**
+ * The half all three notice shots share: one bar, not a toast, holding exactly
+ * `expected` in that order.
+ *
+ * The array comparison covers all three documented rules at once — one row per
+ * distinct sentence (a repeat is not a second fact), first-occurrence order (a
+ * repeat does not move its row to the end), and the bar's own bound — so a bug in
+ * any of them shows up as a named mismatch rather than a screenshot nobody reads.
+ */
+const expectNoticeRows = (expected) => async (page) => {
+  const seen = await observeNotices(page);
+  const out = [];
+  if (seen.bars !== 1)
+    out.push(`${seen.bars} elements are named 应用提示 — the bar cannot be located, so nothing about it was verified`);
+  if (seen.inToaster) out.push("the notice bar is rendered inside the toast region, so a reader cannot tell the two live regions apart");
+  if (seen.toasterName === "应用提示") out.push("the toast region answers to 应用提示, so the name no longer identifies the bar");
+  const named = await page.getByRole("status", { name: "应用提示", exact: true }).count();
+  if (named !== 1) out.push(`getByRole("status", { name: "应用提示" }) matched ${named} elements, expected exactly 1`);
+  if (seen.rows.join("\n") !== expected.join("\n"))
+    out.push(
+      `the bar holds ${seen.rows.length} row(s) ${JSON.stringify(seen.rows)} — expected ${expected.length} ${JSON.stringify(expected)}`
+    );
+  // An invariant of every notice shot, not just the lookalike's: no row may ever
+  // be the CLI's text. The marker is stripped on the way in, so comparing against
+  // the raw fixture line would miss it — `LOOKALIKE_SENTENCE` is the rendered form.
+  if (seen.rows.some((row) => row && (row.includes(LOOKALIKE_SENTENCE) || LOOKALIKE_SENTENCE.includes(row))))
+    out.push("a CLI line that merely begins with the marker was lifted onto the bar as if the app had said it");
+  return out;
+};
+
+/**
+ * ?notice=1 — the app said two things about itself, and one CLI line beginning
+ * with the same marker was filed under a run.
+ *
+ * The drawer check is the other half of "the bar refuses it": refusing must not
+ * mean dropping. The line is still in the record, verbatim, with its marker.
+ */
+const expectOnlyAppSentences = async (page) => {
+  const out = await expectNoticeRows(NOTICE_ROWS.single)(page);
+  const seen = await observeNotices(page);
+  if (seen.rows.length !== 2) out.push(`the bar shows ${seen.rows.length} rows for the two sentences the app wrote`);
+  if (!seen.drawer.includes(CLI_NOTICE_LOOKALIKE))
+    out.push("the CLI's line is not in the log drawer verbatim — the drawer is the record and must keep every line as it arrived");
+  return out;
+};
+
+/** ?notice=many — 1, 2, 1: the repeat is not a second row and does not jump to
+ *  the end. The array comparison names both failures; these two name them in the
+ *  words of the rule. */
+const expectNoticeDedupe = async (page) => {
+  const out = await expectNoticeRows(NOTICE_ROWS.many)(page);
+  const seen = await observeNotices(page);
+  const [first, second] = NOTICE_ROWS.many;
+  if (seen.rows.filter((row) => row === first).length > 1) out.push("a repeated sentence became a second row");
+  if (seen.rows[0] !== first) out.push(`the first sentence is no longer the first row: ${JSON.stringify(seen.rows[0] ?? null)}`);
+  if (seen.rows[1] !== second) out.push(`the second sentence is no longer the second row: ${JSON.stringify(seen.rows[1] ?? null)}`);
+  return out;
+};
+
+/** ?notice=overflow — four distinct sentences, one past the bar's bound: the
+ *  oldest leaves and the rest keep their order. */
+const expectNoticeBound = async (page) => {
+  const out = await expectNoticeRows(NOTICE_ROWS.overflow)(page);
+  const seen = await observeNotices(page);
+  if (seen.rows.length !== NOTICE_LIMIT)
+    out.push(`the bar holds ${seen.rows.length} rows against its own bound of ${NOTICE_LIMIT}`);
+  if (seen.rows.some((row) => row.includes(NOTICE_DROPPED_SENTENCE)))
+    out.push("the oldest sentence is still on the bar — the bound did not evict it");
+  return out;
+};
+
+await shoot(page, "notice-bar", {
+  query: "?notice=1",
+  // The drawer is opened before the screenshot so the shot shows both surfaces
+  // at once: the bar with the app's two sentences, and the record that still
+  // holds the CLI's line the bar refused.
+  after: async (page) => {
+    // The drawer opens itself for lines that look like trouble, so clicking
+    // blindly closes the very thing this shot is here to see.
+    if ((await page.locator("pre").count()) === 0) await page.getByRole("button", { name: /运行日志/ }).click();
+    await page.waitForTimeout(500);
+  },
+  expect: expectOnlyAppSentences,
+});
+await shoot(page, "notice-many", { query: "?notice=many", expect: expectNoticeDedupe });
+await shoot(page, "notice-overflow", { query: "?notice=overflow", expect: expectNoticeBound });
+
+/**
+ * The reverse control for the three shots above.
+ *
+ * Those shots compare the bar against sentences the main process produced, so
+ * they cannot weaken with the rule — but "cannot" is a claim, and this is the
+ * only place that checks it. The bundle served on PORT+1 has `logSource` rewritten
+ * to answer `app` for everything: the rule this repo had while the marker alone
+ * was the test, i.e. the actual bug, kept around as a build artefact.
+ *
+ * Success is *red*: the strict comparison must reject that bundle and name the
+ * sentence that entered. A green here means the bar's assertion cannot see the
+ * bug it exists for, and is reported as a failure like any other. It runs even
+ * under SHOT, because a filtered run still gets to know whether the notice rule's
+ * safety net exists.
+ */
+{
+  const weakPage = await browser.newPage({ deviceScaleFactor: SCALE });
+  // The bridge is injected per page, not bundled: without this the app does not
+  // mount at all ("Cannot read properties of undefined (reading onMenuOpenRepo)"),
+  // and a bar that is missing because nothing rendered would read as a rule that
+  // was not weakened.
+  await weakPage.addInitScript(BRIDGE);
+  await weakPage.setViewportSize({ width: 1440, height: 900 });
+  await weakPage.goto(`http://127.0.0.1:${PORT + 1}/?notice=1`, { waitUntil: "load" });
+  await weakPage.evaluate((s) => {
+    localStorage.clear();
+    for (const [k, v] of Object.entries(s)) localStorage.setItem(k, v);
+  }, STORAGE);
+  await weakPage.reload({ waitUntil: "load" });
+  await weakPage.waitForTimeout(1200);
+  const rows = (await observeNotices(weakPage)).rows;
+  const strict = await expectNoticeRows(NOTICE_ROWS.single)(weakPage);
+  const problems = [];
+  if (!rows.some((row) => row && (row.includes(LOOKALIKE_SENTENCE) || LOOKALIKE_SENTENCE.includes(row))))
+    problems.push("the weakened bundle did not lift the CLI line into the bar, so no mutation was actually applied");
+  if (!strict.length)
+    problems.push("the strict notice comparison still passed against a rule that lifts any marked line — it cannot see the bug it exists for");
+  else if (!strict.some((one) => one.includes(LOOKALIKE_SENTENCE)))
+    problems.push(`the failure does not name the sentence that entered the bar: ${JSON.stringify(strict)}`);
+  await weakPage.screenshot({
+    path: path.join(SHOTS, `notice-rule-weakened${SCALE === 1 ? "" : "@" + Math.round(SCALE * 100)}.png`),
+  });
+  await weakPage.close();
+  console.log(
+    `${problems.length ? "FAIL    " : "ok      "} notice-rule-weakened  1440x900  <- ` +
+      (problems.length ? problems.join("; ") : `the bar's assertion rejects a rule that lifts any marked line (${strict.length} problem(s))`)
+  );
+  problems.length ? failed.push("notice-rule-weakened") : passed.push("notice-rule-weakened");
+}
+
 await browser.close();
 server.close();
+noticeWeakServer.close();
 
 // A harness that prints FAIL and then exits 0 is a harness CI will happily
 // ignore. Report the tally and fail loudly.

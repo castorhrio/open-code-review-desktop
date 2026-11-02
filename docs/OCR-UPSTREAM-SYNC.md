@@ -35,7 +35,7 @@ tag v1.13.3
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 99 轮：`git ls-remote` 退出码 0，`refs/heads/main` 仍是 `216dcf5`，与第 98 轮同一个 commit；`refs/tags/v1.13.3` 仍为最高 tag，由 `git ls-remote --tags` 核对；npm `@alibaba-group/open-code-review` 仍为 `1.13.3`，发布的版本没动，所以 pin 不前进；通路：git）**
+**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 100 轮：`git ls-remote` 退出码 0，`refs/heads/main` 仍是 `216dcf5`，与第 98、99 轮同一个 commit；`git ls-remote --tags` 按版本排序的最高 tag 仍是 `refs/tags/v1.13.3`（词法序末位是 `v1.9.9`，所以按 `sort -V` 读）；npm `@alibaba-group/open-code-review` 仍为 `1.13.3`，发布的版本没动，所以 pin 不前进；通路：git）**
 
 ### 核对通路账
 
@@ -107,6 +107,7 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 | 97 | 2026-10-27 | git | `375f64c` / `v1.13.3`，无新内容；npm `1.13.3`；`describeProbeError` 的无原型拒绝补到 sink 端（payload 与句子两端同问）、文档截断进断言（未闭合围栏 / 停在半句 / 标题收尾 / 当前状态无正文） | — |
 | 98 | 2026-11-02 | git | **上游 HEAD 前进**：`375f64c` → `216dcf5`（3 个 commit：Go / Node 版本、GitHub Action 稳定性、`session show --json` 的空表改成 `[]`）；`refs/tags/v1.13.3` 与 npm `1.13.3` 均未变，**pin 不前进**；对照表 5 行的上游文件都没被这三个 commit 碰到，而 `session` 的 JSON 形状不在这 5 行里（本仓只调 `session list`，已容忍 `null`）；人读区必需标题各恰好一次 + 「当前状态」轮次 ↔ 账末行进断言（`humanSectionViolations`）、`bridge-contract` 的接口与通道双射补反向控制 | — |
 | 99 | 2026-11-02 | git | `216dcf5` / `v1.13.3`，无新内容；npm `1.13.3`；README 指向的每份 .md 都要闭合（`productDocViolations`：围栏闭合、最后一行、表格行、指针 404 四条反向控制）、DoD 头部与「状态」行只许是 locked / live（`dodAuthorityViolations`，draft 词汇与「什么都没写」各判一次红） | — |
+| 100 | 2026-11-02 | git | `216dcf5` / `v1.13.3`，无新内容；npm `1.13.3`；通知条的三条回放进断言（`?notice=1` 恰两行且 CLI 伪装行不进条但仍在抽屉里、`?notice=many` 去重且顺序不动、`?notice=overflow` 恰 `NOTICE_LIMIT` 条且最旧离场），反向控制改成另起一个端口服务 `logSource` 被削弱的 bundle 并要求同一比较变红；新增 `tools/notices-smoke.mjs`（`logSource` / `noticeText` 逐格边界、三种错误实现自测、`src/store.tsx` 调用点必须两个参数）并作为 `audit:notices` 挂进 `audit:static` | — |
 
 ### 对照表（上游前进时要重读的五处）
 
@@ -192,45 +193,33 @@ commit 的文件清单也证实这一点——`internal/llm/resolver.go`、`conf
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。搬完这里只留一句
    指针——「本文件只留当前一轮」不是约定而是断言（`previousRoundPointerViolations`）。
 
-## 当前状态（第 99 轮，2026-11-02）
+## 当前状态（第 100 轮，2026-11-02）
+第 100 轮复核：**上游无新内容。**`git ls-remote` 退出码 0，`refs/heads/main` 仍是 `216dcf5`
+（与第 98、99 轮同一个 commit），`git ls-remote --tags` 按版本排序的最高 tag 仍是 `v1.13.3`
+（词法序的末位是 `v1.9.9`，`sort -V` 才是 1.13.3），`npm view` 仍是 `1.13.3`。**pin 不前进，
+无移植项**：被封装的那个二进制与第 98 轮逐字节相同。
 
-第 99 轮复核：**上游无新内容。**`git ls-remote` 退出码 0，`refs/heads/main` 仍是 `216dcf5`
-（与第 98 轮同一个 commit），`git ls-remote --tags` 的最高 tag 仍是 `refs/tags/v1.13.3`，
-`npm view @alibaba-group/open-code-review version` 仍是 `1.13.3`。**pin 不前进，无移植项**：
-发布版本没动，被封装的那个二进制与第 98 轮逐字节相同。
+本轮的主题是「上一轮自己登记的 P0」——通知条有了三条回放，却没有任何一条断言在消费它们。
 
-本轮只动文档与断言，主题是「产品文件不能自己带伤，权威源只能有一处」，产品代码未动。
+- **三条回放进断言。** `?notice=1` 要求恰好两行（`main-wiring.js` 的两句）、且 CLI 那句以
+  `[notice]` 开头的原文**不在**条上、但在运行日志抽屉里逐字仍在（拒绝 ≠ 丢弃）；`?notice=many`
+  要 1、2、1 只变成两行且首个句子仍在首位（重复不产生第二行、不跳到最后）；`?notice=overflow`
+  要恰 `NOTICE_LIMIT`（从 `src/store.tsx` 读，不抄）条，最旧一句离场。期望行由**生产者**的
+  文本拼出（`sentenceOf`）而不是调用被测规则，否则规则被削弱时期望跟着削弱，两边一致不等于
+  断言。
+- **反向控制不再靠人手。** 另起一个端口服务一份 `out/` 的副本，其中编译后的
+  `logSource` 被判据削成「永远答 app」（即只用前缀的那版规则），要求**同一比较变红**并且
+  红的话里点名那句伪装行；替换次数必须恰为 1，0 次就停——一个没被真正施加的变异是一枚
+  证明不了任何事的绿灯。这条控制不受 `SHOT` 过滤影响，过滤跑也照样验。
+- **纯函数边界进 `audit:notices`（`tools/notices-smoke.mjs`）。** `src/lib/notices.ts` 的注释
+  里有六条不变量，此前只有注释：空串 id、非字符串 id（`123` / `true` / `[]` / `{}`）、
+  `null` / `undefined` / 非对象载荷都算「无 run」；裸 marker 返回原文；句子两侧 trim；
+  跑在某次运行名下的行一律不是提示。每种错法各有一次自测（真值判定、只减前缀、不剥 marker），
+  另钉 `src/store.tsx` 的调用点必须是 `noticeText(line, logSource(payload))` 恰好一处。
 
-- **README 的截断不能只靠「有人看见」。** 截断规则（`docTruncationViolations`）存在了很多
-  轮，却只被问过它自己所属的两份文档，于是 `README.md` 的架构代码块带着半行 `main.js Elec`
-  活了下来，没有任何一条断言是红的——规则是对的，只是没被指向陌生人第一个打开的那个文件。
-  所以现在**文件清单是推导出来的**：`docPointers` 从两份 README 里取出所有相对 `*.md`
-  链接，`productDocViolations` 逐个要求「存在 + 闭合」，README 自身也在清单里。两步分开
-  是有意的：丢了一条指针和一份文档被截断会说两句不同的话，而不是一句无法指向哪一半的话。
-- **四条反向控制**：删掉 README 最后一个收尾围栏（点名文件与打开围栏的行号）、指向一份
-  不存在的文档（点名目标是 404）、被指向的文档停在「，」上（点名是**哪份**文档截断，
-  README 是干净的）、缺了收尾 `|` 的表格行。第四条是这轮被迫补的第五种答案：一份**以表格
-  行收尾**的完整文档，按普通的「最后一行」读会停在连接符 `|` 上，于是把写完的文档判成截断
-  ——表格行的收尾 `|` 本身就是终止符。
-- **过线标准只能有一个权威。** `README.md` 让贡献者「DoD 勾满就停手」，而它指向的
-  `docs/PRODUCT-DOD.md` 头部还写着 `writable draft … 尚未授权`：两处权威源互相矛盾，而
-  一条「可能不算数」的标准不是标准。状态在 2026-10-31 定稿为 locked / live，`先改头部`
-  只是把人读的部分改对；**不可再复现**才是这轮要做的事——`dodAuthorityViolations` 要求
-  头部（第一条水平线之前）不出现 draft 词汇（`writable draft` / `尚未授权` / `草稿` 等），
-  且「状态」一行必须写明 locked / live，并配两条反向控制：把旧头部原样粘回去要红、让头部
-  「什么都没写」要红（后者是另一种错：它不矛盾，只是让读者无法判断）。
-
-- **「这一轮是第几轮」不许从括号里的旧引用读出来。** 通路账与提交信息的绑定读的是
-  `git log -1` 的标题，此前取的是标题里**第一个**「第 N 轮」。而本轮之前的那个提交先说了
-  「抓出第 97 轮账加了一行」，后面才说「第 98 轮上游核对」——于是它自称第 97 轮，比自己的
-  账落后一轮，**而且是绿的**：窗口本来就允许「账比 HEAD 领先一轮」。一条为了正确理由而绿的
-  断言是这一整套东西最反对的形状，所以轮次现在先从固定的说法「第 N 轮上游核对」里读，读不到
-  才退回第一个「第 N 轮」（发布提交那种写法）。三条反向控制钉住这个选择：旧引用在前仍读自己的
-  轮次、标记之后又提到更早的轮次不改答案、没有标记的标题仍能读出唯一那个轮次。
-
-改动只在 `tools/upstream-watch.mjs`、`tools/upstream-watch-smoke.mjs`、`docs/PRODUCT-DOD.md`
-与两份 README 的过线标准指针；评审逻辑、CLI 参数、配置读写路径与运行期行为均未变。
-
+改动只在 `tools/ui-audit/`（`audit.mjs` / `fixtures.mjs`）、新增的 `tools/notices-smoke.mjs`、
+`package.json` 的 `audit:notices` 与 README 的审计命令清单；评审逻辑、CLI 参数、配置读写路径
+与运行期行为均未变。
 上一轮（第 98 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-98-轮2026-11-02)，归档之后本文件不留第二份。
 
 ## 上游真变了怎么办（命令驱动，而不是「记得看一眼」）
