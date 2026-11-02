@@ -52,6 +52,7 @@ import {
   PRODUCT_DOD_DOC,
   DOD_DRAFT_TERMS,
   README_FILES,
+  firstScreenViolations,
   DANGLING_LINE_ENDINGS,
   HUMAN_SECTIONS,
   humanSectionViolations,
@@ -2748,6 +2749,146 @@ if (!flags.selftest && !flags.noRespawn) {
     "...and the same row with its closing pipe missing goes red as an unfinished table",
     docTruncationViolations(tableOpen).length === 1 && docTruncationViolations(tableOpen)[0].includes("表格"),
     docTruncationViolations(tableOpen).join("；") || "no violation"
+  );
+}
+
+/* ---- the first screen is a product story, not a changelog ----
+ * Both READMEs opened with how they are built and then ~18 verification
+ * bullets; the sentence a stranger needs first ("what is this, who is it for,
+ * what does it do that the terminal does not") was three sections down. The
+ * checks here hold the shape that fixed it: one sentence, no flags, 3–5
+ * user-facing bullets, and the long record in the section the short list links
+ * to. Each rule gets a mutation that has to make it red, because a rule about
+ * prose that never fires is indistinguishable from a rule nobody wired up.
+ */
+{
+  const readmes = README_FILES.map((name) => ({ path: name, text: fs.readFileSync(path.join(ROOT, name), "utf8") }));
+  const live = firstScreenViolations(readmes);
+  check(
+    "both READMEs open with one sentence, no CLI flags, 3–5 bullets, and the long list under the section they link to",
+    live.length === 0,
+    live.join("；") || "no violation"
+  );
+
+  const mutate = (name, from, to) => {
+    const before = readmes.find((doc) => doc.path === name).text;
+    const hits = before.split(from).length - 1;
+    return { hits, text: before.replace(from, to) };
+  };
+  const mutated = (name, from, to) => firstScreenViolations([{ path: name, text: mutate(name, from, to).text }]);
+  const hits = (name, from) => mutate(name, from, "").hits;
+
+  const greeting = "instead of scrolling a terminal.";
+  check(
+    "...and the mutation below is anchored in the live greeting (a rule tested against a sentence nobody wrote proves nothing)",
+    hits("README.md", greeting) === 1,
+    String(hits("README.md", greeting))
+  );
+
+  const twoSentences = mutated("README.md", greeting, "instead of scrolling a terminal. It also has a tray icon.");
+  check(
+    "a greeting that grew a second sentence goes red, and says how many it counted",
+    twoSentences.length === 1 && twoSentences[0].includes("数到 2"),
+    twoSentences.join("；") || "no violation"
+  );
+
+  // A flag inside backticks is still a flag: the rule reads the raw line, so
+  // this mutation is written the tempting way rather than the obvious one.
+  const flagged = mutated("README.md", "pick the branch", "run `--preview` on the branch");
+  check(
+    "a first screen that names a CLI flag goes red, even inside backticks",
+    flagged.length === 1 && flagged[0].includes("--preview"),
+    flagged.join("；") || "no violation"
+  );
+
+  const wrapped = mutated("README.md", "A desktop app for people who want", "A desktop wrapper for people who want");
+  check(
+    "a first screen that says it is a wrapper goes red, naming the word",
+    wrapped.length === 1 && wrapped[0].includes("wrapper"),
+    wrapped.join("；") || "no violation"
+  );
+
+  const zhWrapped = mutate("README.zh-CN.md", "给想让 AI 真去审一遍代码", "本应用封装了官方 CLI，给想让 AI 真去审一遍代码");
+  const zhViolations = firstScreenViolations([{ path: "README.zh-CN.md", text: zhWrapped.text }]);
+  check(
+    "...and the same rule answers for the Chinese README, not just the English one",
+    zhWrapped.hits === 1 && zhViolations.length === 1 && zhViolations[0].includes("封装"),
+    zhViolations.join("；") || "no violation"
+  );
+
+  // The short list: 3–5 bullets, and an anchor that resolves.
+  const statusOf = (text) => {
+    const lines = text.split(/\r?\n/);
+    const start = lines.findIndex((line) => /^##\s+/.test(line));
+    let end = start + 1;
+    while (end < lines.length && !/^##\s+/.test(lines[end])) end += 1;
+    return lines.slice(start + 1, end);
+  };
+  const dropBullet = (text, nth) => {
+    const lines = text.split(/\r?\n/);
+    const start = lines.findIndex((line) => /^##\s+/.test(line));
+    let seen = 0;
+    for (let index = start + 1; index < lines.length; index += 1) {
+      if (!/^\s*-\s+/.test(lines[index])) continue;
+      seen += 1;
+      if (seen === nth) {
+        lines.splice(index, 1);
+        return lines.join("\n");
+      }
+    }
+    return text;
+  };
+  const enText = readmes.find((doc) => doc.path === "README.md").text;
+  const tooFew = firstScreenViolations([{ path: "README.md", text: dropBullet(dropBullet(dropBullet(dropBullet(enText, 5), 4), 3), 2) }]);
+  check(
+    "a status block cut down to one bullet goes red, saying how many it found",
+    tooFew.length === 1 && tooFew[0].includes("1 条"),
+    tooFew.join("；") || "no violation"
+  );
+
+  const tooMany = firstScreenViolations([
+    {
+      path: "README.md",
+      text: enText.replace("\n\nEverything that has actually been verified", "\n- **A sixth bullet** — which is where a changelog starts again.\n\nEverything that has actually been verified"),
+    },
+  ]);
+  check(
+    "...and so does a sixth bullet (the upper bound is what keeps the first screen from becoming the old one)",
+    tooMany.length === 1 && tooMany[0].includes("6 条"),
+    tooMany.join("；") || "no violation"
+  );
+
+  const unlinked = firstScreenViolations([
+    { path: "README.md", text: enText.replace("is listed under [Verified behaviour](#verified-behaviour)", "is listed further down this file") },
+  ]);
+  check(
+    "a status block that stops pointing at the long list goes red: the sunk record must have an address",
+    unlinked.length === 1 && unlinked[0].includes("没有指向本文件"),
+    unlinked.join("；") || "no violation"
+  );
+
+  const dangling = firstScreenViolations([
+    { path: "README.md", text: enText.replace("(#verified-behaviour)", "(#nowhere)") },
+  ]);
+  check(
+    "...and a link whose anchor matches no heading goes red by name",
+    dangling.length === 1 && dangling[0].includes("#nowhere"),
+    dangling.join("；") || "no violation"
+  );
+
+  // The sink has to still hold the record. This is the quiet failure: the
+  // pointer stays, the section stays, and the eighteen bullets quietly leave.
+  const emptied = enText.replace("## Verified behaviour", "## Verified behaviour\n\nNothing to see here yet.\n");
+  const lostRecord = firstScreenViolations([{ path: "README.md", text: emptied.replace(/^- .*\n/gm, "") }]);
+  check(
+    "a linked section that lost its bullets goes red: the promise \"everything is under X\" needs X to still hold it",
+    lostRecord.length >= 1 && lostRecord.some((violation) => violation.includes("长清单被删掉了")),
+    lostRecord.join("；") || "no violation"
+  );
+  check(
+    "...and the empty section really is a section on its own (the anchor still resolves, so the red is about the bullets)",
+    /^##\s+Verified behaviour\s*$/m.test(emptied) && /\]\(#verified-behaviour\)/.test(emptied),
+    String(statusOf(emptied).length)
   );
 }
 

@@ -2,38 +2,25 @@
 
 # Open Code Review Desktop
 
-An **unofficial cross-platform desktop GUI** for [`alibaba/open-code-review`](https://github.com/alibaba/open-code-review) (`ocr`) — Alibaba's AI code review CLI, 45k+ stars. It is **not an Alibaba project and is not endorsed by it**. Ships for **Windows, macOS and Linux**.
+A desktop app for people who want Alibaba's AI code review run against a real repository: pick the branch, the commit or the whole codebase, see which files it will pull in and what it will cost before a token is spent, then read the findings as a document instead of scrolling a terminal.
 
-The review engine is the official, **unmodified** `ocr` binary. This project only wraps it: it builds the command line, streams progress, parses the JSON output, and gives you a GUI for scoping, cost control, findings triage, and session history. No review logic is reimplemented here.
+It runs the official [`alibaba/open-code-review`](https://github.com/alibaba/open-code-review) CLI (`ocr`, Alibaba's 45k-star AI code review engine) **unmodified** — the review rules and the prompts are its own, not this project's. This app is **unofficial**: not an Alibaba project, and not endorsed by Alibaba. Builds ship for Windows, macOS and Linux.
 
 ---
 
 ## Status
 
-`v0.1.13` (latest) — usable, verified against `ocr v1.13.3`.
+`v0.1.13` (latest) — usable, verified against `ocr v1.13.3` on Windows x64.
 
-Verified end-to-end against the real CLI, without spending tokens:
+What you can count on today:
 
-- all four review scopes, and `--preview` for workspace / range / commit / scan
-- the per-mode flag whitelist (`ocr scan` rejects `--effort`, `--no-filter` and `--background-file`; sending them would abort the whole run)
-- keeping several providers configured, switching the active one, and the per-run override (`--provider` / `--model` reach only that one command line, never the global config)
-- testing the connection from the form values (the CLI runs in an empty temp HOME, so nothing is written), the model names a rejected request lists becoming one-click fixes, and the automatic re-test after saving
-- failure output handling, session listing / loading / HTML export / deletion, `ocr rules check`, `ocr llm providers` parsing
-- the packaged app boots and reaches the bundled binary
-- the run log streams the CLI's own progress lines live (`full-scan: N file(s) discovered`, `estimated cost: …`, `scan dispatch: …`, `Session: …`, per-file exclusions and failures) while keeping the failure payload out of it
-- a completed whole-file scan against a live provider — the results page renders that payload (the run's own token count and duration are in [`docs/measurements.md`](docs/measurements.md))
-- live progress during a run (files discovered, completed tool calls, comments so far, the CLI's own cost estimate), with per-tool-call chatter counted rather than streamed; large scans are gated behind an explicit size/cost confirmation
-- `ocr llm test` against a live provider, including the tool-call round trip
-- the two results surfaces at four figures: `?huge=1` mounts 1200 findings — every row in the triage list, every block in 阅读 — and the audit prints that mount time on every run and fails it past a ceiling; neither virtualises, and that measurement is the reason (the measured numbers live in [`docs/measurements.md`](docs/measurements.md), not here)
-- rendering at 125% and 150% system scale: the visual audit re-runs its eight tightest shots at both device pixel ratios, green at each
-- a run cut short by a limit is not clean: the CLI's `review_limit_reached` warning (upstream v1.13.1) and `summary.budget_exceeded` are read, so a run that stopped at the limit and found nothing says so instead of claiming the code is fine — on both results surfaces
-- the code beside a finding is the code that was reviewed: against a real repository with a dirty working copy, a review at `HEAD` shows the committed file, a review at another branch shows that branch, and a file that is not in the ref fails loudly instead of being answered with the working copy
-- a reopened session is read at the commit it was reviewed at: the CLI freezes the endpoints into the manifest before it runs, and the code pane, the results header and the report all name that commit — a branch that moved on afterwards no longer changes what you read next to a finding
-- the truncation evidence outlives the app: closing the window right after a run that hit the limit still flushes the pending write before the process exits, and reopening that session waits for a write that is still landing — so a truncated run never looks like a clean one, checked in a real Electron process, not reasoned about
-- a run that could not start is reported once: a process that cannot be spawned emits both an error and a close, and the app used to show the same failure twice, as two toasts and two log lines
-- a failed run says why, in the report itself: the CLI's own `manifest.run_failure` classification is translated (a timeout, a configuration problem, a spent budget — each a different next step) and written into the report next to the findings, so the document a reader forwards says why it is not the whole review; the CLI's own reason is quoted under it, labelled as the CLI's words
+- **Nothing is spent before you decide** — a zero-cost preview lists the files in scope and says why each excluded file is out.
+- **A run that stopped early never reads as clean** — complete / partial / failed badges, the list of files that were *not* reviewed, and the CLI's own truncation warning, on both results surfaces.
+- **You can watch it work** — the CLI's tool calls stream onto the screen (which file, what it looked for, how long it took), so a long silence does not look like a hung app.
+- **Interrupted work continues** — resume from the official session, without paying twice for files already reviewed.
+- **Your key stays yours** — written through `ocr config set`; this app keeps no copy of it.
 
-**Verified against a real full scan**: a real full scan emitted a sectioned `project_summary` (that run's size and duration are in [`docs/measurements.md`](docs/measurements.md)), and the band rendered that real text, capped and faded. Whether a run emits one is the CLI's decision — a workspace run over the same repo with 2 comments emitted none — so this project promises only to render it when present. Sessions still never persist it, so a session result showing no band remains correct behaviour, not missing rendering. A real review's findings themselves do render — a completed scan's 4 comments were loaded from its session and shown in the results list.
+Everything that has actually been verified — end to end, against the real CLI, inside a real Electron process — is listed under [Verified behaviour](#verified-behaviour). That list is long on purpose: it is a record, not a roadmap.
 
 ## Why a GUI
 
@@ -59,6 +46,31 @@ The CLI is excellent but you live in a terminal: reading 40 line-level findings,
 | **Test before you save** | *Test connection* checks the values currently in the form — nothing is written, and saving then runs the check automatically. When a vendor rejects the model name, the names it accepts become clickable buttons that fill the field. |
 | **In-app updates** | The installed build checks the published release on launch, downloads in the background, verifies the SHA-512 checksum and restarts on your word — no returning to the browser |
 | **Local config stays local** | everything is written through `ocr config set` into `~/.opencodereview/config.json`; the app keeps no separate copy of your key and talks only to the endpoint you configure |
+
+## Verified behaviour
+
+Everything below was exercised against the real CLI, without spending tokens unless the line says otherwise. It is what `v0.1.13` has actually been run against — not a plan.
+
+- all four review scopes, and `--preview` for workspace / range / commit / scan
+- the per-mode flag whitelist (`ocr scan` rejects `--effort`, `--no-filter` and `--background-file`; sending them would abort the whole run)
+- keeping several providers configured, switching the active one, and the per-run override (`--provider` / `--model` reach only that one command line, never the global config)
+- testing the connection from the form values (the CLI runs in an empty temp HOME, so nothing is written), the model names a rejected request lists becoming one-click fixes, and the automatic re-test after saving
+- failure output handling, session listing / loading / HTML export / deletion, `ocr rules check`, `ocr llm providers` parsing
+- the packaged app boots and reaches the bundled binary
+- the run log streams the CLI's own progress lines live (`full-scan: N file(s) discovered`, `estimated cost: …`, `scan dispatch: …`, `Session: …`, per-file exclusions and failures) while keeping the failure payload out of it
+- a completed whole-file scan against a live provider — the results page renders that payload (the run's own token count and duration are in [`docs/measurements.md`](docs/measurements.md))
+- live progress during a run (files discovered, completed tool calls, comments so far, the CLI's own cost estimate), with per-tool-call chatter counted rather than streamed; large scans are gated behind an explicit size/cost confirmation
+- `ocr llm test` against a live provider, including the tool-call round trip
+- the two results surfaces at four figures: `?huge=1` mounts 1200 findings — every row in the triage list, every block in 阅读 — and the audit prints that mount time on every run and fails it past a ceiling; neither virtualises, and that measurement is the reason (the measured numbers live in [`docs/measurements.md`](docs/measurements.md), not here)
+- rendering at 125% and 150% system scale: the visual audit re-runs its eight tightest shots at both device pixel ratios, green at each
+- a run cut short by a limit is not clean: the CLI's `review_limit_reached` warning (upstream v1.13.1) and `summary.budget_exceeded` are read, so a run that stopped at the limit and found nothing says so instead of claiming the code is fine — on both results surfaces
+- the code beside a finding is the code that was reviewed: against a real repository with a dirty working copy, a review at `HEAD` shows the committed file, a review at another branch shows that branch, and a file that is not in the ref fails loudly instead of being answered with the working copy
+- a reopened session is read at the commit it was reviewed at: the CLI freezes the endpoints into the manifest before it runs, and the code pane, the results header and the report all name that commit — a branch that moved on afterwards no longer changes what you read next to a finding
+- the truncation evidence outlives the app: closing the window right after a run that hit the limit still flushes the pending write before the process exits, and reopening that session waits for a write that is still landing — so a truncated run never looks like a clean one, checked in a real Electron process, not reasoned about
+- a run that could not start is reported once: a process that cannot be spawned emits both an error and a close, and the app used to show the same failure twice, as two toasts and two log lines
+- a failed run says why, in the report itself: the CLI's own `manifest.run_failure` classification is translated (a timeout, a configuration problem, a spent budget — each a different next step) and written into the report next to the findings, so the document a reader forwards says why it is not the whole review; the CLI's own reason is quoted under it, labelled as the CLI's words
+
+**Verified against a real full scan**: a real full scan emitted a sectioned `project_summary` (that run's size and duration are in [`docs/measurements.md`](docs/measurements.md)), and the band rendered that real text, capped and faded. Whether a run emits one is the CLI's decision — a workspace run over the same repo with 2 comments emitted none — so this project promises only to render it when present. Sessions still never persist it, so a session result showing no band remains correct behaviour, not missing rendering. A real review's findings themselves do render — a completed scan's 4 comments were loaded from its session and shown in the results list.
 
 ## Install
 

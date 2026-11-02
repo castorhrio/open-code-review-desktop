@@ -38,6 +38,63 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 
 ---
 
+## 上游状态（第 101 轮，2026-11-02）
+第 101 轮复核：**上游 HEAD 前进，但发布版本没动，无移植项。**`git ls-remote` 退出码 0，
+`refs/heads/main` 从 `216dcf5` 前进到 `76ab46a`（比 pin 多 4 个 commit）；`git ls-remote --tags`
+本轮返回空行、tag 通路没答上来，release 改由 npm 回答：`1.13.3`。**pin 不前进。**
+
+四个 commit 是 `9b0fab8`（Go / Node 版本与安全修复）、`cd8b55d`（GitHub Action 稳定性）、
+`216dcf5`（`session show --json` 空表改 `[]`）、`76ab46a`（`file_read_diff` 找不到路径时点名缺哪条）。
+没有一条碰到上面 5 处对照点，而它们对封装层的影响也各自为零：`session show` 本仓不调用（只用
+`session list`，已容忍 `null`）；`file_read_diff` 是上游工具给模型的报错措辞，不对封装暴露；
+两条版本 / CI 改动不改变二进制契约。所以本轮**不升 pin**，下一轮继续盯同一个发布版本。
+
+本轮的主题是上一轮简报的 P0-2 与 P1-1：把「中文排版」从手感变成断言，并让声明与真实需求对齐。
+
+- **三条禁则进脚本（`tools/cjk-typography.mjs`）。** 行首禁则（引用、列表前缀剥掉之后再问）、
+  半角标点后接中文（代码块 / 行内代码 / 链接目标 / URL 除外）、中英裸拼（汉字与拉丁字母之间
+  必须有分隔）。文件清单不是手写的：`docPointers` 从两份 README 推出所有相对 `*.md`，README
+  自身也在清单里——手写清单恰好在「新加了一份文档」时过期，而那正是这条检查存在的理由。
+- **三格反向控制（`tools/cjk-typography-smoke.mjs`）。** 每一格都是「真规则抓到 + 某个弱实现抓不到」：
+  只看 `line[0]` 的版本对 `> ，…` 与 `- **、…` 视而不见；不看代码边界的版本会把围栏里的样例与
+  `1. 标题` 一起判红（这正是会让规则被删掉的那种误报）；只比数字的版本对 `用ocr跑` 答零。
+  另外，把 `README.zh-CN.md` 里一个全角句号改成半角，断言红在**那份文件的那一行**，且只改了一个字符。
+- **`engines.node` 抬到 `>=22.18`。** `tools/notices-smoke.mjs` 与 `tools/ui-audit/fixtures.mjs`
+  直接 import `src/lib/notices.ts`，依赖的是 Node 22.18 起不带 flag 的类型剥离；`>=18` 这条声明
+  比真实需求低了一个大版本，属于「装了会红、但声明说能跑」的错账。
+
+改动只在新增的两个 `tools/` 文件、`package.json` 的 `engines` 与 `audit:typography`，以及本文件；
+评审逻辑、CLI 参数、配置读写路径与运行期行为均未变。
+
+## 上游状态（第 100 轮，2026-11-02）
+
+第 100 轮复核：**上游无新内容。**`git ls-remote` 退出码 0，`refs/heads/main` 仍是 `216dcf5`
+（与第 98、99 轮同一个 commit），`git ls-remote --tags` 按版本排序的最高 tag 仍是 `v1.13.3`
+（词法序的末位是 `v1.9.9`，`sort -V` 才是 1.13.3），`npm view` 仍是 `1.13.3`。**pin 不前进，
+无移植项**：被封装的那个二进制与第 98 轮逐字节相同。
+
+本轮的主题是「上一轮自己登记的 P0」——通知条有了三条回放，却没有任何一条断言在消费它们。
+
+- **三条回放进断言。** `?notice=1` 要求恰好两行（`main-wiring.js` 的两句）、且 CLI 那句以
+  `[notice]` 开头的原文**不在**条上、但在运行日志抽屉里逐字仍在（拒绝 ≠ 丢弃）；`?notice=many`
+  要 1、2、1 只变成两行且首个句子仍在首位（重复不产生第二行、不跳到最后）；`?notice=overflow`
+  要恰 `NOTICE_LIMIT`（从 `src/store.tsx` 读，不抄）条，最旧一句离场。期望行由**生产者**的
+  文本拼出（`sentenceOf`）而不是调用被测规则，否则规则被削弱时期望跟着削弱，两边一致不等于
+  断言。
+- **反向控制不再靠人手。** 另起一个端口服务一份 `out/` 的副本，其中编译后的
+  `logSource` 被判据削成「永远答 app」（即只用前缀的那版规则），要求**同一比较变红**并且
+  红的话里点名那句伪装行；替换次数必须恰为 1，0 次就停——一个没被真正施加的变异是一枚
+  证明不了任何事的绿灯。这条控制不受 `SHOT` 过滤影响，过滤跑也照样验。
+- **纯函数边界进 `audit:notices`（`tools/notices-smoke.mjs`）。** `src/lib/notices.ts` 的注释
+  里有六条不变量，此前只有注释：空串 id、非字符串 id（`123` / `true` / `[]` / `{}`）、
+  `null` / `undefined` / 非对象载荷都算「无 run」；裸 marker 返回原文；句子两侧 trim；
+  跑在某次运行名下的行一律不是提示。每种错法各有一次自测（真值判定、只减前缀、不剥 marker），
+  另钉 `src/store.tsx` 的调用点必须是 `noticeText(line, logSource(payload))` 恰好一处。
+
+改动只在 `tools/ui-audit/`（`audit.mjs` / `fixtures.mjs`）、新增的 `tools/notices-smoke.mjs`、
+`package.json` 的 `audit:notices` 与 README 的审计命令清单；评审逻辑、CLI 参数、配置读写路径
+与运行期行为均未变。
+
 ## 上游状态（第 99 轮，2026-11-02）
 
 第 99 轮复核：**上游无新内容。**`git ls-remote` 退出码 0，`refs/heads/main` 仍是 `216dcf5`

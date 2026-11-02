@@ -1198,6 +1198,170 @@ export const productDocViolations = (readmes, readFile) => {
   return violations;
 };
 
+// ---- the first screen answers "what is this", not "what does it do" ----
+//
+// Both READMEs used to open with the wrapping ("An unofficial cross-platform
+// desktop GUI for …", 「…的**非官方**桌面界面」) and then about eighteen
+// verification bullets, so a stranger's first screen was an implementation note
+// followed by a changelog. The product story — what this is, who it is for, and
+// what it does that the terminal does not — sat three sections down, and the
+// bullets a reader needs first were the ones they met last.
+//
+// Prose cannot be asserted, but its *shape* can, and the shape is what drifted:
+// a one-sentence greeting, no CLI flags in it, a short list of things a user can
+// feel, and the long record sunk into a section that the short list links to.
+// That last part is the one that rots quietly — "everything verified is listed
+// under X" reads fine for as long as nobody checks that X still holds the list.
+//
+//   1. 首段一句话 — the paragraph under the title is exactly one sentence. A
+//      second sentence in that paragraph is a summary, and a summary is what the
+//      list below it was for.
+//   2. 首段不提参数 — no `--flag`. A first screen that names `--preview` is
+//      written for someone who already knows the CLI.
+//   3. 首段不说「封装」 — no "wrapper" / 「封装」: "a wrapper for X" answers how
+//      this is built, not what it is for. The build detail stays in the README,
+//      one paragraph down; it just stops being the greeting.
+//   4. 首屏 3–5 条，长清单有去处 — the first `##` section keeps 3–5 bullets and
+//      links to an anchor in the same document, and that section still holds the
+//      long record (≥ 8 bullets). Without the floor the "sink" is a promise
+//      pointing at a heading whose list was deleted.
+const OPENING_FLAGS = /--[A-Za-z][\w-]*/;
+const OPENING_WRAPPER_TERMS = Object.freeze(["wrapper", "封装", "gui for"]);
+const OPENING_FIRST_BULLETS = Object.freeze([3, 5]);
+const SINK_MIN_BULLETS = 8;
+
+const isBullet = (line) => /^\s*[-*+]\s+/.test(line);
+const level = (line) => {
+  const match = /^(#{1,6})\s+/.exec(line);
+  return match ? match[1].length : 0;
+};
+
+/** The paragraph directly under the document's first `#` heading: the greeting,
+ *  with the blank lines around it dropped and nothing else. */
+const openingParagraph = (lines) => {
+  const title = lines.findIndex((line) => level(line) === 1);
+  if (title === -1) return null;
+  let start = title + 1;
+  while (start < lines.length && !lines[start].trim()) start += 1;
+  const paragraph = [];
+  let index = start;
+  while (index < lines.length && lines[index].trim()) {
+    paragraph.push(lines[index]);
+    index += 1;
+  }
+  return paragraph.length ? { line: start + 1, text: paragraph.join("\n") } : null;
+};
+
+/** The first `##` section (the status block) and the `##` section its anchor
+ *  points at. `null` when the document has no such section. */
+const statusSection = (lines) => {
+  const start = lines.findIndex((line) => level(line) === 2);
+  if (start === -1) return null;
+  let end = start + 1;
+  while (end < lines.length && level(lines[end]) !== 2) end += 1;
+  return { start, end, heading: lines[start], body: lines.slice(start + 1, end) };
+};
+
+const sectionBySlug = (lines, slug) =>
+  lines.reduce((found, line, index) => {
+    if (found !== -1 || level(line) !== 2) return found;
+    return headingSlug(line) === slug ? index : found;
+  }, -1);
+
+/**
+ * The shape of the first screen, per document. `readmes` is `[{ path, text }]`,
+ * the same input as `productDocViolations`, so the smoke test can hand in a
+ * mutated copy and get the sentence this rule would print for the real file.
+ */
+export const firstScreenViolations = (readmes) => {
+  const violations = [];
+
+  for (const { path: source, text } of readmes) {
+    const lines = String(text == null ? "" : text).split(/\r?\n/);
+
+    // 1–3. the greeting.
+    const opening = openingParagraph(lines);
+    if (opening === null) {
+      violations.push(`${source}：标题下面没有一句话说明这是什么——读者第一眼是空的`);
+    } else {
+      const where = `${source}：第 ${opening.line} 行`;
+      const plain = opening.text
+        .replace(/`[^`]*`/g, " ")
+        .replace(/https?:\/\/\S+/g, " ")
+        .replace(/\]\([^)]*\)/g, "]");
+      const sentenceEnds = (plain.match(/[。！？]|[.!?](?=\s|$)/g) || []).length;
+      const endsSentence = /[。！？.!?]\s*$/.test(plain.trim());
+      if (sentenceEnds !== 1 || !endsSentence) {
+        violations.push(
+          `${where}：首段不是一句话（数到 ${sentenceEnds} 个句末标点）——` +
+            "第一段只回答「这是什么、给谁、强在哪」，多出来的句子属于下面的清单"
+        );
+      }
+      // Asked of the raw line, not the stripped one: a flag inside backticks is
+      // still a flag, and stripping code spans first would hide exactly the
+      // shape this rule exists to refuse.
+      const flag = OPENING_FLAGS.exec(opening.text);
+      if (flag) {
+        violations.push(
+          `${where}：首段出现参数名「${flag[0]}」——` +
+            "读第一屏的人还不知道这个 CLI 有哪些参数，这里该说的是会得到什么"
+        );
+      }
+      const term = OPENING_WRAPPER_TERMS.find((word) => opening.text.toLowerCase().includes(word));
+      if (term) {
+        violations.push(
+          `${where}：首段用「${term}」讲自己是怎么做的——` +
+            "「封装了 X」回答的是实现，不是「给谁解决什么」；实现细节留在下一段"
+        );
+      }
+      if (opening.text.split("\n").some(isBullet)) {
+        violations.push(`${where}：标题下面是列表而不是一段话——首屏一句话不能靠条目拼`);
+      }
+    }
+
+    // 4. the short list, and where the long one went.
+    const status = statusSection(lines);
+    if (status === null) {
+      violations.push(`${source}：没有第一节（## 版本状态 / Status），首屏无从谈起`);
+      continue;
+    }
+    const bullets = status.body.filter(isBullet).length;
+    if (bullets < OPENING_FIRST_BULLETS[0] || bullets > OPENING_FIRST_BULLETS[1]) {
+      violations.push(
+        `${source}：第 ${status.start + 1} 行的「${status.heading.replace(/^#+\s*/, "")}」里是 ${bullets} 条，` +
+          `应为 ${OPENING_FIRST_BULLETS[0]}–${OPENING_FIRST_BULLETS[1]} 条：首屏只留用户能感知的能力，长清单下沉到专门一节`
+      );
+    }
+    const anchor = /\]\(#([^)\s]+)\)/.exec(status.body.join("\n"));
+    if (anchor === null) {
+      violations.push(
+        `${source}：第 ${status.start + 1} 行的「${status.heading.replace(/^#+\s*/, "")}」没有指向本文件任一节的链接——` +
+          "首屏的短清单必须说明长清单在哪一节，否则被下沉的正文等于消失了"
+      );
+      continue;
+    }
+    const target = sectionBySlug(lines, anchor[1]);
+    if (target === -1) {
+      violations.push(
+        `${source}：首屏链接指向 #${anchor[1]}，但本文件没有这一节——` +
+          "点下去跳不到任何地方，长清单也就没有去处了"
+      );
+      continue;
+    }
+    let targetEnd = target + 1;
+    while (targetEnd < lines.length && level(lines[targetEnd]) !== 2) targetEnd += 1;
+    const sunk = lines.slice(target + 1, targetEnd).filter(isBullet).length;
+    if (sunk < SINK_MIN_BULLETS) {
+      violations.push(
+        `${source}：首屏说验证过的行为都在「${lines[target].replace(/^#+\s*/, "")}」一节，` +
+          `但那一节只有 ${sunk} 条（至少该有 ${SINK_MIN_BULLETS} 条）——下沉的长清单被删掉了`
+      );
+    }
+  }
+
+  return violations;
+};
+
 // ---- the product bar has one authority, and it has to say whose it is ----
 //
 // `README.md` tells contributors that the next change may only come from an
