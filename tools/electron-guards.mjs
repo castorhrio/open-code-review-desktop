@@ -44,18 +44,30 @@ function runOnce(extraArgs) {
 }
 
 // A headless or containerised machine has no usable GPU (Electron aborts with
-// "GPU process isn't usable. Goodbye.") and its OS sandbox can block file://
-// loads outright (ERR_FAILED, with no will-navigate event at all). Both are
-// environment limits, not product behaviour: the handlers under test live in
-// the browser process and are unaffected. Try the strict flags first and only
-// relax when the environment proves it must be relaxed, saying so out loud.
+// "GPU process isn't usable. Goodbye."), its OS sandbox can block file:// loads
+// outright (ERR_FAILED, with no will-navigate event at all), and — when
+// `chrome-sandbox` is not setuid root — Chromium dies in
+// `setuid_sandbox_host.cc` before the app has done anything, which arrives here
+// as *no report at all*. All three are environment limits, not product
+// behaviour: the handlers under test live in the browser process and are
+// unaffected. Try the strict flags first and only relax when the environment
+// proves it must be relaxed, saying so out loud. "Proved it" includes producing
+// no report, which is what `tools/e2e-flow.mjs` already treats as environmental;
+// the two harnesses disagreeing about that is how the same container runs one
+// suite green and exits 2 on the other.
 const strict = (process.env.PW_ELECTRON_ARGS || "--in-process-gpu").split(" ").filter(Boolean);
 let report = await runOnce(strict);
 let relaxed = false;
 
-if (!report.error && report.results?.some((r) => !r.ok && /bundle loads/.test(r.name))) {
+if (report.error || report.results?.some((r) => !r.ok && /bundle loads/.test(r.name))) {
   relaxed = true;
-  console.log("note: file:// did not load under the OS sandbox; retrying with --no-sandbox (environment limit)\n");
+  console.log(
+    `note: ${
+      report.error
+        ? `the first run produced no report (${report.error})`
+        : "file:// did not load under the OS sandbox"
+    }; retrying with --no-sandbox (environment limit)\n`
+  );
   report = await runOnce([...strict, "--no-sandbox"]);
 }
 

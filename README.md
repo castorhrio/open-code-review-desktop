@@ -4,13 +4,13 @@
 
 A desktop app for people who want Alibaba's AI code review run against a real repository: pick the branch, the commit or the whole codebase, see which files it will pull in and what it will cost before a token is spent, then read the findings as a document instead of scrolling a terminal.
 
-It runs the official [`alibaba/open-code-review`](https://github.com/alibaba/open-code-review) CLI (`ocr`, Alibaba's 45k-star AI code review engine) **unmodified** — the review rules and the prompts are its own, not this project's. This app is **unofficial**: not an Alibaba project, and not endorsed by Alibaba. Builds ship for Windows, macOS and Linux.
+It runs the official [`alibaba/open-code-review`](https://github.com/alibaba/open-code-review) CLI (`ocr`, Alibaba's 45k-star AI code review engine) **unmodified** — the review rules and the prompts are its own, not this project's. This app is **unofficial**: not an Alibaba project, and not endorsed by Alibaba. Releases ship **Windows** builds (installer + portable); the macOS and Linux packaging scripts exist in this repository, but no macOS or Linux artifact has ever been published — see [Install](#install).
 
 ---
 
 ## Status
 
-`v0.1.13` (latest) — usable, verified against `ocr v1.13.3` on Windows x64.
+`v0.1.13` (latest) — usable, validated against the pinned CLI, `ocr v1.13.4`. Verification is not uniform across platforms: **Windows x64 is the only end-to-end platform, and the only build Releases publishes** (installer + portable); on Linux x64 the CLI-facing, real-Electron and UI suites all ran green on 2026-11-03 against that same binary, though no Linux package was produced or installed; **macOS has never been built or run at all**. What each of those covers — and what it does not — is spelled out under Known limitations.
 
 What you can count on today:
 
@@ -78,15 +78,13 @@ Everything below was exercised against the real CLI, without spending tokens unl
 
 **Option B — Windows portable.** Run the `*-portable.exe` directly, no installation. It extracts to a temp dir each run, writes nothing to the registry, and has no uninstaller — just delete the exe.
 
-**Option C — macOS.** Open the `*-mac-<arch>.dmg` and drag the app to *Applications* (`x64` for Intel, `arm64` for Apple Silicon). The build is **unsigned**, so the first launch needs *System Settings → Privacy & Security → Open Anyway*, or right-click → *Open*.
-
-**Option D — Linux.** `chmod +x` the `*-linux-<arch>.AppImage` and run it, or install the `.deb` (`sudo apt install ./…deb`).
+**Option C — macOS and Linux: there is nothing to download.** Releases carry Windows assets only — every one of the twelve releases is `*-setup.exe` + `*-portable.exe` + `latest.yml` + blockmap, and nothing else. `npm run dist:mac` / `npm run dist:linux` are configured here, but each needs its own host (the dmg only builds on macOS, the AppImage / deb on Linux or WSL/Docker), no such artifact has ever been published, and no build from either script has ever been run — so on those platforms this is a source-only project, with the unsigned first-launch warning (Gatekeeper / SmartScreen) applying to whatever you produce yourself.
 
 > Uninstalling never removes `~/.opencodereview/` (your API key and session history live there), so a reinstall keeps working. On Windows you can uninstall from the Start menu, from *Settings → About & Uninstall* inside the app, or from *Settings → Apps*.
 
 > The v0.1.0 assets were renamed in place to `open-code-review-desktop-0.1.0-*.exe` after this project was renamed from `ocr-desktop`; the bytes are unchanged (verified by SHA-256), but the pre-rename download URLs now return 404.
 
-**Option E — from source.**
+**Option D — from source.**
 
 ```bash
 npm install              # downloads the native ocr binary for THIS platform (~55 MB)
@@ -251,9 +249,10 @@ Run these before and after any layout, token, or main-process change. Several re
 
 ## Known limitations
 
-- Git must be on `PATH`. Windows packages are built and verified on Windows x64; macOS dmg builds must run on macOS and Linux AppImage/deb builds on Linux (or WSL/Docker), because each target needs its own host tooling.
+- Git must be on `PATH`. Each target needs its own host tooling: macOS dmgs must be built on macOS, Linux AppImage/deb on Linux (or WSL/Docker), Windows installers on Windows.
+- **What is verified where.** Windows x64 is the only platform verified end to end **and the only one Releases has ever published** (all twelve releases: setup + portable + `latest.yml` + blockmap). On Linux x64 the CLI-facing suites (`audit:service` / `audit:config` / `audit:git` / `audit:providers`), the real-Electron ones (`audit:guards` / `audit:exit` / `audit:e2e`) and the UI matrix (`audit:ui` / `audit:contrast` / `audit:ui-scaled`, headless Chromium under Xvfb) all ran green on 2026-11-03 against `ocr v1.13.4` — that run does **not** cover the Linux packages themselves (`npm run dist:linux`), a real display or GPU, in-app updates, the single-instance lock or the uninstall path. macOS has never been built or run, so treat it as unverified. The numbers and how to reproduce them: [`docs/measurements.md`](docs/measurements.md).
 - **Auto-update applies to the NSIS setup build only.** The portable exe re-extracts to a temp dir each run and has no install root to replace, so it links to the releases page instead. macOS/Linux builds are unsigned against a generic update feed, so treat in-app updates as Windows-installed-build-only for now.
-- Releases must ship `latest.yml` (plus `latest-mac.yml` / `latest-linux.yml` for those platforms) and the `*-setup.exe.blockmap` next to the binaries; without them the updater cannot see a version at all.
+- Releases must ship `latest.yml` and the `*-setup.exe.blockmap` next to the binaries; without them the updater cannot see a version at all. `latest-mac.yml` / `latest-linux.yml` only become a requirement if those platforms are actually built and published, which so far they have never been.
 - Installers are **unsigned**, so SmartScreen (Windows) and Gatekeeper (macOS) will warn on first launch.
 - The CLI exposes no model catalogue, so the model name is still typed by hand — a rejected name makes the vendor turn its accepted names into clickable buttons (see [alibaba/open-code-review#1694](https://github.com/alibaba/open-code-review/issues/1694)).
 - The dev instance and the installed app share one user-data directory, so the **single-instance lock makes whichever starts second exit silently**.

@@ -51,18 +51,19 @@ export const MOVED_MARKER = "[UPSTREAM-MOVED]";
 //
 // The reason is the only failure mode this comparison has: a short pin makes
 // "same commit" and "same first seven characters" the same answer. Upstream
-// moving from `375f64cd6f67…` to `375f64cf…` would then be reported as "与对照表
+// moving from `76ab46ac20f0…` to `76ab46acf…` would then be reported as "与对照表
 // 一致，无需重读" — the one direction this sentence must never be wrong in, since
 // every row of the table would silently be stale. With the whole 40 characters
 // pinned, that case is `moved`: over-reporting drift costs a re-read, under-
 // reporting it costs correctness.
 //
-// The value is upstream `refs/heads/main` as of `v1.13.3`; `docs/OCR-UPSTREAM-SYNC.md`
-// carries the same 40 characters on its fixed "本轮 HEAD 核对" line and the smoke
-// test keeps the two exactly equal.
+// The value is upstream `refs/heads/main` as of `v1.13.4` — the tag commit, which
+// the released binary confirms itself (`ocr --version` prints `v1.13.4 (76ab46a)`);
+// `docs/OCR-UPSTREAM-SYNC.md` carries the same 40 characters on its fixed
+// 「本轮 HEAD 核对」 line and the smoke test keeps the two exactly equal.
 export const PINNED_UPSTREAM = Object.freeze({
-  sha: "375f64cd6f67a48a135da83cfcf59c52669a09cb",
-  tag: "v1.13.3",
+  sha: "76ab46ac20f08a8bd8ac38881a8a826c7cb6495f",
+  tag: "v1.13.4",
 });
 
 // Exactly the rows the sync doc's comparison table wants re-read when upstream
@@ -168,13 +169,13 @@ export const tableRowCoverage = (doc, rows = ROWS_TO_REREAD) => {
 
 // ---- the pin, and the dependency that installs the CLI it pins ------------
 //
-// The sync doc says the desktop wraps upstream `v1.13.3`; `package.json` says
-// `"@alibaba-group/open-code-review": "^1.13.3"`. That is one promise written in
-// two files maintained by different edits, and the two can disagree without
-// anything looking wrong: `^` lets the next `npm install` bring 1.14 while the
-// pin, the five comparison rows and the `UPSTREAM_RESOLVER` simulation all still
-// describe 1.13.3. Today they agree (npm's latest *is* 1.13.3), which is exactly
-// why nothing would notice the day they stop.
+// The sync doc declares one upstream release; `package.json` writes a range for
+// the same package. That is one promise written in two files maintained by
+// different edits, and the two can disagree without anything looking wrong: `^`
+// lets the next `npm install` bring a newer minor while the pin, the five
+// comparison rows and the `UPSTREAM_RESOLVER` simulation all still describe the
+// release this wrapper was read against. Agreement is the common case, which is
+// exactly why nothing would notice the day they stop.
 //
 // So the version in the dependency range is compared to the pinned tag: raising
 // the dependency has to move the pin — and therefore the reading list — with it,
@@ -863,12 +864,17 @@ export const docAuthoringRuleViolations = (doc) => {
 // exist at all.
 export const LEDGER_HEADING = "### 核对通路账";
 
-// The ledger's rows as cell arrays, in document order. `""` (or a doc without
-// that heading) yields no rows rather than rows borrowed from another table.
-export const ledgerRowsIn = (doc) => {
+// A ledger row, as one regex, because two spellings of "looks like a row" is
+// how `ledgerRowsIn` and the contiguity rule below start disagreeing about
+// which lines are in the table at all.
+const LEDGER_ROW = /^\|\s*(\d+)\s*\|/;
+
+// The ledger's own line span: from its heading to the next heading, as
+// `[start, end)` document indexes, or `null` when the doc has no ledger.
+const ledgerRegionOf = (doc) => {
   const lines = String(doc == null ? "" : doc).split(/\r?\n/);
   const start = lines.findIndex((line) => line.trim().startsWith(LEDGER_HEADING));
-  if (start === -1) return [];
+  if (start === -1) return null;
   let end = lines.length;
   for (let index = start + 1; index < lines.length; index += 1) {
     if (/^#{1,4}\s/.test(lines[index])) {
@@ -876,10 +882,82 @@ export const ledgerRowsIn = (doc) => {
       break;
     }
   }
-  return lines
-    .slice(start, end)
-    .filter((line) => /^\|\s*\d+\s*\|/.test(line))
+  return { lines, start, end };
+};
+
+// The ledger's rows as cell arrays, in document order. `""` (or a doc without
+// that heading) yields no rows rather than rows borrowed from another table.
+export const ledgerRowsIn = (doc) => {
+  const region = ledgerRegionOf(doc);
+  if (region === null) return [];
+  return region.lines
+    .slice(region.start, region.end)
+    .filter((line) => LEDGER_ROW.test(line))
     .map((line) => line.split("|").slice(1, -1).map((cell) => cell.trim()));
+};
+
+// ---- one blank line ends the table the reader sees, but not the one we parse ----
+//
+// `ledgerRowsIn` scans the region for lines that look like rows, so it reads
+// *through* a blank line and keeps counting. Markdown does not: GFM ends a table
+// at the first blank line, and what follows has no header row, so those rows
+// render as a paragraph of literal pipes. The two answers differ by exactly the
+// rows below the blank — and the audit is the one that stays green.
+//
+// 第 102 轮 shipped this shape: rows 101 and 102 sat on either side of a blank
+// line, `audit:upstream` counted both, the 「当前状态」 binding passed, and the
+// page GitHub rendered stopped at 101 with 102 printed as text. Nothing was
+// wrong except the document.
+//
+// So the blank line is checked where the parser cannot see its effect: strictly
+// between the ledger's first and last row. A blank line before the header or
+// after the final row is ordinary Markdown (it is what ends the table) and is
+// not this rule's question, and the other tables in this region belong to other
+// rules — a region-wide "no blank lines anywhere" would flag prose spacing and
+// teach whoever sees it to ignore the message.
+export const ledgerTableViolations = (doc) => {
+  const region = ledgerRegionOf(doc);
+  if (region === null) return [];
+  const { lines, start, end } = region;
+
+  const rows = [];
+  for (let index = start; index < end; index += 1) {
+    const hit = LEDGER_ROW.exec(lines[index]);
+    if (hit) rows.push({ index, round: Number(hit[1]) });
+  }
+  if (rows.length === 0) return [];
+  // The table starts at its header, not at its first data row: a blank line
+  // between the header and the body is the same failure one level up — the
+  // reader loses *every* row, while the parser still counts them all.
+  const tableStart = lines
+    .slice(start, end)
+    .findIndex((line) => line.trim().startsWith("|"));
+  const header = tableStart === -1 ? rows[0].index : start + tableStart;
+
+  const violations = [];
+  const last = rows[rows.length - 1].index;
+  let cursor = header + 1;
+  while (cursor < last) {
+    if (lines[cursor].trim() !== "") {
+      cursor += 1;
+      continue;
+    }
+    const blankStart = cursor;
+    while (cursor < last && lines[cursor].trim() === "") cursor += 1;
+    const above = rows.filter((row) => row.index < blankStart);
+    const below = rows.filter((row) => row.index >= cursor);
+    const where = blankStart === cursor - 1 ? `第 ${blankStart + 1} 行` : `第 ${blankStart + 1}–${cursor} 行`;
+    const aboveText = above.length
+      ? `上面读到第 ${above[above.length - 1].round} 轮`
+      : "上面只剩表头，一行正文都读不到";
+    violations.push(
+      `核对通路账的表格被${where}空行截断：${aboveText}，下面第 ${below[0].round}–${below[below.length - 1].round} 轮` +
+        `共 ${below.length} 行 Markdown 不再渲染成表格（空行结束这张表，后面的行没有表头，成了正文里的竖线）；` +
+        "而 ledgerRowsIn 跨过空行，照常数到它们——audit 数到的和读者看到的是两张表。" +
+        "把表格中间的这一行删掉（表前表后的空行是正常收尾，不用动）"
+    );
+  }
+  return violations;
 };
 
 // ---- the human half's sections are counted, not assumed ----

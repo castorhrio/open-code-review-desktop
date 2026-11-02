@@ -1,7 +1,9 @@
-// Contracts verified against @alibaba-group/open-code-review v1.13.3
+// Contracts verified against @alibaba-group/open-code-review v1.13.4
 // (`ocr review --help`, `ocr scan --help`, real `--format json` payloads and the
 // upstream structs in cmd/opencodereview/output.go, internal/model/review.go,
-// internal/llmloop/pool.go, internal/session/{list,manifest}.go).
+// internal/llmloop/pool.go, internal/session/{list,manifest}.go). None of those
+// files moved between v1.13.3 and v1.13.4: the shapes below were last read line by
+// line at v1.13.3 and re-verified against the v1.13.4 binary.
 
 export type ReviewMode = "workspace" | "range" | "commit" | "scan";
 

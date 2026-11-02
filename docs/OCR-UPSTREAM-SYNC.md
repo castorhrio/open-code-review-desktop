@@ -28,14 +28,14 @@
 
 <!-- upstream-pin:start -->
 ```text
-sha 375f64cd6f67a48a135da83cfcf59c52669a09cb
-tag v1.13.3
+sha 76ab46ac20f08a8bd8ac38881a8a826c7cb6495f
+tag v1.13.4
 ```
 <!-- upstream-pin:end -->
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`375f64cd6f67a48a135da83cfcf59c52669a09cb`（第 102 轮：`git ls-remote` 退出码 0，`refs/heads/main` 仍是 `76ab46a`，与第 101 轮同一个 commit；`git ls-remote --tags` 的最高 tag 仍是 `refs/tags/v1.13.3`，npm 仍是 `1.13.3`，所以 pin 不前进；通路：git）**
+**本轮 HEAD 核对：`76ab46ac20f08a8bd8ac38881a8a826c7cb6495f`（第 103 轮：`git ls-remote` 的 TLS 被断开、GitHub API 答上：`refs/heads/main` 仍是 `76ab46a`，与第 101–102 轮同一个 commit；但 `/tags` 里出现了 `v1.13.4`，release 发布于 2026-11-02T15:19:48Z，npm `latest` 同为 `1.13.4`——**tag 前进，pin 跟着前进**；通路：api）**
 
 ### 核对通路账
 
@@ -109,8 +109,8 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 | 99 | 2026-11-02 | git | `216dcf5` / `v1.13.3`，无新内容；npm `1.13.3`；README 指向的每份 .md 都要闭合（`productDocViolations`：围栏闭合、最后一行、表格行、指针 404 四条反向控制）、DoD 头部与「状态」行只许是 locked / live（`dodAuthorityViolations`，draft 词汇与「什么都没写」各判一次红） | — |
 | 100 | 2026-11-02 | git | `216dcf5` / `v1.13.3`，无新内容；npm `1.13.3`；通知条的三条回放进断言（`?notice=1` 恰两行且 CLI 伪装行不进条但仍在抽屉里、`?notice=many` 去重且顺序不动、`?notice=overflow` 恰 `NOTICE_LIMIT` 条且最旧离场），反向控制改成另起一个端口服务 `logSource` 被削弱的 bundle 并要求同一比较变红；新增 `tools/notices-smoke.mjs`（`logSource` / `noticeText` 逐格边界、三种错误实现自测、`src/store.tsx` 调用点必须两个参数）并作为 `audit:notices` 挂进 `audit:static` | — |
 | 101 | 2026-11-02 | git | **上游 HEAD 前进**：`216dcf5` → `76ab46a`（4 个 commit：Go / Node 版本与安全修复、GitHub Action 稳定性、`session show --json` 空表改 `[]`、`file_read_diff` 找不到路径时点名缺哪条）；`git ls-remote --tags` 返回空行（tag 通路本轮没答上来）、npm `1.13.3` 未变，**pin 不前进**；对照表 5 行的上游文件（`resolver.go`、`config_cmd.go`、`llm_cmd.go` / `providers.go`、`failure_class`）一个都没被这四个 commit 碰到，无移植项；新增 `tools/cjk-typography.mjs` + smoke（三条中文排版禁则、三格反向控制、改一个全角句号即点名文件与行号）挂进 `audit:static`，`engines.node` 抬到 `>=22.18` 与类型剥离的真实需求对齐 | — |
-
 | 102 | 2026-11-02 | git | `76ab46a` / `v1.13.3`，无新内容；npm `1.13.3`；两份 README 首屏从能力清单改成产品主意（一句话 + 3–5 条 + 长清单下沉到「已验证行为」/「Verified behaviour」），首屏形状进断言（`firstScreenViolations`：一句话、无 `--参数`、不说「封装」、3–5 条、链接到仍存≥8 条的那一节，逐条反向控制）；`package.json` 的 `description` 同样改口径 | — |
+| 103 | 2026-11-03 | api | **上游 tag 前进**：`v1.13.3` → `v1.13.4`（发布 2026-11-02T15:19:48Z，tag commit 就是第 101 轮已经读过的 `76ab46a`；4 个 commit 与安全修复 / Action 稳定性 / `session show --json` 空表改 `[]` / `file_read_diff` 未命中时点名缺的路径同批）；`git ls-remote` 因 TLS 失败（GnuTLS `-110`），HEAD 与 tag 都由 API 答上、npm `latest` 同为 `1.13.4`，**pin 前进**；对照表 5 行在这一次提交里逐行重读（51 个变更文件不含 `resolver.go`、`config_cmd.go`、`llm_cmd.go` / `providers.go`、`failure_class`，两处 Go 源码改动与本仓的两个消费点对上了）；通路账第 101/102 行之间那个把表截成两段的空行删掉，新增 `ledgerTableViolations` 钉住「表内不许有空行」并补反向控制（含一条证明别的账都看不见它）；升 pin 的那一遍真机验证跑在 Linux x64 上（CLI 层 / 真 Electron / UI 三套全绿，`audit:guards` 先红——它没把「没有报告」当环境问题，重试条件与 `e2e-flow` 对齐后转绿），顺带查出英文 README 在让读者下载 12 个 Release 里从未存在过的 macOS / Linux 包，两份 README 与 `使用说明.md` 的发布面、验证面措辞已对齐 | — |
 
 ### 对照表（上游前进时要重读的五处）
 
@@ -121,11 +121,11 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 **第 46–97 轮上游 HEAD 与 tag 未变**（`375f64c` / `v1.13.3`；第 47–48、52–54 轮只有
 npm 通路可达，第 56 轮 git 超时但 API 可达，第 63–64 轮本文件无通路记录，第 68 轮 git
 超时但 API 可达，第 69–76、79–80、84–85、87、89、91–97 轮 git 可达，第 77 轮本文件无通路记录，第 78、81–83、86、88、90 轮
-git 超时（第 90 轮为 TLS 错误）但 API 可达），所以下表 5 行的
-「最近一次对照」停在第 45 轮是
+git 超时（第 90 轮为 TLS 错误）但 API 可达）。那 52 轮里下表 5 行的
+「最近一次对照」一直停在第 45 轮，这是
 **没有理由重看**，不是忘了看：
 它记录的是「最后一次有人逐行读上游源码」的轮次，而不是「最后一次确认上游没变」的轮次。
-换言之：**停在第 45 轮 = 未重看，不等于欠账**；欠账只有一种——`375f64c` 前进之后没人
+换言之：**停在第 45 轮 = 未重看，不等于欠账**；欠账只有一种——pin 前进之后没人
 重读对应源码。第 50 轮那行（内置服务表为空是否合法）是榜样的写法：它记的是被重读的
 具体行号与 tag，而不是一个「已复核」的戳。
 
@@ -140,13 +140,23 @@ commit 的文件清单也证实这一点——`internal/llm/resolver.go`、`conf
 `providers.go`、`failure_class` 一个都没被改到。这里的 SHA 一律写 7 位前缀（全串只在上面
 三处声明 pin），三个 commit 的清单与结论写在人读区的「当前状态」。
 
+第 103 轮是这条界线的另一半：**tag 第一次真的前进**（`v1.13.3` → `v1.13.4`）。发版的 4 个
+commit 就是第 101 轮已经逐文件读过的那一批，所以本轮重读的不是新改动，而是同一批改动
+第一次变成**被封装的那个发布版本**。`v1.13.3...v1.13.4` 的 51 个变更文件里没有本表任何一行的
+上游文件；两处 Go 源码改动各自有一个本仓消费点要核对，核对结论也各自记在下面那两行里：
+`cmd/opencodereview/session_cmd.go` 只给 `runSessionShow` 的 `--json` 补了空表（本仓不调
+`session show`，只用 `session list`），`internal/tool/file_read_diff.go` 改的是**回给模型的
+tool 结果文本**（`Error: diff not found for: …`、`Diffs exist for: …`），而本仓按行首 `error:`
+分类的两处（`ocr-service.js` 的 `errorLines` 与流式 `emit` 的过滤）读的都是 CLI 的 stderr。
+逐行结论写在下面这张表的最后一列。
+
 | 对照点 | 上游文件 | 人工看什么 | 最近一次对照（轮次 / 日期） |
 | --- | --- | --- | --- |
-| provider 解析顺序 | `internal/llm/resolver.go` | 是否仍按 `cfg.Providers[cfg.Provider]`（原始拼写）读；大小写折叠、回退到 registry 拼写、miss 兜底任一变化都改变设置页「Key 属于哪条」的答案 → 同步改模拟（`UPSTREAM_RESOLVER`）与 `MATCH_RULES` | 第 45 轮 / 2026-10-27（上游 HEAD 未变） |
-| `config set` 的 key 语法 | `cmd/opencodereview/config_cmd.go` | 点名到最后一个点的分段（带点的自定义名）、未配置带点名直接拒绝 | 第 45 轮 / 2026-10-27（上游 HEAD 未变） |
-| 内置服务表 | `ocr llm providers` 输出 | 列、表头、失败时的 stderr 措辞 | 第 45 轮 / 2026-10-27（上游 HEAD 未变） |
-| 内置服务表**为空**是否合法 | `cmd/opencodereview/llm_cmd.go` 的 `runLLMProviders` → `internal/llm/providers.go` 的 `registry` / `ListProviders` | `runLLMProviders` 无条件打印 `Built-in providers:` 表头与 `NAME / PROTOCOL / BASE URL` 列，行来自编译期 `registry` 切片，**一行都没有也不报错、退出码仍为 0**。所以「表读回来是空的」只可能来自装得不完整或我们丢了行——这是 `config-handler.js` 的 `TABLE_HOLLOW` 文案（「CLI 一定有内置服务名，所以这多半是装得不完整」）唯一的外部依据。上游若把 provider 改成可外挂/可配置（空 registry 成为合法状态），这句话就变成错的，`tableSilenceOf` 要跟着改 | 第 50 轮 / 2026-10-27（v1.13.3：`llm_cmd.go:261`、`providers.go:45`） |
-| 运行期失败分类 | 运行 JSON 的 `failure_class` / 每文件 `failure_class` | 枚举值增删（`RunFailureClass` 与 `FailureClass` 是两张表） | 第 45 轮 / 2026-10-27（上游 HEAD 未变） |
+| provider 解析顺序 | `internal/llm/resolver.go` | 是否仍按 `cfg.Providers[cfg.Provider]`（原始拼写）读；大小写折叠、回退到 registry 拼写、miss 兜底任一变化都改变设置页「Key 属于哪条」的答案 → 同步改模拟（`UPSTREAM_RESOLVER`）与 `MATCH_RULES` | 第 103 轮 / 2026-11-03（v1.13.4：`internal/llm/resolver.go` 不在 51 个变更文件里，与 v1.13.3 同一个 commit 的内容，`UPSTREAM_RESOLVER` 与 `MATCH_RULES` 不动） |
+| `config set` 的 key 语法 | `cmd/opencodereview/config_cmd.go` | 点名到最后一个点的分段（带点的自定义名）、未配置带点名直接拒绝 | 第 103 轮 / 2026-11-03（v1.13.4：`cmd/opencodereview/config_cmd.go` 未被这批 commit 改动） |
+| 内置服务表 | `ocr llm providers` 输出 | 列、表头、失败时的 stderr 措辞 | 第 103 轮 / 2026-11-03（v1.13.4：`llm_cmd.go` / `providers.go` 未被改动；`npm run audit:config` 在 1.13.4 的二进制上重跑为绿，见「当前状态」） |
+| 内置服务表**为空**是否合法 | `cmd/opencodereview/llm_cmd.go` 的 `runLLMProviders` → `internal/llm/providers.go` 的 `registry` / `ListProviders` | `runLLMProviders` 无条件打印 `Built-in providers:` 表头与 `NAME / PROTOCOL / BASE URL` 列，行来自编译期 `registry` 切片，**一行都没有也不报错、退出码仍为 0**。所以「表读回来是空的」只可能来自装得不完整或我们丢了行——这是 `config-handler.js` 的 `TABLE_HOLLOW` 文案（「CLI 一定有内置服务名，所以这多半是装得不完整」）唯一的外部依据。上游若把 provider 改成可外挂/可配置（空 registry 成为合法状态），这句话就变成错的，`tableSilenceOf` 要跟着改 | 第 103 轮 / 2026-11-03（v1.13.4：`llm_cmd.go:261`、`providers.go:45` 仍指向同一段代码——这两个文件都不在 `v1.13.3...v1.13.4` 的清单里，所以第 50 轮记下的行号在新 pin 上不需要重找；`TABLE_HOLLOW` 的外部依据不变） |
+| 运行期失败分类 | 运行 JSON 的 `failure_class` / 每文件 `failure_class` | 枚举值增删（`RunFailureClass` 与 `FailureClass` 是两张表） | 第 103 轮 / 2026-11-03（v1.13.4：两张枚举都没有增删——变更清单不含定义 `failure_class` 的文件；唯一改到工具层的是 `file_read_diff` 的未命中文案，那是回给模型的字符串，不落进本仓读 stderr 的两处分类） |
 
 `resolver` 的查找顺序变化**不会**让 `audit:service` 全面变红——它只覆盖上面那几种形状
 （provider 与 registry 拼写不一致、provider 落在 registry 拼写上、provider 指向别的服务）。
@@ -196,29 +206,60 @@ commit 的文件清单也证实这一点——`internal/llm/resolver.go`、`conf
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。搬完这里只留一句
    指针——「本文件只留当前一轮」不是约定而是断言（`previousRoundPointerViolations`）。
 
-## 当前状态（第 102 轮，2026-11-02）
-第 102 轮复核：**上游没有新内容。**`git ls-remote` 退出码 0，`refs/heads/main` 仍是 `76ab46a`
-（与第 101 轮同一个 commit），`git ls-remote --tags` 的最高 tag 仍是 `v1.13.3`，npm 仍是
-`1.13.3`。**pin 不前进，无移植项。**
+## 当前状态（第 103 轮，2026-11-03）
+第 103 轮复核：**上游的发布版本前进了**——`v1.13.3` → `v1.13.4`（发布于 2026-11-02T15:19:48Z）。
+`git ls-remote` 的 TLS 被断开，HEAD 与 tag 都由 GitHub API 答上，npm `latest` 同为 `1.13.4`；
+新 tag 指的正是第 101 轮已经逐文件读过的 `76ab46a`，所以本轮要评估的不是新改动，而是**同一批
+改动第一次成为被封装的那个发布版本**。对照表 5 行在这一次提交里逐行重读完毕（每行的结论与
+依据写在最后一列），**pin 前进**：`PINNED_UPSTREAM`、pin 块、固定行、正文里的第三处声明、
+`package.json` 的 `^1.13.4`，以及 `npm install` 落下来的二进制——它自报
+`open-code-review v1.13.4 (76ab46a) linux/amd64`，与 pin 同一个 commit。
 
-本轮的主题是上一轮简报的 P0-1：README 首屏从「能力清单」改成「产品主意」，并让这个口径有断言。
+- **两处 Go 源码改动都追到了本仓的消费点，「不在对照表里」不等于「与本仓无关」。**
+  `session show --json` 把空表从 `null` 改成 `[]`——本仓不调 `session show`，只用 `session list`；
+  `file_read_diff` 的未命中提示改成点名缺哪条路径（`Error: diff not found for: …`、
+  `Diffs exist for: …`）——那是回给模型的 tool 结果文本，而本仓按行首 `error:` 分类的两处
+  （`ocr-service.js` 的 `errorLines`、流式 `emit` 的过滤）读的都是 CLI 自己的 stderr。
+  所以**无移植项**：四个上游 commit 没有一个改变封装层看得见的内容。
+- **通路账里那个把表截成两段的空行删掉了，并进了断言。** 第 102 轮的账里，第 101 与 102 行之间
+  夹着一个空行：`ledgerRowsIn` 按形状扫这一节，跨过空行照常数到 56 行，而 Markdown 在空行处
+  结束表格——读者看到的表停在第 101 轮，第 102 行渲染成正文里的竖线。新增
+  `ledgerTableViolations`（表内出现空行即红，点名行号与两边的轮次，并说明读者丢掉哪几行），
+  表前表后的空行不算红（那是 Markdown 的正常收尾）。反向控制里最要紧的一条不是「它会红」，
+  而是**别的账都看不见它**：同一份被插入空行的文档，轮次连续、通路/欠账配套、「当前状态」绑定
+  照旧全绿——所以这条断言顺便钉住了它的前提（解析器确实读得穿空行）。
+- **跨平台的那条缺口用一次真实运行补上了一半，并且它当场抓到一个 harness 缺陷。** 升 pin 需要
+  真跑一遍才算验证，而这一轮的开发机是 Linux x64：`npm install` 下来的 1.13.4 二进制自报
+  `v1.13.4 (76ab46a) linux/amd64`，随后 `audit:config` / `audit:service` / `audit:git` /
+  `audit:providers`（真 CLI）、`audit:guards`（24 条）/ `audit:exit`（5 条）/ `audit:e2e`
+  （18 条，真 Electron + 真 CLI）、`audit:ui`（112 条）/ `audit:contrast`（978 处文本，0 处低于
+  AA）/ `audit:ui-scaled`（1.25 与 1.5 各 11 条）全绿，数字与未覆盖面记在
+  [`measurements.md`](measurements.md)。第一条变红的就是 `audit:guards`：这台机器的
+  `chrome-sandbox` 不是 setuid root，Chromium 在写任何报告之前就死在 `setuid_sandbox_host.cc`，
+  而 guards 的重试条件只认「报告里有 `bundle loads` 失败」这一种形状，于是它退出码 2 报
+  「Electron crashed」——`tools/e2e-flow.mjs` 早就把「根本没有报告」当成环境问题重试了，两个
+  harness 对同一种失败的说法不一致，就是「同一台机器上一条绿一条红」的来源。重试条件对齐之后
+  guards 同样全绿。这条记录**不覆盖** Linux / macOS 的打包产物、真显示器与 GPU、以及安装版的
+  自动更新——README 的 Known limitations / 已知限制 现在按这三档写。
+- **同一趟核对撞出一个更硬的问题：英文 README 让读者去下载根本不存在的包。** 12 个 Release
+  逐一看过，资产只有 `*-setup.exe` / `*-portable.exe` / `latest.yml` / blockmap——**从来没发布过
+  一份 macOS 或 Linux 构建**，而 `README.md` 的「Option C — macOS」「Option D — Linux」却写着
+  「打开 `*-mac-<arch>.dmg`」「`chmod +x` 那个 AppImage」，首屏还有一句「Builds ship for Windows,
+  macOS and Linux」。中文版是对的（只有 A 安装版 / B 绿色版 / C 源码）。现在两份都对齐成同一句话：
+  **发布面 = Windows，验证面 = Windows 端到端 + Linux 源码路径，macOS 从未构建也从未运行**；改动的
+  位置是 `README.md`（首屏那段、Install 里合成一段的 C/D、Status、Known limitations）、
+  `README.zh-CN.md`（首屏那段、版本状态、已知限制）与 `使用说明.md`（产物表的两行与「方式 C」的
+  一句前置说明）。这一条不是「加功能」，是把已经在 DoD 里的「非官方诚实」延伸到「发布面诚实」。
+- **把「每次升 pin 必红」的字面量换成真不变式。** smoke 里那条
+  `PINNED_UPSTREAM.tag === "v1.13.3"` 的标题写着「pin 仍指着对照表所依据的那个发布版本」，
+  但它从没打开过文档，而且 pin 每次合法前进都必须手改它——一个每次都要改的断言，最后一定被
+  改成绿的。现在它问的正是标题那句话：5 行的「最近一次对照」都必须引用当前 pin 的 tag，
+  反向控制把其中一行改回上一个 tag，要求红且点名那一行。
 
-- **首屏一句话。** 两份 README 的标题下面现在是一句人话：这是什么、给谁、比终端强在哪。
-  「非官方」声明留在紧跟的一段，实现细节（只做封装、不重写引擎）也还在，但不再是开场白。
-  原来 Status 段那 16–18 条验证记录**下沉**到「已验证行为」/ `Verified behaviour` 一节，
-  首屏只留五条用户能感知的能力，并指过去。
-- **首屏形状进断言（`firstScreenViolations`，`tools/upstream-watch.mjs`）。** 首段必须恰好一句
-  （数句末标点，代码块与 URL 不算）、不得出现 `--参数`（**代码块里的也算**）、不得出现
-  「wrapper」「封装」这类实现口径；第一节必须 3–5 条、必须链接到本文件某一节，且那一节仍
-  存着 ≥8 条——最后一条是这组规则里唯一会安静腐烂的方向：指针还在、节还在，记录被删掉了。
-  每一格配一条反向控制（加第二句、塞 `--preview`、改成 wrapper、删到 1 条、加到 6 条、
-  去掉链接、链接指向不存在的锚点、把那一节清空），两条 README 各问一遍。
-- **`package.json` 的 `description` 同口径。** 从「Desktop wrapper for …」改成一句话说给谁解决
-  什么，`npm view` / 包管理器里看到的也是产品主意而不是实现。
-
-改动只在两份 README、`tools/upstream-watch.mjs` 与它的 smoke、`package.json` 的 `description`，以及本文件；
-评审逻辑、CLI 参数、配置读写路径与运行期行为均未变。
-上一轮（第 101 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-101-轮2026-11-02)，归档之后本文件不留第二份。
+改动只在 `package.json` / `package-lock.json` 的 CLI 版本、`tools/upstream-watch.mjs` 与它的 smoke、
+`tools/electron-guards.mjs` 的沙箱重试条件、两份 README 的验证范围措辞、`docs/measurements.md`，
+以及本文件与归档；评审逻辑、CLI 参数、配置读写路径与运行期行为均未变。
+上一轮（第 102 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-102-轮2026-11-02)，归档之后本文件不留第二份。
 
 ## 上游真变了怎么办（命令驱动，而不是「记得看一眼」）
 ```bash
@@ -233,7 +274,7 @@ pin 前进时，对照表 5 行要在同一个提交里一次性重读完毕；�
 
 ### `upstream:check` 与三处 pin 声明（第三处声明就在这里）
 
-另有 `npm run upstream:check`：先比对 `refs/heads/main` 与本文件固定的整串 40 位 SHA `375f64cd6f67a48a135da83cfcf59c52669a09cb`（正文里引用只写 `375f64c` 前缀是为了好读；这一处与上面的块、下面的固定行同值，`audit:upstream` 三处一起核对）。
+另有 `npm run upstream:check`：先比对 `refs/heads/main` 与本文件固定的整串 40 位 SHA `76ab46ac20f08a8bd8ac38881a8a826c7cb6495f`（正文里引用只写 `76ab46a` 前缀是为了好读；这一处与上面的块、下面的固定行同值，`audit:upstream` 三处一起核对）。
 相等打印一行并注明 `通路：git`；git 不通时自动改走 `api.github.com/commits/main`，
 成功则注明 `通路：api`（两条路问的是同一个 commit）。前进打印醒目提示并逐行列出上表 5 处对照点
 （**不失败**，仍要人读源码）；两条路都失败才明确打印「跳过」，前缀固定为

@@ -39,6 +39,7 @@ import {
   TABLE_HEADER,
   UPSTREAM_HISTORY_DOC,
   classifyGit,
+  comparisonTableRows,
   createRunner,
   describePinDisagreements,
   dependencyPinViolations,
@@ -58,6 +59,7 @@ import {
   humanSectionViolations,
   LEDGER_HEADING,
   ledgerRowsIn,
+  ledgerTableViolations,
   findDocPins,
   findPinShapedCitations,
   findShaCitations,
@@ -219,10 +221,17 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
     PINNED_SHA
   );
   check(
-    "the pin still names the release the doc's table was written against",
-    PINNED_UPSTREAM.tag === "v1.13.3" && /^v\d+\.\d+\.\d+$/.test(PINNED_UPSTREAM.tag),
+    "the pin's tag parses as a version, so the dependency range has something to compare",
+    /^v\d+\.\d+\.\d+$/.test(PINNED_UPSTREAM.tag),
     PINNED_UPSTREAM.tag
   );
+  // The other half of this label — "does the pin still name the release the
+  // comparison table was read against" — is a question about the *doc*, and it
+  // used to be answered here by `tag === "v1.13.3"`. That literal is red on every
+  // legitimate pin advance, so the day the pin moves the honest move is to edit
+  // the literal, and the assertion has stopped asserting anything. The real
+  // question is asked next to the code that reads the table
+  // (`the comparison table was read against the release the pin names`).
 }
 
 /* ---- reading `git ls-remote` output ---- */
@@ -787,13 +796,47 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
     docPins.tag !== null && docPins.tag.tag === PINNED_UPSTREAM.tag,
     JSON.stringify(docPins.tag)
   );
+  // The fifth copy of the pin is not a value but a *claim about reading*: the
+  // comparison table's 「最近一次对照」 column says which round read which row, and
+  // the doc states the answer as a release (`v1.13.4：…`). When the pin moves, the
+  // rows describe the release they were last read against — so a row still citing
+  // the previous tag is the machine-readable shape of "dependency moved, nobody
+  // re-read the row". This is the question the retired `tag === "v1.13.3"` literal
+  // put in its label without ever opening the document.
+  const tableBody = comparisonTableRows(doc).rows;
+  const rowsOffPin = (text) =>
+    comparisonTableRows(text).rows.filter((row) => !row.text.includes(PINNED_UPSTREAM.tag));
+  check(
+    "the comparison table was read against the release the pin names, every row",
+    tableBody.length === ROWS_TO_REREAD.length && rowsOffPin(doc).length === 0,
+    JSON.stringify({
+      rows: tableBody.length,
+      stale: rowsOffPin(doc).map((row) => `第 ${row.line} 行`),
+      want: PINNED_UPSTREAM.tag,
+    })
+  );
+  const staleTagLines = doc.split("\n");
+  const firstRow = tableBody[0];
+  staleTagLines[firstRow.line - 1] = staleTagLines[firstRow.line - 1].replace(
+    PINNED_UPSTREAM.tag,
+    "v1.13.3"
+  );
+  const staleRows = rowsOffPin(staleTagLines.join("\n"));
+  check(
+    "...and one row left citing the previous release goes red, naming that row's line",
+    staleRows.length === 1 &&
+      staleRows[0].line === firstRow.line &&
+      staleTagLines[firstRow.line - 1].includes("v1.13.3"),
+    JSON.stringify({ line: firstRow.line, stale: staleRows.map((row) => row.line) })
+  );
 
   // The pin has a fourth copy, in a different file and a different shape:
-  // `package.json`'s dependency range. The doc says "the desktop wraps v1.13.3",
-  // the dependency says `^1.13.3`, and `^` means the next install may bring 1.14
-  // while the pin, the five rows and the resolver simulation still describe
-  // 1.13.3. The two have to agree *now* — and the failure has to name both
-  // places, because "the dependency moved" is not the interesting half.
+  // `package.json`'s dependency range. The doc declares one release, the
+  // dependency writes a range for the same package, and `^` means the next
+  // install may bring a newer minor while the pin, the five rows and the resolver
+  // simulation still describe the release this wrapper was read against. The two
+  // have to agree *now* — and the failure has to name both places, because "the
+  // dependency moved" is not the interesting half.
   const realPkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
   check(
     "package.json's dependency on the CLI names the version the pin names",
@@ -1247,6 +1290,135 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
     "an empty ledger is red rather than vacuously in agreement",
     ledgerRoundViolations([], "第 82 轮").length === 1,
     JSON.stringify(ledgerRoundViolations([], "第 82 轮"))
+  );
+  /* ---- the ledger is one table for the reader, not just for the parser ----
+   * Every check above asks the parsed rows for a property. None of them can see
+   * a blank line, because `ledgerRowsIn` scans the region for lines that look
+   * like rows and simply steps over it — while GFM *ends the table* there, so
+   * the rows below the blank render as a paragraph of pipes. 第 102 轮 shipped
+   * exactly that: rows 101 and 102 on either side of one blank line, the audit
+   * counting both, GitHub printing the second as text.
+   *
+   * The premise is therefore asserted as loudly as the rule: a mutated doc must
+   * keep counting every row *and* go red. A rule that only fired when the
+   * parser lost the row would be checking something the parser does not do.
+   */
+  const ledgerLines = doc.split("\n");
+  const ledgerRowAt = (round) =>
+    ledgerLines.findIndex((line) => line.startsWith(`| ${round} |`));
+  const liveRounds = ledgerRows.map((row) => Number(row[0]));
+  const liveLast = liveRounds[liveRounds.length - 1];
+  const liveSecondLast = liveRounds[liveRounds.length - 2];
+  check(
+    "the blank-line mutations below are anchored in two real adjacent rows of the live ledger",
+    liveRounds.length >= 2 &&
+      ledgerRowAt(liveLast) !== -1 &&
+      ledgerRowAt(liveSecondLast) !== -1 &&
+      ledgerRowAt(liveLast) === ledgerRowAt(liveSecondLast) + 1,
+    JSON.stringify({ liveLast, liveSecondLast, at: ledgerRowAt(liveLast) })
+  );
+  check(
+    "the live ledger is one contiguous table, with no blank line inside it",
+    ledgerTableViolations(doc).length === 0,
+    ledgerTableViolations(doc).join("；") || `${liveRounds.length} row(s)`
+  );
+  const withBlank = (at, count = 1) =>
+    [
+      ...ledgerLines.slice(0, at),
+      ...Array.from({ length: count }, () => ""),
+      ...ledgerLines.slice(at),
+    ].join("\n");
+  const splitRows = withBlank(ledgerRowAt(liveLast));
+  check(
+    "a blank line between two rows goes red, naming the line and the rounds on both sides",
+    ledgerTableViolations(splitRows).length === 1 &&
+      ledgerTableViolations(splitRows)[0].includes(`第 ${ledgerRowAt(liveLast) + 1} 行`) &&
+      ledgerTableViolations(splitRows)[0].includes(`上面读到第 ${liveSecondLast} 轮`) &&
+      ledgerTableViolations(splitRows)[0].includes(`第 ${liveLast}–${liveLast} 轮共 1 行`),
+    JSON.stringify(ledgerTableViolations(splitRows))
+  );
+  check(
+    "...and the parser still counts every row, which is why the rule has to exist at all",
+    ledgerRowsIn(splitRows).length === ledgerRowsIn(doc).length &&
+      ledgerRowsIn(splitRows).length === liveRounds.length,
+    JSON.stringify({
+      parsedWithBlank: ledgerRowsIn(splitRows).length,
+      parsedLive: ledgerRowsIn(doc).length,
+    })
+  );
+  // The hole is only real if nothing else saw it. Re-ask the split doc every
+  // other question the audit puts to the ledger — rounds consecutive, 通路/欠账
+  // paired, the last row bound to the commit's round, 「当前状态」 bound to that
+  // row — and they all stay green, which is exactly how 第 102 轮 shipped a
+  // table GitHub rendered as two.
+  const splitParsed = ledgerRowsIn(splitRows);
+  const splitRounds = splitParsed.map((row) => Number(row[0]));
+  const splitGaps = splitRounds.slice(1).filter((round, index) => round !== splitRounds[index] + 1);
+  const splitDebtBad = splitParsed.filter(([, , via, , debt]) => {
+    if (!["git", "api", "npm", "none"].includes(via)) return true;
+    return debt.includes(DEBT_MARKER) !== (via === "npm" || via === "none");
+  });
+  const splitBinding = ledgerRoundViolations(
+    splitRounds,
+    `fix: 一处改动（第 ${liveLast} 轮上游核对：无新内容）`
+  );
+  check(
+    "...and no other ledger question sees the blank, which is the hole this rule closes",
+    splitGaps.length === 0 &&
+      splitDebtBad.length === 0 &&
+      splitBinding.length === 0 &&
+      humanSectionViolations(splitRows).join("\n") === humanSectionViolations(doc).join("\n") &&
+      ledgerTableViolations(splitRows).length === 1,
+    JSON.stringify({ gaps: splitGaps, debt: splitDebtBad.length, binding: splitBinding })
+  );
+  check(
+    "...and the sentence says what to do, so 'two tables' does not read as a parsing bug",
+    ledgerTableViolations(splitRows).length === 1 &&
+      ledgerTableViolations(splitRows)[0].includes("删掉"),
+    JSON.stringify(ledgerTableViolations(splitRows))
+  );
+  // Two shapes the rule must NOT fire on, or it becomes noise a reader learns to
+  // ignore: the blank line that legitimately ends a table, and the blank prose
+  // spacing above the header.
+  const lastRowEnd = ledgerRowAt(liveLast);
+  const afterTable = withBlank(lastRowEnd + 1);
+  check(
+    "a blank line after the ledger's last row is normal Markdown, not a broken table",
+    ledgerTableViolations(afterTable).length === 0,
+    JSON.stringify(ledgerTableViolations(afterTable))
+  );
+  const headerAt = ledgerLines.findIndex(
+    (line, index) => index > ledgerLines.findIndex((l) => l.startsWith(LEDGER_HEADING)) && line.trim().startsWith("|")
+  );
+  check(
+    "...and so is the blank line above the header",
+    ledgerTableViolations(withBlank(headerAt)).length === 0,
+    JSON.stringify({ headerAt, violations: ledgerTableViolations(withBlank(headerAt)) })
+  );
+  const underHeader = withBlank(headerAt + 2);
+  check(
+    "a blank line directly under the header is the worse shape: the reader loses every row, and the sentence says so",
+    ledgerTableViolations(underHeader).length === 1 &&
+      ledgerTableViolations(underHeader)[0].includes("只剩表头") &&
+      ledgerTableViolations(underHeader)[0].includes(`共 ${liveRounds.length} 行`),
+    JSON.stringify(ledgerTableViolations(underHeader))
+  );
+  // One accidental double blank is one defect, so it is one sentence — and it
+  // names the range, because "第 112 行" and "第 113 行" both being reported for
+  // the same stray Enter keypress reads like two problems to fix.
+  const doubled = withBlank(ledgerRowAt(liveLast), 2);
+  check(
+    "two consecutive blank lines are one violation naming the range",
+    ledgerTableViolations(doubled).length === 1 &&
+      ledgerTableViolations(doubled)[0].includes(
+        `第 ${ledgerRowAt(liveLast) + 1}–${ledgerRowAt(liveLast) + 2} 行`
+      ),
+    JSON.stringify(ledgerTableViolations(doubled))
+  );
+  check(
+    "a doc with no ledger at all answers 'no violation', not a borrowed table",
+    ledgerTableViolations("### 别的标题\n| 1 | a | b |\n| 2 | c | d |\n").length === 0,
+    JSON.stringify(ledgerTableViolations("### 别的标题\n| 1 | a | b |\n| 2 | c | d |\n"))
   );
   // The reading list is generated from `ROWS_TO_REREAD`; the table is hand-
   // written. Asking "does each label appear somewhere in the doc" (the previous

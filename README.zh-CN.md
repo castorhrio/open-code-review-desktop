@@ -4,7 +4,7 @@
 
 给想让 AI 真去审一遍代码、却不想在终端里和一堆参数较劲的开发者：选好分支、提交或整个代码库，先看清会审到哪些文件、要花多少 token，再把结果当成一份文档来读。
 
-审查引擎是官方 [`alibaba/open-code-review`](https://github.com/alibaba/open-code-review) CLI（`ocr`，45k+ star 的 AI 代码审查引擎）的**未经修改**二进制：审查规则与提示词都来自它，本项目不另写一套。本应用**非官方**——不是阿里巴巴的项目，也未获其背书；构建覆盖 Windows、macOS 与 Linux。
+审查引擎是官方 [`alibaba/open-code-review`](https://github.com/alibaba/open-code-review) CLI（`ocr`，45k+ star 的 AI 代码审查引擎）的**未经修改**二进制：审查规则与提示词都来自它，本项目不另写一套。本应用**非官方**——不是阿里巴巴的项目，也未获其背书；发布只出 **Windows** 包（安装版 + 免安装版），macOS / Linux 的打包脚本在本仓库里，但从来没有产出过、也从来没有跑通过一份非 Windows 构建。
 
 开发、打包、安装的完整细节见 [`使用说明.md`](使用说明.md)。
 
@@ -12,7 +12,7 @@
 
 ## 版本状态
 
-`v0.1.13`（最新），对照 `ocr v1.13.3`，在 Windows x64 上验证。
+`v0.1.13`（最新），对照 pin 住的 CLI `ocr v1.13.4`。验证面在各平台并不一样：**Windows x64 是唯一端到端验证过的平台，也是 Releases 唯一发布过的平台**（安装版 + 免安装版）；2026-11-03 在 Linux x64 上，CLI 层、真 Electron 与 UI 那几套对同一个二进制全绿，但**没有产出、也没有安装过任何 Linux 包**（没覆盖到哪几处写在下面「已知限制」里）；**macOS 从未构建、从未运行**。
 
 今天可以依赖的是这几件事：
 
@@ -125,9 +125,10 @@ preload.js               contextBridge 接口
 
 ## 已知限制
 
-- 只在 Windows x64 上构建并验证过；需要 `PATH` 上有 Git。
+- 需要 `PATH` 上有 Git。每个目标要各自的构建环境：macOS dmg 必须在 macOS 上构建，Linux AppImage / deb 在 Linux（或 WSL / Docker），Windows 安装包在 Windows。
+- **各平台验证到哪一层。** Windows x64 是唯一端到端验证过的平台，**也是 Releases 唯一发布过的平台**（迄今 12 个 Release 全是 setup + portable + `latest.yml` + blockmap）。Linux x64 上，CLI 层（`audit:service` / `audit:config` / `audit:git` / `audit:providers`）、真 Electron（`audit:guards` / `audit:exit` / `audit:e2e`）与 UI 那几套（`audit:ui` / `audit:contrast` / `audit:ui-scaled`，Xvfb 下的无头 Chromium）在 2026-11-03 对 `ocr v1.13.4` 全绿——这一次**不覆盖** Linux 打包产物本身（没跑 `npm run dist:linux`）、真显示器与 GPU、应用内更新、单实例锁与卸载路径。macOS 从未构建、从未运行，按完全未验证对待。数字与复现方式见 [`docs/measurements.md`](docs/measurements.md)。
 - **自动更新只对 NSIS 安装版生效。** portable 每次解压到临时目录，没有可替换的安装根，只能跳下载页。
-- 每次发版必须把 `latest.yml` 与 `*-setup.exe.blockmap` 一起传到 Release，否则更新器根本看不到有版本可更。
+- 每次发版必须把 `latest.yml` 与 `*-setup.exe.blockmap` 一起传到 Release，否则更新器根本看不到有版本可更；`latest-mac.yml` / `latest-linux.yml` 要等到那两个平台真的构建并发布时才是必须项。
 - 安装包**未做代码签名**，首次运行会有 SmartScreen 提示。
 - CLI 不提供模型目录接口，模型名仍需手填；填错时服务商返回的名字会被做成可点按钮（已配置的服务仍要靠一次失败测试才知道可用模型名）。上游提议：[alibaba/open-code-review#1694](https://github.com/alibaba/open-code-review/issues/1694)。
 - 开发实例与安装版共用同一份用户数据，**单实例锁会让后启动的窗口静默退出**。
