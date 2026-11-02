@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { toast } from "sonner";
 import { api, type Provider } from "@/lib/api";
 import { cliFailure, coverageOf, manifestBudgetExceeded, needsContinuation, reviewedCommit, sessionFileRef, sessionState, terminalState } from "@/lib/format";
+import { noticeText } from "@/lib/notices";
 import { intOrEmpty, MODE_META, resumableMode, validateSpec } from "@/lib/spec";
 import type {
   AppInfo,
@@ -157,6 +158,9 @@ export function specFrom(f: FormState, repoDir: string, resumeId?: string): Spec
   return { ...f, mode: "range", from: s.diff_from || "", to: s.diff_to || "" };
 }
 
+/** How many notices the bar may hold at once — see `pushNotice`. */
+export const NOTICE_LIMIT = 3;
+
 interface Store {
   view: View;
   setView: (v: View) => void;
@@ -184,6 +188,9 @@ interface Store {
   cancelRun: () => Promise<void>;
   log: string[];
   clearLog: () => void;
+  /** Log lines the main process marked as notices, newest last. */
+  notices: string[];
+  dismissNotice: (text: string) => void;
   result: RunResult | null;
   resultOrigin: ResultOrigin | null;
   comments: Finding[];
@@ -232,6 +239,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [runLabel, setRunLabel] = useState("");
   const [runResumable, setRunResumable] = useState(true);
   const [log, setLog] = useState<string[]>([]);
+  const [notices, setNotices] = useState<string[]>([]);
   const [result, setResult] = useState<RunResult | null>(null);
   const [resultOrigin, setResultOrigin] = useState<ResultOrigin | null>(null);
   const [resume, setResume] = useState<Store["resume"]>(null);
@@ -422,8 +430,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setRunning(false);
   }, []);
 
+  /**
+   * The bar holds at most a few sentences: they are rare by construction (a
+   * launch that dropped queued events, a probe that threw), so a stack of them
+   * means something is wrong in a loop, and a bar that can grow without bound
+   * would push the whole app down the window.
+   *
+   * A repeat of the same sentence is not a second fact, so it is not added
+   * twice. Dismissing one is the only way it leaves, and it does *not* remove
+   * the line from the drawer: `clearLog` clears the log, not the notices, and
+   * vice versa — the drawer is the record, the bar is the interruption.
+   */
+  const pushNotice = useCallback((text: string) => {
+    setNotices((n) => (n.includes(text) ? n : [...n, text].slice(-NOTICE_LIMIT)));
+  }, []);
+
   useEffect(() => {
-    const offLog = api.onLog(({ line }) => setLog((l) => [...l.slice(-400), line]));
+    const offLog = api.onLog(({ line }) => {
+      setLog((l) => [...l.slice(-400), line]);
+      // The channel and the `{ line }` payload are unchanged; a marked line is
+      // also shown as a notice, because a sentence about the app's own failure
+      // cannot depend on the reader opening a collapsed drawer.
+      const notice = noticeText(line);
+      if (notice) pushNotice(notice);
+    });
     const offProgress = api.onProgress(({ id, progress: p }) => {
       if (runId.current && id === runId.current) setProgress(p);
     });
@@ -503,7 +533,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       offProgress();
       offExit();
     };
-  }, [applyResult, stopTimer]);
+  }, [applyResult, pushNotice, stopTimer]);
 
   const runSpec = useCallback(
     async (spec: Spec) => {
@@ -830,6 +860,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     cancelRun,
     log,
     clearLog: () => setLog([]),
+    notices,
+    dismissNotice: (text) => setNotices((n) => n.filter((t) => t !== text)),
     result,
     resultOrigin,
     comments,

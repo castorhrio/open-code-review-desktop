@@ -2,7 +2,7 @@
 
 # Open Code Review 桌面版
 
-[`alibaba/open-code-review`](https://github.com/alibaba/open-code-review)（`ocr`）的**非官方 Windows 桌面界面**。`ocr` 是阿里巴巴开源的 AI 代码审查 CLI，45k+ star。
+[`alibaba/open-code-review`](https://github.com/alibaba/open-code-review)（`ocr`）的**非官方（unofficial）Windows 桌面界面**——不是阿里巴巴的项目，也未获其背书。`ocr` 是阿里巴巴开源的 AI 代码审查 CLI，45k+ star。
 
 审查引擎是**未经修改的官方 `ocr` 二进制**。本项目只做封装：拼命令行、流式读进度、解析 JSON，并把范围确认、成本控制、问题分级、历史续跑做成图形界面。这里不重新实现任何审查逻辑。
 

@@ -15,6 +15,25 @@ export const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "t
 
 const require = createRequire(import.meta.url);
 const ocr = require(path.join(ROOT, "ocr-service.js"));
+const wiring = require(path.join(ROOT, "main-wiring.js"));
+
+/**
+ * The two sentences `main-wiring.js` writes when the app could not do
+ * something, produced by *calling* it rather than transcribed here.
+ *
+ * Both are `run:log` lines carrying a marker prefix, and the renderer has to
+ * lift the same text into an on-screen notice. Transcribing the sentences
+ * would let the fixture and the UI agree with each other while both disagreed
+ * with the main process — which is the failure mode the notice bar exists to
+ * end, so the fixture asks the producer.
+ */
+export const NOTICE_LINES = (() => {
+  const lines = [];
+  const send = (_channel, payload) => lines.push(payload.line);
+  wiring.reportSenderLoss({ lost: 3, limit: 200, send });
+  wiring.reportProbeError({ message: "Error: spawn ocr ENOENT", send });
+  return lines;
+})();
 
 /**
  * stderr from one real single-file review (`ocr review` on a throwaway repo:
@@ -651,6 +670,7 @@ window.api = (() => {
   const LINES = LONG ? ${JSON.stringify(longRunMilestones())} : ${JSON.stringify(runMilestones())};
   let progressCb = null;
   let logCb = null;
+  let noticeSent = false;
   let exitCb = null;
   // The payload a completed review answers with on stdout. Everything the app
   // shows after a run comes from this shape, so the success transition is only
@@ -1191,7 +1211,19 @@ window.api = (() => {
   setUpdateEnabled: async () => true,
   openReleases: async () => true,
   onUpdateState: () => () => {},
-  onLog: (cb) => { logCb = cb; return () => { if (logCb === cb) logCb = null; }; },
+  // ?notice=1 is a launch where the main process had something to say about
+  // work it could not do: the bounded event queue dropped lines before the
+  // window was ready, and the version probe threw. Both arrive as marked
+  // run:log lines - the channel is unchanged - and the app has to show them
+  // without being asked, because the drawer they still land in starts collapsed.
+  onLog: (cb) => {
+    logCb = cb;
+    if (q.get("notice") === "1" && !noticeSent) {
+      noticeSent = true;
+      ${JSON.stringify(NOTICE_LINES)}.forEach((line, i) => setTimeout(() => logCb && logCb({ id: "run-1", line }), 80 + i * 120));
+    }
+    return () => { if (logCb === cb) logCb = null; };
+  },
   onExit: (cb) => { exitCb = cb; return () => { if (exitCb === cb) exitCb = null; }; },
   onProgress: (cb) => { progressCb = cb; return () => { if (progressCb === cb) progressCb = null; }; },
   onMenuOpenRepo: () => () => {},

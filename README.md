@@ -2,7 +2,7 @@
 
 # Open Code Review Desktop
 
-An **unofficial cross-platform desktop GUI** for [`alibaba/open-code-review`](https://github.com/alibaba/open-code-review) (`ocr`) — Alibaba's AI code review CLI, 45k+ stars. Ships for **Windows, macOS and Linux**.
+An **unofficial cross-platform desktop GUI** for [`alibaba/open-code-review`](https://github.com/alibaba/open-code-review) (`ocr`) — Alibaba's AI code review CLI, 45k+ stars. It is **not an Alibaba project and is not endorsed by it**. Ships for **Windows, macOS and Linux**.
 
 The review engine is the official, **unmodified** `ocr` binary. This project only wraps it: it builds the command line, streams progress, parses the JSON output, and gives you a GUI for scoping, cost control, findings triage, and session history. No review logic is reimplemented here.
 

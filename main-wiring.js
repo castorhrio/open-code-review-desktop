@@ -43,6 +43,18 @@
 
 const RUN_LOG = "run:log";
 
+/**
+ * The marker the renderer turns into an on-screen notice (`src/lib/notices.ts`).
+ *
+ * These two sentences are the ones the app says about work *it* could not do,
+ * and both were only ever written into the run log — a drawer that starts
+ * collapsed and that a reader has no reason to open when the app looks fine.
+ * The marker does not change the channel or the `{ line }` payload; it is a
+ * prefix in the text, so the drawer still shows the line verbatim and the
+ * renderer can lift the same sentence into a bar the reader can close.
+ */
+const NOTICE_MARK = "[notice]";
+
 const isSender = (send) => typeof send === "function";
 
 /** The bound as a sentence fragment, or `null` when it is not a usable number.
@@ -72,8 +84,8 @@ const reportSenderLoss = (options) => {
   const bound = boundOf(opts.limit);
   const line =
     bound === null
-      ? `[ui] 窗口就绪前有 ${lost} 条事件超出缓冲上限，已丢弃最早的那些`
-      : `[ui] 窗口就绪前有 ${lost} 条事件超出缓冲上限（${bound} 条），已丢弃最早的那些`;
+      ? `${NOTICE_MARK} 窗口就绪前有 ${lost} 条事件超出缓冲上限，已丢弃最早的那些`
+      : `${NOTICE_MARK} 窗口就绪前有 ${lost} 条事件超出缓冲上限（${bound} 条），已丢弃最早的那些`;
   opts.send(RUN_LOG, { line });
   return true;
 };
@@ -98,7 +110,7 @@ const reportProbeError = (options) => {
   // An empty message would make the line say "版本探测失败：" and nothing else,
   // which reads as a bug in the logger rather than as a failed probe.
   const detail = typeof opts.message === "string" && opts.message.trim() ? opts.message : "未知错误";
-  opts.send(RUN_LOG, { line: `[app:info] 版本探测失败：${detail}` });
+  opts.send(RUN_LOG, { line: `${NOTICE_MARK} 版本探测失败：${detail}` });
   return true;
 };
 

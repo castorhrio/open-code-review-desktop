@@ -786,6 +786,12 @@ export function SettingsPanel() {
             <InfoRow label="安装目录" value={info?.installDir || "（免安装版运行在临时目录）"} mono />
             <InfoRow label="配置目录" value={info?.configPath || "—"} mono />
           </dl>
+          {/* The one place a reader looks to answer "what is this thing": the
+              app must say there and in the READMEs that it is unofficial and
+              unrelated to Alibaba, not only in a license notice. */}
+          <p className="mt-3 text-meta text-muted">
+            非官方（unofficial）桌面客户端，封装未经修改的官方 <code className="font-mono">ocr</code> 二进制；与阿里巴巴集团无隶属关系，也未获其背书。
+          </p>
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <Button variant="outline" size="sm" disabled={!info?.installDir} onClick={() => void openInstallDir()}>
               <FolderOpen className="size-3.5" />

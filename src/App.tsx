@@ -6,6 +6,7 @@ import { useStore } from "@/store";
 import { NavRail } from "@/components/NavRail";
 import { TopBar } from "@/components/TopBar";
 import { LogDrawer } from "@/components/LogDrawer";
+import { NoticeBar } from "@/components/NoticeBar";
 import { ReviewPanel } from "@/components/ReviewPanel";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { ResultsPanel } from "@/components/ResultsPanel";
@@ -30,6 +31,10 @@ export function App() {
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar />
         <UpdateBanner />
+        {/* Above the working area and outside <main>: the main process's two
+            "could not do this" sentences used to live only in the run log,
+            which is collapsed unless something already looks wrong. */}
+        <NoticeBar />
         <main className="min-h-0 flex-1 overflow-hidden bg-canvas">
           {/* One motion, for the one state change the app makes constantly: which
               view is on screen. It used to hard-swap, so 审查 → 结果 → 历史 read
