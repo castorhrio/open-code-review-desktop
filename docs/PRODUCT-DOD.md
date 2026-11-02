@@ -30,12 +30,16 @@
 
 ## Definition of Done（v0.1.x 可航运）
 
-- [ ] **非官方诚实**：README / 关于页 / 安装说明显著写明 unofficial；不冒充阿里巴巴官方产品
-- [ ] **引擎未改**：审查逻辑零分叉；仅拼 CLI、流式日志、解析 JSON、GUI
-- [ ] **上游同步**：`docs/OCR-UPSTREAM-SYNC.md` pin 与 `npm run audit:upstream` 绿；跟进上游 tag 有记录（当前 pin v1.13.3 / 约定 SHA）
-- [ ] **主路径可演示**：四范围 + `--preview`；成本护栏；完成/部分/失败/警告徽章；预算截断不显示「干净」；续跑仅在 CLI 支持的模式显示
-- [ ] **航运资产**：`v0.1.13`（或更新）`*-setup.exe` / portable 可装可启；内置二进制可达；未签名 SmartScreen 有说明
-- [ ] **安全底线**：Key 不进本程序副本；`asar` 保持 false（spawn 契约）；发版密钥扫描绿
+每条前面那个 `DOD-<n>：` 是稳定 ID，`npm run audit:upstream` 靠它数「哪几条还没勾」；勾上一条时
+必须同时写「证据：<仓内路径>」，指向仓里那份记录（`tools/upstream-watch.mjs` 的
+`dodCheckboxViolations`）。ID 与勾选状态以 scheduler 侧同源副本为准，编码侧只补 ID、不改勾选。
+
+- [ ] DOD-1：**非官方诚实**：README / 关于页 / 安装说明显著写明 unofficial；不冒充阿里巴巴官方产品
+- [ ] DOD-2：**引擎未改**：审查逻辑零分叉；仅拼 CLI、流式日志、解析 JSON、GUI
+- [ ] DOD-3：**上游同步**：`docs/OCR-UPSTREAM-SYNC.md` pin 与 `npm run audit:upstream` 绿；跟进上游 tag 有记录（当前 pin v1.13.3 / 约定 SHA）
+- [ ] DOD-4：**主路径可演示**：四范围 + `--preview`；成本护栏；完成/部分/失败/警告徽章；预算截断不显示「干净」；续跑仅在 CLI 支持的模式显示
+- [ ] DOD-5：**航运资产**：`v0.1.13`（或更新）`*-setup.exe` / portable 可装可启；内置二进制可达；未签名 SmartScreen 有说明
+- [ ] DOD-6：**安全底线**：Key 不进本程序副本；`asar` 保持 false（spawn 契约）；发版密钥扫描绿
 
 ---
 

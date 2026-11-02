@@ -16,14 +16,17 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
+  EXPLICIT_DOCS,
   LINE_START_FORBIDDEN,
+  REQUIRED_DOCS,
   docTypographyViolations,
   formatViolation,
+  typographyCoverageViolations,
   typographyTargets,
   typographyViolations,
   visibleText,
 } from "./cjk-typography.mjs";
-import { README_FILES } from "./upstream-watch.mjs";
+import { PRODUCT_DOD_DOC, README_FILES } from "./upstream-watch.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 
@@ -155,7 +158,9 @@ const rules = (violations) => violations.map((violation) => violation.rule);
     { path: "README.md", text: "see [the DoD](docs/PRODUCT-DOD.md) and [notes](docs/notes.md#top)" },
     { path: "README.zh-CN.md", text: "见 [`docs/PRODUCT-DOD.md`](docs/PRODUCT-DOD.md)" },
   ];
-  const targets = typographyTargets(fake);
+  // `[]` for the explicit list: this block is about the derivation alone, and
+  // the real list is asserted in section 6.
+  const targets = typographyTargets(fake, []);
   check(
     "the target list is the two READMEs plus every relative .md they point at, deduped",
     JSON.stringify(targets) === JSON.stringify(["README.md", "docs/PRODUCT-DOD.md", "docs/notes.md", "README.zh-CN.md"]),
@@ -163,7 +168,7 @@ const rules = (violations) => violations.map((violation) => violation.rule);
   );
 
   // An external link is not ours to read, and a target reached twice is one file.
-  const external = typographyTargets([{ path: "README.md", text: "[upstream](https://github.com/alibaba/open-code-review/blob/main/README.md)" }]);
+  const external = typographyTargets([{ path: "README.md", text: "[upstream](https://github.com/alibaba/open-code-review/blob/main/README.md)" }], []);
   check(
     "...and an external link is not a document this repository owns",
     JSON.stringify(external) === JSON.stringify(["README.md"]),
@@ -171,14 +176,14 @@ const rules = (violations) => violations.map((violation) => violation.rule);
   );
 
   const files = { "README.md": "clean", "docs/broken.md": "好的，然后中文,中文" };
-  const docViolations = docTypographyViolations([{ path: "README.md", text: "见 [broken](docs/broken.md)" }], (target) => files[target] ?? null);
+  const docViolations = docTypographyViolations([{ path: "README.md", text: "见 [broken](docs/broken.md)" }], (target) => files[target] ?? null, []);
   check(
     "a pointer to a broken document is reported against that document and its line",
     docViolations.length === 1 && docViolations[0].file === "docs/broken.md" && docViolations[0].line === 1,
     JSON.stringify(docViolations)
   );
 
-  const missing = docTypographyViolations([{ path: "README.md", text: "见 [gone](docs/gone.md)" }], () => null);
+  const missing = docTypographyViolations([{ path: "README.md", text: "见 [gone](docs/gone.md)" }], () => null, []);
   check(
     "...and a target that cannot be read is a violation, not a silent skip",
     missing.length === 1 && missing[0].rule === "无法读取" && missing[0].file === "docs/gone.md",
@@ -238,7 +243,52 @@ const rules = (violations) => violations.map((violation) => violation.rule);
   }
 }
 
-/* ---- 6. the gate is wired into the suite that runs ----
+/* ---- 6. the net under the derivation: the bar cannot fall out of the set ----
+ *
+ * The target list is derived from the READMEs, which is the right default — a
+ * new document nobody remembered to add is exactly the failure that derivation
+ * prevents. But it also means a document leaves the set the moment a README
+ * stops linking it, and `docs/PRODUCT-DOD.md` is the one document whose absence
+ * would be a real blind spot: it is the bar the next change comes from.
+ *
+ * So the question is asked with the links taken away. Asking "is it in the
+ * list" would pass for the wrong reason today (a README links it), and would
+ * stay green while the explicit list was emptied.
+ */
+{
+  const readmes = README_FILES.map((name) => ({ path: name, text: fs.readFileSync(path.join(ROOT, name), "utf8") }));
+  const stripped = readmes.map(({ path: source, text }) => ({
+    path: source,
+    text: text.replace(/\]\([^)\s]+\.md(?:#[^)]*)?\)/g, "]"),
+  }));
+
+  check(
+    "the explicit list holds the bar, and the live documents pass the coverage rule",
+    EXPLICIT_DOCS.includes(PRODUCT_DOD_DOC) &&
+      REQUIRED_DOCS.includes(PRODUCT_DOD_DOC) &&
+      typographyCoverageViolations(readmes).length === 0,
+    JSON.stringify({ explicit: EXPLICIT_DOCS, violations: typographyCoverageViolations(readmes) })
+  );
+
+  // The premise of the control below: stripping really does remove the link, so
+  // the DoD is out of the derived list and only the explicit list can put it
+  // back. Without this, "it is still covered" would prove nothing.
+  check(
+    "...and with the README links stripped the DoD is out of the derived list, so only the explicit list can put it back",
+    !typographyTargets(stripped, []).includes(PRODUCT_DOD_DOC) &&
+      typographyTargets(stripped).includes(PRODUCT_DOD_DOC),
+    JSON.stringify({ withoutExplicit: typographyTargets(stripped, []), withExplicit: typographyTargets(stripped) })
+  );
+
+  const emptied = typographyCoverageViolations(readmes, []);
+  check(
+    "...and emptying the explicit list goes red, naming the document that fell out",
+    emptied.length === 1 && emptied[0].includes(PRODUCT_DOD_DOC) && emptied[0].includes("显式清单没兜住"),
+    emptied.join("；") || "no violation"
+  );
+}
+
+/* ---- 7. the gate is wired into the suite that runs ----
  *
  * Same shape as the `audit:upstream` gate check: the script has to point at the
  * CLI *and* this file, and `audit:static` has to run it, or the rules above are

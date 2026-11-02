@@ -50,6 +50,11 @@ import {
   docPointers,
   productDocViolations,
   dodAuthorityViolations,
+  dodCheckboxViolations,
+  dodChecklist,
+  dodEvidenceTarget,
+  DOD_CHECKBOX_IDS,
+  DOD_EVIDENCE_MARK,
   PRODUCT_DOD_DOC,
   DOD_DRAFT_TERMS,
   README_FILES,
@@ -3180,6 +3185,173 @@ if (!flags.selftest && !flags.noRespawn) {
       dodAuthorityViolations(silent).length === 1 &&
       dodAuthorityViolations(silent)[0].includes("「状态」一行没有写明"),
     dodAuthorityViolations(silent).join("；") || "no violation"
+  );
+}
+
+/* ---- the bar's checkboxes are readable, and a tick has to be earned ----
+ * The DoD is the only input to the next round, so "which items are still open"
+ * has to be a thing the audit can answer — and a tick has to point at a record
+ * inside this repository, because the coding side may not declare itself done.
+ * The live document is all-unchecked, which is exactly why the interesting
+ * controls are the ones that *add* a tick: a rule that only ever sees `[ ]`
+ * would pass by never being asked.
+ */
+{
+  const doc = fs.readFileSync(path.join(ROOT, PRODUCT_DOD_DOC), "utf8");
+  const exists = (target) => fs.existsSync(path.join(ROOT, target));
+  const lines = doc.split(/\r?\n/);
+  const items = dodChecklist(doc);
+
+  check(
+    "the DoD's checkbox lines all carry a stable ID, and the locked set is still there",
+    items.length === DOD_CHECKBOX_IDS.length &&
+      items.map((item) => item.id).join(",") === DOD_CHECKBOX_IDS.join(","),
+    JSON.stringify(items.map((item) => ({ line: item.line, id: item.id, state: item.state })))
+  );
+  check(
+    "the live DoD passes the checkbox rules (no tick without evidence, no third state)",
+    dodCheckboxViolations(doc, exists).length === 0,
+    dodCheckboxViolations(doc, exists).join("；") || "no violation"
+  );
+
+  // (a) an item that lost its ID: the line is still a checkbox, so the count
+  // stays right and only the ID rule can see it.
+  const first = items[0];
+  const noId = lines
+    .map((line, index) => (index + 1 === first.line ? line.replace(`${first.id}：`, "") : line))
+    .join("\n");
+  const noIdViolations = dodCheckboxViolations(noId, exists);
+  // Two sentences, and both are true: the line has no ID, *and* the locked set
+  // is now short one ID. Reporting only the first would let a reader think the
+  // item is still counted somewhere.
+  check(
+    "...and an item that lost its ID goes red, naming the line and the ID that left the set",
+    noIdViolations.length === 2 &&
+      noIdViolations.some((v) => v.includes(`第 ${first.line} 行`) && v.includes("没有稳定 ID")) &&
+      noIdViolations.some((v) => v.includes(`少了 ${first.id}`)) &&
+      dodChecklist(noId).length === items.length,
+    noIdViolations.join("；") || "no violation"
+  );
+
+  // (b) a tick with nothing behind it — the shape this rule exists for.
+  const ticked = lines
+    .map((line, index) => (index + 1 === first.line ? line.replace("- [ ]", "- [x]") : line))
+    .join("\n");
+  const tickedViolations = dodCheckboxViolations(ticked, exists);
+  check(
+    "...and ticking an item with no evidence goes red, naming the item and the missing mark",
+    tickedViolations.length === 1 &&
+      tickedViolations[0].includes(first.id) &&
+      tickedViolations[0].includes(DOD_EVIDENCE_MARK) &&
+      tickedViolations[0].includes("不许自报完成"),
+    tickedViolations.join("；") || "no violation"
+  );
+
+  // (c) the same tick *with* evidence that exists is green: the rule is about
+  // the record, not about the square brackets. Without this control the rule
+  // above could be "no item may ever be checked", which is a different rule.
+  const evidenced = lines
+    .map((line, index) =>
+      index + 1 === first.line
+        ? `${line.replace("- [ ]", "- [x]")}（${DOD_EVIDENCE_MARK}docs/measurements.md）`
+        : line
+    )
+    .join("\n");
+  check(
+    "...and the same tick with evidence that exists is green: the rule is about the record, not the brackets",
+    dodCheckboxViolations(evidenced, exists).length === 0,
+    dodCheckboxViolations(evidenced, exists).join("；") || "no violation"
+  );
+
+  // (d) evidence that points nowhere is the same as no evidence, and the
+  // sentence has to say which path was missing.
+  const dangling = evidenced.replace("docs/measurements.md", "docs/no-such-record.md");
+  const danglingViolations = dodCheckboxViolations(dangling, exists);
+  check(
+    "...and evidence pointing at a file that does not exist goes red, naming the path",
+    danglingViolations.length === 1 &&
+      danglingViolations[0].includes("docs/no-such-record.md") &&
+      danglingViolations[0].includes("追不到记录"),
+    danglingViolations.join("；") || "no violation"
+  );
+
+  // (e) evidence on an item that is still open: the contradiction that makes
+  // the next tick look already-earned.
+  const premature = lines
+    .map((line, index) =>
+      index + 1 === first.line ? `${line}（${DOD_EVIDENCE_MARK}docs/measurements.md）` : line
+    )
+    .join("\n");
+  const prematureViolations = dodCheckboxViolations(premature, exists);
+  check(
+    "...and an unchecked item that already cites evidence goes red",
+    prematureViolations.length === 1 &&
+      prematureViolations[0].includes("还没勾") &&
+      prematureViolations[0].includes(DOD_EVIDENCE_MARK),
+    prematureViolations.join("；") || "no violation"
+  );
+
+  // (f) deleting an item: the quiet way to make a bar look full.
+  const dropped = lines.filter((_, index) => index + 1 !== items[items.length - 1].line).join("\n");
+  const droppedViolations = dodCheckboxViolations(dropped, exists);
+  check(
+    "...and deleting an item goes red, naming the ID that went missing",
+    droppedViolations.length === 1 &&
+      droppedViolations[0].includes(DOD_CHECKBOX_IDS[DOD_CHECKBOX_IDS.length - 1]) &&
+      droppedViolations[0].includes("少了"),
+    droppedViolations.join("；") || "no violation"
+  );
+
+  // (g) a third state, and a duplicated ID: both are ways of answering "which
+  // item is this" with something that is not an answer.
+  const thirdState = lines
+    .map((line, index) => (index + 1 === first.line ? line.replace("- [ ]", "- [X]") : line))
+    .join("\n");
+  const thirdViolations = dodCheckboxViolations(thirdState, exists);
+  const duplicated = lines
+    .map((line, index) =>
+      index + 1 === items[1].line ? line.replace(items[1].id, first.id) : line
+    )
+    .join("\n");
+  const duplicatedViolations = dodCheckboxViolations(duplicated, exists);
+  check(
+    "...and a third state or a duplicated ID each go red for their own reason",
+    thirdViolations.length === 1 &&
+      thirdViolations[0].includes("[X]") &&
+      thirdViolations[0].includes("半勾") &&
+      duplicatedViolations.some((v) => v.includes(first.id) && v.includes("ID 必须唯一")) &&
+      duplicatedViolations.some((v) => v.includes(`少了 ${items[1].id}`)),
+    JSON.stringify({ third: thirdViolations, duplicated: duplicatedViolations })
+  );
+
+  // (h) two items with the same text: the ID rule cannot see it, and "which one
+  // did we tick" stops being answerable.
+  const sameText = lines
+    .map((line, index) =>
+      index + 1 === items[1].line ? line.replace(items[1].text, first.text) : line
+    )
+    .join("\n");
+  const sameTextViolations = dodCheckboxViolations(sameText, exists);
+  check(
+    "...and two items with identical text go red, naming both lines",
+    sameTextViolations.length === 1 &&
+      sameTextViolations[0].includes(`第 ${items[1].line} 行`) &&
+      sameTextViolations[0].includes(`第 ${first.line} 行`) &&
+      sameTextViolations[0].includes("一模一样"),
+    sameTextViolations.join("；") || "no violation"
+  );
+
+  // (i) the evidence path reader, on the three spellings a person writes.
+  check(
+    "the evidence path is read from the mark, not from the line: note after it, backticks around it, and no mark at all",
+    dodEvidenceTarget(`${DOD_EVIDENCE_MARK}docs/measurements.md（第 104 轮）`) === "docs/measurements.md" &&
+      dodEvidenceTarget(`${DOD_EVIDENCE_MARK}\`docs/measurements.md\``) === "docs/measurements.md" &&
+      dodEvidenceTarget("没有证据的一句话") === null,
+    JSON.stringify([
+      dodEvidenceTarget(`${DOD_EVIDENCE_MARK}docs/measurements.md（第 104 轮）`),
+      dodEvidenceTarget(`${DOD_EVIDENCE_MARK}\`docs/measurements.md\``),
+      dodEvidenceTarget("没有证据的一句话"),
+    ])
   );
 }
 

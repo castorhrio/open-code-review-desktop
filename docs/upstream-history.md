@@ -36,6 +36,32 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 
 ---
 
+## 上游状态（第 104 轮，2026-11-03）
+第 104 轮复核：**上游没有新内容。**`git ls-remote` 退出码 0，`refs/heads/main` 仍是 `76ab46a`
+（与第 101–103 轮同一个 commit）；`git ls-remote --tags` 最高仍是 `v1.13.4`，`/releases/latest`
+与 npm `latest` 同为 `1.13.4`。三条通路的答案一致，**pin 不前进、无移植项**，对照表 5 行因此
+不动；「最近一次对照停在上一轮」是什么意思，写在上面那张表的表头说明里——那不是欠账。
+
+本轮按控制仓简报做三个具名 pass，都不动产品行为：
+
+- **distill + clarify：两份 README 首屏第二段不再放平台验证矩阵。** 那一段讲的是「哪个平台验证到
+  哪一层」，是构建者的账；读者在第一屏要的是「我明天能不能用它」。现在只剩一句：`v0.1.13` 跑的
+  是 `ocr v1.13.4`，Windows 上从构建、安装到审查端到端跑通过，下面每条能力都是实跑出来的。矩阵
+  本体在 Known limitations / 已知限制 那一节，一条没少（第 103 轮刚把它写全）。形状进了
+  `firstScreenViolations` 的第 5 条：第一节里出现架构名、包格式名，或「按平台一条」的 bullet，就红。
+- **distill：本文件人读区从 192 行减到 137 行。** 其中 27 行是上一轮正文照例归档，28 行是真的减重：
+  「给 audit 看的约束」不再复述形状，「pin 存全 40 位」与「能自动变红的地方，和不能的地方」只留
+  规则与其真实边界，逐轮是怎么补上的那些叙述交回 [`upstream-history.md`](upstream-history.md)
+  对应的轮次——那儿是它们该在的地方，本文件也就少了一份会过期的拷贝。
+- **harden：`audit:guards` 的沙箱重试判定抽成纯函数。** 「没写出报告」在第一次严格运行里还算
+  环境问题，在 `--no-sandbox` 的重试之后就不算了。`tools/electron-guards.mjs` 现在导出
+  `guardsRetryReason` / `guardsFailure`，新增的 `tools/electron-guards-smoke.mjs` 用夹具钉住
+  「真崩溃不会被重试洗成绿」，并要求最后那句结论点名是崩溃、不许再写「环境问题」。
+
+改动只在两份 README、`tools/upstream-watch.mjs` 与它的 smoke、`tools/electron-guards.mjs`、新增的
+`tools/electron-guards-smoke.mjs`、`package.json` 的脚本表，以及本文件与归档；评审逻辑、CLI 参数、
+配置读写路径与运行期行为均未变。
+
 ## 上游状态（第 103 轮，2026-11-03）
 第 103 轮复核：**上游的发布版本前进了**——`v1.13.3` → `v1.13.4`（发布于 2026-11-02T15:19:48Z）。
 `git ls-remote` 的 TLS 被断开，HEAD 与 tag 都由 GitHub API 答上，npm `latest` 同为 `1.13.4`；

@@ -11,11 +11,21 @@
 // than by a hand-kept list:
 //
 //   README.md / README.zh-CN.md  →  every relative `*.md` they link to
+//   plus an explicit list of documents that must be checked whether or not a
+//   README happens to link them (`EXPLICIT_DOCS`)
 //
 // The target list is the same pointer walk `tools/upstream-watch.mjs` uses for
 // truncation (`docPointers`), because the two questions — "is this document
 // whole" and "is it set like Chinese" — are about the same set of files. The
 // READMEs are in their own list: they are what the repository page shows.
+//
+// The explicit list is the net under the derivation. `docs/PRODUCT-DOD.md` is
+// the bar the next change comes from, and today it is in the list only because
+// a README links it — so the day a README stops linking it (a re-sync, a
+// rewrite of the first screen), the bar silently leaves the set of documents
+// whose prose is checked, and nothing goes red. `typographyCoverageViolations`
+// asks the question that survives that: strip every `.md` pointer out of the
+// READMEs and the required documents must still be in the list.
 //
 // The three rules, and the wrong implementation each one is tested against in
 // `tools/cjk-typography-smoke.mjs`:
@@ -42,7 +52,7 @@
 // Chinese prose would be a much larger promise than this check is able to keep.
 import fs from "node:fs";
 import path from "node:path";
-import { README_FILES, docPointers } from "./upstream-watch.mjs";
+import { README_FILES, PRODUCT_DOD_DOC, docPointers } from "./upstream-watch.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 
@@ -163,13 +173,24 @@ export const typographyViolations = (file, text) => {
 };
 
 /**
+ * The documents that must be checked even when no README links them. Kept short
+ * on purpose: a long hand-kept list is the thing the derivation exists to
+ * replace, so this holds only the documents whose absence from the set would be
+ * a real blind spot — the bar the next change comes from.
+ */
+export const REQUIRED_DOCS = Object.freeze([PRODUCT_DOD_DOC]);
+export const EXPLICIT_DOCS = REQUIRED_DOCS;
+
+/**
  * Which documents the rules are about, derived from the READMEs themselves.
  *
  * Same walk as `productDocViolations`: every relative `*.md` a README points at,
- * plus the READMEs. A second, hand-kept list would go stale in exactly the case
- * this check exists for — a new document nobody remembered to add.
+ * plus the READMEs, plus the explicit list. A second, hand-kept list *instead of*
+ * the walk would go stale in exactly the case this check exists for — a new
+ * document nobody remembered to add; the explicit list is only the floor under
+ * it, so it is added after the walk and never replaces it.
  */
-export const typographyTargets = (readmes) => {
+export const typographyTargets = (readmes, explicit = EXPLICIT_DOCS) => {
   const targets = [];
   const add = (target) => {
     if (!targets.includes(target)) targets.push(target);
@@ -178,21 +199,51 @@ export const typographyTargets = (readmes) => {
     add(source);
     for (const pointer of docPointers(text)) add(pointer.target);
   }
+  for (const target of explicit) add(target);
   return targets;
+};
+
+/**
+ * The net under the derivation: with every `.md` pointer stripped out of the
+ * READMEs, each required document must still be in the list.
+ *
+ * Asking only "is it in the list" would pass for the wrong reason — it is in the
+ * list today because a README links it, so the check would stay green while the
+ * explicit list was emptied. Stripping the pointers is what makes the question
+ * about the net rather than about the link.
+ */
+export const typographyCoverageViolations = (readmes, explicit = EXPLICIT_DOCS) => {
+  const violations = [];
+  const stripped = readmes.map(({ path: source, text }) => ({
+    path: source,
+    text: String(text == null ? "" : text).replace(/\]\([^)\s]+\.md(?:#[^)]*)?\)/g, "]"),
+  }));
+  const covered = typographyTargets(stripped, explicit);
+  const missing = REQUIRED_DOCS.filter((target) => !covered.includes(target));
+  if (missing.length) {
+    violations.push(
+      `把两份 README 里的 .md 指针全部去掉之后，${missing.join("、")} 就不在被检查的清单里了：` +
+        "显式清单没兜住它——这份文档的中文排版从此没有任何检查看过，而 run 还是绿的"
+    );
+  }
+  return violations;
 };
 
 /**
  * The rules over a set of documents. `readmes` is `[{ path, text }]`;
  * `readFile(target)` returns the text or `null` when it is missing.
  *
+ * `explicit` is passed through so a fixture can ask about the derivation alone;
+ * the gate uses the default, which is the list that must never be empty.
+ *
  * A missing target is reported instead of skipped: a document this check cannot
  * read is a document nothing here has looked at, and a green run that silently
  * dropped a file is the failure mode this whole repository is against. (Whether
  * the link itself is a 404 is `audit:upstream`'s question, not this one.)
  */
-export const docTypographyViolations = (readmes, readFile) => {
+export const docTypographyViolations = (readmes, readFile, explicit = EXPLICIT_DOCS) => {
   const violations = [];
-  for (const target of typographyTargets(readmes)) {
+  for (const target of typographyTargets(readmes, explicit)) {
     const provided = readmes.find((doc) => doc.path === target);
     const text = provided ? provided.text : readFile(target);
     if (text === null || text === undefined) {
@@ -224,13 +275,17 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
   };
   const targets = typographyTargets(readmes);
   const violations = docTypographyViolations(readmes, read);
+  const coverage = typographyCoverageViolations(readmes);
 
   console.log(
-    `中文排版：查了 ${targets.length} 份文档（来源：${README_FILES.join(" / ")} 的相对 .md 指针，外加两份 README 自身）——${targets.join("、")}`
+    `中文排版：查了 ${targets.length} 份文档（来源：${README_FILES.join(" / ")} 的相对 .md 指针，外加两份 README 自身与显式清单 ${EXPLICIT_DOCS.join("、")}）——${targets.join("、")}`
   );
   for (const violation of violations) console.log(`FAIL    ${formatViolation(violation)}`);
-  if (violations.length) {
-    console.log(`\n${violations.length} 处中文排版问题。规则写在 tools/cjk-typography.mjs 顶部，反向控制在 tools/cjk-typography-smoke.mjs。`);
+  for (const violation of coverage) console.log(`FAIL    ${violation}`);
+  if (violations.length || coverage.length) {
+    console.log(
+      `\n${violations.length + coverage.length} 处问题（排版 ${violations.length} 处、清单覆盖 ${coverage.length} 处）。规则写在 tools/cjk-typography.mjs 顶部，反向控制在 tools/cjk-typography-smoke.mjs。`
+    );
     process.exit(1);
   }
   console.log(`ok      ${targets.length} 份文档都守行首禁则、全角标点与中英分隔`);

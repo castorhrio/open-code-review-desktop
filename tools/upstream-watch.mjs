@@ -1530,6 +1530,173 @@ export const dodAuthorityViolations = (doc) => {
   return violations;
 };
 
+// ---- the bar's own checkboxes: readable, and a tick has to be earned ----
+//
+// `dodAuthorityViolations` settles *whether* the bar is in force. It says nothing
+// about the six lines that decide what the next change may be: they were plain
+// `- [ ] **非官方诚实**：…` bullets, so "which items are still open" could only be
+// answered by a person reading the file, and a tick could be added by anyone who
+// believed the work was done. The bar is the only input to the next round, so its
+// state has to be something the audit can read — and a tick has to point at a
+// record inside this repository, because the coding side is not allowed to
+// declare itself finished.
+//
+// Four rules, each with the wrong implementation it is tested against in
+// `tools/upstream-watch-smoke.mjs`:
+//
+//   1. 稳定 ID — every checkbox line starts with `DOD-<n>：`. An item without an
+//      ID cannot be referred to, and a re-sync that reorders the list silently
+//      renames every item.
+//   2. 状态只有两种 — `[ ]` and `[x]`. `[X]`, `[-]`, `[~]` are refused: a third
+//      state is how "half done" gets in, and half done is not a state the bar has.
+//   3. 勾选要有证据 — a `[x]` item must carry `证据：<仓内路径>`, and that path must
+//      exist. An unchecked item must not carry one: evidence for something still
+//      open is a contradiction, and it is how a tick gets pasted in later.
+//   4. 清单不许缩水 — the IDs the bar was locked with must all still be there.
+//      Deleting an item is the quiet way to make a bar look full.
+//
+// The counterpart this rule *cannot* check is the private control repo's
+// next-round brief: it is not in this repository, and the sync doc says this
+// repository keeps no `next-iteration.md`. So the two-way coverage the brief asks
+// for is stated against the only thing both sides share — the DoD's own IDs and
+// the evidence files they point at.
+export const DOD_CHECKBOX_IDS = Object.freeze([
+  "DOD-1",
+  "DOD-2",
+  "DOD-3",
+  "DOD-4",
+  "DOD-5",
+  "DOD-6",
+]);
+export const DOD_EVIDENCE_MARK = "证据：";
+
+const DOD_CHECKBOX = /^\s*[-*+]\s+\[(.)\]\s*(.*)$/;
+const DOD_ITEM_ID = /^([A-Z][A-Z0-9]*-\d+)\s*[：:]\s*(.*)$/;
+
+/** The checkbox lines of the DoD, in file order. `id` is `null` when the line
+ *  carries no stable ID, which is a violation rather than a parse failure: the
+ *  caller has to be able to name the line. */
+export const dodChecklist = (doc) => {
+  const items = [];
+  String(doc == null ? "" : doc)
+    .split(/\r?\n/)
+    .forEach((line, index) => {
+      const hit = DOD_CHECKBOX.exec(line);
+      if (hit === null) return;
+      const rest = hit[2].trim();
+      const idHit = DOD_ITEM_ID.exec(rest);
+      items.push({
+        line: index + 1,
+        state: hit[1],
+        checked: hit[1] === "x",
+        id: idHit === null ? null : idHit[1],
+        text: idHit === null ? rest : idHit[2].trim(),
+      });
+    });
+  return items;
+};
+
+/** The path a checked item cites, or `null`. The first token after the mark, so
+ *  `证据：docs/measurements.md（第 104 轮）` reads as the file and the note after
+ *  it is free text. Backticks around the path are stripped: both spellings are
+ *  what a person writes. */
+export const dodEvidenceTarget = (text) => {
+  const at = String(text == null ? "" : text).indexOf(DOD_EVIDENCE_MARK);
+  if (at === -1) return null;
+  const rest = String(text).slice(at + DOD_EVIDENCE_MARK.length).trim();
+  const token = rest.split(/[\s（()）、，,]/)[0] || "";
+  return token.replace(/^`+|`+$/g, "") || null;
+};
+
+export const dodCheckboxViolations = (doc, exists = () => true) => {
+  const items = dodChecklist(doc);
+  const violations = [];
+
+  if (items.length === 0) {
+    violations.push(
+      "DoD 里一条 `- [ ]` / `- [x]` 都没有：过线标准只剩散文，" +
+        "「下一刀只能从哪来」就没有可数的输入源了"
+    );
+    return violations;
+  }
+
+  for (const item of items) {
+    if (item.id === null) {
+      violations.push(
+        `第 ${item.line} 行：这一条没有稳定 ID（形状 \`- [ ] DOD-1：…\`）——` +
+          "没有 ID 的条目没法被引用，重排一次就等于换了一批条目"
+      );
+    }
+    if (item.state !== " " && item.state !== "x") {
+      violations.push(
+        `第 ${item.line} 行：状态写成了 \`[${item.state}]\`——只有 \`[ ]\` 与 \`[x]\` 两种，` +
+          "第三种状态就是「半勾」，而过线标准没有「半勾」这个状态"
+      );
+    }
+  }
+
+  const seenIds = new Map();
+  const seenText = new Map();
+  for (const item of items) {
+    if (item.id !== null) {
+      const first = seenIds.get(item.id);
+      if (first === undefined) seenIds.set(item.id, item.line);
+      else {
+        violations.push(
+          `第 ${item.line} 行与第 ${first} 行都叫 ${item.id}：ID 必须唯一，` +
+            "否则「第 N 条还没勾」这句话指不到唯一一条"
+        );
+      }
+    }
+    const key = item.text.replace(/\s+/g, " ").trim();
+    const firstText = seenText.get(key);
+    if (firstText === undefined) seenText.set(key, item.line);
+    else {
+      violations.push(
+        `第 ${item.line} 行与第 ${firstText} 行的条目正文一模一样：` +
+          "两条同文的条目会让「勾了哪一条」无法回答"
+      );
+    }
+  }
+
+  const present = new Set(items.map((item) => item.id).filter((id) => id !== null));
+  const missing = DOD_CHECKBOX_IDS.filter((id) => !present.has(id));
+  if (missing.length) {
+    violations.push(
+      `清单里少了 ${missing.join("、")}：过线标准锁定时是 ${DOD_CHECKBOX_IDS.length} 条，` +
+        "删掉一条是让清单看起来更满的最安静的办法"
+    );
+  }
+
+  for (const item of items) {
+    const target = dodEvidenceTarget(item.text);
+    if (!item.checked) {
+      if (target !== null) {
+        violations.push(
+          `第 ${item.line} 行：${item.id || "这一条"}还没勾，却写着「${DOD_EVIDENCE_MARK}${target}」——` +
+            "没做完的条目带证据，下一步就是有人顺手把方括号改成 x"
+        );
+      }
+      continue;
+    }
+    if (target === null) {
+      violations.push(
+        `第 ${item.line} 行：${item.id || "这一条"}被勾上了，却没有写「${DOD_EVIDENCE_MARK}<仓内路径>」——` +
+          "勾选必须追到仓里的一份记录，编码侧不许自报完成"
+      );
+      continue;
+    }
+    if (!exists(target)) {
+      violations.push(
+        `第 ${item.line} 行：${item.id || "这一条"}的证据指向 ${target}，但仓里没有这个文件——` +
+          "勾选追不到记录，等于没有证据"
+      );
+    }
+  }
+
+  return violations;
+};
+
 // ---- what the archive may quote, and what only the sync doc may declare ----
 //
 // `docs/upstream-history.md` quotes upstream commits in prose — whole

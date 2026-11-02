@@ -35,7 +35,7 @@ tag v1.13.4
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`76ab46ac20f08a8bd8ac38881a8a826c7cb6495f`（第 104 轮：`git ls-remote` 退出码 0，`refs/heads/main` 仍是 `76ab46a`，与第 101–103 轮同一个 commit；`git ls-remote --tags` 最高仍是 `v1.13.4`，其指向的就是同一个 commit，`/releases/latest` 与 npm `latest` 同为 `1.13.4`——**HEAD、tag、发布三条通路一致，pin 不前进**；通路：git）**
+**本轮 HEAD 核对：`76ab46ac20f08a8bd8ac38881a8a826c7cb6495f`（第 105 轮：`git ls-remote` 这一轮没有输出，HEAD 与 tag 都由 GitHub API 答上——`/commits/main` 仍是 `76ab46a`，与第 101–104 轮同一个 commit；`/releases/latest` 与 npm `latest` 同为 `1.13.4`，**HEAD、tag、发布三条通路一致，pin 不前进**；通路：api）**
 
 ### 核对通路账
 
@@ -112,6 +112,7 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 | 102 | 2026-11-02 | git | `76ab46a` / `v1.13.3`，无新内容；npm `1.13.3`；两份 README 首屏从能力清单改成产品主意（一句话 + 3–5 条 + 长清单下沉到「已验证行为」/「Verified behaviour」），首屏形状进断言（`firstScreenViolations`：一句话、无 `--参数`、不说「封装」、3–5 条、链接到仍存≥8 条的那一节，逐条反向控制）；`package.json` 的 `description` 同样改口径 | — |
 | 103 | 2026-11-03 | api | **上游 tag 前进**：`v1.13.3` → `v1.13.4`（发布 2026-11-02T15:19:48Z，tag commit 就是第 101 轮已经读过的 `76ab46a`；4 个 commit 与安全修复 / Action 稳定性 / `session show --json` 空表改 `[]` / `file_read_diff` 未命中时点名缺的路径同批）；`git ls-remote` 因 TLS 失败（GnuTLS `-110`），HEAD 与 tag 都由 API 答上、npm `latest` 同为 `1.13.4`，**pin 前进**；对照表 5 行在这一次提交里逐行重读（51 个变更文件不含 `resolver.go`、`config_cmd.go`、`llm_cmd.go` / `providers.go`、`failure_class`，两处 Go 源码改动与本仓的两个消费点对上了）；通路账第 101/102 行之间那个把表截成两段的空行删掉，新增 `ledgerTableViolations` 钉住「表内不许有空行」并补反向控制（含一条证明别的账都看不见它）；升 pin 的那一遍真机验证跑在 Linux x64 上（CLI 层 / 真 Electron / UI 三套全绿，`audit:guards` 先红——它没把「没有报告」当环境问题，重试条件与 `e2e-flow` 对齐后转绿），顺带查出英文 README 在让读者下载 12 个 Release 里从未存在过的 macOS / Linux 包，两份 README 与 `使用说明.md` 的发布面、验证面措辞已对齐 | — |
 | 104 | 2026-11-03 | git | `76ab46a` / `v1.13.4` / npm `1.13.4`，三条通路答案一致、无新内容，**pin 不前进、无移植项**；两份 README 首屏第二段去 AI 味道（平台验证矩阵下沉到 Known limitations / 已知限制，那一节本就记着全部事实），`firstScreenViolations` 加第 5 条——第一节里出现架构名、包格式名或「按平台一条」的 bullet 即红，四条反向控制：粘回英文原矩阵、粘回中文原矩阵、把一个能力 bullet 换成平台 bullet（条数仍是 5，红的只能是新那条）、同一段矩阵写进「已知限制」必须仍绿（钉住这条管的是位置不是事实）；本文件人读区 192 → 137 行（逐轮正文归档 −27、散文减重 −28：规则与其边界留下，「这一条是怎么一格一格补上的」交回归档第 82、83、88、89 轮），顺带把「本节表格的 4 行」改成 5 行——对照表一直是 5 行；`tools/electron-guards.mjs` 的沙箱重试判定抽成导出的 `guardsRetryReason` / `guardsFailure`，新增 `tools/electron-guards-smoke.mjs` 作为 `audit:guards-retry` 挂进 `audit:static`（两次都没有报告就是崩溃，退 2 且结论不许再写「环境问题」） | — |
+| 105 | 2026-11-03 | api | `76ab46a` / `v1.13.4` / npm `1.13.4`，三条通路答案一致、无新内容，**pin 不前进、无移植项**；DoD 的勾选状态进断言（`dodChecklist` / `dodCheckboxViolations`：稳定 ID、只有两种状态、勾选必须带仓内证据、锁定的 6 个 ID 一个不许少，八格反向控制含「补上存在的证据就转绿」）、中文排版的清单补显式兜底（`EXPLICIT_DOCS` + `typographyCoverageViolations`，抹掉 README 指针后 DoD 仍须在清单里）、`docs/measurements.md` 新增「未验证清单」一节 | — |
 
 ### 对照表（上游前进时要重读的五处）
 
@@ -205,32 +206,37 @@ tool 结果文本**（`Error: diff not found for: …`、`Diffs exist for: …`�
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。搬完这里只留一句
    指针——「本文件只留当前一轮」不是约定而是断言（`previousRoundPointerViolations`）。
 
-## 当前状态（第 104 轮，2026-11-03）
-第 104 轮复核：**上游没有新内容。**`git ls-remote` 退出码 0，`refs/heads/main` 仍是 `76ab46a`
-（与第 101–103 轮同一个 commit）；`git ls-remote --tags` 最高仍是 `v1.13.4`，`/releases/latest`
-与 npm `latest` 同为 `1.13.4`。三条通路的答案一致，**pin 不前进、无移植项**，对照表 5 行因此
-不动；「最近一次对照停在上一轮」是什么意思，写在上面那张表的表头说明里——那不是欠账。
+## 当前状态（第 105 轮，2026-11-03）
+第 105 轮复核：**上游没有新内容。**`git ls-remote` 这一轮没有输出（通路没答上来），HEAD 与 tag
+都由 GitHub API 答上：`/commits/main` 仍是 `76ab46a`（与第 101–104 轮同一个 commit），
+`/releases/latest` 与 npm `latest` 同为 `1.13.4`。三条通路答案一致，**pin 不前进、无移植项**，
+对照表 5 行因此不动。
 
-本轮按控制仓简报做三个具名 pass，都不动产品行为：
+本轮按控制仓简报做三件事，都不动产品行为，主题是**让唯一权威源可验证**：
 
-- **distill + clarify：两份 README 首屏第二段不再放平台验证矩阵。** 那一段讲的是「哪个平台验证到
-  哪一层」，是构建者的账；读者在第一屏要的是「我明天能不能用它」。现在只剩一句：`v0.1.13` 跑的
-  是 `ocr v1.13.4`，Windows 上从构建、安装到审查端到端跑通过，下面每条能力都是实跑出来的。矩阵
-  本体在 Known limitations / 已知限制 那一节，一条没少（第 103 轮刚把它写全）。形状进了
-  `firstScreenViolations` 的第 5 条：第一节里出现架构名、包格式名，或「按平台一条」的 bullet，就红。
-- **distill：本文件人读区从 192 行减到 137 行。** 其中 27 行是上一轮正文照例归档，28 行是真的减重：
-  「给 audit 看的约束」不再复述形状，「pin 存全 40 位」与「能自动变红的地方，和不能的地方」只留
-  规则与其真实边界，逐轮是怎么补上的那些叙述交回 [`upstream-history.md`](upstream-history.md)
-  对应的轮次——那儿是它们该在的地方，本文件也就少了一份会过期的拷贝。
-- **harden：`audit:guards` 的沙箱重试判定抽成纯函数。** 「没写出报告」在第一次严格运行里还算
-  环境问题，在 `--no-sandbox` 的重试之后就不算了。`tools/electron-guards.mjs` 现在导出
-  `guardsRetryReason` / `guardsFailure`，新增的 `tools/electron-guards-smoke.mjs` 用夹具钉住
-  「真崩溃不会被重试洗成绿」，并要求最后那句结论点名是崩溃、不许再写「环境问题」。
+- **DoD 的勾选状态进断言。** `docs/PRODUCT-DOD.md` 是「下一刀只能从哪来」的唯一来源，而
+  `dodAuthorityViolations` 只断言了头部是 locked / live——哪几条还开着，只能靠人读。现在每条
+  前面有稳定 ID（`DOD-1` … `DOD-6`），`tools/upstream-watch.mjs` 新增 `dodChecklist` /
+  `dodCheckboxViolations`：ID 必须唯一、状态只有 `[ ]` 与 `[x]` 两种、**勾上一条必须写
+  「证据：<仓内路径>」且那个文件真的在仓里**、锁定时那 6 个 ID 一个都不许少。最后一条是这一轮
+  真正想要的那条：编码侧不许自报完成，勾选必须追到仓里的一份记录。反向控制八格，其中一格是
+  「同一个勾，补上存在的证据就转绿」——没有它，这条规则可能只是「任何条目都不许勾」。
+- **中文排版的清单补上兜底。** `typographyTargets` 从两份 README 的 `.md` 指针推导，所以
+  `docs/PRODUCT-DOD.md` 今天在清单里**只因为**某个 README 链了它；哪天首屏重写把那个链接去掉，
+  过线标准就悄悄退出「排版被检查过」的集合，而 run 还是绿的。新增 `EXPLICIT_DOCS`（显式清单）
+  与 `typographyCoverageViolations`：把两份 README 的 `.md` 指针全部抹掉之后，显式清单里的文档
+  仍必须在被检查的清单里。反向控制先钉住前提（抹掉指针后 DoD 确实掉出推导清单），再要求清空
+  显式清单时点名它。
+- **「没验证过什么」从散句变成一节。** `docs/measurements.md` 末尾新增「未验证清单（截至
+  2026-11-03）」：应用内更新、Linux / macOS 打包产物、真显示器与 GPU、单实例锁、卸载路径，
+  每条写「为什么没验」与「下次要验的触发条件」。两份 README 的 Known limitations / 已知限制
+  指向这一节，这一节也指回那边——「不覆盖」与「什么时候补」现在是同一件事的两面。
 
-改动只在两份 README、`tools/upstream-watch.mjs` 与它的 smoke、`tools/electron-guards.mjs`、新增的
-`tools/electron-guards-smoke.mjs`、`package.json` 的脚本表，以及本文件与归档；评审逻辑、CLI 参数、
-配置读写路径与运行期行为均未变。
-上一轮（第 103 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-103-轮2026-11-03)，归档之后本文件不留第二份。
+改动只在 `docs/PRODUCT-DOD.md`（只补 ID 与一句 ID 约定，勾选状态一个没动）、
+`tools/upstream-watch.mjs` 与它的 smoke、`tools/cjk-typography.mjs` 与它的 smoke、
+`docs/measurements.md`、两份 README 的一句指针，以及本文件与归档；评审逻辑、CLI 参数、配置读写
+路径与运行期行为均未变。
+上一轮（第 104 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-104-轮2026-11-03)，归档之后本文件不留第二份。
 
 ## 上游真变了怎么办（命令驱动，而不是「记得看一眼」）
 ```bash
