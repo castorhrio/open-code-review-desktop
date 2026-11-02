@@ -30,7 +30,12 @@ export function NoticeBar() {
     // `role="status"` and not `alert`: these lines report something that
     // already happened, not something to act on right now, and an alert would
     // interrupt a screen reader mid-sentence on launch.
-    <div role="status" aria-live="polite" className="shrink-0 border-b border-warn/25 bg-warn/10 fade-in">
+    //
+    // It is given a name (`应用提示`) because an unnamed live region is announced
+    // as a naked sentence with nothing saying where it came from — and because
+    // the visual audit needs a selector that cannot be confused with the toast
+    // region, which is also a live region and is also on screen in some shots.
+    <div role="status" aria-label="应用提示" aria-live="polite" className="shrink-0 border-b border-warn/25 bg-warn/10 fade-in">
       {notices.map((text) => (
         <div key={text} className="flex items-start gap-2 px-4 py-1.5">
           <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-warn" />

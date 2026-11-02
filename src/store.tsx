@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { toast } from "sonner";
 import { api, type Provider } from "@/lib/api";
 import { cliFailure, coverageOf, manifestBudgetExceeded, needsContinuation, reviewedCommit, sessionFileRef, sessionState, terminalState } from "@/lib/format";
-import { noticeText } from "@/lib/notices";
+import { logSource, noticeText } from "@/lib/notices";
 import { intOrEmpty, MODE_META, resumableMode, validateSpec } from "@/lib/spec";
 import type {
   AppInfo,
@@ -446,12 +446,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    const offLog = api.onLog(({ line }) => {
+    const offLog = api.onLog((payload) => {
+      const { line } = payload;
       setLog((l) => [...l.slice(-400), line]);
       // The channel and the `{ line }` payload are unchanged; a marked line is
       // also shown as a notice, because a sentence about the app's own failure
       // cannot depend on the reader opening a collapsed drawer.
-      const notice = noticeText(line);
+      //
+      // Two conditions, not one: the marker says *what kind* of line this is,
+      // and the run id says *whose* it is. A CLI line that happens to start
+      // with the marker is part of some run's transcript and stays in the
+      // drawer — see `src/lib/notices.ts`.
+      const notice = noticeText(line, logSource(payload));
       if (notice) pushNotice(notice);
     });
     const offProgress = api.onProgress(({ id, progress: p }) => {

@@ -36,6 +36,55 @@ export const NOTICE_LINES = (() => {
 })();
 
 /**
+ * The same two sentences, as the payloads the renderer actually receives.
+ *
+ * The shell is `{ line }` and **no run id**, which is the whole reason the
+ * renderer can tell "the app is telling me about itself" apart from "this is a
+ * line of some run's transcript" (`src/lib/notices.ts` `logSource`). Sending the
+ * id here — as this fixture did — made the bar appear for the wrong reason: the
+ * payload said the line belonged to `run-1`, and the parser only looked at the
+ * prefix, so the fixture agreed with a rule that was too weak to survive a CLI
+ * line that happens to start with the marker.
+ */
+export const NOTICE_PAYLOADS = (() => {
+  const payloads = [];
+  const send = (_channel, payload) => payloads.push(payload);
+  wiring.reportSenderLoss({ lost: 3, limit: 200, send });
+  wiring.reportProbeError({ message: "Error: spawn ocr ENOENT", send });
+  return payloads;
+})();
+
+/**
+ * A line that *looks* like a notice and is not one: the CLI's own text, filed
+ * under the run it belongs to.
+ *
+ * This is the reverse control for the notice rule. `run:log` carries the CLI's
+ * progress lines on the same channel as the app's two sentences, and a CLI line
+ * beginning with `[notice]` — an upstream warning of that shape, a tool call
+ * quoting such a file — must stay in the log drawer. It must not become a
+ * permanent bar saying the app failed at something it never did, because the
+ * only way to make that claim stop is to dismiss a sentence the app did not say.
+ */
+export const CLI_NOTICE_LOOKALIKE = "[notice] 这一行是 CLI 的原文，不是本程序说的话";
+
+/** Ordinary app-said notices with different counts, for the dedupe / order /
+ *  bound shots. Each is produced by the real reporter, so the sentences are the
+ *  ones the app would really write. */
+export const NOTICE_SERIES = (lost) => {
+  const payloads = [];
+  const send = (_channel, payload) => payloads.push(payload);
+  wiring.reportSenderLoss({ lost, limit: 200, send });
+  return payloads;
+};
+
+/** 1, 2, 1: the middle line is a repeat of the first, which must not become a
+ *  second row and must not jump to the end. */
+const NOTICE_MANY_PAYLOADS = [...NOTICE_SERIES(1), ...NOTICE_SERIES(2), ...NOTICE_SERIES(1)];
+
+/** Four distinct sentences, one past `NOTICE_LIMIT` (3): the oldest leaves. */
+const NOTICE_OVERFLOW_PAYLOADS = [1, 2, 3, 4].flatMap((lost) => NOTICE_SERIES(lost));
+
+/**
  * stderr from one real single-file review (`ocr review` on a throwaway repo:
  * 3m48s, 6 findings). This is the transcript the running screen has to be
  * legible against, and the reason it is here rather than invented: the bridge
@@ -1216,11 +1265,25 @@ window.api = (() => {
   // window was ready, and the version probe threw. Both arrive as marked
   // run:log lines - the channel is unchanged - and the app has to show them
   // without being asked, because the drawer they still land in starts collapsed.
+  //
+  // The payloads carry NO run id, because that is how main-wiring.js sends them;
+  // ?notice=1 also replays one CLI line that begins with the same marker and IS
+  // filed under a run, which must stay out of the bar (reverse control).
+  // ?notice=many repeats an app-said notice and adds another, for dedupe and
+  // order; ?notice=overflow sends four distinct ones, past the bar's bound.
   onLog: (cb) => {
     logCb = cb;
-    if (q.get("notice") === "1" && !noticeSent) {
+    const kind = q.get("notice");
+    if (kind && !noticeSent) {
       noticeSent = true;
-      ${JSON.stringify(NOTICE_LINES)}.forEach((line, i) => setTimeout(() => logCb && logCb({ id: "run-1", line }), 80 + i * 120));
+      const appPayloads = kind === "many"
+        ? ${JSON.stringify(NOTICE_MANY_PAYLOADS)}
+        : kind === "overflow"
+          ? ${JSON.stringify(NOTICE_OVERFLOW_PAYLOADS)}
+          : ${JSON.stringify(NOTICE_PAYLOADS)};
+      const queue = appPayloads.map((p) => ({ payload: p }));
+      if (kind === "1") queue.push({ payload: { id: "run-1", line: ${JSON.stringify(CLI_NOTICE_LOOKALIKE)} } });
+      queue.forEach((item, i) => setTimeout(() => logCb && logCb(item.payload), 80 + i * 120));
     }
     return () => { if (logCb === cb) logCb = null; };
   },

@@ -68,15 +68,45 @@ export async function loadPlaywright() {
 // ever ran on Windows could not be run at all elsewhere. An explicit `bundled`
 // is not the same as "unset": unset keeps the system browser, so the default
 // suite stays on the browser the app's users actually have.
-export const CHANNEL = process.env.PW_CHANNEL === "bundled" ? "" : process.env.PW_CHANNEL || "msedge";
+const RAW_CHANNEL = process.env.PW_CHANNEL;
 
-export function describeChannel() {
-  return CHANNEL === "msedge" || CHANNEL === "chrome"
-    ? `system ${CHANNEL}`
-    : CHANNEL
-      ? `bundled/${CHANNEL}`
-      : "bundled chromium";
+export const CHANNEL = RAW_CHANNEL === "bundled" ? "" : RAW_CHANNEL || "msedge";
+
+/**
+ * How a run names the browser it drove, for the tally that says what a green
+ * actually verified.
+ *
+ * `PW_CHANNEL=bundled` and "unset" end up on two *different* browsers (Playwright's
+ * own Chromium versus the system Edge), and the tally used to print "bundled
+ * chromium" for both — so the line that is supposed to say which browser a green
+ * is a statement about could not tell them apart, and the one environment where
+ * the distinction matters (a Linux box with no Edge, where only `bundled` can
+ * run at all) is exactly where it printed the wrong answer.
+ *
+ * So the label carries both facts and they are separate words: which binary, and
+ * whether the environment asked for it (`explicit`) or the harness fell back to
+ * its default (`default`). `channelLabel` is the pure function, and it is what
+ * `npm run audit:ui` self-checks in both directions: the same value must produce
+ * the same label, and `undefined` must not produce `bundled`'s label.
+ */
+export function channelLabel(raw) {
+  const value = typeof raw === "string" ? raw.trim() : "";
+  // No value at all: the harness default, which is the system browser — stated
+  // as a default, because a reader cannot tell "the machine had Edge" from
+  // "nobody set anything" otherwise.
+  if (!value) return "system msedge (default)";
+  if (value === "bundled") return "bundled chromium (explicit)";
+  if (value === "msedge" || value === "chrome") return `system ${value} (explicit)`;
+  return `bundled/${value} (explicit)`;
 }
+
+export function describeChannel(raw = RAW_CHANNEL) {
+  return channelLabel(raw);
+}
+
+/** The raw `PW_CHANNEL` value, so a tally can print what it was actually given
+ *  next to the label derived from it — the label is a claim, this is the fact. */
+export const RAW_CHANNEL_ENV = RAW_CHANNEL;
 
 // Newest mtime under a file or a directory, so a build can be compared with the
 // sources it claims to be built from. `skip` holds absolute paths of run

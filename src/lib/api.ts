@@ -187,7 +187,10 @@ export interface Bridge {
   openReleases(): Promise<boolean>;
   setUpdateEnabled(enabled: boolean): Promise<boolean>;
   onUpdateState(cb: (p: UpdateState) => void): () => void;
-  onLog(cb: (p: { id: string; line: string }) => void): () => void;
+  // `id` is the run the line belongs to, and it is absent for the lines the app
+  // writes about itself (`main-wiring.js` sends `{ line }` only) — see
+  // `src/lib/notices.ts` `logSource`, which is the only reader that cares.
+  onLog(cb: (p: { id?: string; line: string }) => void): () => void;
   onExit(cb: (p: ExitPayload) => void): () => void;
   onProgress(cb: (p: { id: string; progress: RunProgress }) => void): () => void;
   onMenuOpenRepo(cb: () => void): () => void;
