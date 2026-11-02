@@ -1004,6 +1004,13 @@ export const humanSectionViolations = (doc) => {
 //
 // The rule is deliberately about the *end* of the document, not about length:
 // a short doc is legitimate, a half-written last line is not.
+//
+// A document that ends on a table is the case that forced a fifth answer: read
+// as a plain last line, `| 发版 | tools/release.mjs |` ends on the connector
+// `|`, so a perfectly finished doc was reported as truncated. The trailing pipe
+// of a table row *is* the terminator, so a complete row is a finished line —
+// and a row that lost its closing pipe is the truncated shape, reported as its
+// own fingerprint rather than as a mysterious dangling `|`.
 export const DANGLING_LINE_ENDINGS = Object.freeze(["-", ":", "：", ",", "，", "、", "…", "(", "（", "/", "|", "\\"]);
 
 // The current state's own body — the section every round rewrites. `null` when
@@ -1048,11 +1055,25 @@ export const docTruncationViolations = (doc) => {
     return violations;
   }
   const lastLine = lines[last].trim();
+  // A table row is finished by its own trailing pipe, and unfinished when that
+  // pipe is missing — the row is then still open, which is what a cut inside a
+  // table looks like.
+  const tableRow = lastLine.startsWith("|");
+  const tableRowClosed = /^\|.*\|$/.test(lastLine);
   if (/^#{1,6}\s/.test(lastLine)) {
     violations.push(
       `第 ${last + 1} 行是文档的最后一行，而它是个标题（${lastLine}）：` +
         "标题之后没有正文，和「截断正好落在标题后」是同一个形状"
     );
+  } else if (tableRow && !tableRowClosed) {
+    violations.push(
+      `第 ${last + 1} 行是文档的最后一行，是一行没有收尾的表格（${lastLine}）：` +
+        "表格行要以「|」结束，缺了它就是这张表在最后一行被截断"
+    );
+  } else if (tableRowClosed) {
+    // Nothing to report: the row is complete. (Its cells are checked by the
+    // table-shape rules elsewhere; this rule only says the document did not
+    // stop in the middle of a line.)
   } else {
     const dangling = DANGLING_LINE_ENDINGS.find((ending) => lastLine.endsWith(ending));
     // Inline code spans are counted per line (fence lines are excluded by the
@@ -1091,6 +1112,148 @@ export const docTruncationViolations = (doc) => {
     }
   }
 
+  return violations;
+};
+
+// ---- the same rule, now aimed at every document a README points at ----
+//
+// The truncation rule above was only ever applied to the two files this module
+// owns, and that was one file short of what it promised: `README.md` shipped
+// with a half-written line in its architecture block (`main.js  Elec`) for
+// rounds, and nothing was red — the rule that would have caught it existed and
+// was simply never asked. The rule does not care which document it reads, so
+// the only thing missing was the list of documents.
+//
+// The list is derived, not typed: every relative `*.md` a README links to is a
+// document a stranger is one click from, so each one must exist and must close.
+// READMEs are asked about themselves too — they are pointed at by the repository
+// page, and the truncation that started this was in one of them.
+//
+// Two-step on purpose: `docPointers` answers *which* files, `productDocViolations`
+// answers whether they are whole. The smoke test can then go red for a lost
+// pointer and for a truncated target separately, instead of one check that
+// cannot say which half broke.
+export const README_FILES = Object.freeze(["README.md", "README.zh-CN.md"]);
+
+export const docPointers = (markdown) => {
+  const pointers = [];
+  String(markdown == null ? "" : markdown)
+    .split(/\r?\n/)
+    .forEach((line, index) => {
+      // `[label](path.md)` and `[label](path.md#anchor)`; external links are not
+      // ours to read, and a bare `<a href>` is not how these documents link.
+      const re = /\]\(([^)\s]+\.md)(?:#[^)]*)?\)/g;
+      let match = re.exec(line);
+      while (match !== null) {
+        const target = match[1];
+        const external = /^(?:[a-z]+:)?\/\//i.test(target);
+        if (!external && !pointers.some((p) => p.target === target)) {
+          pointers.push({ target, line: index + 1 });
+        }
+        match = re.exec(line);
+      }
+    });
+  return pointers;
+};
+
+/**
+ * Every document a README points at must exist and must be closed.
+ *
+ * `readmes` is `[{ path, text }]` — the path is only used to name the source in
+ * a violation, so a mutated copy is checked exactly like the real file.
+ * `readFile(target)` returns the target's text, or `null` when it is missing;
+ * injecting it keeps this pure and lets the smoke test hand in a broken target.
+ *
+ * A target reached from two READMEs is checked once and named with both sources:
+ * the document is the same file, and printing the same defect twice reads like
+ * two bugs.
+ */
+export const productDocViolations = (readmes, readFile) => {
+  const violations = [];
+  const sources = new Map();
+
+  for (const { path: source, text } of readmes) {
+    for (const violation of docTruncationViolations(text)) {
+      violations.push(`${source}：${violation}`);
+    }
+    for (const pointer of docPointers(text)) {
+      const seen = sources.get(pointer.target);
+      if (seen === undefined) sources.set(pointer.target, [source]);
+      else if (!seen.includes(source)) seen.push(source);
+    }
+  }
+
+  for (const [target, from] of sources) {
+    const who = `${from.join(" / ")} 指向「${target}」`;
+    const text = readFile(target);
+    if (text === null || text === undefined) {
+      violations.push(`${who}，但文件不存在：读者点下去是 404`);
+      continue;
+    }
+    for (const violation of docTruncationViolations(text)) {
+      violations.push(`${who}：${violation}`);
+    }
+  }
+
+  return violations;
+};
+
+// ---- the product bar has one authority, and it has to say whose it is ----
+//
+// `README.md` tells contributors that the next change may only come from an
+// unchecked DoD item, and points at `docs/PRODUCT-DOD.md` for the list. The file
+// it pointed at still opened with "writable draft … not yet authorised into the
+// live scheduler", so the two authorities disagreed about whether the bar was in
+// force at all — and a bar that might not apply is not a bar.
+//
+// The status was settled on 2026-10-31 (locked / live). This rule keeps it
+// settled: while a README points at the DoD, its header block must read as
+// locked, and the draft vocabulary is refused *by word*, because the way this
+// drifts back is a copy of the old header pasted in during a re-sync.
+export const PRODUCT_DOD_DOC = "docs/PRODUCT-DOD.md";
+export const DOD_DRAFT_TERMS = Object.freeze([
+  "writable draft",
+  "尚未授权",
+  "未授权",
+  "待授权",
+  "待批准",
+  "待 GIN",
+  "草稿",
+]);
+export const DOD_LIVE_TERMS = Object.freeze(["locked", "live", "锁定"]);
+
+/** The header block: everything before the first horizontal rule, which is where
+ *  a status line lives. Asking the whole file would refuse the word "draft" in a
+ *  paragraph that is legitimately about the old state. */
+const dodHeader = (lines) => {
+  const end = lines.findIndex((line) => /^\s*---\s*$/.test(line));
+  return (end === -1 ? lines : lines.slice(0, end)).join("\n");
+};
+
+export const dodAuthorityViolations = (doc) => {
+  const lines = String(doc == null ? "" : doc).split(/\r?\n/);
+  const header = dodHeader(lines);
+  const violations = [];
+
+  const draft = DOD_DRAFT_TERMS.filter((term) => header.includes(term));
+  if (draft.length) {
+    violations.push(
+      `文档头部还带着草稿字样（${draft.map((t) => `「${t}」`).join("、")}）：` +
+        "README 已经把它当成生效中的过线标准，两处权威源因此互相矛盾——" +
+        "过线标准只有「已锁定」和「不存在」两种状态，没有「半生效」"
+    );
+  }
+  // The status line is the only place that has to answer it. Asking the whole
+  // header passed on a sentence about `live scheduler` that says nothing about
+  // this document's status — the rule then could not tell an unstated status
+  // from a stated one.
+  const statusLines = lines.filter((line) => /^>\s*状态[:：]/.test(line.trim()));
+  if (!statusLines.some((line) => DOD_LIVE_TERMS.some((term) => line.includes(term)))) {
+    violations.push(
+      "「状态」一行没有写明这是已锁定 / live 的过线标准（标题里的括注不算数）：" +
+        "读的人无法判断它现在算不算数，而 README 已经在拿它当唯一输入源"
+    );
+  }
   return violations;
 };
 
@@ -1352,13 +1515,25 @@ export const historyRoundNumbers = (doc) =>
 // 60-row table, while "提交信息说第 82 轮，通路账停在 81 轮" is one line to check.
 export const ROUND_IN_COMMIT_SUBJECT = /第\s*(\d+)\s*轮/;
 
+// The house style's own marker: 「第 N 轮上游核对」. Read *this* number first,
+// because a subject also mentions other rounds by way of history — the commit
+// that recorded round 98 opened with "…先抓出第 97 轮账加了一行…" and only later
+// said 「第 98 轮上游核对」. Read as "the first round in the subject", that
+// commit claimed to be round 97, one behind its own ledger row — and it passed,
+// because the +1 window absorbs exactly one round. An assertion that agrees for
+// the wrong reason is the thing this whole module is against, so the round is
+// taken from the marker, and the plain pattern is only the fallback for
+// subjects written before the marker was read (a release commit, say).
+export const ROUND_WITH_CHECK_MARKER = /第\s*(\d+)\s*轮上游核对/;
+
 // The round a commit subject claims to be. `null` when there is none — an empty
 // subject (no git, a shallow copy) or a subject that does not follow the house
 // style. The caller decides what to do with that; this function refuses to guess
 // (a default of 0 would silently compare against a round that never existed).
 export const roundFromCommitSubject = (subject) => {
-  const hit = ROUND_IN_COMMIT_SUBJECT.exec(String(subject == null ? "" : subject));
-  return hit ? Number(hit[1]) : null;
+  const text = String(subject == null ? "" : subject);
+  const marked = ROUND_WITH_CHECK_MARKER.exec(text) || ROUND_IN_COMMIT_SUBJECT.exec(text);
+  return marked ? Number(marked[1]) : null;
 };
 
 // The rule as violations. `ledgerRounds` is the ledger's round column in

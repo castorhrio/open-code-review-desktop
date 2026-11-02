@@ -46,6 +46,12 @@ import {
   versionInRange,
   docAuthoringRuleViolations,
   docTruncationViolations,
+  docPointers,
+  productDocViolations,
+  dodAuthorityViolations,
+  PRODUCT_DOD_DOC,
+  DOD_DRAFT_TERMS,
+  README_FILES,
   DANGLING_LINE_ENDINGS,
   HUMAN_SECTIONS,
   humanSectionViolations,
@@ -70,6 +76,7 @@ import {
   previousRoundPointerViolations,
   headingSlug,
   roundFromCommitSubject,
+  ROUND_IN_COMMIT_SUBJECT,
   runUpstreamWatch,
   tableRowCoverage,
   upstreamDrift,
@@ -1212,6 +1219,28 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
       roundFromCommitSubject("chore: 没有轮次的提交信息") === null &&
       roundFromCommitSubject("") === null,
     JSON.stringify(noRound)
+  );
+  // The subject also names other rounds when it explains history. Reading the
+  // first of those as "the round this commit is" made a commit claim to be one
+  // round behind itself — and the +1 window absorbed it, so nothing was red.
+  // The marker 「第 N 轮上游核对」 is the house style's own answer; these two
+  // checks pin both directions of the choice.
+  const historical = "test(bridge): 接线补反向控制（顺带抓出第 97 轮账加了一行）；第 98 轮上游核对（无新内容）";
+  check(
+    "a subject that mentions an older round first still reads the round it claims",
+    roundFromCommitSubject(historical) === 98 &&
+      ROUND_IN_COMMIT_SUBJECT.exec(historical)[1] === "97",
+    JSON.stringify({ read: roundFromCommitSubject(historical) })
+  );
+  check(
+    "...and a later round named after the marker does not move it, because the marker is the claim",
+    roundFromCommitSubject("fix(x): 一处改动；第 99 轮上游核对（补第 98 轮的行）") === 99,
+    JSON.stringify({ read: roundFromCommitSubject("fix(x): 一处改动；第 99 轮上游核对（补第 98 轮的行）") })
+  );
+  check(
+    "...and a subject without the marker still falls back to its only round",
+    roundFromCommitSubject("chore(release): 0.1.14（第 80 轮）") === 80,
+    JSON.stringify({ read: roundFromCommitSubject("chore(release): 0.1.14（第 80 轮）") })
   );
   check(
     "an empty ledger is red rather than vacuously in agreement",
@@ -2607,6 +2636,174 @@ if (!flags.selftest && !flags.noRespawn) {
     JSON.stringify({
       leaked: respawnCheckNames.filter((name) => String(green.stdout || "").includes(name)),
     })
+  );
+}
+
+/* ---- every document a README points at must be closed ----
+ * The truncation rule lived here for rounds and was only ever asked about the two
+ * files this module owns, so `README.md` shipped with half a line in its
+ * architecture block and nothing was red: the rule was correct and never pointed
+ * at the file a stranger opens first. The list of documents is therefore derived
+ * from the READMEs themselves, and the checks below go red both when a document
+ * stops and when the derivation stops finding it.
+ */
+{
+  const read = (target) => {
+    const file = path.join(ROOT, target);
+    return fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null;
+  };
+  const readmes = README_FILES.map((name) => ({ path: name, text: fs.readFileSync(path.join(ROOT, name), "utf8") }));
+  const live = productDocViolations(readmes, read);
+
+  check(
+    "every document a README points at exists and is closed, and so is the README itself",
+    live.length === 0,
+    live.join("；") || "no violation"
+  );
+
+  // The floor: without it a regex that stopped matching anything would leave the
+  // rule above green over an empty list, which is the way this kind of check
+  // dies. These four are the documents a reader is actually sent to.
+  const pointers = [...new Set(readmes.flatMap((readme) => docPointers(readme.text).map((p) => p.target)))];
+  const required = ["docs/measurements.md", "docs/OCR-UPSTREAM-SYNC.md", PRODUCT_DOD_DOC, "使用说明.md"];
+  check(
+    "the derived list still contains the documents readers are sent to",
+    required.every((target) => pointers.includes(target)),
+    JSON.stringify({ missing: required.filter((t) => !pointers.includes(t)), found: pointers })
+  );
+
+  const readme = readmes[0].text;
+  const lines = readme.split(/\r?\n/);
+
+  // (a) the README itself stops inside a code block: the shape that shipped.
+  let closing = -1;
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    if (lines[index].trim() === "```") {
+      closing = index;
+      break;
+    }
+  }
+  let opener = -1;
+  for (let index = closing - 1; index >= 0; index -= 1) {
+    if (lines[index].trim().startsWith("```")) {
+      opener = index + 1;
+      break;
+    }
+  }
+  const unclosed = lines.filter((_, index) => index !== closing).join("\n");
+  const selfCut = productDocViolations([{ path: "README.md", text: unclosed }], read);
+  check(
+    "a README whose last code block lost its closing fence goes red, naming the file and the opener line",
+    closing !== -1 &&
+      opener !== -1 &&
+      selfCut.length === 1 &&
+      selfCut[0].startsWith("README.md：") &&
+      selfCut[0].includes(`第 ${opener} 行`) &&
+      selfCut[0].includes("代码围栏"),
+    selfCut.join("；") || "no violation"
+  );
+  check(
+    "...and that copy differs from the real README by exactly one deleted line",
+    closing !== -1 && unclosed.split(/\r?\n/).length === lines.length - 1,
+    `${lines.length} -> ${unclosed.split(/\r?\n/).length}`
+  );
+
+  // (b) a pointer to a file that is not there. The reader follows it into a 404,
+  // and before this rule nothing said so.
+  const danglingPointer = `${readme}\n见 [不存在的文档](docs/不存在的文档.md)。\n`;
+  const missingTarget = productDocViolations([{ path: "README.md", text: danglingPointer }], read);
+  check(
+    "a pointer to a file that does not exist goes red, naming the target",
+    missingTarget.length === 1 &&
+      missingTarget[0].includes("docs/不存在的文档.md") &&
+      missingTarget[0].includes("不存在"),
+    missingTarget.join("；") || "no violation"
+  );
+
+  // (c) a *target* stops mid-sentence: the defect is in the linked document, and
+  // the sentence has to say which one, because the README is fine.
+  const truncatedTarget = productDocViolations(readmes, (target) =>
+    target === "docs/measurements.md" ? `${read(target)}\n本轮改动停在半路，` : read(target)
+  );
+  check(
+    "a document that stops mid-sentence goes red against the README that points at it",
+    truncatedTarget.length === 1 &&
+      truncatedTarget[0].includes("docs/measurements.md") &&
+      truncatedTarget[0].includes("README.md") &&
+      truncatedTarget[0].includes("「，」"),
+    truncatedTarget.join("；") || "no violation"
+  );
+
+  // (d) a document that legitimately ends on a table. Read as a plain last line
+  // it ends on the connector `|`, which reported finished documents as
+  // truncated — the reason this fingerprint exists.
+  const tableEnded = "# 标题\n\n| 项 | 路径 |\n| --- | --- |\n| 发版 | tools/release.mjs |\n";
+  const tableOpen = "# 标题\n\n| 项 | 路径 |\n| --- | --- |\n| 发版 | tools/release.mjs\n";
+  check(
+    "a document that ends on a complete table row is finished, not truncated",
+    docTruncationViolations(tableEnded).length === 0,
+    docTruncationViolations(tableEnded).join("；") || "no violation"
+  );
+  check(
+    "...and the same row with its closing pipe missing goes red as an unfinished table",
+    docTruncationViolations(tableOpen).length === 1 && docTruncationViolations(tableOpen)[0].includes("表格"),
+    docTruncationViolations(tableOpen).join("；") || "no violation"
+  );
+}
+
+/* ---- the product bar says it is in force, and one place says it ----
+ * `README.md` sends contributors to the DoD and tells them to stop adding
+ * features once it is full; the file it sent them to opened with "writable draft
+ * … not yet authorised", so the bar might not have been a bar at all. The status
+ * was settled on 2026-10-31; these checks are what keep a re-sync from quietly
+ * pasting the old header back.
+ */
+{
+  const readme = fs.readFileSync(path.join(ROOT, "README.md"), "utf8");
+  const doc = fs.readFileSync(path.join(ROOT, PRODUCT_DOD_DOC), "utf8");
+
+  check(
+    "a README still points at the DoD, so the status rule is about a live authority",
+    docPointers(readme).some((p) => p.target === PRODUCT_DOD_DOC),
+    JSON.stringify(docPointers(readme).map((p) => p.target))
+  );
+  check(
+    "the DoD header reads as locked / live and carries no draft vocabulary",
+    dodAuthorityViolations(doc).length === 0,
+    dodAuthorityViolations(doc).join("；") || "no violation"
+  );
+
+  // The reverse control is the old header itself, put back where it was.
+  const statusLine = doc.split(/\r?\n/).find((line) => line.includes("状态：")) || "";
+  const reverted = doc.replace(
+    statusLine,
+    "> 状态：**writable draft**（2026-10-31 Asia/Shanghai）；**尚未**授权同步进 live scheduler / control prompts"
+  );
+  const revertedViolations = dodAuthorityViolations(reverted);
+  check(
+    "putting the draft header back goes red, naming the words that made it a contradiction",
+    statusLine !== "" &&
+      revertedViolations.length === 1 &&
+      DOD_DRAFT_TERMS.some((term) => revertedViolations[0].includes(`「${term}」`)) &&
+      reverted.split(/\r?\n/).length === doc.split(/\r?\n/).length,
+    revertedViolations.join("；") || "no violation"
+  );
+
+  // A header that says nothing about its own status is the other half: it does
+  // not contradict the README, it just leaves the reader unable to tell.
+  // Both places the header could say it: the title's parenthetical and the
+  // status line. Dropping only one leaves the other one answering, which is
+  // exactly the "it says it somewhere" reading this rule refuses to accept.
+  const silent = doc
+    .replace(statusLine, "> 状态：见下文")
+    .replace("（locked / live）", "")
+    .replace("锁定稿", "规范稿");
+  check(
+    "...and a header with no status at all goes red for its own reason",
+    statusLine !== "" &&
+      dodAuthorityViolations(silent).length === 1 &&
+      dodAuthorityViolations(silent)[0].includes("「状态」一行没有写明"),
+    dodAuthorityViolations(silent).join("；") || "no violation"
   );
 }
 

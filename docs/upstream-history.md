@@ -38,6 +38,53 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 
 ---
 
+## 上游状态（第 98 轮，2026-11-02）
+
+第 98 轮复核：**上游默认分支前进了，发布版本没有。**`git ls-remote` 退出码 0，
+`refs/heads/main` 已是 `216dcf5`（比 pin 多 3 个 commit：Go / Node 版本升级、GitHub Action
+稳定性、`session show --json` 把空表打成 `[]`），而 `refs/tags` 最高仍是 `v1.13.3`、npm
+仍是 `1.13.3`。本程序封装的是**发布出来的那个二进制**，所以 **pin 不前进**，对照表 5 行
+也没有欠账——那三个 commit 的文件清单里没有一个 5 行引用的上游文件（`resolver.go` /
+`config_cmd.go` / `llm_cmd.go` / `providers.go` / `failure_class` 均未出现）。**无移植项**。
+
+留一条给未来：`216dcf5`（#1792）改的是 `session show --json` 的空 `items`（原来是 `null`，
+现在是无条件 `[]`）。本仓不调 `session show`，调的是 `session list --json`，它在 pin 上仍
+打印 `null`，`ocr-service.js` 的 `Array.isArray(...) ? ... : []` 已经把两种形状都兜住，所以
+这条改动今天对我们没有影响。但**这个形状不在对照表 5 行里**：pin 真前进那天，除了 5 行还
+要多读 `cmd/opencodereview/session_cmd.go` 一次，并把 `ocr session list --json` 的空表实际
+跑一遍确认——上游正在逐个把 `null` 改成 `[]`，`show` 与 `comments` 已经改了。
+
+本轮只动断言，主题是「接线与文档的形状不能只靠读源码相信」：
+
+- **P0-1：桥的双射有反向控制了。** `tools/bridge-contract.mjs` 里接口的读法与通道的读法
+  都收成一个函数（`interfaceIn` / `channelsIn`），下面新增八格自测：把 `src/lib/api.ts` 的
+  一个方法改名喂进去，`missing` 与 `undeclared` 各点名自己那一侧；暴露侧同样改名则两个答案
+  互换；把接口缩进改成四空格，严格正则读空而宽松正则仍数到 42 条，「没有成员被跳过」那条
+  断言于是有它自己的红；把 `preload.js` 的一个通道改名，`unhandled` 与 `orphans` 同时点名
+  新旧两个拼写；把 `RUN_EXIT_CHANNEL` 的值改指别处，`neverSent` 与 `sentToNobody` 双端变红
+  ——这一格专门盯「main 侧经常量发出的通道」，正则丢了常量解析就会把它读成没人发的事件。
+- **P0-2：人读区的形状进断言。** `tools/upstream-watch.mjs` 新增 `humanSectionViolations`：
+  「关系 / 规则 / 当前状态 / 改这份文档之前」四节在人读区各恰好一次，缺一节、降级成 `###`、
+  被复制两份、或整节被搬进机器可读区，都点名行号；另加一条「当前状态标题的轮次必须等于通路
+  账末行」。通路账的行改由 `ledgerRowsIn` 一处解析，烟测与规则读同一张表。这条断言第一次跑
+  就把本仓自己的断链抓出来了：第 97 轮加了账的一行，却没有重写本节，标题停在第 96 轮——
+  两边各自都自洽，所以此前没有任何一条规则看得见它。第 96 轮的正文已按约定搬到
+  `docs/upstream-history.md`，本节不留第二份。
+- **P1-3：三条同拼写条目。** `tools/config-handler-smoke.mjs` 补 `spellingClashMessage` 的
+  三入口三种形状（三条同段、两条一段加一条另一段且表静默、三条分三段），每格按 `entries`
+  的配对断言、并要求句子里两处计数都来自条目数；一个把 `listed` 截成前两条的实现会在这里
+  变红（已用临时改动验过：两条用例全绿、三条用例红），把 `sameSection` 写成
+  `entries.length > 1` 也一样红——两条的时候不暴露的分叉，三条才暴露。
+
+改动只在 `tools/bridge-contract.mjs`、`tools/upstream-watch.mjs`、
+`tools/upstream-watch-smoke.mjs`、`tools/config-handler-smoke.mjs` 与两份上游文档；产品代码
+未动（`config-handler.js` 只是被临时改坏用于自测，已还原）。评审逻辑、CLI 参数、配置读写
+路径与运行期行为均未变。
+
+上一轮（第 96 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-96-轮2026-10-27)，归档之后本文件不留第二份。
+
+---
+
 ## 上游状态（第 96 轮，2026-10-27）
 
 第 96 轮复核：**HEAD 未变，结论仍是「无新内容」；git 与 npm 均可核对。**

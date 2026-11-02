@@ -1,11 +1,12 @@
-# open-code-review-desktop 产品标准锁定稿（writable draft）
+# open-code-review-desktop 产品标准锁定稿（locked / live）
 
-> 状态：**writable draft**（2026-10-31 Asia/Shanghai）；**尚未**授权同步进 live scheduler / control prompts  
-> 用途：给 agent 下一刀 / TODO / next-iteration 的 **下一轮合法输入源**（待 GIN 批准后锁定）  
+> 状态：**locked / live**（2026-10-31 Asia/Shanghai 锁定）——已同步进 live scheduler / control prompts，是本产品过线的唯一标准；`npm run audit:upstream` 会拒绝任何回到 draft 的头部  
+> 用途：给 agent 下一刀 / TODO / next-iteration 的**唯一合法输入源**：只许 DoD 未勾选 ∪ 当周反馈 ∪ 回归/断链/合规/上游 pin 破裂；勾满即停手  
+> 归属：本文件是 scheduler 侧 `/opt/agent-scheduler/docs/product-dod/open-code-review-desktop-dod.md` 在产品仓内的同源副本，条目以 scheduler 侧为准，编码侧只读不改  
 > 形态：OSS 桌面壳，封装 **未修改** 的官方 `alibaba/open-code-review`（`ocr`）二进制；**非官方**须诚实声明  
 > 发版：`v0.1.13` 对照上游 `ocr v1.13.3`；安装包/portable 在 Releases  
 > 代码：`/opt/open-code-review-desktop` · GitHub `castorhrio/open-code-review-desktop`  
-> **不改** live scheduler、config.yaml、产品业务代码；本文件仅 box `/workspace/product-dod/` 可写草稿
+> **不改** live scheduler、config.yaml、产品业务代码
 
 ---
 
