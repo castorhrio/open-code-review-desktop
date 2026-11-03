@@ -31,6 +31,29 @@
 //     fix, and claiming to check it here would be a green light wired to
 //     nothing. What this app owns is the reading screen the export is made from.
 //
+// Two further questions are asked of the same screen, because they are the same
+// kind of claim as the punctuation rules — a property of the text a stranger
+// reads, stated in `styles.css` and checked by nothing:
+//
+//   - **the floor of the type ramp.** No Chinese text may be set below 12px.
+//     The ramp comment in `styles.css` says the app used to run ten sizes
+//     between 10 and 14px, in half-pixel steps, and that the four steps are a
+//     ceiling on choices; a comment cannot hold that, and 11px is exactly the
+//     value a comment would not notice coming back.
+//   - **the order of the font stack.** Latin face first, then a Chinese face,
+//     then a generic. `App.tsx` carries the story of what an unordered stack
+//     costs: the toast list renders outside `<main>`, inherited the library's
+//     stack with no Chinese family in it, and set Chinese with whatever the
+//     operating system picked. So the rule is asked of every rendered CJK leaf,
+//     and a stack that names no Chinese family is red even when it *looks* right
+//     on the machine that wrote it.
+//
+// Both are read from `getComputedStyle` on the leaves that actually carry text,
+// not from the stylesheet: an inline style, a class that lost a merge, or a
+// library's own default all bypass a stylesheet reading. The declarations in
+// `src/styles.css` are asserted separately in `ui-cjk-typography-smoke.mjs`, so
+// an edit there is caught without a browser on the next `audit:static` run.
+//
 // The line-start rule is asked of *block* starts, not of wrap points: `innerText`
 // breaks lines at block boundaries and at `<br>`, not where the browser wrapped,
 // so a comma pushed to the next visual line by the measure is not visible to
@@ -91,6 +114,201 @@ export const uiTypographyViolations = (screen, blocks) => {
   return violations;
 };
 
+/* ---- the type ramp and the font stack ----
+ *
+ * The floor `styles.css` states as `--text-meta` and the order its `--font-sans`
+ * declares, asked of rendered text. The rule names are the failure a reader has
+ * to act on, so they are sentences rather than codes.
+ */
+
+/** No Chinese text may be set below this. Mirrors the smallest step of the ramp. */
+export const MIN_CJK_FONT_PX = 12;
+
+/** Text that contains a Chinese character — the text these two rules are about. */
+export const CJK_TEXT = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/;
+
+/**
+ * The Chinese faces this machine may resolve, lowercased. Not exhaustive on
+ * purpose: the rule is "the stack names a Chinese face", so a stack that names
+ * one nobody here knows is red — a name a browser cannot resolve and no name at
+ * all produce the same glyphs, and only one of them is a decision.
+ */
+export const CJK_FAMILIES = [
+  "microsoft yahei",
+  "微软雅黑",
+  "pingfang sc",
+  "pingfang tc",
+  "pingfang hk",
+  "hiragino sans gb",
+  "heiti sc",
+  "songti sc",
+  "noto sans cjk sc",
+  "noto sans sc",
+  "noto serif cjk sc",
+  "source han sans sc",
+  "source han sans",
+  "simsun",
+  "宋体",
+  "simhei",
+  "黑体",
+  "microsoft jhenghei",
+  "wenquanyi micro hei",
+  "wenquanyi zen hei",
+  "droid sans fallback",
+  "sarasa gothic sc",
+  "lxgw wenkai",
+];
+
+/** CSS-wide families: whatever follows one of these is never reached. */
+export const GENERIC_FAMILIES = [
+  "serif",
+  "sans-serif",
+  "monospace",
+  "cursive",
+  "fantasy",
+  "system-ui",
+  "ui-serif",
+  "ui-sans-serif",
+  "ui-monospace",
+  "ui-rounded",
+  "emoji",
+  "math",
+  "fangsong",
+];
+
+export const isCjkFamily = (family) => CJK_FAMILIES.includes(String(family).trim().toLowerCase());
+export const isGenericFamily = (family) => GENERIC_FAMILIES.includes(String(family).trim().toLowerCase());
+
+/** `font-family` → the list of unquoted family names, in the order written. */
+export const parseFontStack = (value) =>
+  String(value || "")
+    .split(",")
+    .map((family) => family.trim().replace(/^["']|["']$/g, "").trim())
+    .filter(Boolean);
+
+/**
+ * The stack has to be Latin → Chinese → generic.
+ *
+ * Three ways it can stop being that, each one a different visible defect:
+ *
+ *   - no Chinese family: Chinese glyphs come from the operating system's
+ *     fallback, so the app's Chinese typography is whatever the machine
+ *     happens to have (this is the toast bug written up in `App.tsx`);
+ *   - a Chinese family before any Latin one: Latin text is drawn in the Chinese
+ *     face, which is the shape the comment in `styles.css` says makes screens
+ *     look unrelated;
+ *   - a real family after a generic one: it is never reached, so the stack
+ *     *reads* as ordered while the browser stopped two entries earlier. One
+ *     generic after another (`system-ui, sans-serif`) is fine and stays green.
+ */
+export const fontStackViolations = (where, stack) => {
+  const families = parseFontStack(stack);
+  if (!families.length) return [{ rule: "字体栈为空", detail: `${where}：font-family 是空的，中文由系统兜底` }];
+  const violations = [];
+  const cjkIndex = families.findIndex(isCjkFamily);
+  const genericIndex = families.findIndex(isGenericFamily);
+  const latinIndex = families.findIndex((family) => !isGenericFamily(family) && !isCjkFamily(family));
+  if (cjkIndex === -1) {
+    violations.push({
+      rule: "字体栈缺中文字族",
+      detail: `${where}：${families.join(", ")} 里没有中文字族，中文只能由系统兜底（App.tsx 关于 toast 的那段注释就是这个缺陷）`,
+    });
+  } else if (latinIndex === -1 || latinIndex > cjkIndex) {
+    violations.push({
+      rule: "中文字族排在拉丁字族之前",
+      detail: `${where}：${families.join(", ")} 里中文字族在第 ${cjkIndex + 1} 位、拉丁字族在第 ${latinIndex + 1} 位，拉丁文会掉进中文字形`,
+    });
+  }
+  if (genericIndex !== -1) {
+    const dead = families.slice(genericIndex + 1).filter((family) => !isGenericFamily(family));
+    if (dead.length) {
+      violations.push({
+        rule: "通用字族之后还有字族",
+        detail: `${where}：${dead.join(", ")} 排在通用字族「${families[genericIndex]}」之后，浏览器到那一项就停下了，这几项永远用不上`,
+      });
+    }
+  }
+  return violations;
+};
+
+/**
+ * Chinese text below the ramp's floor, grouped by size.
+ *
+ * Grouped because the defect is one decision (`text-meta` went to 11px), not
+ * forty; a per-leaf list would print the same sentence forty times and bury
+ * which one to change. Each group still names the first leaves, so a reader
+ * lands on an element rather than a number.
+ */
+export const cjkFontSizeViolations = (screen, leaves) => {
+  const tiny = [];
+  for (const leaf of leaves) {
+    if (!CJK_TEXT.test(String(leaf.text || ""))) continue;
+    const size = Number(leaf.fontSize);
+    if (!Number.isFinite(size)) {
+      tiny.push({ size: NaN, leaf });
+      continue;
+    }
+    if (size + 1e-6 < MIN_CJK_FONT_PX) tiny.push({ size, leaf });
+  }
+  const groups = new Map();
+  for (const { size, leaf } of tiny) {
+    const key = Number.isFinite(size) ? size : "unreadable";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(leaf);
+  }
+  const violations = [];
+  for (const [size, group] of groups) {
+    const examples = group.slice(0, 2).map((leaf) => `${leaf.where}「${snippet(leaf.text, 24)}」`).join("、");
+    violations.push({
+      file: screen,
+      rule: "中文字号低于 12px",
+      detail:
+        Number.isFinite(size)
+          ? `${screen} 里 ${group.length} 处中文是 ${size}px，低于 ${MIN_CJK_FONT_PX}px 的下限（字号档位见 src/styles.css 的类型阶梯），例如 ${examples}`
+          : `${screen} 里 ${group.length} 处中文的 font-size 读不出来，例如 ${examples}`,
+    });
+  }
+  return violations;
+};
+
+/**
+ * The stack, asked once per distinct stack on the screen rather than per leaf.
+ *
+ * Every leaf usually shares the same stack, so per-leaf reporting would turn one
+ * defect into several hundred identical sentences. Each group keeps the count
+ * and the first leaf, which is what a reader needs to find the declaration.
+ */
+export const uiFontStackViolations = (screen, leaves) => {
+  const groups = new Map();
+  for (const leaf of leaves) {
+    if (!CJK_TEXT.test(String(leaf.text || ""))) continue;
+    const key = String(leaf.fontFamily || "").replace(/\s+/g, " ").trim();
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(leaf);
+  }
+  const violations = [];
+  for (const [stack, group] of groups) {
+    for (const violation of fontStackViolations(`${group.length} 处中文文本`, stack)) {
+      const leaf = group[0];
+      violations.push({
+        file: screen,
+        rule: violation.rule,
+        detail: `${violation.detail}；例如 ${leaf.where}「${snippet(leaf.text, 24)}」`,
+      });
+    }
+  }
+  return violations;
+};
+
+/**
+ * The premise for the two rules above: a screen where no leaf carries Chinese
+ * text was not read. Punctuation can be green on a screen whose leaves the
+ * probe missed (labels without punctuation, prose moved into `pre`), so the two
+ * premises are separate rather than one shared "was it read".
+ */
+export const screensWithoutCjkText = (entries) =>
+  entries.filter((entry) => !(entry.leaves || []).some((leaf) => CJK_TEXT.test(String(leaf.text || "")))).map((entry) => entry.screen);
+
 /**
  * The prose blocks of the current page, in document order.
  *
@@ -144,6 +362,46 @@ const proseBlocks = () => {
     blocks.push({ where: el.tagName.toLowerCase() + (cls ? `.${cls}` : ""), text });
   }
   return blocks;
+};
+
+/**
+ * The leaves that actually carry text, with the two properties the ramp and the
+ * stack are stated in.
+ *
+ * A "leaf" here is an element with its *own* text node — not the outermost block
+ * `proseBlocks` returns. That difference matters: a `<span className="text-meta">`
+ * inside a paragraph is the element whose `font-size` the ramp sets, and reading
+ * the paragraph instead would report the inherited size and see nothing. Same
+ * exclusions as the prose probe (`pre` / `code` / form controls), because a code
+ * sample is not set in the ramp and its stack is the mono one.
+ */
+const textLeaves = () => {
+  const SKIP = new Set(["PRE", "CODE", "TEXTAREA", "INPUT", "SCRIPT", "STYLE", "KBD", "SAMP", "SVG", "CANVAS", "SELECT"]);
+  const skipped = (el) => {
+    for (let n = el; n && n.nodeType === 1; n = n.parentElement) if (SKIP.has(n.tagName.toUpperCase())) return true;
+    return false;
+  };
+  const leaves = [];
+  for (const el of document.body.querySelectorAll("*")) {
+    if (skipped(el)) continue;
+    if (!el.getClientRects().length) continue;
+    const own = [...el.childNodes]
+      .filter((node) => node.nodeType === 3)
+      .map((node) => node.textContent)
+      .join("")
+      .trim();
+    if (!own) continue;
+    const style = getComputedStyle(el);
+    if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) continue;
+    const cls = typeof el.className === "string" ? el.className.split(/\s+/).filter(Boolean).slice(0, 2).join(".") : "";
+    leaves.push({
+      where: el.tagName.toLowerCase() + (cls ? `.${cls}` : ""),
+      text: own,
+      fontSize: Number.parseFloat(style.fontSize),
+      fontFamily: style.fontFamily,
+    });
+  }
+  return leaves;
 };
 
 // ---- the screens ----
@@ -314,6 +572,96 @@ export function weakenedTypographyBundle() {
   return WEAK_OUT;
 }
 
+/**
+ * The second reverse control: the same app with the type ramp's floor and the
+ * order of the font stack broken in the *stylesheet*.
+ *
+ * The punctuation needles above prove the rules can fire on a sentence; they say
+ * nothing about whether a missing Chinese family or an 11px step would be seen,
+ * because those are decided in `out/assets/*.css`, not in a component. The two
+ * mutations are the two defects `styles.css`'s comments claim not to have:
+ *
+ *   - the smallest step dropped to 11px, which is invisible unless something
+ *     reads the computed size of text that is already rendered;
+ *   - `Microsoft YaHei` removed from `--font-sans`, leaving a stack that looks
+ *     fine in English and sets Chinese with whatever the OS picked — the toast
+ *     bug in `App.tsx`, restored on purpose.
+ *
+ * Each needle is a compiled declaration, so it is exactly one occurrence or the
+ * run stops: a minifier that renames a class or re-spaces a declaration is a
+ * build problem, not a typography finding.
+ */
+/**
+ * The `--font-sans` declaration, as compiled, with and without its Chinese face.
+ *
+ * Derived from `src/styles.css` rather than written out: the reverse control has
+ * to break the stack the build actually reads from, and a copy of it here would
+ * be the second place to keep in sync (the smoke test asserts the derivation).
+ */
+const STYLESHEET = fs.readFileSync(path.join(ROOT, "src", "styles.css"), "utf8");
+export const DECLARED_SANS = ((STYLESHEET.match(/--font-sans:\s*([^;]+);/) || [])[1] || "").trim();
+const DECLARED_CJK = DECLARED_SANS.split(",").map((f) => f.trim().replace(/^["']|["']$/g, "").trim()).find((f) => isCjkFamily(f)) || "";
+export const FONT_SANS_NEEDLE = `--font-sans:${DECLARED_SANS}`;
+export const FONT_SANS_MUTANT = `--font-sans:${DECLARED_SANS.replace(`"${DECLARED_CJK}", `, "")}`;
+
+export const STYLE_MUTATIONS = [
+  {
+    needle: ".text-meta{font-size:12px",
+    mutant: ".text-meta{font-size:11px",
+    rule: "中文字号低于 12px",
+    screen: "settings-top",
+    quote: "11px",
+    source: "src/styles.css 的 --text-meta 档位",
+  },
+  {
+    // The whole declaration, not the family token: Tailwind also emits
+    // `--default-font-family` with the same value, so a needle on the family
+    // alone occurs twice and the run cannot know which one it broke.
+    needle: FONT_SANS_NEEDLE,
+    mutant: FONT_SANS_MUTANT,
+    rule: "字体栈缺中文字族",
+    screen: "settings-top",
+    quote: "没有中文字族",
+    source: "src/styles.css 的 --font-sans 字族顺序",
+  },
+];
+
+export const WEAK_STYLE_OUT = path.join(ROOT, ".tmp-audit", "typography-weak-style");
+
+export function weakenedStyleBundle() {
+  fs.rmSync(WEAK_STYLE_OUT, { recursive: true, force: true });
+  fs.cpSync(OUT, WEAK_STYLE_OUT, { recursive: true });
+  const applied = new Map(STYLE_MUTATIONS.map((mutation) => [mutation.needle, 0]));
+  for (const name of fs.readdirSync(path.join(WEAK_STYLE_OUT, "assets"))) {
+    if (!name.endsWith(".css")) continue;
+    const file = path.join(WEAK_STYLE_OUT, "assets", name);
+    let source = fs.readFileSync(file, "utf8");
+    for (const mutation of STYLE_MUTATIONS) {
+      const parts = source.split(mutation.needle);
+      if (parts.length === 1) continue;
+      applied.set(mutation.needle, applied.get(mutation.needle) + parts.length - 1);
+      source = parts.join(mutation.mutant);
+    }
+    fs.writeFileSync(file, source);
+  }
+  const wrong = STYLE_MUTATIONS.filter((mutation) => applied.get(mutation.needle) !== 1);
+  if (wrong.length) {
+    console.error(
+      "The stylesheet reverse control could not be built: " +
+        wrong
+          .map(
+            (mutation) =>
+              `the compiled CSS contains ${applied.get(mutation.needle)} occurrence(s) of 「${mutation.needle}」, but exactly 1 is required (${mutation.source})`
+          )
+          .join("; ") +
+        ".\n" +
+        "Read out/assets/*.css and src/styles.css: a minifier that re-spaced the declaration or renamed the class is a build problem, not a typography finding."
+    );
+    process.exit(2);
+  }
+  return WEAK_STYLE_OUT;
+}
+
 // ---- the gate ----
 
 const walk = async (page, port, screens) => {
@@ -337,7 +685,17 @@ const walk = async (page, port, screens) => {
       console.error(`FAIL    ${screen.name}：这一屏没有取到任何可见文本，检查因此没有看过它`);
       process.exit(2);
     }
-    found.push({ screen: screen.name, blocks, violations: uiTypographyViolations(screen.name, blocks) });
+    const leaves = await page.evaluate(textLeaves);
+    found.push({
+      screen: screen.name,
+      blocks,
+      leaves,
+      violations: [
+        ...uiTypographyViolations(screen.name, blocks),
+        ...cjkFontSizeViolations(screen.name, leaves),
+        ...uiFontStackViolations(screen.name, leaves),
+      ],
+    });
   }
   return found;
 };
@@ -363,20 +721,33 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
 
   const violations = clean.flatMap((entry) => entry.violations);
   const blocks = clean.reduce((n, entry) => n + entry.blocks.length, 0);
+  const leaves = clean.reduce((n, entry) => n + (entry.leaves || []).length, 0);
   console.log(
-    `界面中文排版：查了 ${clean.length} 屏（${clean.map((e) => e.screen).join("、")}）共 ${blocks} 块可见文本，` +
-      `浏览器 ${describeChannel(process.env.PW_CHANNEL)}`
+    `界面中文排版：查了 ${clean.length} 屏（${clean.map((e) => e.screen).join("、")}）共 ${blocks} 块可见文本、` +
+      `${leaves} 个带文字的叶子，浏览器 ${describeChannel(process.env.PW_CHANNEL)}`
   );
   for (const violation of violations) console.log(`FAIL    ${formatViolation(violation)}`);
 
-  // The premise, per screen: a screen with no full-width punctuation anywhere is
-  // a screen this check did not read. Reported before the violations so a
-  // navigation that landed on the wrong page cannot pass as clean prose.
-  const unread = screensWithoutProsePunctuation(clean);
-  if (unread.length) {
+  // The premises, per screen, and they are two different questions: a screen with
+  // no full-width punctuation was not read as prose, and a screen with no Chinese
+  // leaf was not read for the ramp and the stack (a page of bare labels is green
+  // on punctuation and says nothing about 12px). Reported before the violations
+  // so a navigation that landed on the wrong page cannot pass as clean type.
+  const unreadProse = screensWithoutProsePunctuation(clean);
+  const unreadCjk = screensWithoutCjkText(clean);
+  if (unreadProse.length) {
     console.log(
-      `FAIL    前提：${unread.join("、")} 这一屏没有取到任何含中文标点的文本——` +
+      `FAIL    前提：${unreadProse.join("、")} 这一屏没有取到任何含中文标点的文本——` +
         "没有标点可查的屏，绿只说明它没被读到（导航落错页、正文挪进了 pre、或夹具没渲染）"
+    );
+    await browser.close();
+    cleanServer.close();
+    process.exit(2);
+  }
+  if (unreadCjk.length) {
+    console.log(
+      `FAIL    前提：${unreadCjk.join("、")} 这一屏没有取到任何带中文的叶子——` +
+        "字号与字族规则在这几屏上什么都没问，绿只说明它们没被读到"
     );
     await browser.close();
     cleanServer.close();
@@ -408,16 +779,40 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
     process.exit(2);
   }
 
+  // The second reverse control: a stylesheet with 11px and no Chinese family.
+  const styleServer = await serve(PORT + 2, weakenedStyleBundle());
+  const styled = await walk(page, PORT + 2, SCREENS);
+  const styleViolations = styled.flatMap((entry) => entry.violations);
+  const missedStyle = [];
+  for (const mutation of STYLE_MUTATIONS) {
+    const caught = styleViolations.filter((v) => v.rule === mutation.rule && v.file === mutation.screen && v.detail.includes(mutation.quote));
+    if (!caught.length) missedStyle.push(mutation);
+    else console.log(`ok      反向控制：把${mutation.source}改成「${mutation.mutant || "缺中文字族"}」之后，${mutation.screen} 上点名了 ${caught.length} 处（${mutation.rule}）`);
+  }
+  if (missedStyle.length) {
+    console.log(
+      `FAIL    反向控制：${missedStyle.map((m) => `${m.source} → ${m.rule}`).join("、")} 改坏之后，本检查在 ${missedStyle
+        .map((m) => m.screen)
+        .join("、")} 上没有变红——字号与字族规则看不见它该看的那个属性`
+    );
+    await browser.close();
+    cleanServer.close();
+    weakServer.close();
+    styleServer.close();
+    process.exit(2);
+  }
+
   await browser.close();
   cleanServer.close();
   weakServer.close();
+  styleServer.close();
 
   if (violations.length) {
     console.log(
-      `\n${violations.length} 处问题。规则写在 tools/cjk-typography.mjs 顶部（与文档共用同一份），` +
-        "反向控制在 tools/ui-cjk-typography-smoke.mjs。"
+      `\n${violations.length} 处问题。标点三条规则写在 tools/cjk-typography.mjs 顶部（与文档共用同一份），` +
+        "字号与字族两条写在本文件顶部；反向控制在 tools/ui-cjk-typography-smoke.mjs。"
     );
     process.exit(1);
   }
-  console.log(`ok      ${clean.length} 屏的可见中文都守行首禁则、全角标点与中英分隔`);
+  console.log(`ok      ${clean.length} 屏的可见中文都守行首禁则、全角标点与中英分隔，中文不小于 ${MIN_CJK_FONT_PX}px，字族顺序是拉丁 → 中文 → 通用`);
 }

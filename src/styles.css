@@ -69,11 +69,11 @@
                in the app — 阅读 needs a line that outranks its section headers,
                and there is deliberately no step above 20px.
      Line heights are set here so `text-meta` alone never changes rhythm. */
-  --text-meta: 11px;
+  --text-meta: 12px;
   --text-meta--line-height: 1.45;
-  --text-body: 12px;
+  --text-body: 13px;
   --text-body--line-height: 1.55;
-  --text-strong: 13px;
+  --text-strong: 14px;
   --text-strong--line-height: 1.5;
   --text-stat: 20px;
   --text-stat--line-height: 1.1;

@@ -569,10 +569,15 @@ export function ResultsPanel() {
             said out loud here. */}
         {resultOrigin?.pinnedCommit && (
           <Badge
-            className="shrink-0 font-mono"
+            className="shrink-0"
             title={`这次审查读的是这一版代码：${resultOrigin.pinnedCommit}。之后分支再前进，这里读到的仍是当时那一版。`}
           >
-            固定在 {shortRef(resultOrigin.pinnedCommit)}
+            {/* Only the commit is mono. `font-mono` on the whole badge put the
+                Chinese label in the mono stack, which names no Chinese face —
+                those two characters were set by whatever the OS fell back to,
+                the same defect `App.tsx` writes up for the toast list. The new
+                rule in `tools/ui-cjk-typography.mjs` is what found it. */}
+            固定在 <span className="font-mono">{shortRef(resultOrigin.pinnedCommit)}</span>
           </Badge>
         )}
         <div className="tnum flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-muted">

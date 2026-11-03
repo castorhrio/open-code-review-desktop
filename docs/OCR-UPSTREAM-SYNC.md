@@ -35,7 +35,7 @@ tag v1.13.4
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`76ab46ac20f08a8bd8ac38881a8a826c7cb6495f`（第 109 轮：`git ls-remote` 答上，`refs/heads/main` 前进 `8f9c8b7` → `c452846`，`refs/tags/v1.13.4` 仍指向 tag 对象 `1393158`，`/releases/latest` 仍是 `v1.13.4`——tag 与 npm 未动，**pin 不前进**；通路：git）**
+**本轮 HEAD 核对：`76ab46ac20f08a8bd8ac38881a8a826c7cb6495f`（第 110 轮：`git ls-remote` 答上，`refs/heads/main` 前进 `c452846` → `5c039e8`（1 个 commit：HAML / Slim / ERB 模板进 allowlist 与规则表），`refs/tags/v1.13.4` 仍指向 tag 对象 `1393158`，npm `latest` 仍是 `1.13.4`——tag 与 npm 未动，**pin 不前进**；通路：git）**
 
 ### 核对通路账
 
@@ -117,6 +117,7 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 | 107 | 2026-11-03 | api | **上游 HEAD 前进**：`76ab46a` → `8f9c8b7`（1 个 commit：`fix(diff)` 让工作区模式保留被 `.gitignore` 匹配的**已跟踪**文件——`internal/diff/git.go` 的 `partitionDiffs` 在 `ModeWorkspace` 下不再套 `.gitignore`，因为工作区模式里未跟踪的忽略文件早已被滤掉，再套一次会误删已跟踪的改动）；`refs/tags/v1.13.4` 与 npm `1.13.4` 均未变，**pin 不前进**；对照表 5 行的上游文件一个都没被这个 commit 碰到，无移植项（本仓不自己过滤 diff，工作区范围就是 `ocr review --repo`，行为变化由 CLI 带来）；DoD 的版本事实进断言（`dodPinViolations`：过线标准里的每个 `vX.Y.Z` 只能是 pin 的 tag 或本程序版本），并修掉 DoD 里两处过期的 `v1.13.3` | — |
 | 108 | 2026-11-04 | git | `8f9c8b7` / `v1.13.4` / npm `1.13.4`，三条通路答案一致、无新内容，**pin 不前进、无移植项**；DoD 从「人读才能核」推到「脚本能核哪几条还没证据」：6 条各加一行 `证据候选：<仓内路径>`，新增 `dodEvidenceCandidates` / `dodEvidenceCandidateViolations`（每条至少一个候选、路径必须在仓里、候选必须挂在某一条之下），候选与证据共用同一个路径读法；八格反向控制，其中一格是这条规则第一次跑就抓到的自己——DoD 解释标记的那段散文含有这四个字，被「行里出现过标记」判成无主候选，规则改成「行首是标记」；两份 README 的安装段去掉内部场合的说法（「初审答辩环境」/「reviewed and demoed on」→「已验证环境」/「Verified environment」），新增 `readmeInternalTermViolations` 与五格反向控制（含「平台事实本身仍绿」）；界面中文排版从三屏扩到六屏（通知条 `?notice=overflow`、设置页、首屏引导卡），新增逐屏前提 `screensWithoutProsePunctuation`（一屏里没有任何全角标点即算没读到）与第二条反向控制（设置页那句的全角顿号改半角，要求点名 `settings-top`） | — |
 | 109 | 2026-11-03 | git | **上游 HEAD 前进**：`8f9c8b7` → `c452846`（3 个 commit：`.jsonc` 进 allowlist、EJS / Liquid / Nunjucks 模板支持、Scala 审查规则）；`refs/tags/v1.13.4` 与 npm `1.13.4` 均未变，**pin 不前进**；对照表 5 行的上游文件一个都没被这三个 commit 碰到，无移植项（三处都是引擎侧的 allowlist 与规则表，本仓只显示 CLI 给出的排除原因，不自己判定哪些文件进审查）；DoD 的证据从「候选指到哪」推到「候选文件里真有那份证据」：新增 `DOD_EVIDENCE_SHAPES`（14 条候选各声明该记录里必须出现的证据形状，DOD-6 另有一条 `mustNot`）与 `dodEvidenceBodyViolations`（每个候选都要有形状、形状表与候选双射、文件里必须真的有那份证据、读不到不算绿），七格反向控制（把 README 里的「非官方」抹掉、加一条没声明形状的候选、删掉 DOD-5 的候选、文件读不到、`config-handler.js` 开始自己写配置）；DOD-4 补一条指向 `tools/e2e-flow.cjs` 的候选——`.mjs` 只是跑真 Electron 的壳，预览与分支对比的断言在 `.cjs` 里，原候选指过去读不到那几条 check；`docs/measurements.md` 未验证清单补「浏览器依赖」一行，两份 README 的已知限制写明导出 HTML 报告的排版归上游 | — |
+| 110 | 2026-11-04 | git | **上游 HEAD 前进**：`c452846` → `5c039e8`（1 个 commit：HAML / Slim / ERB 模板进 `supported_file_types.json` 与 `system_rules.json`）；`refs/tags/v1.13.4`（`1393158`）与 npm `1.13.4` 均未变，**pin 不前进**；对照表 5 行的上游文件一个都没被这个 commit 碰到，无移植项（allowlist 与规则表是引擎侧，本仓只显示 CLI 给出的排除原因）；界面中文排版新增两条断言——字号下限 12px 与字体栈顺序（拉丁 → 中文 → 通用），第一次跑就在结果页抓到一个真缺陷：`` 固定在 <sha> `` 的徽章整块套着 `font-mono`，中文字族不在 mono 栈里，两个中文字由系统兜底 | — |
 
 ### 对照表（上游前进时要重读的五处）
 
@@ -210,67 +211,31 @@ tool 结果文本**（`Error: diff not found for: …`、`Diffs exist for: …`�
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。搬完这里只留一句
    指针——「本文件只留当前一轮」不是约定而是断言（`previousRoundPointerViolations`）。
 
-## 当前状态（第 109 轮，2026-11-03）
-第 108 轮复核：**上游没有新内容。**`git ls-remote` 这一轮答上来了：`refs/heads/main` 仍是 `8f9c8b7`，
-`refs/tags/v1.13.4` 仍指向 tag 对象 `1393158`，`/releases/latest` 仍是 `v1.13.4`。三条通路答案一致，
-**pin 不前进**，对照表 5 行因此不动，无移植项。
+## 当前状态（第 110 轮，2026-11-04）
+本轮复核：**上游 HEAD 前进了 1 个 commit。**`git ls-remote` 答上：`refs/heads/main` 从 `c452846` 前进到
+`5c039e8`（`feat(allowlist): add HAML, Slim and ERB template support (#1552)`，动的是
+`internal/config/allowlist/supported_file_types.json`、`system_rules.json` 与规则文档）；
+`refs/tags/v1.13.4` 仍指向 tag 对象 `1393158`，npm `latest` 仍是 `1.13.4`。tag 与 npm 未动，
+**pin 不前进**，对照表 5 行不动，无移植项——allowlist 与规则表是引擎侧，本仓只显示 CLI 给出的排除原因，
+不自己判定哪些文件进审查。
 
-本轮按控制仓简报做 P0-1 的收尾、P1-2 与 P1-1，三件都不新增产品功能。
+本轮的产品改动是一件：**界面中文的「字号下限」与「字体栈顺序」从注释变成断言**。
+`styles.css` 的两段注释一直说阶梯最小 12px、栈是拉丁 → 中文 → 通用，但没有任何检查——而这正是 11px
+与「漏掉中文字族」能悄悄回来的方式。`tools/ui-cjk-typography.mjs` 因此多问两个问题，都对**真正带文字的叶子**
+读 `getComputedStyle`（不是读样式表：内联样式、被 merge 吃掉的类、库自己的默认值都绕得过样式表）：
+中文文本的 `font-size` 不得低于 12px；含中文的叶子，`font-family` 必须是拉丁 → 中文 → 通用（缺中文字族 /
+中文字族排在拉丁之前 / 通用字族之后还有真字族，三种各自点名）。逐屏前提也分成两条：没有中文标点算没读到散文，
+没有中文叶子算没读到字号与字族。
 
-**P0-1：过线标准从「人读才能核」推到「脚本能核哪几条还没证据」。** 上一轮把 DoD 的版本事实拉进了断言，
-但 `dodCheckboxViolations` 只对**勾上的**条目说话，而 6 条全是 `[ ]`——于是「六条里没有一条指出过任何一份
-记录」是审计判绿的状态。「没什么可报」与「没人看过」对那条检查是同一个答案，而只有后者说明这份标准还在被维护。
+它第一次跑就抓到一个真缺陷：结果页「固定在 d41c8b7」的徽章整块套着 `font-mono`，而 mono 栈里没有中文字族——
+「固定在」三个字是系统兜底画的，与 `App.tsx` 里 toast 那段注释描述的是同一个缺陷。修法是只把 commit 留在
+mono 里，标签回到正文字族（`src/components/ResultsPanel.tsx`）。
 
-- 每条 DOD 下面加一行缩进的 `证据候选：<仓内路径>`（`docs/PRODUCT-DOD.md`）：它回答的是另一半问题——
-  **这一条若要勾，该去仓里翻哪份记录**。候选不是勾选，也不代替证据；勾选仍归 scheduler 侧，条目正文一个字没动。
-- 新增 `dodEvidenceCandidates` / `dodEvidenceCandidateViolations`（`tools/upstream-watch.mjs`）：每条 ID 至少一个
-  候选、候选路径必须真的在仓里、候选必须挂在某一条之下（写在第一条之前或清单之后属于「没有 ID 的候选」，
-  看着像覆盖、实际一条都没补上）。
-- 候选路径与证据路径共用同一个读法（`dodPathAfterMark`）：反引号与后面的括注都不改变「这一行指的是哪个文件」，
-  两处各写一份「路径到哪结束」正是两条规则开始对同一行给出不同答案的方式。
-- 反向控制（`tools/upstream-watch-smoke.mjs`）八格：正向全绿；前提（6 个 ID 都有候选、没有无主候选、候选数 ≥ 6）；
-  删掉 DOD-5 的候选只点名 DOD-5；候选指向 `docs/no-such-record.md` 点名行号与路径；候选写在第一条之前点名行号；
-  标记后面没有路径点名行号；**正文里提到标记不算候选**（见下）；候选路径的反引号与括注不改变文件名。
-- 这条规则第一次跑就抓到自己：DoD 里解释这个标记的那段散文**含有**这四个字，于是「行里出现过标记」把说明本身
-  判成了无主候选，活文档当场变红。规则改成「行首是标记」——提到标记是散文，以标记开头才是回答，两半都进了断言
-  （否则「忽略提及」在规则完全停止读取候选时也会绿）。
+反向控制也加了一组按**样式表**改坏的两格：把 `.text-meta` 的 12px 改成 11px、把 `--font-sans` 里的
+`Microsoft YaHei` 摘掉，各要求在 `settings-top` 上点名对应规则。两条 needle 从 `src/styles.css` 推导而不是抄一份，
+needle 指错时 `audit:static` 先红（`ui-cjk-typography-smoke.mjs` 同时断言阶梯最小值、声明栈的顺序与两条 needle 的推导）。
 
-**P1-2：README 的安装段不再出现内部场合的说法。** 上一轮在安装段顶部写的是「初审答辩环境：Windows x64」/
-「the environment this is reviewed and demoed on is Windows x64」。两句都真，但都在讲**我们**：一个内部场合
-（初审答辩）与一个内部动词（demo），第一次装这个应用的人读到的是「这句话是写给谁看的」，而不是「哪个平台验证过、
-下哪个文件」。改成「已验证环境：Windows x64，使用 `*-setup.exe`」/「Verified environment: Windows x64, using the
-`*-setup.exe`」——平台事实与文件名都留着，去掉的只是场合。
-
-- 新增 `readmeInternalTermViolations`（`tools/upstream-watch.mjs`）：两份 README 里不许出现内部场合的词
-  （`答辩` / `评审` / `初审` / `内部评审` / `内部试用` / `演示环境`，英文侧 `demo` / `demoed` / `demoing`）。
-  按词拒绝而不是按句，因为这句话回来的方式是「从某份报告里粘一句」，句子每次都不一样。
-- 反向控制五格：正向全绿；前提（两份 README 都真的读到了，不是空清单）；中文那句粘回去点名文件、行号与「答辩」；
-  英文那句粘回去点名「demoed」（只挡中文名词的规则挡不住它）；**平台事实本身仍绿**——把「macOS 与 Linux 只有源码」
-  写进同一句必须不红，否则这条规则会连诚实的那半句一起赶走。
-
-**P1-1：界面中文排版从三屏扩到六屏。** 上一轮把界面排版从手感变成断言，但只走了三屏（结果页选中一条
-finding、长 finding、阅读页）。漏掉的三处恰好是**手写**中文最密的地方：通知条（主进程自己写的失败句）、
-设置页（提示与解释，全应用最密）、首屏引导卡（新用户读到的第一段中文）。手写句子是半角逗号进来的唯一途径，
-而模型返回的 finding 反而是最不容易出这种错的那一类。
-
-- `tools/ui-cjk-typography.mjs` 新增三屏：`notice-overflow`（`?notice=overflow`，通知条被填到上限的那一屏）、
-  `settings-top`、`guide-first-run`。规则函数一个没动——三屏复用同一份 `uiTypographyViolations`。
-- 引导卡要**单独一份 storage**：其余各屏共用的 `STORAGE` 带 `guide-dismissed: 1`，继承它的引导屏会一张卡都不渲染
-  却照样报绿。`walk` 改成「先 `localStorage.clear()` 再写这一屏的 storage」，否则上一屏写的键会漏进下一屏。
-- 新增逐屏前提 `screensWithoutProsePunctuation`：一屏里**没有任何全角标点**就算没读到（导航落错页、正文挪进
-  `pre`、夹具没渲染），直接退 2 而不是报绿。「没什么可报」与「什么都没读到」在一条只数违规的检查里是同一个答案。
-- 反向控制从一条变两条（`MUTATIONS`）：报告那句之外，加设置页「不写配置、也不需要先保存」的顿号改半角，
-  要求点名 `settings-top`。只加屏不加针，新屏就停在报告屏加针之前的状态——被一条没人证明能在那里触发的规则看着。
-- `tools/ui-cjk-typography-smoke.mjs`（`audit:static`，无浏览器）补四格：六屏清单逐字断言（少一屏即红）、
-  引导屏确实退出了 `guide-dismissed`、逐屏前提的正反两向（有散文的屏绿、只有裸标签的屏被点名）、
-  以及「每条针都还在它渲染的那个组件里」从只查第一条改成查全部。
-
-本轮改动：`tools/upstream-watch.mjs`（新增候选规则与 README 内部词规则）、`tools/upstream-watch-smoke.mjs`
-（八格 + 五格断言）、`tools/ui-cjk-typography.mjs`（三屏 + 逐屏前提 + 第二条反向控制）、
-`tools/ui-cjk-typography-smoke.mjs`（四格断言）、`docs/PRODUCT-DOD.md`（6 条各加证据候选与一段说明）、
-两份 README（各一句）、`docs/measurements.md`（本轮验证数字 + 未验证清单加「导出 HTML 排版归上游」）、
-本文件与归档。
-上一轮（第 107 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-107-轮2026-11-03)，归档之后本文件不留第二份。
+上一轮（第 109 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-109-轮2026-11-03)，归档之后本文件不留第二份。
 
 ## 上游真变了怎么办（命令驱动，而不是「记得看一眼」）
 ```bash

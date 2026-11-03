@@ -65,7 +65,19 @@ export function App() {
           // so without this the one piece of text a user needs to copy (to
           // paste into an issue, or to search for) is the one they cannot.
           className: "selectable",
-          style: { background: "var(--surface)", border: "1px solid var(--line)", color: "var(--ink)", fontSize: "12.5px" } as React.CSSProperties,
+          // `fontFamily` is not decoration: the toast list is rendered by the
+          // toast library outside <main>, so it never inherits `body`'s stack
+          // and fell back to the library's own default — a stack with no CJK
+          // family in it, which is the one place in the app where Chinese was
+          // set by whatever the OS picked. `fontSize` is the ramp's `strong`
+          // step; 12.5px was the last half-pixel size left in the app.
+          style: {
+            background: "var(--surface)",
+            border: "1px solid var(--line)",
+            color: "var(--ink)",
+            fontFamily: "var(--font-sans)",
+            fontSize: "13px",
+          } as React.CSSProperties,
         }}
       />
     </div>

@@ -35,9 +35,17 @@ import fs from "node:fs";
 import path from "node:path";
 import { typographyViolations } from "./cjk-typography.mjs";
 import {
+  MIN_CJK_FONT_PX,
   MUTATIONS,
   SCREENS,
+  STYLE_MUTATIONS,
+  cjkFontSizeViolations,
+  fontStackViolations,
+  isCjkFamily,
+  parseFontStack,
+  screensWithoutCjkText,
   screensWithoutProsePunctuation,
+  uiFontStackViolations,
   uiTypographyViolations,
 } from "./ui-cjk-typography.mjs";
 
@@ -243,6 +251,186 @@ const rulesOf = (violations) => violations.map((violation) => violation.rule);
     "...and each mutation names a screen the harness actually walks",
     MUTATIONS.every((mutation) => SCREENS.some((screen) => screen.name === mutation.screen)),
     JSON.stringify(MUTATIONS.map((mutation) => mutation.screen))
+  );
+}
+
+/* ---- 2b. the type ramp's floor and the font stack's order ----
+ *
+ * Two claims `styles.css` states in comments and nothing read: no Chinese text
+ * below 12px, and Latin → Chinese → generic in `--font-sans`. A comment cannot
+ * hold either — 11px is one edit away and a missing Chinese family looks correct
+ * on the machine that wrote it (that is the toast story in `App.tsx`).
+ *
+ * The rules are asked here on constructed leaves, and the *declarations* are
+ * asked of `src/styles.css` itself: the browser harness can only say "what is
+ * rendered is fine today", while this says "the stylesheet this build reads from
+ * still declares it", which is the half that runs in `audit:static`.
+ */
+{
+  // The floor. Every boundary is asserted in both directions, because a rule
+  // that fires on 13px too would be turned off and take the real check with it.
+  const leaf = (text, fontSize, fontFamily = '"Inter", "Microsoft YaHei", sans-serif') => ({
+    where: "span.text-meta",
+    text,
+    fontSize,
+    fontFamily,
+  });
+  const atEleven = cjkFontSizeViolations("settings-top", [leaf("不写配置、也不需要先保存", 11)]);
+  const atTwelve = cjkFontSizeViolations("settings-top", [leaf("不写配置、也不需要先保存", 12)]);
+  const atThirteen = cjkFontSizeViolations("settings-top", [leaf("不写配置、也不需要先保存", 13)]);
+  check(
+    "中文字号低于 12px fires at 11px and names the screen, the size and the element",
+    atEleven.length === 1 &&
+      atEleven[0].rule === "中文字号低于 12px" &&
+      atEleven[0].file === "settings-top" &&
+      atEleven[0].detail.includes("11px") &&
+      atEleven[0].detail.includes("span.text-meta"),
+    JSON.stringify(atEleven)
+  );
+  check(
+    "...and 12px (the ramp's smallest step) and 13px are green",
+    atTwelve.length === 0 && atThirteen.length === 0,
+    JSON.stringify({ atTwelve, atThirteen })
+  );
+  check(
+    "...and the rule is about Chinese: an 11px leaf with no Chinese character in it is not a finding",
+    cjkFontSizeViolations("settings-top", [leaf("v1.13.4", 11)]).length === 0,
+    JSON.stringify(cjkFontSizeViolations("settings-top", [leaf("v1.13.4", 11)]))
+  );
+  // The premise the leaf probe carries: a size that is not a number is reported,
+  // not skipped. "Unreadable" and "fine" must not be the same answer.
+  check(
+    "...and a leaf whose font-size cannot be read is reported rather than passed",
+    cjkFontSizeViolations("settings-top", [leaf("中文", Number.NaN)]).length === 1,
+    JSON.stringify(cjkFontSizeViolations("settings-top", [leaf("中文", Number.NaN)]))
+  );
+
+  // The stack, three ways it can be wrong and the shapes that are fine.
+  const good = '"Inter", "Inter Variable", -apple-system, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif';
+  const noCjk = '"Inter", -apple-system, "Segoe UI", system-ui, sans-serif';
+  const cjkFirst = '"Microsoft YaHei", "Inter", sans-serif';
+  const deadAfterGeneric = '"Inter", "Microsoft YaHei", sans-serif, "Segoe UI"';
+  const twoGenerics = '"Inter", "Microsoft YaHei", system-ui, sans-serif';
+  check(
+    "fontStackViolations is green on the stack the app declares (Latin → Chinese → generic)",
+    fontStackViolations("--font-sans", good).length === 0,
+    JSON.stringify(fontStackViolations("--font-sans", good))
+  );
+  check(
+    "...and a stack with no Chinese family is 字体栈缺中文字族",
+    fontStackViolations("--font-sans", noCjk).map((v) => v.rule).join(",") === "字体栈缺中文字族",
+    JSON.stringify(fontStackViolations("--font-sans", noCjk))
+  );
+  check(
+    "...and Chinese before Latin is 中文字族排在拉丁字族之前",
+    fontStackViolations("--font-sans", cjkFirst).map((v) => v.rule).join(",") === "中文字族排在拉丁字族之前",
+    JSON.stringify(fontStackViolations("--font-sans", cjkFirst))
+  );
+  check(
+    "...and a real family after a generic one is 通用字族之后还有字族",
+    fontStackViolations("--font-sans", deadAfterGeneric).map((v) => v.rule).join(",") === "通用字族之后还有字族",
+    JSON.stringify(fontStackViolations("--font-sans", deadAfterGeneric))
+  );
+  check(
+    "...while a second generic after the first is fine (the app's stack ends that way)",
+    fontStackViolations("--font-sans", twoGenerics).length === 0,
+    JSON.stringify(fontStackViolations("--font-sans", twoGenerics))
+  );
+  check(
+    "...and an empty stack is not green: it is reported as 字体栈为空",
+    fontStackViolations("--font-sans", "").map((v) => v.rule).join(",") === "字体栈为空",
+    JSON.stringify(fontStackViolations("--font-sans", ""))
+  );
+
+  // Screens are named once per distinct stack, with the count and an example
+  // leaf: one defect should not print once per leaf, and "how many" is what tells
+  // a reader whether they are looking at a component or at the whole app.
+  const stackNamed = uiFontStackViolations("settings-top", [
+    leaf("这里改的是官方 CLI 的用户级配置。", 13, noCjk),
+    leaf("不写配置、也不需要先保存。", 13, noCjk),
+  ]);
+  check(
+    "the screen-level stack rule names the screen, the count and one element",
+    stackNamed.length === 1 &&
+      stackNamed[0].file === "settings-top" &&
+      stackNamed[0].rule === "字体栈缺中文字族" &&
+      stackNamed[0].detail.includes("2 处中文文本") &&
+      stackNamed[0].detail.includes("span.text-meta"),
+    JSON.stringify(stackNamed)
+  );
+
+  // The second premise: a screen with no Chinese leaf was not read for these two
+  // rules. Separate from the punctuation premise because a screen of bare labels
+  // can be green on punctuation and silent on 12px.
+  const read = [{ screen: "settings-top", leaves: [leaf("不写配置。", 13)] }];
+  const unread = [
+    { screen: "notice-overflow", leaves: [leaf("v1.13.4 run 3", 12)] },
+    { screen: "guide-first-run", leaves: [] },
+  ];
+  check(
+    "a screen with no Chinese leaf is named as unread, and a screen with Chinese leaves is not",
+    screensWithoutCjkText([...read, ...unread]).join(",") === "notice-overflow,guide-first-run",
+    JSON.stringify(screensWithoutCjkText([...read, ...unread]))
+  );
+  check(
+    "...and that premise is not vacuous either",
+    screensWithoutCjkText(read).length === 0 && screensWithoutCjkText(unread).length === 2,
+    JSON.stringify({ read: screensWithoutCjkText(read), unread: screensWithoutCjkText(unread) })
+  );
+}
+
+/* ---- 2c. the stylesheet the build reads from still declares both ----
+ *
+ * The browser pass proves the rendered app is fine *today*. This proves the
+ * declarations the app is built from still say so, which is the half that can
+ * run without a build. It also keeps the stylesheet reverse control honest: the
+ * needles are compiled text, so a ramp or stack edit here would make the
+ * browser harness exit 2 — better to be told here, in the suite that runs on
+ * every change.
+ */
+{
+  const css = fs.readFileSync(path.join(ROOT, "src", "styles.css"), "utf8");
+  const ramp = [...css.matchAll(/--text-([a-z-]+):\s*(\d+)px/g)].map((match) => ({ step: match[1], px: Number(match[2]) }));
+  const smallest = ramp.reduce((min, entry) => Math.min(min, entry.px), Number.POSITIVE_INFINITY);
+  check(
+    `the type ramp's smallest step is at least ${MIN_CJK_FONT_PX}px`,
+    ramp.length >= 4 && smallest >= MIN_CJK_FONT_PX,
+    JSON.stringify(ramp)
+  );
+
+  const declaredSans = (css.match(/--font-sans:\s*([^;]+);/) || [])[1] || "";
+  check(
+    "the declared --font-sans is Latin → Chinese → generic",
+    fontStackViolations("src/styles.css --font-sans", declaredSans).length === 0 && parseFontStack(declaredSans).some(isCjkFamily),
+    JSON.stringify({ declaredSans, violations: fontStackViolations("src/styles.css --font-sans", declaredSans) })
+  );
+
+  // The two stylesheet mutations are compiled declarations, so the values they
+  // look for have to still be the values in the source. If this goes red, the
+  // ramp or the stack changed and `STYLE_MUTATIONS` has to follow — otherwise the
+  // browser harness stops the run with "could not be built" instead of proving
+  // anything.
+  const metaStep = ramp.find((entry) => entry.step === "meta");
+  check(
+    "the 11px reverse control still targets the current --text-meta step",
+    Boolean(metaStep) && STYLE_MUTATIONS[0].needle === `.text-meta{font-size:${metaStep.px}px`,
+    JSON.stringify({ metaStep, needle: STYLE_MUTATIONS[0].needle })
+  );
+  const cjkFamily = parseFontStack(declaredSans).find(isCjkFamily);
+  const sansMutation = STYLE_MUTATIONS[1];
+  check(
+    "the missing-CJK reverse control mutates the very declaration the stylesheet gives, and drops only the Chinese face",
+    Boolean(cjkFamily) &&
+      sansMutation.needle === `--font-sans:${declaredSans}` &&
+      sansMutation.mutant === `--font-sans:${declaredSans.replace(`"${cjkFamily}", `, "")}` &&
+      !sansMutation.mutant.includes(cjkFamily) &&
+      fontStackViolations("mutant --font-sans", sansMutation.mutant.slice("--font-sans:".length)).length > 0,
+    JSON.stringify({ cjkFamily, needle: sansMutation.needle, mutant: sansMutation.mutant })
+  );
+  check(
+    "...and both mutations name a screen the browser harness walks and a rule it reports",
+    STYLE_MUTATIONS.every((mutation) => SCREENS.some((screen) => screen.name === mutation.screen) && mutation.rule.length > 0),
+    JSON.stringify(STYLE_MUTATIONS.map((mutation) => ({ screen: mutation.screen, rule: mutation.rule })))
   );
 }
 

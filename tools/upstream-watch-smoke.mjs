@@ -768,11 +768,34 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
   const doc = fs.readFileSync(SYNC_DOC, "utf8");
   // One line, fixed shape: the reader should not have to skim a paragraph to
   // learn whether the current round was actually checked.
-  const match = doc.match(/本轮 HEAD 核对：`([0-9a-f]{7,40})`（([^）]+)）/);
+  //
+  // The qualifier is prose, and prose grows parentheses: round 110 wrote
+  // `… `c452846` → `5c039e8`（1 个 commit：…），` inside it, and the shape used
+  // to be `（([^）]+)）` — it stopped at the *inner* `）`, so the road at the end
+  // of the qualifier was never captured and a correct doc was reported as not
+  // saying which road checked the HEAD. The shape is therefore "the line ends
+  // with `）**`": everything up to the final `）` belongs to the qualifier,
+  // whatever it puts inside.
+  const fixedLine = (text) => text.match(/本轮 HEAD 核对：`([0-9a-f]{7,40})`（(.+)）(?:\*\*|\s*$)/m);
+  const match = fixedLine(doc);
   check(
     "the sync doc carries a fixed '本轮 HEAD 核对' line with a SHA and a qualifier",
     match !== null && match[2].trim().length > 0,
     match ? `${match[1]}（${match[2]}）` : "missing"
+  );
+
+  // The reverse control for that shape, on a constructed line rather than the
+  // doc: the doc's own qualifier changes every round, and a control that reads
+  // the live line would go quiet the first round nobody nested a parenthesis.
+  // What it asks is the half that broke — the road sits *after* an inner `）`.
+  const nested = fixedLine(
+    "**本轮 HEAD 核对：`76ab46ac`（第 110 轮：前进 `c452846` → `5c039e8`（1 个 commit：模板进 allowlist 与规则表），通路：git）**"
+  );
+  const nestedRoad = nested ? /通路：(git|api|npm|none)/.exec(nested[2]) : null;
+  check(
+    "...and a qualifier with parentheses inside it still yields the road at its end",
+    nestedRoad !== null && nestedRoad[1] === "git",
+    JSON.stringify({ qualifier: nested ? nested[2] : null, road: nestedRoad ? nestedRoad[1] : null })
   );
 
   // The pin is handwritten in three places in the doc (the machine-readable

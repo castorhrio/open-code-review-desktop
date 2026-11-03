@@ -171,13 +171,21 @@ const PROBE = `(() => {
     const cls = typeof el.className === "string" ? el.className : el.getAttribute("class") || "";
     unreachable.push(el.tagName.toLowerCase() + "." + cls.slice(0, 50) + " " + el.scrollWidth + ">" + el.clientWidth);
   }
-  // One type ramp. styles.css declares four steps and nothing else — 11 / 12 /
-  // 13 / 20px — because the app once used ten sizes between 10 and 14px in
+  // One type ramp. styles.css declares four steps and nothing else — 12 / 13 /
+  // 14 / 20px — because the app once used ten sizes between 10 and 14px in
   // half-pixel increments, which is what made every screen look slightly
   // unrelated to every other one. A comment cannot hold that; this can. Only
   // elements that *own* text are sampled, so an inherited size is never counted
   // twice, and the sizes are reported so a failure names the offender.
-  const RAMP = [11, 12, 13, 20];
+  //
+  // The floor is 12px, and it is a floor rather than a taste: the smallest step
+  // used to be 11px, which is where 121 blocks of Chinese sat (hints, counts,
+  // badges, the run feed's meta line). Han glyphs at 11px lose their internal
+  // strokes, so the step was raised to 12 and the two above it moved up with it
+  // to keep four distinct steps. tools/ui-cjk-typography.mjs asks the same
+  // question of the prose it walks; this list is what makes an *off-ramp* size
+  // red, and the two together are why "11px Chinese" cannot come back quietly.
+  const RAMP = [12, 13, 14, 20];
   const offRamp = {};
   for (const el of document.querySelectorAll("main *")) {
     if (!el.getClientRects().length) continue;
@@ -613,9 +621,19 @@ const expectCodeReadAtCommit = async (page) => {
  * cannot produce, and the abbreviated form the app actually renders was never on
  * screen. So the visible text is now asserted to be the short form, not merely to
  * contain the prefix.
+ *
+ * The label and the commit are two runs of text, not one: the badge sets the
+ * Chinese label in the app's sans stack and only the SHA in the mono one (a
+ * whole-badge mono class put two Chinese characters into a stack that names no
+ * Chinese face — see the rule in tools/ui-cjk-typography.mjs). Two runs inside a
+ * badge means innerText reports them on separate lines, so the comparison
+ * collapses whitespace: what this check is about is the words on screen, and a
+ * layout break between them is not a different sentence.
  */
+const flatten = (text) => String(text ?? "").replace(/\s+/g, " ").trim();
+
 const expectPinnedCommit = async (page) => {
-  const text = await page.locator("main").innerText();
+  const text = flatten(await page.locator("main").innerText());
   const out = [];
   if (!/固定在 d41c8b7/.test(text)) out.push("the results header does not say which commit was reviewed");
   const badge = await page
@@ -623,7 +641,7 @@ const expectPinnedCommit = async (page) => {
     .first()
     .innerText()
     .catch(() => null);
-  if (badge !== "固定在 d41c8b7")
+  if (flatten(badge) !== "固定在 d41c8b7")
     out.push(`the pinned commit badge is not the abbreviated SHA a real run shows (badge: ${JSON.stringify(badge)})`);
   const title = await page
     .locator('main span[title^="这次审查读的是这一版代码"]')

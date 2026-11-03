@@ -274,7 +274,7 @@ export const docTypographyViolations = (readmes, readFile, explicit = EXPLICIT_D
 };
 
 export const formatViolation = (violation) =>
-  `${violation.file}:${violation.line}：${violation.rule}——${violation.detail}`;
+  `${violation.file}${violation.line == null ? "" : `:${violation.line}`}：${violation.rule}——${violation.detail}`;
 
 // ---- the gate ----
 //
