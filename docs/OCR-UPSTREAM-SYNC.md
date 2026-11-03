@@ -35,7 +35,7 @@ tag v1.13.5
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`abb7abcd5c5196fa0278dc87db85780fa269562f`（第 114 轮：`git ls-remote` 这一趟通了，HEAD 与 tag 一次问全——`refs/heads/main` 仍是 `abb7abc`，与第 111–113 轮核对到的是同一个 commit，**HEAD 本轮没有前进**；`refs/tags/v1.13.5`（tag 对象 `e739d39`）指向的也是 `abb7abc`，Releases 前三仍是 `v1.13.5` / `v1.13.4` / `v1.13.3`（皆非 draft / 非 prerelease），npm `latest` 仍是 `1.13.5`（`gitHead` = `abb7abc`）——三处口径一致，**pin 不动**；通路：git）**
+**本轮 HEAD 核对：`abb7abcd5c5196fa0278dc87db85780fa269562f`（第 116 轮：`git ls-remote` 这一趟通了，HEAD 与 tag 一次问全——`refs/heads/main` 仍是 `abb7abc`，与第 111–114 轮核对到的是同一个 commit，**HEAD 本轮没有前进**；`refs/tags/v1.13.5` 指向的也是 `abb7abc`，npm `latest` 仍是 `1.13.5`（`gitHead` = `abb7abc`）——三处口径一致，**pin 不动**；通路：git）**
 
 ### 核对通路账
 
@@ -122,6 +122,8 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 | 112 | 2026-11-04 | git | **上游没动**：`refs/heads/main` 仍是 `abb7abc`、`refs/tags/v1.13.5` 仍是 `abb7abc`（tag 对象 `e739d39`）、npm `latest` 仍是 `1.13.4`，三个口径一致，**pin 不动**、对照表 5 行无需重读、无移植项；`--max-tools` 那条用户可见的差距不留在会被归档的正文里，改记进 `docs/PRODUCT-DOD.md` 的 DOD-2 未勾原因（那一句有断言读）；本轮产品改动是把 DOD-4 缺的首启链路做成 harness：`tools/e2e-first-run.cjs` + `tools/e2e-first-run.mjs`，17 条 check 走「空档案 → 引导 → 选仓 → 配 provider → 清单 → 成本确认挡住的那次 `scan`」，判定抽进 `tools/e2e-first-run-steps.cjs` 由 `audit:e2e-first-run-rules` 钉住，harness 挂在 `audit:app`（`audit:e2e-first-run`） | — |
 | 113 | 2026-11-04 | api | **上游发布版本前进**：`v1.13.4` → `v1.13.5`（tag commit 就是第 111–112 轮已经核对到的 `abb7abc`，tag 对象 `e739d39`，Release 发布于 2026-11-03T14:43:14Z、非 draft / 非 prerelease），npm `latest` 同为 `1.13.5`，本机 npm 装下来的二进制自报 `v1.13.5 (abb7abcd) linux/amd64`——第 111 轮那条「tag / Release 走了、npm 没走」的分叉本轮合上，**pin 前进**；`git ls-remote` 的 TLS 被断开（GnuTLS `-110`），HEAD 与 tag 都由 API 答上；对照表 5 行在这一次提交里逐行重读（compare `v1.13.4...v1.13.5` 是 8 个 commit / 36 个文件，`internal/llm/resolver.go`、`cmd/opencodereview/config_cmd.go`、`llm_cmd.go` / `providers.go` 一个都不在清单里——清单里那个 `internal/diff/resolver.go` 是**同名不同包**的另一个文件；唯一被碰到的定义 `failure_class` 的文件是 `internal/session/manifest.go`，它只给 `ManifestExecution` 加了 `MaxToolRequestTimes`，两张枚举逐字未变）；第 111 轮记下的那条用户可见差距在这一次闭合（`resolveReviewMaxTools`：解析后的正值精确设置上限，1–49 仍先上调到 50），DOD-2 的未勾原因随之改写；升 pin 的真机验证跑在 Linux x64（数字记在 `docs/measurements.md`），两份 README、`src/lib/types.ts` 与 DoD 头部的版本行同步前进 | — |
 | 114 | 2026-11-04 | git | `abb7abc` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**；参数面从手感变成断言：新增 `tools/cli-surface.mjs`（`npm run audit:surface`），读被 pin 的那一版二进制的 `--help`（12 条命令）与本仓真的交给 `spawn` 的 18 条命令行，双向对照 57 行要拼 / 10 行不收 / 15 行有理由地不用，版本行必须同时带 pin 的 tag 与 commit 前缀；自检 `tools/cli-surface-smoke.mjs` 46 条（其中 4 条看仓库而不是夹具，含「`--preview` 与 `--resume` 不在同一条命令行上」这条前提），挂进 `audit:static`（24 → 25 项） | — |
+| 115 | 2026-11-04 | none | 本文件没有核对记录（该轮未更新状态与账） | `[UPSTREAM-DEBT]` HEAD |
+| 116 | 2026-11-04 | git | `abb7abc` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**（这一批就是第 113 轮重读过的那一批，五个对照点一个都没被碰到）；第 115 轮的欠账由本轮的 `git` 通路清掉，本轮产品侧只修了上一轮留下的账断链（第 115 轮提交了、通路账停在 114，`ledgerRoundViolations` 开局即红） | — |
 
 「最近一次对照」只写**那一项最近被人工重新核对**的轮次。该列没有列出本轮，表示本轮
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
@@ -213,38 +215,21 @@ tool 结果文本**（`Error: diff not found for: …`、`Diffs exist for: …`�
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。搬完这里只留一句
    指针——「本文件只留当前一轮」不是约定而是断言（`previousRoundPointerViolations`）。
 
-## 当前状态（第 114 轮，2026-11-04）
-本轮复核：**上游什么都没动。** `git ls-remote` 这一趟通了（第 113 轮那条 GnuTLS `-110` 没再出现），HEAD 与 tag 一次问全：
-`refs/heads/main` 仍是 `abb7abc`——第 111、112、113 轮核对到的都是它，本轮第四次；`refs/tags/v1.13.5`（tag 对象 `e739d39`）指向的
-也是 `abb7abc`；Releases 前三条仍是 `v1.13.5` / `v1.13.4` / `v1.13.3`（皆非 draft / 非 prerelease），npm `latest` 仍是 `1.13.5`
-（`gitHead` = `abb7abc`）。**pin 不动、对照表 5 行无需重读、无移植项。**
+## 当前状态（第 116 轮，2026-11-04）
+本轮复核：**上游什么都没动。** `git ls-remote` 这一趟通了，HEAD 与 tag 一次问全：`refs/heads/main` 仍是 `abb7abc`
+（第 111、112、113、114 轮核对到的都是它，本轮第五次）；`refs/tags/v1.13.5` 指向的也是 `abb7abc`；npm `latest`
+仍是 `1.13.5`（`gitHead` = `abb7abc`）。三处口径一致，**pin 不动、对照表 5 行无需重读、无移植项**——上游这一批
+没有任何 commit 落在本仓消费的五个对照点（`internal/llm/resolver.go`、`config_cmd.go`、`llm_cmd.go` /
+`providers.go`、`failure_class` 两张枚举）上，因为这一批就是上一轮重读过的那一批。
 
-本轮的产品改动是补 DOD-2 的实证面：**参数面**。此前「引擎未改」只有两条证据——`ocr-service.js` 只拼参数不实现规则、以及一张手写的
-每模式白名单；两者都答不了审阅者真正要问的那一句：本仓拼出去的每一个 flag，是不是都被**被 pin 的那一版** CLI 收。`tools/cli-surface.mjs`
-（`npm run audit:surface`）回答它，用的是两台机器而不是一次重读：被 pin 的二进制的 `--help`（12 条命令，含 `ocr review --help` 与
-`ocr scan --help`）与本仓真的交给 `spawn` 的 argv（`preview` / 四种范围的 `startRun` / 会话三条 / 规则 / 配置两条 / provider 表，共 18 条
-命令行）。两个方向都查：表里的 57 行必须在 help 里且类型一致、也必须真的被某条命令行拼出来；录到的每个 flag 必须在表里有行；help 里有
-而本仓不送的 15 行必须在「不用」表里写下理由；「`scan` 不收 `--effort`」这类 10 行白名单依据也要在 help 里核对。另有两条不属于双射但
-同样会杀人：`--preview` 永不带 `--resume`（CLI 拒绝这对组合，而预览与运行共用一个 spec），版本行必须同时带 pin 的 tag 与 commit 前缀
-（否则上面每一条答案说的都是别的发布）。
+本轮产品侧没有新增能力，做的是**把上一轮留下的断链接上**：第 115 轮的提交信息写着「第 115 轮」，而通路账停在
+第 114 轮，于是 `ledgerRoundViolations` 的判定（账末行轮次必须是提交信息的 N 或 N+1）在开局时就是红的——这正是
+那条规则存在的理由：一轮提交了、账没加行，看起来和「这一轮核对过、上游没动」一模一样。账上补了第 115 轮一行，
+通路写 `none` 并带 `[UPSTREAM-DEBT] HEAD`（那一轮确实没有核对记录，欠账如实记着，本轮由 `git` 通路清掉），
+第 116 轮一行写本轮的 git 结论。
 
-三张表都在 `tools/cli-surface.mjs` 里，本文件只指向它、不抄第二份——拷贝会各自漂，这是第 104 轮把人读区减重的同一条理由。
-反向控制在 `tools/cli-surface-smoke.mjs` 一并跑（同一个 script 先自检、再门禁）：夹具不是抄表，而是**从表生成**，于是「诚实的答案」
-是空数组；每一格再改一个事实，要求拥有那个事实的规则用自己的话点名。这一遍第一次跑就抓到自制夹具自己的两处错：它把 `--preview` 与
-`--resume` 拼在同一条合成命令行上（于是每条控制都在跟一个不诚实的底色对账，46 条里 12 条因此假红），以及把「值长得像 flag」那一格的
-期望写成了两个 flag（`--rule --repo /r` 在 CLI 眼里是「`--rule` 的值是 `--repo`」，那行只有一个 flag）。两处改的都是夹具的期望与前提，
-不是放宽规则——反过来，现在还有一条前提专门钉住「底色里没有任何一条命令行同时带 `--preview` 与 `--resume`」。
+上一轮（第 114 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-114-轮2026-11-04)，归档之后本文件不留第二份。
 
-代价写清：`audit:surface` 读的是本机装下来的那份二进制（与 `ocr-service.js` 的 `binaryPath()` 同一个答案），所以 `audit:static`
-从本轮起不再「不需要 CLI 也能跑」——CLI 没落下来时它退 1 并说清原因，而不是静默变绿。
-
-DOD-2 的未勾原因随之改写：原先那句「参数面仍有成片没逐条核过」从本轮起是假话。**勾选状态不动**（勾选归 scheduler 侧），改的是
-「为什么还不能勾」——现在缺的是 scheduler 侧的确认，以及「对照的是参数面，不是引擎的规则表本身」这半句诚实边界。
-
-验证口径：`npm run audit:static`（25 项，本轮新增的 `audit:surface` 里含 46 条自检 + 12 条命令的 help 对照）在本机 Linux x64 上全绿，
-二进制自报 `v1.13.5 (abb7abcd)`，数字记在 [`docs/measurements.md`](measurements.md)。
-
-上一轮（第 113 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-113-轮2026-11-04)，归档之后本文件不留第二份。
 
 ### 参数面：`ocr review --help` / `ocr scan --help` 与本仓真的拼出的每一行
 
