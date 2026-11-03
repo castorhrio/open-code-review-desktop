@@ -228,8 +228,14 @@ const git = (cwd, args) =>
 //  - `a.go` is the only *reviewable* working-tree change, so the workspace list has
 //    one row. `b.go` is committed on the branch and is not a working change.
 //  - `go.mod` and `testdata/sample.json` are changed too, and the pinned CLI
-//    (v1.13.4) refuses them: `unsupported_ext` and `default_path`. That is the
+//    (v1.13.5) refuses them: `unsupported_ext` and `default_path`. That is the
 //    exclusion block — two rows, two different reasons — with nothing guessed at.
+//    Worth naming why this one is pinned down: the wrapped release keeps growing
+//    its extension allowlist (this pin added `.jsonc`, EJS / Liquid / Nunjucks and
+//    HAML / Slim / ERB), so a future pin could make one of these two reviewable and
+//    quietly shrink the block to a single row — the check would then be reading less
+//    while still printing a green line, which is exactly what "two rows, two
+//    different reasons" is there to refuse.
 //  - 35 committed `.go` files, so 全量扫描 reports well over `SCAN_CONFIRM_AT` (20)
 //    reviewable files and the cost confirmation is unavoidable. Under that
 //    threshold the guard never fires and the last three checks would be vacuous.

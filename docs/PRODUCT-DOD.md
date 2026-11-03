@@ -4,7 +4,7 @@
 > 用途：给 agent 下一刀 / TODO / next-iteration 的**唯一合法输入源**：只许 DoD 未勾选 ∪ 当周反馈 ∪ 回归/断链/合规/上游 pin 破裂；勾满即停手  
 > 归属：本文件是 scheduler 侧 `/opt/agent-scheduler/docs/product-dod/open-code-review-desktop-dod.md` 在产品仓内的同源副本，条目以 scheduler 侧为准，编码侧只读不改  
 > 形态：OSS 桌面壳，封装 **未修改** 的官方 `alibaba/open-code-review`（`ocr`）二进制；**非官方**须诚实声明  
-> 发版：`v0.1.13` 对照上游 `ocr v1.13.4`；安装包/portable 在 Releases  
+> 发版：`v0.1.13` 对照上游 `ocr v1.13.5`；安装包/portable 在 Releases  
 > 代码：`/opt/open-code-review-desktop` · GitHub `castorhrio/open-code-review-desktop`  
 > **不改** live scheduler、config.yaml、产品业务代码
 
@@ -49,10 +49,10 @@
   证据候选：README.zh-CN.md（首屏、安装段、归属声明三处的「非官方」声明）
   证据候选：src/components/SettingsPanel.tsx（设置页「关于」区的归属声明）
 - [ ] DOD-2：**引擎未改**：审查逻辑零分叉；仅拼 CLI、流式日志、解析 JSON、GUI
-  未勾原因：`ocr-service.js` 只 spawn 官方二进制这件事有断言，但「零分叉」要逐条对照上游 CLI 的参数面，而对照表只覆盖本仓实际用到的那些行。已经有一条是漏网的：上游 1.13.5 才让 `--max-tools`「给了就赢过模板默认值」，而 npm 至今只发到 1.13.4，所以界面「调整这次审查的参数」里把「每组最多工具调用轮数」调**小**这件事，按 `docs/OCR-UPSTREAM-SYNC.md` 记的 pin 仍然会被静默盖掉——参数面没有逐条核过，就还不能勾。
+  未勾原因：`ocr-service.js` 只 spawn 官方二进制这件事有断言，但「零分叉」要逐条对照上游 CLI 的参数面，而对照表只覆盖本仓实际用到的那些行。第 111 轮记下的那条漏网项（界面把「每组最多工具调用轮数」调**小**时会被模板默认值静默盖掉）已随 pin 前进到 `v1.13.5` 闭合——CLI 侧 `resolveReviewMaxTools` 让解析后的正值精确设置上限，见 `docs/OCR-UPSTREAM-SYNC.md` 第 113 轮；但参数面仍有成片没逐条核过，所以这一条还不能勾。
   证据候选：ocr-service.js（只 spawn 官方 CLI、拼参数、解析 JSON 与流式日志，无审查规则）
   证据候选：tools/service-smoke.mjs（按上游 resolver 语义重算「这次运行会打开哪条条目」）
-- [ ] DOD-3：**上游同步**：`docs/OCR-UPSTREAM-SYNC.md` pin 与 `npm run audit:upstream` 绿；跟进上游 tag 有记录（当前 pin v1.13.4 / 约定 SHA）
+- [ ] DOD-3：**上游同步**：`docs/OCR-UPSTREAM-SYNC.md` pin 与 `npm run audit:upstream` 绿；跟进上游 tag 有记录（当前 pin v1.13.5 / 约定 SHA）
   未勾原因：pin 与对照表有断言，但这一条要的是「跟进上游 tag 有记录」的连续性，而 `docs/OCR-UPSTREAM-SYNC.md` 的通路账里还留着几轮只核了 release 的欠账；等连续几轮 HEAD 都真的核过再勾。
   证据候选：docs/OCR-UPSTREAM-SYNC.md（pin 三处声明与对照表）
   证据候选：tools/upstream-watch-smoke.mjs（pin 与对照表的双射、通路账、DoD 版本事实）

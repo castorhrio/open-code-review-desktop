@@ -51,19 +51,19 @@ export const MOVED_MARKER = "[UPSTREAM-MOVED]";
 //
 // The reason is the only failure mode this comparison has: a short pin makes
 // "same commit" and "same first seven characters" the same answer. Upstream
-// moving from `76ab46ac20f0…` to `76ab46acf…` would then be reported as "与对照表
+// moving from `abb7abcd5c51…` to `abb7abcd5c5f…` would then be reported as "与对照表
 // 一致，无需重读" — the one direction this sentence must never be wrong in, since
 // every row of the table would silently be stale. With the whole 40 characters
 // pinned, that case is `moved`: over-reporting drift costs a re-read, under-
 // reporting it costs correctness.
 //
-// The value is upstream `refs/heads/main` as of `v1.13.4` — the tag commit, which
-// the released binary confirms itself (`ocr --version` prints `v1.13.4 (76ab46a)`);
+// The value is upstream `refs/heads/main` as of `v1.13.5` — the tag commit, which
+// the released binary confirms itself (`ocr --version` prints `v1.13.5 (abb7abcd)`);
 // `docs/OCR-UPSTREAM-SYNC.md` carries the same 40 characters on its fixed
 // 「本轮 HEAD 核对」 line and the smoke test keeps the two exactly equal.
 export const PINNED_UPSTREAM = Object.freeze({
-  sha: "76ab46ac20f08a8bd8ac38881a8a826c7cb6495f",
-  tag: "v1.13.4",
+  sha: "abb7abcd5c5196fa0278dc87db85780fa269562f",
+  tag: "v1.13.5",
 });
 
 // Exactly the rows the sync doc's comparison table wants re-read when upstream

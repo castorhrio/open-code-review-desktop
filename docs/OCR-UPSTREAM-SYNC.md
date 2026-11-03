@@ -28,14 +28,14 @@
 
 <!-- upstream-pin:start -->
 ```text
-sha 76ab46ac20f08a8bd8ac38881a8a826c7cb6495f
-tag v1.13.4
+sha abb7abcd5c5196fa0278dc87db85780fa269562f
+tag v1.13.5
 ```
 <!-- upstream-pin:end -->
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`76ab46ac20f08a8bd8ac38881a8a826c7cb6495f`（第 112 轮：`git ls-remote` 答上，`refs/heads/main` 停在 `abb7abc`——与第 111 轮核对到的是同一个 commit，本轮没有前进；`refs/tags/v1.13.5` 仍指向 `abb7abc`（tag 对象 `e739d39`），npm `latest` 仍是 `1.13.4`——**HEAD、tag、npm 三个口径本轮一致，pin 不动**；通路：git）**
+**本轮 HEAD 核对：`abb7abcd5c5196fa0278dc87db85780fa269562f`（第 113 轮：`git ls-remote` 的 TLS 被断开（GnuTLS `-110`），`refs/heads/main` 由 GitHub API 答上，仍是 `abb7abc`——与第 111、112 轮核对到的是同一个 commit，**HEAD 本轮没有前进**；前进的是发布口径：npm `latest` 从 `1.13.4` 变成 `1.13.5`，`refs/tags/v1.13.5` 指向的正是这个 `abb7abc`（tag 对象 `e739d39`，Release 发布于 2026-11-03T14:43:14Z，非 draft / 非 prerelease），本机装下来的二进制自报 `v1.13.5 (abb7abcd)`——**pin 因此前进**；通路：api）**
 
 ### 核对通路账
 
@@ -120,6 +120,7 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 | 110 | 2026-11-04 | git | **上游 HEAD 前进**：`c452846` → `5c039e8`（1 个 commit：HAML / Slim / ERB 模板进 `supported_file_types.json` 与 `system_rules.json`）；`refs/tags/v1.13.4`（`1393158`）与 npm `1.13.4` 均未变，**pin 不前进**；对照表 5 行的上游文件一个都没被这个 commit 碰到，无移植项（allowlist 与规则表是引擎侧，本仓只显示 CLI 给出的排除原因）；界面中文排版新增两条断言——字号下限 12px 与字体栈顺序（拉丁 → 中文 → 通用），第一次跑就在结果页抓到一个真缺陷：`` 固定在 <sha> `` 的徽章整块套着 `font-mono`，中文字族不在 mono 栈里，两个中文字由系统兜底 | — |
 | 111 | 2026-11-04 | git | **上游 HEAD 前进 + 第一次出现「tag / release 走了、npm 没走」**：`refs/heads/main` `5c039e8` → `abb7abc`（3 个 commit：`--max-tools` 低于模板值时开始被采纳、裸 `diff --git` 头按分隔符切开、new-side hunk 匹配允许跳过空行重试）；`refs/tags/v1.13.5` = `abb7abc`（tag 对象 `e739d39`，Release 已发布），npm `latest` 仍是 `1.13.4`，**pin 不前进**（pin 跟 npm 走，本程序 spawn 的是 npm 包里的二进制）；对照表 5 行一个都没被碰到，无移植项，但 `--max-tools` 那条对本仓用户可见（1.13.4 上把「每组最多工具调用轮数」调小会被模板默认值盖掉）；DoD 的证据从「候选指到哪」推到「候选真的被跑过」（`auditScriptClosure` + `dodHarnessReachViolations`），并给每个没勾的条目加一句「未勾原因」（`dodReasonViolations`）；`docs/measurements.md` 的「未验证清单」每行加归属（上游 / 本仓 / 真机）与可指认的路径（`unverifiedRowViolations`） | — |
 | 112 | 2026-11-04 | git | **上游没动**：`refs/heads/main` 仍是 `abb7abc`、`refs/tags/v1.13.5` 仍是 `abb7abc`（tag 对象 `e739d39`）、npm `latest` 仍是 `1.13.4`，三个口径一致，**pin 不动**、对照表 5 行无需重读、无移植项；`--max-tools` 那条用户可见的差距不留在会被归档的正文里，改记进 `docs/PRODUCT-DOD.md` 的 DOD-2 未勾原因（那一句有断言读）；本轮产品改动是把 DOD-4 缺的首启链路做成 harness：`tools/e2e-first-run.cjs` + `tools/e2e-first-run.mjs`，17 条 check 走「空档案 → 引导 → 选仓 → 配 provider → 清单 → 成本确认挡住的那次 `scan`」，判定抽进 `tools/e2e-first-run-steps.cjs` 由 `audit:e2e-first-run-rules` 钉住，harness 挂在 `audit:app`（`audit:e2e-first-run`） | — |
+| 113 | 2026-11-04 | api | **上游发布版本前进**：`v1.13.4` → `v1.13.5`（tag commit 就是第 111–112 轮已经核对到的 `abb7abc`，tag 对象 `e739d39`，Release 发布于 2026-11-03T14:43:14Z、非 draft / 非 prerelease），npm `latest` 同为 `1.13.5`，本机 npm 装下来的二进制自报 `v1.13.5 (abb7abcd) linux/amd64`——第 111 轮那条「tag / Release 走了、npm 没走」的分叉本轮合上，**pin 前进**；`git ls-remote` 的 TLS 被断开（GnuTLS `-110`），HEAD 与 tag 都由 API 答上；对照表 5 行在这一次提交里逐行重读（compare `v1.13.4...v1.13.5` 是 8 个 commit / 36 个文件，`internal/llm/resolver.go`、`cmd/opencodereview/config_cmd.go`、`llm_cmd.go` / `providers.go` 一个都不在清单里——清单里那个 `internal/diff/resolver.go` 是**同名不同包**的另一个文件；唯一被碰到的定义 `failure_class` 的文件是 `internal/session/manifest.go`，它只给 `ManifestExecution` 加了 `MaxToolRequestTimes`，两张枚举逐字未变）；第 111 轮记下的那条用户可见差距在这一次闭合（`resolveReviewMaxTools`：解析后的正值精确设置上限，1–49 仍先上调到 50），DOD-2 的未勾原因随之改写；升 pin 的真机验证跑在 Linux x64（数字记在 `docs/measurements.md`），两份 README、`src/lib/types.ts` 与 DoD 头部的版本行同步前进 | — |
 
 「最近一次对照」只写**那一项最近被人工重新核对**的轮次。该列没有列出本轮，表示本轮
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
@@ -159,11 +160,11 @@ tool 结果文本**（`Error: diff not found for: …`、`Diffs exist for: …`�
 
 | 对照点 | 上游文件 | 人工看什么 | 最近一次对照（轮次 / 日期） |
 | --- | --- | --- | --- |
-| provider 解析顺序 | `internal/llm/resolver.go` | 是否仍按 `cfg.Providers[cfg.Provider]`（原始拼写）读；大小写折叠、回退到 registry 拼写、miss 兜底任一变化都改变设置页「Key 属于哪条」的答案 → 同步改模拟（`UPSTREAM_RESOLVER`）与 `MATCH_RULES` | 第 103 轮 / 2026-11-03（v1.13.4：`internal/llm/resolver.go` 不在 51 个变更文件里，与 v1.13.3 同一个 commit 的内容，`UPSTREAM_RESOLVER` 与 `MATCH_RULES` 不动） |
-| `config set` 的 key 语法 | `cmd/opencodereview/config_cmd.go` | 点名到最后一个点的分段（带点的自定义名）、未配置带点名直接拒绝 | 第 103 轮 / 2026-11-03（v1.13.4：`cmd/opencodereview/config_cmd.go` 未被这批 commit 改动） |
-| 内置服务表 | `ocr llm providers` 输出 | 列、表头、失败时的 stderr 措辞 | 第 103 轮 / 2026-11-03（v1.13.4：`llm_cmd.go` / `providers.go` 未被改动；`npm run audit:config` 在 1.13.4 的二进制上重跑为绿，见「当前状态」） |
-| 内置服务表**为空**是否合法 | `cmd/opencodereview/llm_cmd.go` 的 `runLLMProviders` → `internal/llm/providers.go` 的 `registry` / `ListProviders` | `runLLMProviders` 无条件打印 `Built-in providers:` 表头与 `NAME / PROTOCOL / BASE URL` 列，行来自编译期 `registry` 切片，**一行都没有也不报错、退出码仍为 0**。所以「表读回来是空的」只可能来自装得不完整或我们丢了行——这是 `config-handler.js` 的 `TABLE_HOLLOW` 文案（「CLI 一定有内置服务名，所以这多半是装得不完整」）唯一的外部依据。上游若把 provider 改成可外挂/可配置（空 registry 成为合法状态），这句话就变成错的，`tableSilenceOf` 要跟着改 | 第 103 轮 / 2026-11-03（v1.13.4：`llm_cmd.go:261`、`providers.go:45` 仍指向同一段代码——这两个文件都不在 `v1.13.3...v1.13.4` 的清单里，所以第 50 轮记下的行号在新 pin 上不需要重找；`TABLE_HOLLOW` 的外部依据不变） |
-| 运行期失败分类 | 运行 JSON 的 `failure_class` / 每文件 `failure_class` | 枚举值增删（`RunFailureClass` 与 `FailureClass` 是两张表） | 第 103 轮 / 2026-11-03（v1.13.4：两张枚举都没有增删——变更清单不含定义 `failure_class` 的文件；唯一改到工具层的是 `file_read_diff` 的未命中文案，那是回给模型的字符串，不落进本仓读 stderr 的两处分类） |
+| provider 解析顺序 | `internal/llm/resolver.go` | 是否仍按 `cfg.Providers[cfg.Provider]`（原始拼写）读；大小写折叠、回退到 registry 拼写、miss 兜底任一变化都改变设置页「Key 属于哪条」的答案 → 同步改模拟（`UPSTREAM_RESOLVER`）与 `MATCH_RULES` | 第 113 轮 / 2026-11-04（v1.13.5：`internal/llm/resolver.go` 不在这一批 36 个变更文件里——那批里唯一叫 `resolver.go` 的是 `internal/diff/resolver.go`，**同名不同包**，改的是 new-side hunk 匹配跳过空行重试，与本行的查找顺序无关；`UPSTREAM_RESOLVER` 与 `MATCH_RULES` 不动） |
+| `config set` 的 key 语法 | `cmd/opencodereview/config_cmd.go` | 点名到最后一个点的分段（带点的自定义名）、未配置带点名直接拒绝 | 第 113 轮 / 2026-11-04（v1.13.5：`cmd/opencodereview/config_cmd.go` 不在这一批的清单里——那批在 `cmd/opencodereview` 下只动 `review_cmd.go` 与它的测试，改的是 `--max-tools` 的采纳规则） |
+| 内置服务表 | `ocr llm providers` 输出 | 列、表头、失败时的 stderr 措辞 | 第 113 轮 / 2026-11-04（v1.13.5：`llm_cmd.go` / `providers.go` 都不在清单里；`npm run audit:config` 与 `audit:providers` 在这一次新装的二进制（自报 `abb7abcd`）上重跑为绿，见「当前状态」） |
+| 内置服务表**为空**是否合法 | `cmd/opencodereview/llm_cmd.go` 的 `runLLMProviders` → `internal/llm/providers.go` 的 `registry` / `ListProviders` | `runLLMProviders` 无条件打印 `Built-in providers:` 表头与 `NAME / PROTOCOL / BASE URL` 列，行来自编译期 `registry` 切片，**一行都没有也不报错、退出码仍为 0**。所以「表读回来是空的」只可能来自装得不完整或我们丢了行——这是 `config-handler.js` 的 `TABLE_HOLLOW` 文案（「CLI 一定有内置服务名，所以这多半是装得不完整」）唯一的外部依据。上游若把 provider 改成可外挂/可配置（空 registry 成为合法状态），这句话就变成错的，`tableSilenceOf` 要跟着改 | 第 113 轮 / 2026-11-04（v1.13.5：`llm_cmd.go` 与 `providers.go` 都不在这一批的清单里，所以这两个文件与上一个发布逐字相同，第 50 轮记下的行号在新 pin 上不需要重找——`llm_cmd.go:261` 取回该 tag 的文件核对，仍是 `func runLLMProviders()`；`TABLE_HOLLOW` 的外部依据不变） |
+| 运行期失败分类 | 运行 JSON 的 `failure_class` / 每文件 `failure_class` | 枚举值增删（`RunFailureClass` 与 `FailureClass` 是两张表） | 第 113 轮 / 2026-11-04（v1.13.5：定义这两张枚举的 `internal/session/manifest.go` **是这一批里被碰到的文件**，所以本行不是「清单里没有它」而是「读了它改的那几行」——diff 只有一处：`ManifestExecution` 多一个 `MaxToolRequestTimes`（JSON `max_tool_request_times`），`FailureClass` 的 8 个值与 `RunFailureClass` 的 7 个值在两个 tag 上逐行取出来比过、完全一致；本仓不读那个新字段，`RUN_FAILURE_LABEL` / `ITEM_FAILURE_LABEL` 不动） |
 
 `resolver` 的查找顺序变化**不会**让 `audit:service` 全面变红——它只覆盖上面那几种形状
 （provider 与 registry 拼写不一致、provider 落在 registry 拼写上、provider 指向别的服务）。
@@ -211,43 +212,61 @@ tool 结果文本**（`Error: diff not found for: …`、`Diffs exist for: …`�
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。搬完这里只留一句
    指针——「本文件只留当前一轮」不是约定而是断言（`previousRoundPointerViolations`）。
 
-## 当前状态（第 112 轮，2026-11-04）
-本轮复核：**上游什么都没动。** `git ls-remote` 答上：`refs/heads/main` 仍是 `abb7abc`（与第 111 轮核对到的同一个 commit），
-`refs/tags/v1.13.5` 仍指向它（tag 对象 `e739d39`），npm `latest` 仍是 `1.13.4`。三个口径本轮一致，pin 因此不动，对照表 5 行无需重读，
-无移植项。上一轮写下的那条规则（**pin 跟 npm 走，不跟 tag 或 Release 走**）是常驻规则，不是那一轮的结论，所以这里只重述一句：
-下一次 npm 发到 `1.13.5` 时，pin 前进的那一轮要同时重读对照表 5 行。
+## 当前状态（第 113 轮，2026-11-04）
+本轮复核：**上游的发布版本前进了**——`v1.13.4` → `v1.13.5`。npm `latest` 变成 `1.13.5`，`refs/tags/v1.13.5` 指向 `abb7abc`（tag 对象
+`e739d39`，Release 发布于 2026-11-03T14:43:14Z，非 draft、非 prerelease），而 `refs/heads/main` 仍是第 111、112 轮核对到的那个
+`abb7abc`。第 111 轮那条「tag / Release 走了、npm 没走」的分叉本轮合上，**pin 前进**；本机 `npm install` 落下来的二进制自报
+`v1.13.5 (abb7abcd) linux/amd64`，与新 pin 是同一个 commit。
 
-第 111 轮发现的 `--max-tools` 那条用户可见差距（pin 的 1.13.4 上把「每组最多工具调用轮数」调**小**会被模板默认值盖掉）
-本轮**从正文搬进 `docs/PRODUCT-DOD.md` 的 DOD-2 未勾原因**。理由是这份文件本身的规矩：正文每轮归档，只有当前一轮留在这里，
-而「上游发了才算解决」的欠账如果只写在正文里，归档之后就没有任何人再持有它——DOD-2 那一句是有断言读的（`dodReasonViolations`
-要求它指到仓里真实存在的记录），欠账因此有了一个不会随归档消失的家。
+第 112 轮留下的那句预告（「下一次 npm 发到 `1.13.5` 时，pin 前进的那一轮要同时重读对照表 5 行」）本轮执行了：`v1.13.4...v1.13.5`
+是 8 个 commit、36 个变更文件，逐行结论写在上面那张表的最后一列。这里只留两条读名字会踩坑的：
 
-本轮的产品改动是一件：**把 DOD-4 缺的「首启 → 引导 → 配 provider → 预览」做成 harness**。
-根因不在产品而在证据：`tools/e2e-flow.cjs` 一进来就 `localStorage.setItem("last-repo", …)` 并把引导卡关掉，它证明的是范围引擎，
-装完安装版之后的第一屏没有任何脚本走过。新增的 `tools/e2e-first-run.cjs`（`npm run audit:e2e-first-run`，挂在 `audit:app`）
-17 条 check 走的是一个人真的会走的路径，其中三个决定不是装饰：
+- **两个 `resolver.go` 不是同一个文件。** 清单里有 `internal/diff/resolver.go`（new-side hunk 匹配的空行重试），没有对照表第 1 行说的
+  `internal/llm/resolver.go`。`UPSTREAM_RESOLVER` 与 `MATCH_RULES` 因此不动。
+- **第五行的文件这次真的被碰到了。** 定义两张失败枚举的 `internal/session/manifest.go` 在清单里，所以「清单里没有它」这一句在这一行
+  不成立，读的是它改的那几行：diff 只有一处，`ManifestExecution` 多一个 `MaxToolRequestTimes`（JSON `max_tool_request_times`）。
+  `FailureClass` 的 8 个值与 `RunFailureClass` 的 7 个值在两个 tag 上逐行取出来比过、完全一致；本仓只读已知键，那个新字段不消费。
 
-- **档案是一次性的，不是「删掉用户的」。** `HOME`（与三个 Windows 变量）、Electron 的 `userData`、因而渲染层的 `localStorage`
-  全在 `require("main.js")` 之前指向一个临时目录；引导卡能出现是因为那份档案本来就是空的，而不是因为脚本把它调成空的。
-  这条规矩的代价写在 `tools/e2e-first-run-steps.cjs`：判不出来就**不开应用**，因为这条链路要写一个假 API Key，
-  重定向若没生效，它会进开发者真实的 `~/.opencodereview/config.json`。链路末尾另有一条 check 把那份真实文件的摘要与开跑前比一次。
-- **拒绝是谁挡的要由进程自己说。** 引导卡、运行门与设置页的措辞都能被渲染层自己圆过去，所以 spawn 是被记下来的
-  （`child_process.spawn` 在 `main.js` 拉进 service 之前被包住）：填 Key 之前必须**零个** `review` / `scan`，
-  成本确认后点「取消」必须**仍零个**，点「仍然开始」必须**恰好一个**且带着用户设的 `--max-tokens-budget`。
-  `--preview` 不算——预览不花钱，这是产品的立身之本，分类把它单独放开。
-- **provider 是假的，请求也出不了这台机器。** 端点是 `http://127.0.0.1:9/v1`（discard 端口，没人监听），CLI 的连通测试在机器内部失败，
-  一个包都不发出去；不调真 API、不花 token。
+无移植项，但有一条**用户可见**：`--max-tools` 从这一版起「调小也算数」。新二进制自己的帮助文本是
+`max tool call rounds per subtask (0 = template default; min 50)`——解析后的正值精确设置上限，但 `50` 仍是下限。第 111 轮发现、
+第 112 轮搬进 DOD-2 未勾原因的那条差距就此闭合，本轮把那一句改写；**DOD-2 仍然没勾**，因为「零分叉」要的是参数面逐条对照，
+这件事不会因为一版发布而自动完成。界面那行的 hint（`0 = 模板默认。`）本来就只承诺 `0` 的含义，现在它说的仍然是真话，所以这一轮
+**不**给它加「调小会被模板默认值覆盖」的说明——那句话的有效期只有上一个 pin，写下去就是一句注定过期的话。
 
-它第一次跑抓到的是**它自己**的三处错，都不是产品缺陷但都会让它假绿：fixture 把 HEAD 切回 `main`，于是「feature」分支徽章永远等不到；
-Radix 的 select trigger 带的是 `role="combobox"` 而**没有** `aria-haspopup`，用后者找它等于永远点不开；
-确认框经 Portal 渲染在 `document.body`，用 `main button` 找「取消」找不到，看上去像护栏没出现。
-第三处还顺带纠了一个更早的误判：`llm test` 那一次 spawn 的 `HOME` 不是 harness 的临时目录——那是 `config-handler.js`
-**自己**为「按填写值测试」造的第二个一次性档案（保存过的 Key 会盖过 `OCR_LLM_*`，见那里的注释），
-所以判定改成「没有任何孩子跑在开发者的真实档案里」，并把那类档案认成允许的、而不是当成泄漏。
+另外三条引擎侧的变化对本仓没有契约影响：allowlist 扩了 `.jsonc` 与 EJS / Liquid / Nunjucks / HAML / Slim / ERB，Scala 进规则表，
+工作区模式不再把被 `.gitignore` 匹配的**已跟踪**文件滤掉（第 107 轮记的那条 HEAD 改动，这一次进入被封装的发布版本）。本仓显示的
+是 CLI 给出的排除原因与文件清单，不自己判定哪些文件进审查，所以无移植项。
 
-它还差的那一半也记在 DOD-4 的未勾原因里：真截断一次预算要花的钱本程序不替用户花，「单个提交」与「全量扫描」两条范围到目前只有预览级证据。
+本轮还收编了一处**依赖先动、文档没跟上**的状态：工作树里 `package.json` 与 `package-lock.json` 已经落在 `^1.13.5`（本机
+`npm install` 从镜像拉下来的），而 pin 仍写上一个发布版本——`audit:upstream` 因此点名「依赖先动，就要把 pin、对照表 5 行与
+`UPSTREAM_RESOLVER` 一起复核后改成本轮的版本」。这条断言的存在理由就是这一刻：它不许一次版本前进只发生在 lockfile 里。本轮按它
+要求的那条路走完了，而不是把 lockfile 退回去假装没发生。
 
-上一轮（第 111 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-111-轮2026-11-04)，归档之后本文件不留第二份。
+验证口径与第 103 轮那次升 pin 相同：跑在本机 Linux x64（开发机，不是发布面），CLI 层、真 Electron、UI 三套的数字记在
+[`docs/measurements.md`](measurements.md)；两份 README 与 `src/lib/types.ts` 的版本行随 pin 一起前进。
+
+还有一条本轮**修掉并加了断言**的 lockfile 事实：本机 `npm install` 重新生成的 `package-lock.json` 里只剩 5 个平台包，
+`@alibaba-group/ocr-darwin-x64` 掉了出去——父条目 `optionalDependencies` 里那六行声明还在，只是它自己那条解析记录没了。对发布面没有
+影响（发布的是 Windows x64，`ocr-win32-x64` 在），对这台机器也没有影响（linux/x64 本来就不装 darwin 包），所以它**不会**让任何一条
+门禁变红：真正的后果是 `npm ci` 在 macOS x64 上装不出东西，而那正是从来没被构建过的平台——只在没人构建的平台上开的口子，就是会一直
+开着的口子。修法是把那条记录按 `npm view` 给出的 `resolved` / `integrity` 补回去（tarball 下下来重算 sha512 与 `npm view` 逐字相等，
+不是抄一个看起来对的串），补完再跑一次 `npm install --package-lock-only` 确认 npm 不会把它再剪掉。
+
+断言加在 `tools/check-packaging.mjs`（`audit:packaging`）：它问的是同一个问题的下一层——「打包出来的应用找得到自己的文件吗」——
+只不过问的是 `package-lock.json`。规则只有一条，但**读的是声明而不是写死的六个名字**：父条目的 `optionalDependencies` 说有几个平台包，
+每一个就必须有自己的解析记录，版本要与声明一致、`resolved` 与 `integrity` 都要在。`tools/check-packaging-smoke.mjs` 用**改真 lockfile**
+的方式造六格反向控制（删一条记录 / 版本对不上 / 缺 integrity / 上游多声明一个平台 / 声明为空 / 父条目整个不见），所以上游哪天加第七个
+平台，这一套不用改就覆盖到了；「声明为空」那一格是防假绿的——没有声明时循环会一条问题都不报，而它其实什么都没读。
+
+还有一条本轮把版本行推到 `v1.13.5` 时**必须一起说清**的发布面事实：仓里最后一个发布提交是 2026-10-14 的
+`chore(release): 0.1.13`，那一份 `package.json` 里的 CLI 依赖还是 `^1.13.0`。也就是说 Releases 上那份
+`*-setup.exe` 带的 `ocr` 既不是 `v1.13.4` 也不是 `v1.13.5`，而是那天解析到的那一版；README 的「`v0.1.13`, running
+`ocr v1.13.5`」与 DoD 头部那句说的是**这份源码树构建出来、按此 pin 验证过**的那一版，不是下载得到的那串字节。合上这个落差的
+动作是发一次新版——`tools/release.mjs` 停在推送提交与发布 Release 之前，那两步属于人。本轮既不假装已经发过，也不把 README 的
+版本行退回成资产里的旧版本：那会把 pin 的本意（「封装并对照的是哪一版」）改成「上一次 shipping 里恰好装的是哪一版」。要补的实测
+记在 [`docs/measurements.md`](measurements.md) 的未验证清单里。
+
+上一轮（第 112 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-112-轮2026-11-04)，归档之后本文件不留第二份。
 
 ## 上游真变了怎么办（命令驱动，而不是「记得看一眼」）
 ```bash
@@ -262,7 +281,7 @@ pin 前进时，对照表 5 行要在同一个提交里一次性重读完毕；�
 
 ### `upstream:check` 与三处 pin 声明（第三处声明就在这里）
 
-另有 `npm run upstream:check`：先比对 `refs/heads/main` 与本文件固定的整串 40 位 SHA `76ab46ac20f08a8bd8ac38881a8a826c7cb6495f`（正文里引用只写 `76ab46a` 前缀是为了好读；这一处与上面的块、下面的固定行同值，`audit:upstream` 三处一起核对）。
+另有 `npm run upstream:check`：先比对 `refs/heads/main` 与本文件固定的整串 40 位 SHA `abb7abcd5c5196fa0278dc87db85780fa269562f`（正文里引用只写 `abb7abc` 前缀是为了好读；这一处与上面的块、下面的固定行同值，`audit:upstream` 三处一起核对）。
 相等打印一行并注明 `通路：git`；git 不通时自动改走 `api.github.com/commits/main`，成功注明 `通路：api`——两条路问的是同一个 commit。前进时打印醒目提示并逐行列出上面那 5 处对照点，
 **但不失败**，仍要人读源码；两条路都失败才打印「跳过」，前缀固定为 `[UPSTREAM-DEBT]`、写明两条路各自的原因，退出码恒为 0，所以它能挂在任何流程里而不把网络问题当成上游变更。
 

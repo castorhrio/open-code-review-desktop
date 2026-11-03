@@ -1,9 +1,11 @@
-// Contracts verified against @alibaba-group/open-code-review v1.13.4
+// Contracts verified against @alibaba-group/open-code-review v1.13.5
 // (`ocr review --help`, `ocr scan --help`, real `--format json` payloads and the
 // upstream structs in cmd/opencodereview/output.go, internal/model/review.go,
-// internal/llmloop/pool.go, internal/session/{list,manifest}.go). None of those
-// files moved between v1.13.3 and v1.13.4: the shapes below were last read line by
-// line at v1.13.3 and re-verified against the v1.13.4 binary.
+// internal/llmloop/pool.go, internal/session/{list,manifest}.go). Of those files
+// only `internal/session/manifest.go` moved between v1.13.4 and v1.13.5, and one
+// line of it: `execution` gained `max_tool_request_times`, which this app does not
+// read. The shapes below were last read line by line at v1.13.3 and re-verified
+// against the v1.13.5 binary.
 
 export type ReviewMode = "workspace" | "range" | "commit" | "scan";
 

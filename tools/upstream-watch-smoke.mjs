@@ -846,11 +846,11 @@ const SAME_PREFIX_SHA = PINNED_SHA.slice(0, 7) + SAME_PREFIX_TAIL;
   );
   // The fifth copy of the pin is not a value but a *claim about reading*: the
   // comparison table's 「最近一次对照」 column says which round read which row, and
-  // the doc states the answer as a release (`v1.13.4：…`). When the pin moves, the
-  // rows describe the release they were last read against — so a row still citing
-  // the previous tag is the machine-readable shape of "dependency moved, nobody
-  // re-read the row". This is the question the retired `tag === "v1.13.3"` literal
-  // put in its label without ever opening the document.
+  // the doc states the answer as a release (the cell opens with the pinned tag).
+  // When the pin moves, the rows describe the release they were last read against
+  // — so a row still citing the previous tag is the machine-readable shape of
+  // "dependency moved, nobody re-read the row". This is the question the retired
+  // `tag === "v1.13.3"` literal put in its label without ever opening the document.
   const tableBody = comparisonTableRows(doc).rows;
   const rowsOffPin = (text) =>
     comparisonTableRows(text).rows.filter((row) => !row.text.includes(PINNED_UPSTREAM.tag));
@@ -3121,10 +3121,26 @@ if (!flags.selftest && !flags.noRespawn) {
   // second paragraph in both READMEs — `x64`, installer + portable, the dated green
   // run, "macOS has never been built" — which is the release-and-CI record, not an
   // answer to "can I run this tomorrow". These mutations paste that record back.
+  //
+  // The status sentence is the needle, and it is *derived* rather than written
+  // out: it carries this app's version and the pinned release, both of which
+  // change, and a hardcoded copy turns a pin advance into "go find the fixtures
+  // that quote the old tag". What is asserted first is that the derived needle
+  // still matches the live README exactly once — a needle that stops matching
+  // would make the mutation a no-op and the red below would look like a
+  // first-screen bug rather than like this control having lost its object.
+  const readmePkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
+  const enStatus = "`v" + readmePkg.version + "`, running `ocr " + PINNED_UPSTREAM.tag + "`";
+  check(
+    "the English README's status sentence is still the needle this control mutates",
+    hits("README.md", enStatus) === 1,
+    JSON.stringify({ needle: enStatus, hits: hits("README.md", enStatus) })
+  );
   const enMatrix = mutated(
     "README.md",
-    "`v0.1.13`, running `ocr v1.13.4`",
-    "Verification is not uniform across platforms: **Windows x64 is the only end-to-end platform, and the only build Releases publishes** (`*-setup.exe` + portable); the `*.dmg` and the AppImage / `.deb` have never been produced.\n\n`v0.1.13`, running `ocr v1.13.4`"
+    enStatus,
+    "Verification is not uniform across platforms: **Windows x64 is the only end-to-end platform, and the only build Releases publishes** (`*-setup.exe` + portable); the `*.dmg` and the AppImage / `.deb` have never been produced.\n\n" +
+      enStatus
   );
   check(
     "pasting the platform matrix back into the first screen goes red, naming the token and the line",
@@ -3814,13 +3830,26 @@ if (!flags.selftest && !flags.noRespawn) {
 
   // The app's own version is the second allowed value, and it is allowed for a
   // reason: without it the rule would refuse the bar's own release line.
+  //
+  // The "third version" is derived (the pin's patch + 1) rather than written out:
+  // a hardcoded one is a ticking bomb — the fixture that exists to refuse a
+  // version which is *not* the pin goes quiet-red the round the pin reaches that
+  // number, and the red then reads like the rule broke rather than like the
+  // fixture expired.
+  const pinParts = PINNED_UPSTREAM.tag.replace(/^v/, "").split(".").map(Number);
+  const thirdVersion = `v${pinParts[0]}.${pinParts[1]}.${pinParts[2] + 1}`;
   const ownLine = `发版：\`v${pkg.version}\` 对照上游 \`ocr ${PINNED_UPSTREAM.tag}\``;
-  const futureLine = `发版：\`v${pkg.version}\` 对照上游 \`ocr v1.13.5\``;
+  const futureLine = `发版：\`v${pkg.version}\` 对照上游 \`ocr ${thirdVersion}\``;
+  check(
+    "...and the derived third version really is neither the pin nor this app's release",
+    thirdVersion !== PINNED_UPSTREAM.tag && thirdVersion !== `v${pkg.version}`,
+    JSON.stringify({ thirdVersion, pinned: PINNED_UPSTREAM.tag, own: `v${pkg.version}` })
+  );
   check(
     "...and the app's own version is allowed, while a third version in the same sentence is not",
     dodPinViolations(ownLine, opts).length === 0 &&
       dodPinViolations(futureLine, opts).length === 1 &&
-      dodPinViolations(futureLine, opts)[0].includes("v1.13.5"),
+      dodPinViolations(futureLine, opts)[0].includes(thirdVersion),
     JSON.stringify([dodPinViolations(ownLine, opts), dodPinViolations(futureLine, opts)])
   );
 

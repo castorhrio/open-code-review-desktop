@@ -24,7 +24,9 @@ import { createRequire } from "node:module";
 
 import {
   DEFAULT_ENTRIES,
+  OCR_PACKAGE,
   allowlistMatcher,
+  findLockfilePlatformProblems,
   findPackagingProblems,
   matchesPattern,
 } from "./check-packaging.mjs";
@@ -339,6 +341,97 @@ try {
     "...and every root *.js is one of the modules the walk reached, so the sweep has nothing left to add",
     real.rootModules.length > 1 && real.rootModules.every((rel) => real.checked.includes(rel)),
     JSON.stringify(real.rootModules)
+  );
+
+  /* ---- the platform binaries in package-lock.json ----
+   * The declaration is the source of truth here, not a list of six names kept in
+   * this file: the parent entry's `optionalDependencies` says which platform
+   * packages the wrapped CLI ships, and each one needs a resolved entry. So the
+   * fixtures below are built by *editing the real lockfile*, which means a
+   * seventh platform added upstream is covered without touching this suite.
+   */
+  const realLock = JSON.parse(fs.readFileSync(path.join(ROOT, "package-lock.json"), "utf8"));
+  const declaredPlatforms = Object.keys(
+    realLock.packages?.[`node_modules/${OCR_PACKAGE}`]?.optionalDependencies || {}
+  ).sort();
+  const clone = () => JSON.parse(JSON.stringify(realLock));
+  const platformProblems = (lock) => findLockfilePlatformProblems({ lock });
+
+  check(
+    "this repository's lockfile resolves every platform binary the wrapped CLI declares",
+    platformProblems(realLock).length === 0,
+    platformProblems(realLock).join(" | ")
+  );
+  check(
+    "...and the answer is not vacuous: the declaration was read and it is not empty",
+    declaredPlatforms.length >= 2 &&
+      declaredPlatforms.every((name) => realLock.packages[`node_modules/${name}`]),
+    JSON.stringify(declaredPlatforms)
+  );
+
+  // The exact hole this was written for: the declaration survives, the resolution
+  // does not. It is silent on this host (linux/x64 never installs the darwin
+  // package) and would only surface as `npm ci` failing on a platform nobody has
+  // built — which is why it is asserted from the declaration side.
+  const dropped = clone();
+  const droppedName = declaredPlatforms[0];
+  delete dropped.packages[`node_modules/${droppedName}`];
+  check(
+    "a platform package that is declared but has no resolved entry goes red, naming it",
+    platformProblems(dropped).length === 1 &&
+      platformProblems(dropped)[0].includes(droppedName) &&
+      platformProblems(dropped)[0].includes("no resolved entry"),
+    platformProblems(dropped).join(" | ")
+  );
+
+  const skewed = clone();
+  skewed.packages[`node_modules/${droppedName}`].version = "0.0.1";
+  check(
+    "...and an entry resolved at a different version than the parent asked for goes red, naming both",
+    platformProblems(skewed).length === 1 &&
+      platformProblems(skewed)[0].includes(droppedName) &&
+      platformProblems(skewed)[0].includes("0.0.1"),
+    platformProblems(skewed).join(" | ")
+  );
+
+  const unhashed = clone();
+  delete unhashed.packages[`node_modules/${droppedName}`].integrity;
+  check(
+    "...and an entry without an integrity hash goes red, because it cannot be installed reproducibly",
+    platformProblems(unhashed).length === 1 &&
+      platformProblems(unhashed)[0].includes(droppedName) &&
+      platformProblems(unhashed)[0].includes("integrity"),
+    platformProblems(unhashed).join(" | ")
+  );
+
+  // A seventh platform declared upstream with no entry here is the same hole one
+  // release later, so the check must follow the declaration rather than a list.
+  const seventh = clone();
+  seventh.packages[`node_modules/${OCR_PACKAGE}`].optionalDependencies[
+    "@alibaba-group/ocr-freebsd-x64"
+  ] = "1.13.5";
+  check(
+    "...and a platform declared upstream that this lockfile never resolved goes red too, so the check follows the declaration instead of a hardcoded six",
+    platformProblems(seventh).length === 1 &&
+      platformProblems(seventh)[0].includes("ocr-freebsd-x64"),
+    platformProblems(seventh).join(" | ")
+  );
+
+  const hollow = clone();
+  hollow.packages[`node_modules/${OCR_PACKAGE}`].optionalDependencies = {};
+  check(
+    "...and a parent entry that declares no platform at all goes red instead of passing with nothing to read",
+    platformProblems(hollow).length === 1 &&
+      platformProblems(hollow)[0].includes("declares no optionalDependencies"),
+    platformProblems(hollow).join(" | ")
+  );
+
+  const noParent = clone();
+  delete noParent.packages[`node_modules/${OCR_PACKAGE}`];
+  check(
+    "...and a lockfile with no entry for the wrapped CLI at all goes red, naming the package",
+    platformProblems(noParent).length === 1 && platformProblems(noParent)[0].includes(OCR_PACKAGE),
+    platformProblems(noParent).join(" | ")
   );
 
   // Every allowlist line ending in `.js` is load-bearing: removing it has to turn

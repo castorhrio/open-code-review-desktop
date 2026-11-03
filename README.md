@@ -10,7 +10,7 @@ It runs the official [`alibaba/open-code-review`](https://github.com/alibaba/ope
 
 ## Status
 
-`v0.1.13`, running `ocr v1.13.4`, is what you can use today: built, installed and reviewed end to end on Windows, and every capability below has been run rather than promised.
+`v0.1.13`, running `ocr v1.13.5`, is what you can use today: built, installed and reviewed end to end on Windows, and every capability below has been run rather than promised.
 
 What you can count on today:
 
@@ -255,7 +255,7 @@ Run these before and after any layout, token, or main-process change. Several re
 ## Known limitations
 
 - Git must be on `PATH`. Each target needs its own host tooling: macOS dmgs must be built on macOS, Linux AppImage/deb on Linux (or WSL/Docker), Windows installers on Windows.
-- **What is verified where.** Windows x64 is the only platform verified end to end **and the only one Releases has ever published** (all twelve releases: setup + portable + `latest.yml` + blockmap). On Linux x64 the CLI-facing suites (`audit:service` / `audit:config` / `audit:git` / `audit:providers`), the real-Electron ones (`audit:guards` / `audit:exit` / `audit:e2e` / `audit:e2e-first-run`) and the UI matrix (`audit:ui` / `audit:contrast` / `audit:ui-scaled`, headless Chromium under Xvfb) all ran green on 2026-11-04 against `ocr v1.13.4` — that run does **not** cover the Linux packages themselves (`npm run dist:linux`), a real display or GPU, in-app updates, the single-instance lock or the uninstall path. macOS has never been built or run, so treat it as unverified. The numbers and how to reproduce them: [`docs/measurements.md`](docs/measurements.md) — and the list of what has **not** been verified, with the trigger that would make each one checkable, is that file's last section.
+- **What is verified where.** Windows x64 is the only platform verified end to end **and the only one Releases has ever published** (all twelve releases: setup + portable + `latest.yml` + blockmap). On Linux x64 the CLI-facing suites (`audit:service` / `audit:config` / `audit:git` / `audit:providers`), the real-Electron ones (`audit:guards` / `audit:exit` / `audit:e2e` / `audit:e2e-first-run`) and the UI matrix (`audit:ui` / `audit:contrast` / `audit:ui-scaled`, headless Chromium under Xvfb) all ran green on 2026-11-04 against `ocr v1.13.5` — that run does **not** cover the Linux packages themselves (`npm run dist:linux`), a real display or GPU, in-app updates, the single-instance lock or the uninstall path. macOS has never been built or run, so treat it as unverified. The numbers and how to reproduce them: [`docs/measurements.md`](docs/measurements.md) — and the list of what has **not** been verified, with the trigger that would make each one checkable, is that file's last section.
 - **Auto-update applies to the NSIS setup build only.** The portable exe re-extracts to a temp dir each run and has no install root to replace, so it links to the releases page instead. macOS/Linux builds are unsigned against a generic update feed, so treat in-app updates as Windows-installed-build-only for now.
 - Releases must ship `latest.yml` and the `*-setup.exe.blockmap` next to the binaries; without them the updater cannot see a version at all. `latest-mac.yml` / `latest-linux.yml` only become a requirement if those platforms are actually built and published, which so far they have never been.
 - Installers are **unsigned**, so SmartScreen (Windows) and Gatekeeper (macOS) will warn on first launch.

@@ -36,6 +36,42 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 
 ---
 
+## 上游状态（第 112 轮，2026-11-04）
+本轮复核：**上游什么都没动。** `git ls-remote` 答上：`refs/heads/main` 仍是 `abb7abc`（与第 111 轮核对到的同一个 commit），
+`refs/tags/v1.13.5` 仍指向它（tag 对象 `e739d39`），npm `latest` 仍是 `1.13.4`。三个口径本轮一致，pin 因此不动，对照表 5 行无需重读，
+无移植项。上一轮写下的那条规则（**pin 跟 npm 走，不跟 tag 或 Release 走**）是常驻规则，不是那一轮的结论，所以这里只重述一句：
+下一次 npm 发到 `1.13.5` 时，pin 前进的那一轮要同时重读对照表 5 行。
+
+第 111 轮发现的 `--max-tools` 那条用户可见差距（pin 的 1.13.4 上把「每组最多工具调用轮数」调**小**会被模板默认值盖掉）
+本轮**从正文搬进 `docs/PRODUCT-DOD.md` 的 DOD-2 未勾原因**。理由是这份文件本身的规矩：正文每轮归档，只有当前一轮留在这里，
+而「上游发了才算解决」的欠账如果只写在正文里，归档之后就没有任何人再持有它——DOD-2 那一句是有断言读的（`dodReasonViolations`
+要求它指到仓里真实存在的记录），欠账因此有了一个不会随归档消失的家。
+
+本轮的产品改动是一件：**把 DOD-4 缺的「首启 → 引导 → 配 provider → 预览」做成 harness**。
+根因不在产品而在证据：`tools/e2e-flow.cjs` 一进来就 `localStorage.setItem("last-repo", …)` 并把引导卡关掉，它证明的是范围引擎，
+装完安装版之后的第一屏没有任何脚本走过。新增的 `tools/e2e-first-run.cjs`（`npm run audit:e2e-first-run`，挂在 `audit:app`）
+17 条 check 走的是一个人真的会走的路径，其中三个决定不是装饰：
+
+- **档案是一次性的，不是「删掉用户的」。** `HOME`（与三个 Windows 变量）、Electron 的 `userData`、因而渲染层的 `localStorage`
+  全在 `require("main.js")` 之前指向一个临时目录；引导卡能出现是因为那份档案本来就是空的，而不是因为脚本把它调成空的。
+  这条规矩的代价写在 `tools/e2e-first-run-steps.cjs`：判不出来就**不开应用**，因为这条链路要写一个假 API Key，
+  重定向若没生效，它会进开发者真实的 `~/.opencodereview/config.json`。链路末尾另有一条 check 把那份真实文件的摘要与开跑前比一次。
+- **拒绝是谁挡的要由进程自己说。** 引导卡、运行门与设置页的措辞都能被渲染层自己圆过去，所以 spawn 是被记下来的
+  （`child_process.spawn` 在 `main.js` 拉进 service 之前被包住）：填 Key 之前必须**零个** `review` / `scan`，
+  成本确认后点「取消」必须**仍零个**，点「仍然开始」必须**恰好一个**且带着用户设的 `--max-tokens-budget`。
+  `--preview` 不算——预览不花钱，这是产品的立身之本，分类把它单独放开。
+- **provider 是假的，请求也出不了这台机器。** 端点是 `http://127.0.0.1:9/v1`（discard 端口，没人监听），CLI 的连通测试在机器内部失败，
+  一个包都不发出去；不调真 API、不花 token。
+
+它第一次跑抓到的是**它自己**的三处错，都不是产品缺陷但都会让它假绿：fixture 把 HEAD 切回 `main`，于是「feature」分支徽章永远等不到；
+Radix 的 select trigger 带的是 `role="combobox"` 而**没有** `aria-haspopup`，用后者找它等于永远点不开；
+确认框经 Portal 渲染在 `document.body`，用 `main button` 找「取消」找不到，看上去像护栏没出现。
+第三处还顺带纠了一个更早的误判：`llm test` 那一次 spawn 的 `HOME` 不是 harness 的临时目录——那是 `config-handler.js`
+**自己**为「按填写值测试」造的第二个一次性档案（保存过的 Key 会盖过 `OCR_LLM_*`，见那里的注释），
+所以判定改成「没有任何孩子跑在开发者的真实档案里」，并把那类档案认成允许的、而不是当成泄漏。
+
+它还差的那一半也记在 DOD-4 的未勾原因里：真截断一次预算要花的钱本程序不替用户花，「单个提交」与「全量扫描」两条范围到目前只有预览级证据。
+
 ## 上游状态（第 111 轮，2026-11-04）
 本轮复核：**上游 HEAD 前进了 3 个 commit，并且第一次出现「tag / release 走了、npm 没走」的情形。**
 `git ls-remote` 答上：`refs/heads/main` 从 `5c039e8` 前进到 `abb7abc`；`refs/tags/v1.13.5` 指向 `abb7abc`

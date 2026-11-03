@@ -35,6 +35,12 @@
 // The very same function is what `tools/check-packaging-smoke.mjs` points at a
 // fixture with one allowlist line removed, so "this gate can go red" is asserted
 // rather than assumed. `npm run audit:packaging`.
+//
+// The second question this file answers is not about `build.files` at all but
+// about the same worry one layer down — "will the packaged app find its files" —
+// and it is asked of `package-lock.json`: the six platform binaries the wrapped
+// CLI ships as optional dependencies each need a resolved entry. See
+// `findLockfilePlatformProblems` for the failure that put it here.
 import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -128,6 +134,69 @@ export const findPackagingProblems = ({ root = ROOT, patterns, entries = DEFAULT
   return { problems, checked: [...seen].sort(), rootModules };
 };
 
+// ---- the other half of "the packaged app finds its files": the platform binaries
+//
+// `@alibaba-group/open-code-review` ships its `ocr` binary as six optional
+// platform packages (`ocr-darwin-arm64` … `ocr-win32-x64`), and npm installs only
+// the one matching the host — which is why `build/fetch-binaries.cjs` exists for
+// cross-platform builds. What is checked here is the *lockfile* half: the parent
+// entry declares all six in `optionalDependencies`, so every one of them must
+// have a resolved entry of its own.
+//
+// The failure this was written for is real and silent. Regenerating
+// `package-lock.json` for the v1.13.5 bump on this machine dropped
+// `ocr-darwin-x64`: the declaration stayed, the resolution did not. Nothing in
+// the repository noticed, because the host is linux/x64 and that package is not
+// installed here anyway — it would have surfaced as `npm ci` failing on a macOS
+// x64 machine, i.e. on the one platform nobody has ever built. A hole that only
+// opens on an unbuilt platform is exactly the kind that stays open, so it is
+// asserted from the declaration side instead of from the host side.
+export const OCR_PACKAGE = "@alibaba-group/open-code-review";
+
+export const findLockfilePlatformProblems = ({ lock, parent = OCR_PACKAGE }) => {
+  const problems = [];
+  const parentEntry = lock?.packages?.[`node_modules/${parent}`];
+  if (!parentEntry) return [`package-lock.json has no entry for ${parent}`];
+
+  const declared = parentEntry.optionalDependencies || {};
+  const names = Object.keys(declared).sort();
+  if (names.length === 0) {
+    // Vacuous-green guard: with nothing declared, the loop below would report
+    // "no problems" while reading nothing at all.
+    problems.push(
+      `${parent} declares no optionalDependencies in package-lock.json — the platform binaries are ` +
+        `resolved from that list, so an empty one leaves this check reading nothing`
+    );
+    return problems;
+  }
+
+  for (const name of names) {
+    const entry = lock.packages[`node_modules/${name}`];
+    if (!entry) {
+      problems.push(
+        `package-lock.json declares ${name}@${declared[name]} as an optional dependency of ${parent} ` +
+          `but has no resolved entry for it — \`npm ci\` on that platform installs nothing and the ` +
+          `packaged app finds no binary`
+      );
+      continue;
+    }
+    if (entry.version !== declared[name]) {
+      problems.push(
+        `${name} is declared at ${declared[name]} but resolved at ${entry.version} — the lockfile ` +
+          `would install a binary the parent did not ask for`
+      );
+    }
+    if (!entry.resolved || !entry.integrity) {
+      problems.push(
+        `${name} has no ${entry.resolved ? "integrity" : "resolved"} in package-lock.json — an entry ` +
+          `without both cannot be installed reproducibly`
+      );
+    }
+  }
+
+  return problems;
+};
+
 const isEntryPoint =
   process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
 
@@ -146,10 +215,24 @@ if (isEntryPoint) {
     console.log(`  ${isPackaged(rel) ? "packaged" : "MISSING "}  ${rel}`);
   }
 
-  if (problems.length) {
-    console.error(`\n${problems.length} packaging problem(s):`);
-    for (const p of problems) console.error(`  - ${p}`);
+  const lock = JSON.parse(fs.readFileSync(path.join(ROOT, "package-lock.json"), "utf8"));
+  const platformProblems = findLockfilePlatformProblems({ lock });
+  const declaredPlatforms = Object.keys(
+    lock.packages?.[`node_modules/${OCR_PACKAGE}`]?.optionalDependencies || {}
+  ).sort();
+  console.log(
+    `checked ${declaredPlatforms.length} platform binaries declared by ${OCR_PACKAGE} in package-lock.json`
+  );
+  for (const name of declaredPlatforms) {
+    const entry = lock.packages?.[`node_modules/${name}`];
+    console.log(`  ${entry ? "resolved" : "MISSING "}  ${name}${entry ? `@${entry.version}` : ""}`);
+  }
+
+  const all = [...problems, ...platformProblems];
+  if (all.length) {
+    console.error(`\n${all.length} packaging problem(s):`);
+    for (const p of all) console.error(`  - ${p}`);
     process.exit(1);
   }
-  console.log("\npackaging allowlist is complete");
+  console.log("\npackaging allowlist is complete, and every platform binary is resolved");
 }
