@@ -32,6 +32,7 @@ harness 会自己说明「sandbox relaxed」。这一行**不覆盖**：Linux / 
 能复现的是**断言**——「1200 条全部渲染出来」「挂载不超过上限」写成了
 `tools/ui-audit/audit.mjs` 里的检查，改坏了会红；「渲染一次真实扫描的载荷」写成了
 读夹具的检查。README 承诺的是这一层，不是上表里的某一格。
+| 2026-11-04 | 第 114 轮：参数面（DOD-2 的实证面）从手感变成门禁——`tools/cli-surface.mjs` 读被 pin 的那一版二进制的 `--help`（12 条命令）与本仓真的交给 `spawn` 的 18 条命令行，双向对照 | `npm run audit:surface` 全绿：自检 46 条（含 4 条看仓库而不是夹具：`llm test` 的 needle 真在 `config-handler.js` 里、两个消费模块的 flag 字面量与表双向相等、同步文档仍有两条 run 命令的 `--help` 对照行、`audit:surface` 真挂在 `audit:static` 里）+ 门禁「57 行要拼 × help 逐条一致 / 10 行不收 / 15 行有理由地不用」；二进制自报 `v1.13.5 (abb7abcd)`。这一遍第一次跑抓到的是自制夹具自己的两处错：合成命令行把 `--preview` 与 `--resume` 拼在同一条上（46 条里 12 条因此假红），以及「值长得像 flag」那格的期望写成了两个 flag（`--rule --repo /r` 在 CLI 眼里只有一个 flag）；改的是期望与前提，不是规则。`npm run audit:static` 25 项全绿（2362 条 ok 行，exit 0），新增的那一项使 `audit:static` 从本轮起需要本机已装 CLI | `node tools/cli-surface-smoke.mjs`；`node tools/cli-surface.mjs`；`npm run audit:static`（Linux x64，二进制 `v1.13.5 (abb7abcd)`） |
 
 ## 未验证清单（截至 2026-11-04）
 

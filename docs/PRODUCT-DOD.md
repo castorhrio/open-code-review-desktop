@@ -49,7 +49,7 @@
   证据候选：README.zh-CN.md（首屏、安装段、归属声明三处的「非官方」声明）
   证据候选：src/components/SettingsPanel.tsx（设置页「关于」区的归属声明）
 - [ ] DOD-2：**引擎未改**：审查逻辑零分叉；仅拼 CLI、流式日志、解析 JSON、GUI
-  未勾原因：`ocr-service.js` 只 spawn 官方二进制这件事有断言，但「零分叉」要逐条对照上游 CLI 的参数面，而对照表只覆盖本仓实际用到的那些行。第 111 轮记下的那条漏网项（界面把「每组最多工具调用轮数」调**小**时会被模板默认值静默盖掉）已随 pin 前进到 `v1.13.5` 闭合——CLI 侧 `resolveReviewMaxTools` 让解析后的正值精确设置上限，见 `docs/OCR-UPSTREAM-SYNC.md` 第 113 轮；但参数面仍有成片没逐条核过，所以这一条还不能勾。
+  未勾原因：原先那句「参数面仍有成片没逐条核过」从第 114 轮起是假话——`tools/cli-surface.mjs` 把本仓真的交给 `spawn` 的 18 条命令行与 12 条命令的 `--help` 双向比了一遍（57 行要拼 / 10 行不收 / 15 行有理由地不用，另含 `--preview` 不带 `--resume` 与版本行归属两条契约），第 111 轮记的 `--max-tools` 差距也已在这张表里逐字对上；这一条仍不勾，因为勾选归 scheduler 侧，且它对照的是**参数面**，不是上游规则表本身——这条边界写在 `docs/OCR-UPSTREAM-SYNC.md` 第 114 轮。
   证据候选：ocr-service.js（只 spawn 官方 CLI、拼参数、解析 JSON 与流式日志，无审查规则）
   证据候选：tools/service-smoke.mjs（按上游 resolver 语义重算「这次运行会打开哪条条目」）
 - [ ] DOD-3：**上游同步**：`docs/OCR-UPSTREAM-SYNC.md` pin 与 `npm run audit:upstream` 绿；跟进上游 tag 有记录（当前 pin v1.13.5 / 约定 SHA）

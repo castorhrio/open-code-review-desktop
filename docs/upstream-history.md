@@ -36,6 +36,62 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 
 ---
 
+## 上游状态（第 113 轮，2026-11-04）
+本轮复核：**上游的发布版本前进了**——`v1.13.4` → `v1.13.5`。npm `latest` 变成 `1.13.5`，`refs/tags/v1.13.5` 指向 `abb7abc`（tag 对象
+`e739d39`，Release 发布于 2026-11-03T14:43:14Z，非 draft、非 prerelease），而 `refs/heads/main` 仍是第 111、112 轮核对到的那个
+`abb7abc`。第 111 轮那条「tag / Release 走了、npm 没走」的分叉本轮合上，**pin 前进**；本机 `npm install` 落下来的二进制自报
+`v1.13.5 (abb7abcd) linux/amd64`，与新 pin 是同一个 commit。
+
+第 112 轮留下的那句预告（「下一次 npm 发到 `1.13.5` 时，pin 前进的那一轮要同时重读对照表 5 行」）本轮执行了：`v1.13.4...v1.13.5`
+是 8 个 commit、36 个变更文件，逐行结论写在上面那张表的最后一列。这里只留两条读名字会踩坑的：
+
+- **两个 `resolver.go` 不是同一个文件。** 清单里有 `internal/diff/resolver.go`（new-side hunk 匹配的空行重试），没有对照表第 1 行说的
+  `internal/llm/resolver.go`。`UPSTREAM_RESOLVER` 与 `MATCH_RULES` 因此不动。
+- **第五行的文件这次真的被碰到了。** 定义两张失败枚举的 `internal/session/manifest.go` 在清单里，所以「清单里没有它」这一句在这一行
+  不成立，读的是它改的那几行：diff 只有一处，`ManifestExecution` 多一个 `MaxToolRequestTimes`（JSON `max_tool_request_times`）。
+  `FailureClass` 的 8 个值与 `RunFailureClass` 的 7 个值在两个 tag 上逐行取出来比过、完全一致；本仓只读已知键，那个新字段不消费。
+
+无移植项，但有一条**用户可见**：`--max-tools` 从这一版起「调小也算数」。新二进制自己的帮助文本是
+`max tool call rounds per subtask (0 = template default; min 50)`——解析后的正值精确设置上限，但 `50` 仍是下限。第 111 轮发现、
+第 112 轮搬进 DOD-2 未勾原因的那条差距就此闭合，本轮把那一句改写；**DOD-2 仍然没勾**，因为「零分叉」要的是参数面逐条对照，
+这件事不会因为一版发布而自动完成。界面那行的 hint（`0 = 模板默认。`）本来就只承诺 `0` 的含义，现在它说的仍然是真话，所以这一轮
+**不**给它加「调小会被模板默认值覆盖」的说明——那句话的有效期只有上一个 pin，写下去就是一句注定过期的话。
+
+另外三条引擎侧的变化对本仓没有契约影响：allowlist 扩了 `.jsonc` 与 EJS / Liquid / Nunjucks / HAML / Slim / ERB，Scala 进规则表，
+工作区模式不再把被 `.gitignore` 匹配的**已跟踪**文件滤掉（第 107 轮记的那条 HEAD 改动，这一次进入被封装的发布版本）。本仓显示的
+是 CLI 给出的排除原因与文件清单，不自己判定哪些文件进审查，所以无移植项。
+
+本轮还收编了一处**依赖先动、文档没跟上**的状态：工作树里 `package.json` 与 `package-lock.json` 已经落在 `^1.13.5`（本机
+`npm install` 从镜像拉下来的），而 pin 仍写上一个发布版本——`audit:upstream` 因此点名「依赖先动，就要把 pin、对照表 5 行与
+`UPSTREAM_RESOLVER` 一起复核后改成本轮的版本」。这条断言的存在理由就是这一刻：它不许一次版本前进只发生在 lockfile 里。本轮按它
+要求的那条路走完了，而不是把 lockfile 退回去假装没发生。
+
+验证口径与第 103 轮那次升 pin 相同：跑在本机 Linux x64（开发机，不是发布面），CLI 层、真 Electron、UI 三套的数字记在
+[`docs/measurements.md`](measurements.md)；两份 README 与 `src/lib/types.ts` 的版本行随 pin 一起前进。
+
+还有一条本轮**修掉并加了断言**的 lockfile 事实：本机 `npm install` 重新生成的 `package-lock.json` 里只剩 5 个平台包，
+`@alibaba-group/ocr-darwin-x64` 掉了出去——父条目 `optionalDependencies` 里那六行声明还在，只是它自己那条解析记录没了。对发布面没有
+影响（发布的是 Windows x64，`ocr-win32-x64` 在），对这台机器也没有影响（linux/x64 本来就不装 darwin 包），所以它**不会**让任何一条
+门禁变红：真正的后果是 `npm ci` 在 macOS x64 上装不出东西，而那正是从来没被构建过的平台——只在没人构建的平台上开的口子，就是会一直
+开着的口子。修法是把那条记录按 `npm view` 给出的 `resolved` / `integrity` 补回去（tarball 下下来重算 sha512 与 `npm view` 逐字相等，
+不是抄一个看起来对的串），补完再跑一次 `npm install --package-lock-only` 确认 npm 不会把它再剪掉。
+
+断言加在 `tools/check-packaging.mjs`（`audit:packaging`）：它问的是同一个问题的下一层——「打包出来的应用找得到自己的文件吗」——
+只不过问的是 `package-lock.json`。规则只有一条，但**读的是声明而不是写死的六个名字**：父条目的 `optionalDependencies` 说有几个平台包，
+每一个就必须有自己的解析记录，版本要与声明一致、`resolved` 与 `integrity` 都要在。`tools/check-packaging-smoke.mjs` 用**改真 lockfile**
+的方式造六格反向控制（删一条记录 / 版本对不上 / 缺 integrity / 上游多声明一个平台 / 声明为空 / 父条目整个不见），所以上游哪天加第七个
+平台，这一套不用改就覆盖到了；「声明为空」那一格是防假绿的——没有声明时循环会一条问题都不报，而它其实什么都没读。
+
+还有一条本轮把版本行推到 `v1.13.5` 时**必须一起说清**的发布面事实：仓里最后一个发布提交是 2026-10-14 的
+`chore(release): 0.1.13`，那一份 `package.json` 里的 CLI 依赖还是 `^1.13.0`。也就是说 Releases 上那份
+`*-setup.exe` 带的 `ocr` 既不是 `v1.13.4` 也不是 `v1.13.5`，而是那天解析到的那一版；README 的「`v0.1.13`, running
+`ocr v1.13.5`」与 DoD 头部那句说的是**这份源码树构建出来、按此 pin 验证过**的那一版，不是下载得到的那串字节。合上这个落差的
+动作是发一次新版——`tools/release.mjs` 停在推送提交与发布 Release 之前，那两步属于人。本轮既不假装已经发过，也不把 README 的
+版本行退回成资产里的旧版本：那会把 pin 的本意（「封装并对照的是哪一版」）改成「上一次 shipping 里恰好装的是哪一版」。要补的实测
+记在 [`docs/measurements.md`](measurements.md) 的未验证清单里。
+
+上一轮（第 112 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-112-轮2026-11-04)，归档之后本文件不留第二份。
+
 ## 上游状态（第 112 轮，2026-11-04）
 本轮复核：**上游什么都没动。** `git ls-remote` 答上：`refs/heads/main` 仍是 `abb7abc`（与第 111 轮核对到的同一个 commit），
 `refs/tags/v1.13.5` 仍指向它（tag 对象 `e739d39`），npm `latest` 仍是 `1.13.4`。三个口径本轮一致，pin 因此不动，对照表 5 行无需重读，

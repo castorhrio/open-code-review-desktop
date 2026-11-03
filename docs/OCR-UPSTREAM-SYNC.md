@@ -35,7 +35,7 @@ tag v1.13.5
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`abb7abcd5c5196fa0278dc87db85780fa269562f`（第 113 轮：`git ls-remote` 的 TLS 被断开（GnuTLS `-110`），`refs/heads/main` 由 GitHub API 答上，仍是 `abb7abc`——与第 111、112 轮核对到的是同一个 commit，**HEAD 本轮没有前进**；前进的是发布口径：npm `latest` 从 `1.13.4` 变成 `1.13.5`，`refs/tags/v1.13.5` 指向的正是这个 `abb7abc`（tag 对象 `e739d39`，Release 发布于 2026-11-03T14:43:14Z，非 draft / 非 prerelease），本机装下来的二进制自报 `v1.13.5 (abb7abcd)`——**pin 因此前进**；通路：api）**
+**本轮 HEAD 核对：`abb7abcd5c5196fa0278dc87db85780fa269562f`（第 114 轮：`git ls-remote` 这一趟通了，HEAD 与 tag 一次问全——`refs/heads/main` 仍是 `abb7abc`，与第 111–113 轮核对到的是同一个 commit，**HEAD 本轮没有前进**；`refs/tags/v1.13.5`（tag 对象 `e739d39`）指向的也是 `abb7abc`，Releases 前三仍是 `v1.13.5` / `v1.13.4` / `v1.13.3`（皆非 draft / 非 prerelease），npm `latest` 仍是 `1.13.5`（`gitHead` = `abb7abc`）——三处口径一致，**pin 不动**；通路：git）**
 
 ### 核对通路账
 
@@ -121,6 +121,7 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 | 111 | 2026-11-04 | git | **上游 HEAD 前进 + 第一次出现「tag / release 走了、npm 没走」**：`refs/heads/main` `5c039e8` → `abb7abc`（3 个 commit：`--max-tools` 低于模板值时开始被采纳、裸 `diff --git` 头按分隔符切开、new-side hunk 匹配允许跳过空行重试）；`refs/tags/v1.13.5` = `abb7abc`（tag 对象 `e739d39`，Release 已发布），npm `latest` 仍是 `1.13.4`，**pin 不前进**（pin 跟 npm 走，本程序 spawn 的是 npm 包里的二进制）；对照表 5 行一个都没被碰到，无移植项，但 `--max-tools` 那条对本仓用户可见（1.13.4 上把「每组最多工具调用轮数」调小会被模板默认值盖掉）；DoD 的证据从「候选指到哪」推到「候选真的被跑过」（`auditScriptClosure` + `dodHarnessReachViolations`），并给每个没勾的条目加一句「未勾原因」（`dodReasonViolations`）；`docs/measurements.md` 的「未验证清单」每行加归属（上游 / 本仓 / 真机）与可指认的路径（`unverifiedRowViolations`） | — |
 | 112 | 2026-11-04 | git | **上游没动**：`refs/heads/main` 仍是 `abb7abc`、`refs/tags/v1.13.5` 仍是 `abb7abc`（tag 对象 `e739d39`）、npm `latest` 仍是 `1.13.4`，三个口径一致，**pin 不动**、对照表 5 行无需重读、无移植项；`--max-tools` 那条用户可见的差距不留在会被归档的正文里，改记进 `docs/PRODUCT-DOD.md` 的 DOD-2 未勾原因（那一句有断言读）；本轮产品改动是把 DOD-4 缺的首启链路做成 harness：`tools/e2e-first-run.cjs` + `tools/e2e-first-run.mjs`，17 条 check 走「空档案 → 引导 → 选仓 → 配 provider → 清单 → 成本确认挡住的那次 `scan`」，判定抽进 `tools/e2e-first-run-steps.cjs` 由 `audit:e2e-first-run-rules` 钉住，harness 挂在 `audit:app`（`audit:e2e-first-run`） | — |
 | 113 | 2026-11-04 | api | **上游发布版本前进**：`v1.13.4` → `v1.13.5`（tag commit 就是第 111–112 轮已经核对到的 `abb7abc`，tag 对象 `e739d39`，Release 发布于 2026-11-03T14:43:14Z、非 draft / 非 prerelease），npm `latest` 同为 `1.13.5`，本机 npm 装下来的二进制自报 `v1.13.5 (abb7abcd) linux/amd64`——第 111 轮那条「tag / Release 走了、npm 没走」的分叉本轮合上，**pin 前进**；`git ls-remote` 的 TLS 被断开（GnuTLS `-110`），HEAD 与 tag 都由 API 答上；对照表 5 行在这一次提交里逐行重读（compare `v1.13.4...v1.13.5` 是 8 个 commit / 36 个文件，`internal/llm/resolver.go`、`cmd/opencodereview/config_cmd.go`、`llm_cmd.go` / `providers.go` 一个都不在清单里——清单里那个 `internal/diff/resolver.go` 是**同名不同包**的另一个文件；唯一被碰到的定义 `failure_class` 的文件是 `internal/session/manifest.go`，它只给 `ManifestExecution` 加了 `MaxToolRequestTimes`，两张枚举逐字未变）；第 111 轮记下的那条用户可见差距在这一次闭合（`resolveReviewMaxTools`：解析后的正值精确设置上限，1–49 仍先上调到 50），DOD-2 的未勾原因随之改写；升 pin 的真机验证跑在 Linux x64（数字记在 `docs/measurements.md`），两份 README、`src/lib/types.ts` 与 DoD 头部的版本行同步前进 | — |
+| 114 | 2026-11-04 | git | `abb7abc` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**；参数面从手感变成断言：新增 `tools/cli-surface.mjs`（`npm run audit:surface`），读被 pin 的那一版二进制的 `--help`（12 条命令）与本仓真的交给 `spawn` 的 18 条命令行，双向对照 57 行要拼 / 10 行不收 / 15 行有理由地不用，版本行必须同时带 pin 的 tag 与 commit 前缀；自检 `tools/cli-surface-smoke.mjs` 46 条（其中 4 条看仓库而不是夹具，含「`--preview` 与 `--resume` 不在同一条命令行上」这条前提），挂进 `audit:static`（24 → 25 项） | — |
 
 「最近一次对照」只写**那一项最近被人工重新核对**的轮次。该列没有列出本轮，表示本轮
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
@@ -212,61 +213,55 @@ tool 结果文本**（`Error: diff not found for: …`、`Diffs exist for: …`�
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。搬完这里只留一句
    指针——「本文件只留当前一轮」不是约定而是断言（`previousRoundPointerViolations`）。
 
-## 当前状态（第 113 轮，2026-11-04）
-本轮复核：**上游的发布版本前进了**——`v1.13.4` → `v1.13.5`。npm `latest` 变成 `1.13.5`，`refs/tags/v1.13.5` 指向 `abb7abc`（tag 对象
-`e739d39`，Release 发布于 2026-11-03T14:43:14Z，非 draft、非 prerelease），而 `refs/heads/main` 仍是第 111、112 轮核对到的那个
-`abb7abc`。第 111 轮那条「tag / Release 走了、npm 没走」的分叉本轮合上，**pin 前进**；本机 `npm install` 落下来的二进制自报
-`v1.13.5 (abb7abcd) linux/amd64`，与新 pin 是同一个 commit。
+## 当前状态（第 114 轮，2026-11-04）
+本轮复核：**上游什么都没动。** `git ls-remote` 这一趟通了（第 113 轮那条 GnuTLS `-110` 没再出现），HEAD 与 tag 一次问全：
+`refs/heads/main` 仍是 `abb7abc`——第 111、112、113 轮核对到的都是它，本轮第四次；`refs/tags/v1.13.5`（tag 对象 `e739d39`）指向的
+也是 `abb7abc`；Releases 前三条仍是 `v1.13.5` / `v1.13.4` / `v1.13.3`（皆非 draft / 非 prerelease），npm `latest` 仍是 `1.13.5`
+（`gitHead` = `abb7abc`）。**pin 不动、对照表 5 行无需重读、无移植项。**
 
-第 112 轮留下的那句预告（「下一次 npm 发到 `1.13.5` 时，pin 前进的那一轮要同时重读对照表 5 行」）本轮执行了：`v1.13.4...v1.13.5`
-是 8 个 commit、36 个变更文件，逐行结论写在上面那张表的最后一列。这里只留两条读名字会踩坑的：
+本轮的产品改动是补 DOD-2 的实证面：**参数面**。此前「引擎未改」只有两条证据——`ocr-service.js` 只拼参数不实现规则、以及一张手写的
+每模式白名单；两者都答不了审阅者真正要问的那一句：本仓拼出去的每一个 flag，是不是都被**被 pin 的那一版** CLI 收。`tools/cli-surface.mjs`
+（`npm run audit:surface`）回答它，用的是两台机器而不是一次重读：被 pin 的二进制的 `--help`（12 条命令，含 `ocr review --help` 与
+`ocr scan --help`）与本仓真的交给 `spawn` 的 argv（`preview` / 四种范围的 `startRun` / 会话三条 / 规则 / 配置两条 / provider 表，共 18 条
+命令行）。两个方向都查：表里的 57 行必须在 help 里且类型一致、也必须真的被某条命令行拼出来；录到的每个 flag 必须在表里有行；help 里有
+而本仓不送的 15 行必须在「不用」表里写下理由；「`scan` 不收 `--effort`」这类 10 行白名单依据也要在 help 里核对。另有两条不属于双射但
+同样会杀人：`--preview` 永不带 `--resume`（CLI 拒绝这对组合，而预览与运行共用一个 spec），版本行必须同时带 pin 的 tag 与 commit 前缀
+（否则上面每一条答案说的都是别的发布）。
 
-- **两个 `resolver.go` 不是同一个文件。** 清单里有 `internal/diff/resolver.go`（new-side hunk 匹配的空行重试），没有对照表第 1 行说的
-  `internal/llm/resolver.go`。`UPSTREAM_RESOLVER` 与 `MATCH_RULES` 因此不动。
-- **第五行的文件这次真的被碰到了。** 定义两张失败枚举的 `internal/session/manifest.go` 在清单里，所以「清单里没有它」这一句在这一行
-  不成立，读的是它改的那几行：diff 只有一处，`ManifestExecution` 多一个 `MaxToolRequestTimes`（JSON `max_tool_request_times`）。
-  `FailureClass` 的 8 个值与 `RunFailureClass` 的 7 个值在两个 tag 上逐行取出来比过、完全一致；本仓只读已知键，那个新字段不消费。
+三张表都在 `tools/cli-surface.mjs` 里，本文件只指向它、不抄第二份——拷贝会各自漂，这是第 104 轮把人读区减重的同一条理由。
+反向控制在 `tools/cli-surface-smoke.mjs` 一并跑（同一个 script 先自检、再门禁）：夹具不是抄表，而是**从表生成**，于是「诚实的答案」
+是空数组；每一格再改一个事实，要求拥有那个事实的规则用自己的话点名。这一遍第一次跑就抓到自制夹具自己的两处错：它把 `--preview` 与
+`--resume` 拼在同一条合成命令行上（于是每条控制都在跟一个不诚实的底色对账，46 条里 12 条因此假红），以及把「值长得像 flag」那一格的
+期望写成了两个 flag（`--rule --repo /r` 在 CLI 眼里是「`--rule` 的值是 `--repo`」，那行只有一个 flag）。两处改的都是夹具的期望与前提，
+不是放宽规则——反过来，现在还有一条前提专门钉住「底色里没有任何一条命令行同时带 `--preview` 与 `--resume`」。
 
-无移植项，但有一条**用户可见**：`--max-tools` 从这一版起「调小也算数」。新二进制自己的帮助文本是
-`max tool call rounds per subtask (0 = template default; min 50)`——解析后的正值精确设置上限，但 `50` 仍是下限。第 111 轮发现、
-第 112 轮搬进 DOD-2 未勾原因的那条差距就此闭合，本轮把那一句改写；**DOD-2 仍然没勾**，因为「零分叉」要的是参数面逐条对照，
-这件事不会因为一版发布而自动完成。界面那行的 hint（`0 = 模板默认。`）本来就只承诺 `0` 的含义，现在它说的仍然是真话，所以这一轮
-**不**给它加「调小会被模板默认值覆盖」的说明——那句话的有效期只有上一个 pin，写下去就是一句注定过期的话。
+代价写清：`audit:surface` 读的是本机装下来的那份二进制（与 `ocr-service.js` 的 `binaryPath()` 同一个答案），所以 `audit:static`
+从本轮起不再「不需要 CLI 也能跑」——CLI 没落下来时它退 1 并说清原因，而不是静默变绿。
 
-另外三条引擎侧的变化对本仓没有契约影响：allowlist 扩了 `.jsonc` 与 EJS / Liquid / Nunjucks / HAML / Slim / ERB，Scala 进规则表，
-工作区模式不再把被 `.gitignore` 匹配的**已跟踪**文件滤掉（第 107 轮记的那条 HEAD 改动，这一次进入被封装的发布版本）。本仓显示的
-是 CLI 给出的排除原因与文件清单，不自己判定哪些文件进审查，所以无移植项。
+DOD-2 的未勾原因随之改写：原先那句「参数面仍有成片没逐条核过」从本轮起是假话。**勾选状态不动**（勾选归 scheduler 侧），改的是
+「为什么还不能勾」——现在缺的是 scheduler 侧的确认，以及「对照的是参数面，不是引擎的规则表本身」这半句诚实边界。
 
-本轮还收编了一处**依赖先动、文档没跟上**的状态：工作树里 `package.json` 与 `package-lock.json` 已经落在 `^1.13.5`（本机
-`npm install` 从镜像拉下来的），而 pin 仍写上一个发布版本——`audit:upstream` 因此点名「依赖先动，就要把 pin、对照表 5 行与
-`UPSTREAM_RESOLVER` 一起复核后改成本轮的版本」。这条断言的存在理由就是这一刻：它不许一次版本前进只发生在 lockfile 里。本轮按它
-要求的那条路走完了，而不是把 lockfile 退回去假装没发生。
+验证口径：`npm run audit:static`（25 项，本轮新增的 `audit:surface` 里含 46 条自检 + 12 条命令的 help 对照）在本机 Linux x64 上全绿，
+二进制自报 `v1.13.5 (abb7abcd)`，数字记在 [`docs/measurements.md`](measurements.md)。
 
-验证口径与第 103 轮那次升 pin 相同：跑在本机 Linux x64（开发机，不是发布面），CLI 层、真 Electron、UI 三套的数字记在
-[`docs/measurements.md`](measurements.md)；两份 README 与 `src/lib/types.ts` 的版本行随 pin 一起前进。
+上一轮（第 113 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-113-轮2026-11-04)，归档之后本文件不留第二份。
 
-还有一条本轮**修掉并加了断言**的 lockfile 事实：本机 `npm install` 重新生成的 `package-lock.json` 里只剩 5 个平台包，
-`@alibaba-group/ocr-darwin-x64` 掉了出去——父条目 `optionalDependencies` 里那六行声明还在，只是它自己那条解析记录没了。对发布面没有
-影响（发布的是 Windows x64，`ocr-win32-x64` 在），对这台机器也没有影响（linux/x64 本来就不装 darwin 包），所以它**不会**让任何一条
-门禁变红：真正的后果是 `npm ci` 在 macOS x64 上装不出东西，而那正是从来没被构建过的平台——只在没人构建的平台上开的口子，就是会一直
-开着的口子。修法是把那条记录按 `npm view` 给出的 `resolved` / `integrity` 补回去（tarball 下下来重算 sha512 与 `npm view` 逐字相等，
-不是抄一个看起来对的串），补完再跑一次 `npm install --package-lock-only` 确认 npm 不会把它再剪掉。
+### 参数面：`ocr review --help` / `ocr scan --help` 与本仓真的拼出的每一行
 
-断言加在 `tools/check-packaging.mjs`（`audit:packaging`）：它问的是同一个问题的下一层——「打包出来的应用找得到自己的文件吗」——
-只不过问的是 `package-lock.json`。规则只有一条，但**读的是声明而不是写死的六个名字**：父条目的 `optionalDependencies` 说有几个平台包，
-每一个就必须有自己的解析记录，版本要与声明一致、`resolved` 与 `integrity` 都要在。`tools/check-packaging-smoke.mjs` 用**改真 lockfile**
-的方式造六格反向控制（删一条记录 / 版本对不上 / 缺 integrity / 上游多声明一个平台 / 声明为空 / 父条目整个不见），所以上游哪天加第七个
-平台，这一套不用改就覆盖到了；「声明为空」那一格是防假绿的——没有声明时循环会一条问题都不报，而它其实什么都没读。
+上游每加一个 flag、每改一次类型、每收一次短写法，本仓拼的那条命令行就有一次变成 `unknown flag` 的机会，而
+用户看到的是「审查一开始就失败」。这一面从第 114 轮起有门禁：`npm run audit:surface`（`tools/cli-surface.mjs`，
+挂在 `audit:static` 里），跑法就是那一条命令，红了它逐行点名。
 
-还有一条本轮把版本行推到 `v1.13.5` 时**必须一起说清**的发布面事实：仓里最后一个发布提交是 2026-10-14 的
-`chore(release): 0.1.13`，那一份 `package.json` 里的 CLI 依赖还是 `^1.13.0`。也就是说 Releases 上那份
-`*-setup.exe` 带的 `ocr` 既不是 `v1.13.4` 也不是 `v1.13.5`，而是那天解析到的那一版；README 的「`v0.1.13`, running
-`ocr v1.13.5`」与 DoD 头部那句说的是**这份源码树构建出来、按此 pin 验证过**的那一版，不是下载得到的那串字节。合上这个落差的
-动作是发一次新版——`tools/release.mjs` 停在推送提交与发布 Release 之前，那两步属于人。本轮既不假装已经发过，也不把 README 的
-版本行退回成资产里的旧版本：那会把 pin 的本意（「封装并对照的是哪一版」）改成「上一次 shipping 里恰好装的是哪一版」。要补的实测
-记在 [`docs/measurements.md`](measurements.md) 的未验证清单里。
+它问两台机器，而不是问一个读代码的人：**被 pin 的那一版二进制**的 `--help`（`ocr review --help`、`ocr scan --help`
+与另外 10 条本仓在调的命令：`session list/comments/export/rm`、`rules check`、`config set/unset`、`llm providers`、
+`llm test`、`version`），以及**本仓自己**交出来的 argv（把 `spawn` 换成记录器，用一份每项都填满的 spec 驱动
+`preview`、四种范围的 `startRun`、会话三条、规则、配置两条与 provider 表）。三张表（要拼 57 行 / 不收 10 行 /
+有理由地不用 15 行）都在 `tools/cli-surface.mjs` 里，本文件不抄第二份：抄一份就是两个会各自漂的权威。
 
-上一轮（第 112 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-112-轮2026-11-04)，归档之后本文件不留第二份。
+判定是这些表与那两台机器的双射，外加两条不属于双射但同样会杀人的契约：`--preview` 永不带 `--resume`，以及
+二进制自报的版本行必须同时带 pin 的 tag 与 commit 前缀。反向控制在 `tools/cli-surface-smoke.mjs`（同一个 script
+先自检、再门禁），夹具从表本身生成，每一格只改一个事实。改这一套之前先读那两个文件的头注释：它们各自说明了
+为什么「看起来对」不算证据。
 
 ## 上游真变了怎么办（命令驱动，而不是「记得看一眼」）
 ```bash
