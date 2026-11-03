@@ -118,6 +118,15 @@ async function makeRepo() {
   fs.writeFileSync(path.join(dir, "b.go"), "package main\n\nfunc helper() int { return 1 }\n");
   await git(dir, ["add", "."]);
   await git(dir, ["commit", "-q", "-m", "add helper"]);
+  // A *second* commit on the branch, touching a file neither of the other two
+  // scopes can report. 单个提交 is judged by "the newest commit's own file is
+  // listed and the branch-comparison file is not", and that only discriminates
+  // if the two scopes disagree about at least one path: with a single commit on
+  // the branch, `--commit HEAD` and `main..feature` name the same change, so a
+  // preview that never re-ran would look exactly like one that did.
+  fs.writeFileSync(path.join(dir, "d.go"), "package main\n\nfunc newest() int { return 2 }\n");
+  await git(dir, ["add", "."]);
+  await git(dir, ["commit", "-q", "-m", "add newest"]);
   await git(dir, ["remote", "add", "origin", remote]);
   await git(dir, ["push", "-q", "-u", "origin", "feature"]);
   // Uncommitted change so `workspace` has something to report.
@@ -327,6 +336,67 @@ app.whenReady().then(async () => {
     );
     check("the range scope names two different refs", new Set(fields).size >= 2, `the scope fields hold ${JSON.stringify(fields)}`);
 
+    /* ---- 4b. 单个提交 against the real CLI ----
+     * The fourth scope, and the one DOD-4 could only call "preview-level" until
+     * now. Two things are asserted, and the second is what makes the first mean
+     * anything: the file the newest commit adds must be listed, and the file the
+     * *previous* scope listed must be gone. A preview that never re-ran would
+     * keep b.go on screen, so "d.go is listed" alone would be satisfied by a
+     * stale list the moment d.go happened to be in it — the pair is the
+     * discriminator, which is why the throwaway repository has a second commit
+     * on the branch (see `makeRepo`).
+     *
+     * The 提交 field is filled by `repo:inspect` with the newest commit, so the
+     * mode opens ready rather than with its required field empty; that is
+     * asserted too, because a mode that opens disabled reads as unfinished and
+     * the preview below would then be waiting on a form nobody filled.
+     */
+    const headShort = await git(repoPath, ["rev-parse", "--short", "HEAD"]);
+    const switchedToCommit = await window.webContents.executeJavaScript(
+      `(() => { const b = [...document.querySelectorAll("main button")].find((x) => (x.textContent || "").trim() === "单个提交"); if (b) b.click(); return Boolean(b); })()`,
+      true
+    );
+    const commitTimeoutMs = 60000;
+    const commitScope = await screenAfterWindow(
+      window,
+      waitFor(
+        window,
+        `(() => {
+           const t = document.querySelector("main").innerText;
+           return /d\.go/.test(t) && !/b\.go/.test(t) ? t : null;
+         })()`,
+        { label: "the 单个提交 preview (d.go)", timeout: commitTimeoutMs }
+      ),
+      { timeoutMs: commitTimeoutMs }
+    );
+    check(
+      "单个提交 previews the newest commit's own change",
+      !commitScope.timedOut && /d\.go/.test(commitScope.screen),
+      commitScope.timedOut
+        ? `${neverAppeared("the 单个提交 preview", commitTimeoutMs)} — the mode never produced a list, so the commit scope was not judged`
+        : /d\.go/.test(commitScope.screen)
+          ? ""
+          : `the 单个提交 scope appeared but never listed d.go — the commit the field holds did not reach the CLI as --commit. Screen said:\n${commitScope.screen.slice(0, 600)}`
+    );
+    check(
+      "...and the previous scope's file is gone, so the preview really re-ran",
+      !commitScope.timedOut && !/b\.go/.test(commitScope.screen),
+      commitScope.timedOut
+        ? `${neverAppeared("the 单个提交 preview", commitTimeoutMs)}, so a stale list was not ruled out`
+        : /b\.go/.test(commitScope.screen)
+          ? `b.go is still on screen: the 分支对比 list was never replaced, so this preview is the previous scope's answer`
+          : ""
+    );
+    const commitValue = await window.webContents.executeJavaScript(
+      `(() => { const i = document.querySelector('main input[placeholder="abc1234"]'); return i ? i.value : null; })()`,
+      true
+    );
+    check(
+      "单个提交's 提交 field is filled by repo:inspect, so the mode opens ready",
+      switchedToCommit && commitValue === headShort,
+      `clicked=${switchedToCommit} field=${JSON.stringify(commitValue)} head=${JSON.stringify(headShort)}`
+    );
+
     /* ---- 5. the sub-directory picker, end to end ----
      * `repo:pickInside` is the one handler whose entire body is "ask the dialog,
      * then translate the answer". The translation is pinned by `audit:path`; what
@@ -443,6 +513,62 @@ app.whenReady().then(async () => {
             : `扫描路径 reads ${JSON.stringify(setup.filled)} — the payload's relPath never reached pickScanDir`,
       };
     });
+
+    /* ---- 5b. 全量扫描 against the real CLI ----
+     * The picker steps above switch to 全量扫描 and fill 扫描路径 with `pkg/inner`,
+     * but they only ever read the *field*: nothing asked whether that scope
+     * reaches the CLI. Switching the mode already ran a whole-repository preview
+     * (a.go is in it), so "c.go is listed and a.go is not" is the pair that
+     * proves the path was handed to `ocr scan --path` instead of being ignored —
+     * a scan that quietly widened to the whole repository is the expensive
+     * version of the same bug the picker's refusal checks guard against.
+     *
+     * Reported red, not skipped, when the dialog stub did not take: the mode is
+     * never switched in that case, and a check that vanishes from the report is
+     * counted as a pass by anything that counts failures.
+     */
+    const scanTimeoutMs = 60000;
+    // `pickerSetup` may reject (the mode switch or the pick threw); the two
+    // checks below report that instead of letting it reach the catch-all, which
+    // would say only "the flow completed: false".
+    const scanScope = dialogIsStubbed
+      ? await pickerSetup.catch(() => null).then(() =>
+          screenAfterWindow(
+            window,
+            waitFor(
+              window,
+              `(() => {
+                 const t = document.querySelector("main").innerText;
+                 return /c\.go/.test(t) && !/a\.go/.test(t) ? t : null;
+               })()`,
+              { label: "the 全量扫描 preview (c.go)", timeout: scanTimeoutMs }
+            ),
+            { timeoutMs: scanTimeoutMs }
+          )
+        )
+      : null;
+    check(
+      "全量扫描 previews the file under 扫描路径",
+      Boolean(scanScope) && !scanScope.timedOut && /c\.go/.test(scanScope.screen),
+      !scanScope
+        ? PICKER_STUB_MISSING
+        : scanScope.timedOut
+          ? `${neverAppeared("the 全量扫描 preview", scanTimeoutMs)} — the mode never produced a list, so the scan scope was not judged`
+          : /c\.go/.test(scanScope.screen)
+            ? ""
+            : `the 全量扫描 scope appeared but never listed c.go — 扫描路径 did not reach the CLI as --path. Screen said:\n${scanScope.screen.slice(0, 600)}`
+    );
+    check(
+      "...and the whole-repository files are gone, so 扫描路径 reached the CLI",
+      Boolean(scanScope) && !scanScope.timedOut && !/a\.go/.test(scanScope.screen),
+      !scanScope
+        ? PICKER_STUB_MISSING
+        : scanScope.timedOut
+          ? `${neverAppeared("the 全量扫描 preview", scanTimeoutMs)}, so a whole-repository scan was not ruled out`
+          : /a\.go/.test(scanScope.screen)
+            ? `a.go is still on screen: the scan widened to the whole repository, which is the expensive direction of this bug`
+            : ""
+    );
 
     await pickerCheck("...and the dialog was asked for a directory, starting at the repo", async () => {
       const setup = await pickerSetup;
