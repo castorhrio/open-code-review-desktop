@@ -4,7 +4,7 @@
 > 用途：给 agent 下一刀 / TODO / next-iteration 的**唯一合法输入源**：只许 DoD 未勾选 ∪ 当周反馈 ∪ 回归/断链/合规/上游 pin 破裂；勾满即停手  
 > 归属：本文件是 scheduler 侧 `/opt/agent-scheduler/docs/product-dod/open-code-review-desktop-dod.md` 在产品仓内的同源副本，条目以 scheduler 侧为准，编码侧只读不改  
 > 形态：OSS 桌面壳，封装 **未修改** 的官方 `alibaba/open-code-review`（`ocr`）二进制；**非官方**须诚实声明  
-> 发版：`v0.1.13` 对照上游 `ocr v1.13.3`；安装包/portable 在 Releases  
+> 发版：`v0.1.13` 对照上游 `ocr v1.13.4`；安装包/portable 在 Releases  
 > 代码：`/opt/open-code-review-desktop` · GitHub `castorhrio/open-code-review-desktop`  
 > **不改** live scheduler、config.yaml、产品业务代码
 
@@ -36,7 +36,7 @@
 
 - [ ] DOD-1：**非官方诚实**：README / 关于页 / 安装说明显著写明 unofficial；不冒充阿里巴巴官方产品
 - [ ] DOD-2：**引擎未改**：审查逻辑零分叉；仅拼 CLI、流式日志、解析 JSON、GUI
-- [ ] DOD-3：**上游同步**：`docs/OCR-UPSTREAM-SYNC.md` pin 与 `npm run audit:upstream` 绿；跟进上游 tag 有记录（当前 pin v1.13.3 / 约定 SHA）
+- [ ] DOD-3：**上游同步**：`docs/OCR-UPSTREAM-SYNC.md` pin 与 `npm run audit:upstream` 绿；跟进上游 tag 有记录（当前 pin v1.13.4 / 约定 SHA）
 - [ ] DOD-4：**主路径可演示**：四范围 + `--preview`；成本护栏；完成/部分/失败/警告徽章；预算截断不显示「干净」；续跑仅在 CLI 支持的模式显示
 - [ ] DOD-5：**航运资产**：`v0.1.13`（或更新）`*-setup.exe` / portable 可装可启；内置二进制可达；未签名 SmartScreen 有说明
 - [ ] DOD-6：**安全底线**：Key 不进本程序副本；`asar` 保持 false（spawn 契约）；发版密钥扫描绿

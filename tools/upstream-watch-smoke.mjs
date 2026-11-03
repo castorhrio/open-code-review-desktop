@@ -53,6 +53,8 @@ import {
   dodCheckboxViolations,
   dodChecklist,
   dodEvidenceTarget,
+  dodPinViolations,
+  DOD_VERSION_TOKEN,
   DOD_CHECKBOX_IDS,
   DOD_EVIDENCE_MARK,
   PRODUCT_DOD_DOC,
@@ -3352,6 +3354,91 @@ if (!flags.selftest && !flags.noRespawn) {
       dodEvidenceTarget(`${DOD_EVIDENCE_MARK}\`docs/measurements.md\``),
       dodEvidenceTarget("没有证据的一句话"),
     ])
+  );
+}
+
+/* ---- the bar's version facts: a pin that moved must not leave the DoD behind ----
+ * The DoD states two versions in prose — the upstream release this wrapper ships
+ * and this app's own release. The first went stale when the pin moved to v1.13.4
+ * and nothing noticed, because a version inside a sentence is not a shape any
+ * other rule reads. The rule is therefore stated over the values: every `vX.Y.Z`
+ * in the bar must be the pinned tag or this app's version, and nothing else.
+ *
+ * The controls below are the three ways this rule could be wrong: it could pass
+ * by reading nothing (no token found), it could refuse the app's own version
+ * (which would make it unusable and get it deleted), and it could stay green on
+ * the exact defect it exists for (the old pin pasted back in).
+ */
+{
+  const doc = fs.readFileSync(path.join(ROOT, PRODUCT_DOD_DOC), "utf8");
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
+  const opts = { pinned: PINNED_UPSTREAM, appVersion: pkg.version };
+  const tokens = [...doc.matchAll(DOD_VERSION_TOKEN)].map((hit) => hit[0]);
+
+  check(
+    "the live DoD's version facts are the pinned tag and this app's own version, and nothing else",
+    dodPinViolations(doc, opts).length === 0,
+    dodPinViolations(doc, opts).join("；") || "no violation"
+  );
+  // The premise: a rule that finds no version token at all is green for the
+  // wrong reason, and the two states look identical from the outside.
+  check(
+    "...and the rule is reading something: the bar really does state both versions",
+    tokens.includes(PINNED_UPSTREAM.tag) && tokens.includes(`v${pkg.version}`),
+    JSON.stringify(tokens)
+  );
+
+  // The defect this rule exists for: the pin moves, the sentence does not.
+  const staleTag = "v1.13.3";
+  const stale = doc.split(PINNED_UPSTREAM.tag).join(staleTag);
+  const staleViolations = dodPinViolations(stale, opts);
+  const staleLines = stale
+    .split(/\r?\n/)
+    .map((line, index) => (line.includes(staleTag) ? index + 1 : null))
+    .filter((n) => n !== null);
+  check(
+    "...and the previous pin pasted back in goes red, naming every line that still says it",
+    staleViolations.length === staleLines.length &&
+      staleLines.length >= 2 &&
+      staleLines.every((n) => staleViolations.some((v) => v.includes(`第 ${n} 行`) && v.includes(staleTag))) &&
+      staleViolations.every((v) => v.includes(PINNED_UPSTREAM.tag) && v.includes(`v${pkg.version}`)),
+    JSON.stringify({ staleLines, staleViolations })
+  );
+
+  // A historical version fact is the other way a wrong number gets in: it is not
+  // a stale pin, and it still does not belong in the bar.
+  const historical = `${doc}\n\n- 上游 v1.13.1 新增了 review_limit_reached 警告。\n`;
+  const historicalViolations = dodPinViolations(historical, opts);
+  check(
+    "...and a historical upstream version quoted in the bar goes red too, naming the token",
+    historicalViolations.length === 1 &&
+      historicalViolations[0].includes("v1.13.1") &&
+      historicalViolations[0].includes("upstream-history.md"),
+    historicalViolations.join("；") || "no violation"
+  );
+
+  // The app's own version is the second allowed value, and it is allowed for a
+  // reason: without it the rule would refuse the bar's own release line.
+  const ownLine = `发版：\`v${pkg.version}\` 对照上游 \`ocr ${PINNED_UPSTREAM.tag}\``;
+  const futureLine = `发版：\`v${pkg.version}\` 对照上游 \`ocr v1.13.5\``;
+  check(
+    "...and the app's own version is allowed, while a third version in the same sentence is not",
+    dodPinViolations(ownLine, opts).length === 0 &&
+      dodPinViolations(futureLine, opts).length === 1 &&
+      dodPinViolations(futureLine, opts)[0].includes("v1.13.5"),
+    JSON.stringify([dodPinViolations(ownLine, opts), dodPinViolations(futureLine, opts)])
+  );
+
+  // No second allowed value means the app's own version would be reported as a
+  // stale pin — a rule that cannot tell the two apart gets switched off by the
+  // first person who hits it, so the missing argument is red rather than silent.
+  const noAppVersion = dodPinViolations(doc, { pinned: PINNED_UPSTREAM });
+  check(
+    "...and a caller that forgets the app version goes red instead of reporting the app's own version as stale",
+    noAppVersion.length === 3 &&
+      noAppVersion[0].includes("package.json 的 version") &&
+      noAppVersion.slice(1).every((v) => v.includes(`v${pkg.version}`)),
+    noAppVersion.join("；") || "no violation"
   );
 }
 

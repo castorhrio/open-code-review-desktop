@@ -36,6 +36,59 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 
 ---
 
+## 上游状态（第 106 轮，2026-11-03）
+第 106 轮复核：**上游没有新内容。**`git ls-remote` 这一轮答上来了：`refs/heads/main` 仍是 `76ab46a`
+（与第 101–105 轮同一个 commit），`refs/tags/v1.13.4` 指向 tag 对象 `1393158`，`/releases/latest` 与
+npm `latest` 同为 `1.13.4`。三条通路答案一致，**pin 不前进、无移植项**，对照表 5 行因此不动。
+
+本轮按控制仓简报做 P0-1：**界面里的中文排版从「手感」变成断言。**
+
+`tools/cjk-typography.mjs` 一直在查文档，而**屏幕是陌生人读的另一半，那一半没有任何检查看过**：
+模型返回的 finding 里带一个半角逗号、某个标签写成 `用ocr跑`、某一行以「，」起头——这三种缺陷
+`audit:ui` 全都看不见（布局仍然放得下、没有溢出、没有占位符泄漏），`audit:typography` 也看不见
+（它从不打开应用）。所以三条规则从那份文件里**抽成可复用函数**（`lineStartViolation` /
+`halfWidthViolations` / `bareAdjacencyViolations`），文档侧与界面侧共用同一份：在一处修好的规则
+在两侧都修好，两份拷贝也就没有机会漂移。
+
+- **`tools/ui-cjk-typography.mjs`**（`npm run audit:typography-ui`）用真浏览器走三屏——结果页选中
+  一条 finding、长 finding 那一屏（模型写得最多的地方）、阅读/报告页——把每屏的可见文本按**块**取出
+  （块 = 子元素全是行内级的最外层元素，所以 `<p>foo <strong>bar</strong></p>` 是一块而不是三块，
+  行首禁则问的是句子而不是碰巧以逗号开头的碎片），再跑同一套规则。`pre` / `code` / `textarea` /
+  `input` 整棵子树排除：代码样例不是散文，diff 里的 `foo(x,y)中` 不是排版缺陷——这条排除正是
+  「规则」与「噪音」的分界，与文档侧对代码段的排除是同一条。
+- **反向控制**：把报告里那句「固定到审查当时的那一版，之后分支再前进也不影响这份报告」的全角逗号
+  改成半角，用同一份 bundle 的副本再走一遍三屏，要求本检查**变红并点名那一屏**。没有它，绿只说明
+  「规则满足了」或「规则根本没跑」，而这两件事从外面看一模一样。
+- **`tools/ui-cjk-typography-smoke.mjs`**（`npm run audit:typography-ui-rules`）是不需要浏览器的
+  那一半：逐行断言界面侧与文档侧**报出同样的规则与同样的句子**（有人把规则抄进界面文件而不是 import，
+  第一次改动就会红）、三条规则各自在渲染文本上点名到「哪一屏 / 哪个元素 / 第几行 / 哪段文字」、
+  干净散文必须绿、以及反向控制那句原文仍在 `ReportView.tsx` 里（句子被改写时先在这里红，而不是让
+  浏览器那一半退 2）。
+
+**接线与简报的一处偏差，写在这里而不是悄悄改**：简报说把 `audit:typography-ui` 挂进 `audit:static`，
+但这一半需要 `out/` 与浏览器，而 `audit:static` 的契约是「不构建、不开浏览器」。所以浏览器那一半挂在
+`audit:app`（`npm run audit` 只构建一次，交给所有 harness），不需要浏览器的那一半挂在 `audit:static`。
+
+**没有检查的，写清楚**：导出的自包含 HTML 报告是**上游 CLI**（`ocr session export`）写的，不是本程序
+渲染的——它的排版归上游，声称在这里检查它只会是一盏接不到线的绿灯。本程序拥有的是导出所依据的那个
+阅读页，那一页在检查范围内。另外行首禁则问的是**块首**：`innerText` 只在块边界与 `<br>` 处断行，
+浏览器按栏宽折出来的行它看不见，所以「逗号被折到下一行」这一类不在覆盖内——这是真实的边界，写在
+工具头部而不是糊过去。
+
+**P0-2 的 critique 结论是「装饰多于信息」，据此做了一个具名 pass：`quieter`。** 三处 `Sparkles`
+（✨ 是生成物最直白的签名）从结果页的要点标题、报告页的要点卡片与「模型判断过程」的折叠标题上摘掉——
+它们不指向任何可点的东西，只是给每块文字配一个图标。同一趟 critique 撞出更硬的一条：结果页 header 的
+`固定在 <sha>` 徽章在每一张截图里都是一堵 41 字符的十六进制墙，因为 `tools/ui-audit/fixtures.mjs` 的
+SHA 是 **41** 位（真实 git 是 40 位），`shortRef` 的 `/^[0-9a-f]{40}$/` 从没匹配上——**审计一直在验一个
+真实运行产生不出来的形状，而应用真正渲染的 7 位短形从没上过屏**。夹具改成 40 位，`expectPinnedCommit`
+新增一条断言：徽章可见文本必须**恰好**是 `固定在 d41c8b7`（完整 SHA 仍留在 title 里）。`audit:ui` 112 条
+全绿，`audit:typography-ui` 三屏 202 块全绿。
+
+本轮没有动任何交互语义、IPC 与评审逻辑；改动只在 `tools/cjk-typography.mjs`（抽函数，行为不变，
+`audit:typography` 与它的 smoke 全绿）、两个新 `tools/` 文件、`package.json` 的两条脚本与两处套件接线、
+`src/components/ReportView.tsx` 与 `ResultsPanel.tsx` 的三处图标、`tools/ui-audit/fixtures.mjs` 与
+`audit.mjs` 的 SHA 形状，以及本文件与归档。
+
 ## 上游状态（第 105 轮，2026-11-03）
 第 105 轮复核：**上游没有新内容。**`git ls-remote` 这一轮没有输出（通路没答上来），HEAD 与 tag
 都由 GitHub API 答上：`/commits/main` 仍是 `76ab46a`（与第 101–104 轮同一个 commit），

@@ -1697,6 +1697,67 @@ export const dodCheckboxViolations = (doc, exists = () => true) => {
   return violations;
 };
 
+// ---- the bar's own version facts: a pin that moved must not leave the DoD behind ----
+//
+// The DoD is the only input to the next round, and it states two version facts in
+// prose: which upstream release this wrapper ships (`对照上游 ocr vX.Y.Z`) and
+// which release of this app carries it (`v0.1.N`). The first one went stale the
+// moment the pin moved to v1.13.4 — the file still said v1.13.3 in two places,
+// and nothing noticed, because a version number in a sentence is not a shape any
+// other rule reads. A reader who trusts the bar then believes the app ships an
+// older engine than it does, and the next round's "what is left" is answered
+// against a document that is wrong about the present.
+//
+// So the rule is stated over the values rather than over the sentences: every
+// `vX.Y.Z` the DoD contains must be one of exactly two things — the pinned tag,
+// or this app's own version. Anything else is either a stale pin (the defect
+// this rule exists for) or a historical version fact that belongs in the archive
+// and the READMEs, not in the bar. Both are red, and the sentence names the line,
+// the token, and the two values it was compared against.
+//
+// `appVersion` is required rather than defaulted: with no second allowed value,
+// the app's own `v0.1.N` would be reported as a stale pin, and a rule that
+// cannot tell the two apart would be turned off by the first person who hit it.
+export const DOD_VERSION_TOKEN = /\bv(\d+\.\d+\.\d+)\b/g;
+
+export const dodPinViolations = (doc, { pinned = PINNED_UPSTREAM, appVersion = "" } = {}) => {
+  const violations = [];
+  const pinTag = String((pinned && pinned.tag) || "").trim();
+  const own = String(appVersion == null ? "" : appVersion).trim().replace(/^v/, "");
+  if (!/^v\d+\.\d+\.\d+$/.test(pinTag)) {
+    violations.push(
+      `pin 的 tag 是 ${JSON.stringify(pinTag || null)}，读不出 vX.Y.Z：` +
+        "本条按版本号比较，读不出 pin 的版本就没有可比的一方"
+    );
+  }
+  if (!/^\d+\.\d+\.\d+/.test(own)) {
+    violations.push(
+      `调用方没给本程序版本（package.json 的 version，收到 ${JSON.stringify(appVersion == null ? null : appVersion)}）：` +
+        "DoD 里同时写着 pin 的 tag 与本程序自己的版本，只认一个会把另一个判成过期"
+    );
+  }
+  const allowed = new Map();
+  if (pinTag) allowed.set(pinTag, "pin 的 tag");
+  if (own) allowed.set(`v${own}`, "本程序自己的版本");
+
+  String(doc == null ? "" : doc)
+    .split(/\r?\n/)
+    .forEach((line, index) => {
+      for (const hit of line.matchAll(DOD_VERSION_TOKEN)) {
+        const token = hit[0];
+        if (allowed.has(token)) continue;
+        violations.push(
+          `第 ${index + 1} 行：DoD 里写着 ${token}，但 pin 是 ${pinTag || "（读不出）"}、` +
+            `本程序是 ${own ? `v${own}` : "（读不出）"}——` +
+            "过线标准里的版本号只能是这两个之一；上游 pin 前进时这一行没跟着改，" +
+            "读的人就会以为封装的是另一个发布版本（历史版本事实写进 upstream-history.md 与 README，不写进过线标准）"
+        );
+      }
+    });
+
+  return violations;
+};
+
 // ---- what the archive may quote, and what only the sync doc may declare ----
 //
 // `docs/upstream-history.md` quotes upstream commits in prose — whole
