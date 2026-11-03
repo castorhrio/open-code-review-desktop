@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Download, ExternalLink, FileCode2, FolderOpen, Search, Sparkles, TriangleAlert, Wrench, Copy, BookOpenText } from "lucide-react";
+import { Download, ExternalLink, FileCode2, FolderOpen, Search, TriangleAlert, Wrench, Copy, BookOpenText } from "lucide-react";
 import { api, type FileWindow } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { SEVERITY_DOT, SEVERITY_LABEL, SEVERITY_RANK, SEVERITY_TEXT, STATUS, coverageOf, runLimitReached, shortRef, summaryLine, terminalState } from "@/lib/format";
@@ -670,7 +670,6 @@ export function ResultsPanel() {
       {result.project_summary && (
         <div className="shrink-0 border-b border-line bg-surface px-4 py-3">
           <div className="mb-2 flex items-center gap-1.5">
-            <Sparkles className="size-3.5 text-accent" />
             <h3 className="text-strong font-semibold text-ink">这次审查的要点</h3>
             <span className="text-meta text-faint">由 CLI 汇总，不是本程序生成的</span>
           </div>
@@ -887,10 +886,7 @@ export function ResultsPanel() {
                 {current.suggestion_code && <CodeBlock title="建议改为" tone="ok" text={current.suggestion_code} />}
                 {current.thinking && (
                   <details className="mt-3 text-body text-muted">
-                    <summary className="cursor-pointer text-faint hover:text-ink">
-                      <Sparkles className="mr-1 inline size-3" />
-                      模型判断过程
-                    </summary>
+                    <summary className="cursor-pointer text-faint hover:text-ink">模型判断过程</summary>
                     <div className="mt-2 whitespace-pre-wrap">{current.thinking}</div>
                   </details>
                 )}

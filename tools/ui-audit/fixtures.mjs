@@ -466,6 +466,13 @@ const SESSIONS = [
     // mutable refs the user typed". The branch has moved on since (that is the
     // whole point of reading an old session), so the code pane has to read the
     // reviewed commit, not `feat/tenant-rate-limit`.
+    //
+    // Both SHAs are 40 hex characters, because that is what git emits and what
+    // `shortRef` abbreviates. They used to be 41 — one character too long — so
+    // `shortRef`'s `/^[0-9a-f]{40}$/` never matched and every screenshot showed
+    // the whole SHA in the header badge: a shape a real run cannot produce, and
+    // the abbreviated form the app actually renders was never on screen. The
+    // length is the assertion, not a detail.
     run_manifest: {
       schema_version: "ocr.run-manifest/v1",
       run_id: "9f2c41d0",
@@ -475,9 +482,9 @@ const SESSIONS = [
         mode: "range",
         requested_from: "main",
         requested_head: "feat/tenant-rate-limit",
-        resolved_base: "3f2a7c91d4b6e0852a1c9f7e3b5d80146c2ea7f93",
-        resolved_head: "d41c8b7a2e9f6013c5d8a4b6e2f7091c3a5d8e6b4",
-        exact_range: "3f2a7c91d4b6e0852a1c9f7e3b5d80146c2ea7f93..d41c8b7a2e9f6013c5d8a4b6e2f7091c3a5d8e6b4",
+        resolved_base: "3f2a7c91d4b6e0852a1c9f7e3b5d80146c2ea7f9",
+        resolved_head: "d41c8b7a2e9f6013c5d8a4b6e2f7091c3a5d8e6b",
+        exact_range: "3f2a7c91d4b6e0852a1c9f7e3b5d80146c2ea7f9..d41c8b7a2e9f6013c5d8a4b6e2f7091c3a5d8e6b",
       },
     },
   },
@@ -941,9 +948,9 @@ window.api = (() => {
         mode: "range",
         requested_from: "main",
         requested_head: "feat/tenant-rate-limit",
-        resolved_base: "3f2a7c91d4b6e0852a1c9f7e3b5d80146c2ea7f93",
-        resolved_head: "d41c8b7a2e9f6013c5d8a4b6e2f7091c3a5d8e6b4",
-        exact_range: "3f2a7c91d4b6e0852a1c9f7e3b5d80146c2ea7f93..d41c8b7a2e9f6013c5d8a4b6e2f7091c3a5d8e6b4",
+        resolved_base: "3f2a7c91d4b6e0852a1c9f7e3b5d80146c2ea7f9",
+        resolved_head: "d41c8b7a2e9f6013c5d8a4b6e2f7091c3a5d8e6b",
+        exact_range: "3f2a7c91d4b6e0852a1c9f7e3b5d80146c2ea7f9..d41c8b7a2e9f6013c5d8a4b6e2f7091c3a5d8e6b",
       },
       coverage: { failed: [], waived: [] },
     },

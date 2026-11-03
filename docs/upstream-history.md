@@ -36,6 +36,38 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 
 ---
 
+## 上游状态（第 105 轮，2026-11-03）
+第 105 轮复核：**上游没有新内容。**`git ls-remote` 这一轮没有输出（通路没答上来），HEAD 与 tag
+都由 GitHub API 答上：`/commits/main` 仍是 `76ab46a`（与第 101–104 轮同一个 commit），
+`/releases/latest` 与 npm `latest` 同为 `1.13.4`。三条通路答案一致，**pin 不前进、无移植项**，
+对照表 5 行因此不动。
+
+本轮按控制仓简报做三件事，都不动产品行为，主题是**让唯一权威源可验证**：
+
+- **DoD 的勾选状态进断言。** `docs/PRODUCT-DOD.md` 是「下一刀只能从哪来」的唯一来源，而
+  `dodAuthorityViolations` 只断言了头部是 locked / live——哪几条还开着，只能靠人读。现在每条
+  前面有稳定 ID（`DOD-1` … `DOD-6`），`tools/upstream-watch.mjs` 新增 `dodChecklist` /
+  `dodCheckboxViolations`：ID 必须唯一、状态只有 `[ ]` 与 `[x]` 两种、**勾上一条必须写
+  「证据：<仓内路径>」且那个文件真的在仓里**、锁定时那 6 个 ID 一个都不许少。最后一条是这一轮
+  真正想要的那条：编码侧不许自报完成，勾选必须追到仓里的一份记录。反向控制八格，其中一格是
+  「同一个勾，补上存在的证据就转绿」——没有它，这条规则可能只是「任何条目都不许勾」。
+- **中文排版的清单补上兜底。** `typographyTargets` 从两份 README 的 `.md` 指针推导，所以
+  `docs/PRODUCT-DOD.md` 今天在清单里**只因为**某个 README 链了它；哪天首屏重写把那个链接去掉，
+  过线标准就悄悄退出「排版被检查过」的集合，而 run 还是绿的。新增 `EXPLICIT_DOCS`（显式清单）
+  与 `typographyCoverageViolations`：把两份 README 的 `.md` 指针全部抹掉之后，显式清单里的文档
+  仍必须在被检查的清单里。反向控制先钉住前提（抹掉指针后 DoD 确实掉出推导清单），再要求清空
+  显式清单时点名它。
+- **「没验证过什么」从散句变成一节。** `docs/measurements.md` 末尾新增「未验证清单（截至
+  2026-11-03）」：应用内更新、Linux / macOS 打包产物、真显示器与 GPU、单实例锁、卸载路径，
+  每条写「为什么没验」与「下次要验的触发条件」。两份 README 的 Known limitations / 已知限制
+  指向这一节，这一节也指回那边——「不覆盖」与「什么时候补」现在是同一件事的两面。
+
+改动只在 `docs/PRODUCT-DOD.md`（只补 ID 与一句 ID 约定，勾选状态一个没动）、
+`tools/upstream-watch.mjs` 与它的 smoke、`tools/cjk-typography.mjs` 与它的 smoke、
+`docs/measurements.md`、两份 README 的一句指针，以及本文件与归档；评审逻辑、CLI 参数、配置读写
+路径与运行期行为均未变。
+上一轮（第 104 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-104-轮2026-11-03)，归档之后本文件不留第二份。
+
 ## 上游状态（第 104 轮，2026-11-03）
 第 104 轮复核：**上游没有新内容。**`git ls-remote` 退出码 0，`refs/heads/main` 仍是 `76ab46a`
 （与第 101–103 轮同一个 commit）；`git ls-remote --tags` 最高仍是 `v1.13.4`，`/releases/latest`

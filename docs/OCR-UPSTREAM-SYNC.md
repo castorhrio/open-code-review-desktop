@@ -35,7 +35,7 @@ tag v1.13.4
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`76ab46ac20f08a8bd8ac38881a8a826c7cb6495f`（第 105 轮：`git ls-remote` 这一轮没有输出，HEAD 与 tag 都由 GitHub API 答上——`/commits/main` 仍是 `76ab46a`，与第 101–104 轮同一个 commit；`/releases/latest` 与 npm `latest` 同为 `1.13.4`，**HEAD、tag、发布三条通路一致，pin 不前进**；通路：api）**
+**本轮 HEAD 核对：`76ab46ac20f08a8bd8ac38881a8a826c7cb6495f`（第 106 轮：`git ls-remote` 答上来了，`refs/heads/main` 仍是 `76ab46a`，与第 101–105 轮同一个 commit；`refs/tags/v1.13.4` 指向 tag 对象 `1393158`，`/releases/latest` 与 npm `latest` 同为 `1.13.4`，**pin 不前进**；通路：git）**
 
 ### 核对通路账
 
@@ -113,6 +113,7 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 | 103 | 2026-11-03 | api | **上游 tag 前进**：`v1.13.3` → `v1.13.4`（发布 2026-11-02T15:19:48Z，tag commit 就是第 101 轮已经读过的 `76ab46a`；4 个 commit 与安全修复 / Action 稳定性 / `session show --json` 空表改 `[]` / `file_read_diff` 未命中时点名缺的路径同批）；`git ls-remote` 因 TLS 失败（GnuTLS `-110`），HEAD 与 tag 都由 API 答上、npm `latest` 同为 `1.13.4`，**pin 前进**；对照表 5 行在这一次提交里逐行重读（51 个变更文件不含 `resolver.go`、`config_cmd.go`、`llm_cmd.go` / `providers.go`、`failure_class`，两处 Go 源码改动与本仓的两个消费点对上了）；通路账第 101/102 行之间那个把表截成两段的空行删掉，新增 `ledgerTableViolations` 钉住「表内不许有空行」并补反向控制（含一条证明别的账都看不见它）；升 pin 的那一遍真机验证跑在 Linux x64 上（CLI 层 / 真 Electron / UI 三套全绿，`audit:guards` 先红——它没把「没有报告」当环境问题，重试条件与 `e2e-flow` 对齐后转绿），顺带查出英文 README 在让读者下载 12 个 Release 里从未存在过的 macOS / Linux 包，两份 README 与 `使用说明.md` 的发布面、验证面措辞已对齐 | — |
 | 104 | 2026-11-03 | git | `76ab46a` / `v1.13.4` / npm `1.13.4`，三条通路答案一致、无新内容，**pin 不前进、无移植项**；两份 README 首屏第二段去 AI 味道（平台验证矩阵下沉到 Known limitations / 已知限制，那一节本就记着全部事实），`firstScreenViolations` 加第 5 条——第一节里出现架构名、包格式名或「按平台一条」的 bullet 即红，四条反向控制：粘回英文原矩阵、粘回中文原矩阵、把一个能力 bullet 换成平台 bullet（条数仍是 5，红的只能是新那条）、同一段矩阵写进「已知限制」必须仍绿（钉住这条管的是位置不是事实）；本文件人读区 192 → 137 行（逐轮正文归档 −27、散文减重 −28：规则与其边界留下，「这一条是怎么一格一格补上的」交回归档第 82、83、88、89 轮），顺带把「本节表格的 4 行」改成 5 行——对照表一直是 5 行；`tools/electron-guards.mjs` 的沙箱重试判定抽成导出的 `guardsRetryReason` / `guardsFailure`，新增 `tools/electron-guards-smoke.mjs` 作为 `audit:guards-retry` 挂进 `audit:static`（两次都没有报告就是崩溃，退 2 且结论不许再写「环境问题」） | — |
 | 105 | 2026-11-03 | api | `76ab46a` / `v1.13.4` / npm `1.13.4`，三条通路答案一致、无新内容，**pin 不前进、无移植项**；DoD 的勾选状态进断言（`dodChecklist` / `dodCheckboxViolations`：稳定 ID、只有两种状态、勾选必须带仓内证据、锁定的 6 个 ID 一个不许少，八格反向控制含「补上存在的证据就转绿」）、中文排版的清单补显式兜底（`EXPLICIT_DOCS` + `typographyCoverageViolations`，抹掉 README 指针后 DoD 仍须在清单里）、`docs/measurements.md` 新增「未验证清单」一节 | — |
+| 106 | 2026-11-03 | git | `76ab46a` / `v1.13.4` / npm `1.13.4`，三条通路答案一致、无新内容，**pin 不前进、无移植项**；界面中文排版从「手感」变成断言：新增 `tools/ui-cjk-typography.mjs`（真浏览器走结果页 / 长 finding / 阅读页三屏，把可见中文按块取出后跑与文档同源的三条规则，`pre` / `code` 整棵子树排除）与 `tools/ui-cjk-typography-smoke.mjs`（规则同源、三条规则各自点名、接线与反向控制前提），三条规则从 `tools/cjk-typography.mjs` 抽成可复用函数而不是抄一份；反向控制把报告里那句「固定到审查当时的那一版…」的全角逗号改成半角，要求同一趟走查变红并点名那一屏 | — |
 
 ### 对照表（上游前进时要重读的五处）
 
@@ -206,37 +207,59 @@ tool 结果文本**（`Error: diff not found for: …`、`Diffs exist for: …`�
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。搬完这里只留一句
    指针——「本文件只留当前一轮」不是约定而是断言（`previousRoundPointerViolations`）。
 
-## 当前状态（第 105 轮，2026-11-03）
-第 105 轮复核：**上游没有新内容。**`git ls-remote` 这一轮没有输出（通路没答上来），HEAD 与 tag
-都由 GitHub API 答上：`/commits/main` 仍是 `76ab46a`（与第 101–104 轮同一个 commit），
-`/releases/latest` 与 npm `latest` 同为 `1.13.4`。三条通路答案一致，**pin 不前进、无移植项**，
-对照表 5 行因此不动。
+## 当前状态（第 106 轮，2026-11-03）
+第 106 轮复核：**上游没有新内容。**`git ls-remote` 这一轮答上来了：`refs/heads/main` 仍是 `76ab46a`
+（与第 101–105 轮同一个 commit），`refs/tags/v1.13.4` 指向 tag 对象 `1393158`，`/releases/latest` 与
+npm `latest` 同为 `1.13.4`。三条通路答案一致，**pin 不前进、无移植项**，对照表 5 行因此不动。
 
-本轮按控制仓简报做三件事，都不动产品行为，主题是**让唯一权威源可验证**：
+本轮按控制仓简报做 P0-1：**界面里的中文排版从「手感」变成断言。**
 
-- **DoD 的勾选状态进断言。** `docs/PRODUCT-DOD.md` 是「下一刀只能从哪来」的唯一来源，而
-  `dodAuthorityViolations` 只断言了头部是 locked / live——哪几条还开着，只能靠人读。现在每条
-  前面有稳定 ID（`DOD-1` … `DOD-6`），`tools/upstream-watch.mjs` 新增 `dodChecklist` /
-  `dodCheckboxViolations`：ID 必须唯一、状态只有 `[ ]` 与 `[x]` 两种、**勾上一条必须写
-  「证据：<仓内路径>」且那个文件真的在仓里**、锁定时那 6 个 ID 一个都不许少。最后一条是这一轮
-  真正想要的那条：编码侧不许自报完成，勾选必须追到仓里的一份记录。反向控制八格，其中一格是
-  「同一个勾，补上存在的证据就转绿」——没有它，这条规则可能只是「任何条目都不许勾」。
-- **中文排版的清单补上兜底。** `typographyTargets` 从两份 README 的 `.md` 指针推导，所以
-  `docs/PRODUCT-DOD.md` 今天在清单里**只因为**某个 README 链了它；哪天首屏重写把那个链接去掉，
-  过线标准就悄悄退出「排版被检查过」的集合，而 run 还是绿的。新增 `EXPLICIT_DOCS`（显式清单）
-  与 `typographyCoverageViolations`：把两份 README 的 `.md` 指针全部抹掉之后，显式清单里的文档
-  仍必须在被检查的清单里。反向控制先钉住前提（抹掉指针后 DoD 确实掉出推导清单），再要求清空
-  显式清单时点名它。
-- **「没验证过什么」从散句变成一节。** `docs/measurements.md` 末尾新增「未验证清单（截至
-  2026-11-03）」：应用内更新、Linux / macOS 打包产物、真显示器与 GPU、单实例锁、卸载路径，
-  每条写「为什么没验」与「下次要验的触发条件」。两份 README 的 Known limitations / 已知限制
-  指向这一节，这一节也指回那边——「不覆盖」与「什么时候补」现在是同一件事的两面。
+`tools/cjk-typography.mjs` 一直在查文档，而**屏幕是陌生人读的另一半，那一半没有任何检查看过**：
+模型返回的 finding 里带一个半角逗号、某个标签写成 `用ocr跑`、某一行以「，」起头——这三种缺陷
+`audit:ui` 全都看不见（布局仍然放得下、没有溢出、没有占位符泄漏），`audit:typography` 也看不见
+（它从不打开应用）。所以三条规则从那份文件里**抽成可复用函数**（`lineStartViolation` /
+`halfWidthViolations` / `bareAdjacencyViolations`），文档侧与界面侧共用同一份：在一处修好的规则
+在两侧都修好，两份拷贝也就没有机会漂移。
 
-改动只在 `docs/PRODUCT-DOD.md`（只补 ID 与一句 ID 约定，勾选状态一个没动）、
-`tools/upstream-watch.mjs` 与它的 smoke、`tools/cjk-typography.mjs` 与它的 smoke、
-`docs/measurements.md`、两份 README 的一句指针，以及本文件与归档；评审逻辑、CLI 参数、配置读写
-路径与运行期行为均未变。
-上一轮（第 104 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-104-轮2026-11-03)，归档之后本文件不留第二份。
+- **`tools/ui-cjk-typography.mjs`**（`npm run audit:typography-ui`）用真浏览器走三屏——结果页选中
+  一条 finding、长 finding 那一屏（模型写得最多的地方）、阅读/报告页——把每屏的可见文本按**块**取出
+  （块 = 子元素全是行内级的最外层元素，所以 `<p>foo <strong>bar</strong></p>` 是一块而不是三块，
+  行首禁则问的是句子而不是碰巧以逗号开头的碎片），再跑同一套规则。`pre` / `code` / `textarea` /
+  `input` 整棵子树排除：代码样例不是散文，diff 里的 `foo(x,y)中` 不是排版缺陷——这条排除正是
+  「规则」与「噪音」的分界，与文档侧对代码段的排除是同一条。
+- **反向控制**：把报告里那句「固定到审查当时的那一版，之后分支再前进也不影响这份报告」的全角逗号
+  改成半角，用同一份 bundle 的副本再走一遍三屏，要求本检查**变红并点名那一屏**。没有它，绿只说明
+  「规则满足了」或「规则根本没跑」，而这两件事从外面看一模一样。
+- **`tools/ui-cjk-typography-smoke.mjs`**（`npm run audit:typography-ui-rules`）是不需要浏览器的
+  那一半：逐行断言界面侧与文档侧**报出同样的规则与同样的句子**（有人把规则抄进界面文件而不是 import，
+  第一次改动就会红）、三条规则各自在渲染文本上点名到「哪一屏 / 哪个元素 / 第几行 / 哪段文字」、
+  干净散文必须绿、以及反向控制那句原文仍在 `ReportView.tsx` 里（句子被改写时先在这里红，而不是让
+  浏览器那一半退 2）。
+
+**接线与简报的一处偏差，写在这里而不是悄悄改**：简报说把 `audit:typography-ui` 挂进 `audit:static`，
+但这一半需要 `out/` 与浏览器，而 `audit:static` 的契约是「不构建、不开浏览器」。所以浏览器那一半挂在
+`audit:app`（`npm run audit` 只构建一次，交给所有 harness），不需要浏览器的那一半挂在 `audit:static`。
+
+**没有检查的，写清楚**：导出的自包含 HTML 报告是**上游 CLI**（`ocr session export`）写的，不是本程序
+渲染的——它的排版归上游，声称在这里检查它只会是一盏接不到线的绿灯。本程序拥有的是导出所依据的那个
+阅读页，那一页在检查范围内。另外行首禁则问的是**块首**：`innerText` 只在块边界与 `<br>` 处断行，
+浏览器按栏宽折出来的行它看不见，所以「逗号被折到下一行」这一类不在覆盖内——这是真实的边界，写在
+工具头部而不是糊过去。
+
+**P0-2 的 critique 结论是「装饰多于信息」，据此做了一个具名 pass：`quieter`。** 三处 `Sparkles`
+（✨ 是生成物最直白的签名）从结果页的要点标题、报告页的要点卡片与「模型判断过程」的折叠标题上摘掉——
+它们不指向任何可点的东西，只是给每块文字配一个图标。同一趟 critique 撞出更硬的一条：结果页 header 的
+`固定在 <sha>` 徽章在每一张截图里都是一堵 41 字符的十六进制墙，因为 `tools/ui-audit/fixtures.mjs` 的
+SHA 是 **41** 位（真实 git 是 40 位），`shortRef` 的 `/^[0-9a-f]{40}$/` 从没匹配上——**审计一直在验一个
+真实运行产生不出来的形状，而应用真正渲染的 7 位短形从没上过屏**。夹具改成 40 位，`expectPinnedCommit`
+新增一条断言：徽章可见文本必须**恰好**是 `固定在 d41c8b7`（完整 SHA 仍留在 title 里）。`audit:ui` 112 条
+全绿，`audit:typography-ui` 三屏 202 块全绿。
+
+本轮没有动任何交互语义、IPC 与评审逻辑；改动只在 `tools/cjk-typography.mjs`（抽函数，行为不变，
+`audit:typography` 与它的 smoke 全绿）、两个新 `tools/` 文件、`package.json` 的两条脚本与两处套件接线、
+`src/components/ReportView.tsx` 与 `ResultsPanel.tsx` 的三处图标、`tools/ui-audit/fixtures.mjs` 与
+`audit.mjs` 的 SHA 形状，以及本文件与归档。
+上一轮（第 105 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-105-轮2026-11-03)，归档之后本文件不留第二份。
 
 ## 上游真变了怎么办（命令驱动，而不是「记得看一眼」）
 ```bash

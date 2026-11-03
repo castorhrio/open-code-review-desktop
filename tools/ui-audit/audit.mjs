@@ -596,7 +596,7 @@ const expectCodeReadAtCommit = async (page) => {
   if (!/来自 d41c8b7/.test(text))
     out.push("the code pane is not read from the reviewed commit, so it is showing the working tree or a moved branch");
   const title = await page.locator('main span[title^="来自 d41c8b7"]').first().getAttribute("title").catch(() => null);
-  if (!title || !title.includes("d41c8b7a2e9f6013c5d8a4b6e2f7091c3a5d8e6b4"))
+  if (!title || !title.includes("d41c8b7a2e9f6013c5d8a4b6e2f7091c3a5d8e6b"))
     out.push(`the code pane's ref is not the reviewed commit in full (title: ${title})`);
   return out;
 };
@@ -605,17 +605,32 @@ const expectCodeReadAtCommit = async (page) => {
  * The results header has to say which version was reviewed. The scope line names
  * the refs the run was asked for, and a ref is a name that moves — a reader who
  * forwards the report needs to know which commit the findings are about.
+ *
+ * Two halves, and the second one is the one that was silently missing: the badge
+ * shows the *abbreviated* commit and the tooltip keeps the whole SHA. The fixture
+ * used to carry a 41-character SHA, so `shortRef` never matched and the badge
+ * rendered all 41 characters — the assertion below passed on a shape a real run
+ * cannot produce, and the abbreviated form the app actually renders was never on
+ * screen. So the visible text is now asserted to be the short form, not merely to
+ * contain the prefix.
  */
 const expectPinnedCommit = async (page) => {
   const text = await page.locator("main").innerText();
   const out = [];
   if (!/固定在 d41c8b7/.test(text)) out.push("the results header does not say which commit was reviewed");
+  const badge = await page
+    .locator('main span[title^="这次审查读的是这一版代码"]')
+    .first()
+    .innerText()
+    .catch(() => null);
+  if (badge !== "固定在 d41c8b7")
+    out.push(`the pinned commit badge is not the abbreviated SHA a real run shows (badge: ${JSON.stringify(badge)})`);
   const title = await page
     .locator('main span[title^="这次审查读的是这一版代码"]')
     .first()
     .getAttribute("title")
     .catch(() => null);
-  if (!title || !title.includes("d41c8b7a2e9f6013c5d8a4b6e2f7091c3a5d8e6b4"))
+  if (!title || !title.includes("d41c8b7a2e9f6013c5d8a4b6e2f7091c3a5d8e6b"))
     out.push(`the pinned commit badge does not keep the full SHA reachable (title: ${title})`);
   return out;
 };
@@ -2152,7 +2167,7 @@ await shoot(page, "86-report-pinned-commit", {
     const text = await page.locator("main").innerText();
     const out = [];
     if (!/commit d41c8b7/.test(text)) out.push("the report does not say which commit it is about");
-    const title = await page.locator('main span[title="d41c8b7a2e9f6013c5d8a4b6e2f7091c3a5d8e6b4"]').first().getAttribute("title").catch(() => null);
+    const title = await page.locator('main span[title="d41c8b7a2e9f6013c5d8a4b6e2f7091c3a5d8e6b"]').first().getAttribute("title").catch(() => null);
     if (!title) out.push("the report's commit is not kept in full");
     return out;
   },

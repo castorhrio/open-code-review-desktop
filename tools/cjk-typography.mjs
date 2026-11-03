@@ -98,6 +98,58 @@ const firstProseCharacter = (line, visible) => {
   return Array.from(visible.replace(LINE_PREFIX, ""))[0] || "";
 };
 
+// The three rules as separate questions, so a second caller can ask them of
+// something that is not a Markdown document — the rendered UI, where the same
+// three defects are just as visible and just as invisible to every other check.
+// `typographyViolations` below is the Markdown-shaped caller; `tools/ui-cjk-typography.mjs`
+// is the rendered-text one. The rules live here once, so a rule fixed here is
+// fixed in both places, and a rule that drifts would have to drift in one file.
+//
+// Each returns `null` / `[]` when the line is fine, and a sentence naming the
+// offending pair when it is not — the sentence is what a reader acts on, so it
+// is written once, here.
+
+/** 1. 行首禁则 — the first character a reader sees at the start of a line. */
+export const lineStartViolation = (line, visible = visibleText(line)) => {
+  // Only asked of a line that is Chinese at all, and never of a line whose first
+  // visible character is a code span: the punctuation after `[UPSTREAM-DEBT]` is
+  // not at the start of anything a reader sees as prose, it is a continuation of
+  // the same sentence as the code.
+  if (!HAS_HAN.test(visible)) return null;
+  const first = firstProseCharacter(line, visible);
+  if (!first || !LINE_START_FORBIDDEN.includes(first)) return null;
+  return `这一行以「${first}」开头：中文行不能以收尾标点起头，把上一行的断行挪开`;
+};
+
+/**
+ * 2. 半角标点后接中文 — immediately, which is what "紧跟" means. Allowing a space
+ * here would flag every ordered list (`1. 顶部…`) in the repository, and a rule
+ * with a false positive on every numbered step is a rule nobody keeps green.
+ */
+export const halfWidthViolations = (visible) => {
+  const out = [];
+  const halfWidth = new RegExp(`([,.])(?=[${HAN}])`, "g");
+  let hit = halfWidth.exec(visible);
+  while (hit !== null) {
+    const following = visible.slice(hit.index + hit[0].length)[0] || "";
+    out.push(`「${hit[1]}${following}」是半角标点接中文，中文句子里要用全角「，」「。」`);
+    hit = halfWidth.exec(visible);
+  }
+  return out;
+};
+
+/** 3. 中英裸拼 — a Han character touching a Latin letter with nothing between. */
+export const bareAdjacencyViolations = (visible) => {
+  const out = [];
+  const adjacent = new RegExp(`[${HAN}][A-Za-z]|[A-Za-z][${HAN}]`, "g");
+  let hit = adjacent.exec(visible);
+  while (hit !== null) {
+    out.push(`「${hit[0]}」中英之间没有分隔：中文与西文之间留一个空格`);
+    hit = adjacent.exec(visible);
+  }
+  return out;
+};
+
 // The three rules, one document at a time. Returns `[{ file, line, rule, detail }]`
 // — objects rather than sentences, because the smoke test asks which rule fired
 // and the CLI turns them into `file:line` text.
@@ -122,51 +174,12 @@ export const typographyViolations = (file, text) => {
       if (!visible.trim()) return;
       const at = index + 1;
 
-      // 1. 行首禁则 — only asked of a line that is Chinese at all, and never of
-      // a line whose first visible character is a code span: the punctuation
-      // after `[UPSTREAM-DEBT]` is not at the start of anything a reader sees as
-      // prose, it is a continuation of the same sentence as the code.
-      if (HAS_HAN.test(visible)) {
-        const first = firstProseCharacter(line, visible);
-        if (first && LINE_START_FORBIDDEN.includes(first)) {
-          violations.push({
-            file,
-            line: at,
-            rule: "行首禁则",
-            detail: `这一行以「${first}」开头：中文行不能以收尾标点起头，把上一行的断行挪开`,
-          });
-        }
-      }
-
-      // 2. 半角标点后接中文 — immediately, which is what "紧跟" means. Allowing a
-      // space here would flag every ordered list (`1. 顶部…`) in the repository,
-      // and a rule with a false positive on every numbered step is a rule nobody
-      // keeps green.
-      const halfWidth = new RegExp(`([,.])(?=[${HAN}])`, "g");
-      let hit = halfWidth.exec(visible);
-      while (hit !== null) {
-        const following = visible.slice(hit.index + hit[0].length)[0] || "";
-        violations.push({
-          file,
-          line: at,
-          rule: "半角标点后接中文",
-          detail: `「${hit[1]}${following}」是半角标点接中文，中文句子里要用全角「，」「。」`,
-        });
-        hit = halfWidth.exec(visible);
-      }
-
-      // 3. 中英裸拼.
-      const adjacent = new RegExp(`[${HAN}][A-Za-z]|[A-Za-z][${HAN}]`, "g");
-      hit = adjacent.exec(visible);
-      while (hit !== null) {
-        violations.push({
-          file,
-          line: at,
-          rule: "中英裸拼",
-          detail: `「${hit[0]}」中英之间没有分隔：中文与西文之间留一个空格`,
-        });
-        hit = adjacent.exec(visible);
-      }
+      const start = lineStartViolation(line, visible);
+      if (start) violations.push({ file, line: at, rule: "行首禁则", detail: start });
+      for (const detail of halfWidthViolations(visible))
+        violations.push({ file, line: at, rule: "半角标点后接中文", detail });
+      for (const detail of bareAdjacencyViolations(visible))
+        violations.push({ file, line: at, rule: "中英裸拼", detail });
     });
 
   return violations;

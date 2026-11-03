@@ -1,4 +1,4 @@
-import { ArrowLeft, FileCode2, Sparkles } from "lucide-react";
+import { ArrowLeft, FileCode2 } from "lucide-react";
 import { SEVERITY_RANK, STATUS, coverageOf, runLimitReached, shortRef, terminalState } from "@/lib/format";
 import type { Finding } from "@/lib/types";
 import { copyText } from "@/lib/clipboard";
@@ -139,7 +139,6 @@ export function ReportView() {
           {result.project_summary && (
             <Card
               padded={false}
-              icon={<Sparkles className="size-3.5 text-accent" />}
               title="这次审查的要点"
               hint="由 CLI 汇总，不是本程序生成的"
             >
