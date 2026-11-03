@@ -35,7 +35,7 @@ tag v1.13.5
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`abb7abcd5c5196fa0278dc87db85780fa269562f`（第 116 轮：`git ls-remote` 这一趟通了，HEAD 与 tag 一次问全——`refs/heads/main` 仍是 `abb7abc`，与第 111–114 轮核对到的是同一个 commit，**HEAD 本轮没有前进**；`refs/tags/v1.13.5` 指向的也是 `abb7abc`，npm `latest` 仍是 `1.13.5`（`gitHead` = `abb7abc`）——三处口径一致，**pin 不动**；通路：git）**
+**本轮 HEAD 核对：`abb7abcd5c5196fa0278dc87db85780fa269562f`（第 117 轮：`git ls-remote` 这一趟超时（124），HEAD 与 tag 都由 GitHub API 答上——`/commits/main` 仍是 `abb7abc`，`/tags` 里 `v1.13.5` 指向的也是 `abb7abc`，`/releases/latest` 仍是 `v1.13.5`；npm `latest` 同为 `1.13.5`——三处口径一致，**pin 不动**；通路：api）**
 
 ### 核对通路账
 
@@ -124,6 +124,7 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 | 114 | 2026-11-04 | git | `abb7abc` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**；参数面从手感变成断言：新增 `tools/cli-surface.mjs`（`npm run audit:surface`），读被 pin 的那一版二进制的 `--help`（12 条命令）与本仓真的交给 `spawn` 的 18 条命令行，双向对照 57 行要拼 / 10 行不收 / 15 行有理由地不用，版本行必须同时带 pin 的 tag 与 commit 前缀；自检 `tools/cli-surface-smoke.mjs` 46 条（其中 4 条看仓库而不是夹具，含「`--preview` 与 `--resume` 不在同一条命令行上」这条前提），挂进 `audit:static`（24 → 25 项） | — |
 | 115 | 2026-11-04 | none | 本文件没有核对记录（该轮未更新状态与账） | `[UPSTREAM-DEBT]` HEAD |
 | 116 | 2026-11-04 | git | `abb7abc` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**（这一批就是第 113 轮重读过的那一批，五个对照点一个都没被碰到）；第 115 轮的欠账由本轮的 `git` 通路清掉，本轮产品侧只修了上一轮留下的账断链（第 115 轮提交了、通路账停在 114，`ledgerRoundViolations` 开局即红） | — |
+| 117 | 2026-11-04 | api | `abb7abc` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**（`git ls-remote` 超时 124，HEAD / tag / release 由 GitHub API 答上）；本轮产品改动是把「装完的那份字节」第一次交给脚本：新增 `tools/e2e-packaged.mjs`（`npm run audit:packaged`）——用一次性 HOME 启动 `release/<platform>-unpacked` 里的可执行文件，经 DevTools 协议读界面，断言渲染层来自 `resources/app/out`、应用自报「安装版」且安装目录就是打包树、内置 CLI 在打包树里且自报 pin 的 tag 与 commit 前缀、配置落在一次性档案里、开发者真实配置摘要不变；反向控制是同一套断言指向源码树（必须变红并点名安装目录与 CLI 位置）；规则抽成四个纯函数由 `tools/e2e-packaged-smoke.mjs`（`audit:packaged-rules`，挂进 `audit:static`）用 24 条检查钉住 | — |
 
 「最近一次对照」只写**那一项最近被人工重新核对**的轮次。该列没有列出本轮，表示本轮
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看

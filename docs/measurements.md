@@ -33,6 +33,7 @@ harness 会自己说明「sandbox relaxed」。这一行**不覆盖**：Linux / 
 `tools/ui-audit/audit.mjs` 里的检查，改坏了会红；「渲染一次真实扫描的载荷」写成了
 读夹具的检查。README 承诺的是这一层，不是上表里的某一格。
 | 2026-11-04 | 第 114 轮：参数面（DOD-2 的实证面）从手感变成门禁——`tools/cli-surface.mjs` 读被 pin 的那一版二进制的 `--help`（12 条命令）与本仓真的交给 `spawn` 的 18 条命令行，双向对照 | `npm run audit:surface` 全绿：自检 46 条（含 4 条看仓库而不是夹具：`llm test` 的 needle 真在 `config-handler.js` 里、两个消费模块的 flag 字面量与表双向相等、同步文档仍有两条 run 命令的 `--help` 对照行、`audit:surface` 真挂在 `audit:static` 里）+ 门禁「57 行要拼 × help 逐条一致 / 10 行不收 / 15 行有理由地不用」；二进制自报 `v1.13.5 (abb7abcd)`。这一遍第一次跑抓到的是自制夹具自己的两处错：合成命令行把 `--preview` 与 `--resume` 拼在同一条上（46 条里 12 条因此假红），以及「值长得像 flag」那格的期望写成了两个 flag（`--rule --repo /r` 在 CLI 眼里只有一个 flag）；改的是期望与前提，不是规则。`npm run audit:static` 25 项全绿（2362 条 ok 行，exit 0），新增的那一项使 `audit:static` 从本轮起需要本机已装 CLI | `node tools/cli-surface-smoke.mjs`；`node tools/cli-surface.mjs`；`npm run audit:static`（Linux x64，二进制 `v1.13.5 (abb7abcd)`） |
+| 2026-11-04 | 第 117 轮：**打包产物第一次被脚本启动**——`release/linux-unpacked` 里的可执行文件（不是源码树里的 Electron）在一次性 HOME 下起来，经 DevTools 协议读界面 | `npm run audit:packaged` 11 条全绿：渲染层来自 `resources/app/out`、首屏引导卡三步在、应用自报「安装版」且 `installDir` 就是打包树、设置页徽章写「安装版 · linux」、内置 CLI 在打包树里（`binarySource=package`）并自报 `v1.13.5 (abb7abcd) linux/amd64`、配置落在一次性档案里、开发者真实 `~/.opencodereview/config.json` 摘要不变；反向控制把同一套断言指向源码树，必须变红并点名安装目录与 CLI 位置（实测点名 2 条）；规则本身 24 条由 `audit:packaged-rules` 钉住（含「`audit:packaged` 不许进 `audit:app`」）| `PLAYWRIGHT_MODULE=<带 playwright 的 node_modules> xvfb-run -a node tools/e2e-packaged.mjs`；`node tools/e2e-packaged-smoke.mjs`，Electron 33.4.11 |
 
 ## 未验证清单（截至 2026-11-04）
 
@@ -45,7 +46,7 @@ harness 会自己说明「sandbox relaxed」。这一行**不覆盖**：Linux / 
 | 应用内更新（NSIS 安装版） | 真机 | 更新器要走完「已安装的旧版本 → 下载 → 校验 → 重启」四步，这台机器上只有开发实例；装一次再升一次会覆盖用户数据目录（`update-service.js`） | 下一次发版前，在 Windows x64 上装 `v0.1.13` 再升到新版本，记下四步各自的结果 |
 | Linux / macOS 打包产物 | 真机 | 只跑过源码级门禁；`npm run dist:linux` 没跑过，macOS 一次都没构建（`tools/release.mjs`） | 第一次真的要发布这两个平台时；在那之前 README 的发布面只写 Windows |
 | 真显示器与 GPU | 真机 | 这台机器没有显示器，UI 三条都在 Xvfb 下的无头 Chromium 里跑（`tools/ui-audit/audit.mjs`） | 有人在一台带显示器的机器上打开安装版，看一遍首屏、结果页与 1.25 / 1.5 缩放 |
-| 安装版之后的首启链路 | 真机 | 首启 → 引导 → 配 provider → 预览这条链路从第 112 轮起有 harness 了（`tools/e2e-first-run.cjs`），但它跑的是源码树里的 Electron 加真 CLI；装完 `*-setup.exe` 之后的第一屏——图标起的那份、内置二进制可达的那份——仍然只有人眼看过 | 在 Windows x64 上装一次 `v0.1.13` 或更新的安装包，把首启那一屏的结果记下来；这一趟同时也是 DOD-5 缺的那半边 |
+| 安装版之后的首启链路 | 真机 | 第 117 轮起「装完的那份字节」有脚本了：`tools/e2e-packaged.mjs` 启动 `release/linux-unpacked` 里的可执行文件并断言首屏、安装形态与内置二进制（Linux x64 上 11 条全绿）。仍缺的是 **Windows 的 `*-setup.exe` 包装层**——NSIS 安装、快捷方式、SmartScreen、卸载器，以及装完之后图标起的那一份；这台机器是 Linux，跑不了那一层 | 在 Windows x64 上装一次 `v0.1.13` 或更新的安装包，把首启那一屏的结果记下来；这一趟同时也是 DOD-5 缺的那半边 |
 | 发布资产里带的是哪一版 `ocr` | 真机 | 最后一个发布提交是 2026-10-14 的 `chore(release): 0.1.13`，那一份 `package.json` 里的 CLI 依赖还是 `^1.13.0`；README 与 `docs/PRODUCT-DOD.md` 的版本行说的是**源码树对照的 pin**，不是下载得到的那份字节里装的版本。要知道安装版自带的二进制到底是哪一版，得装一次并读应用自己的版本探测（`app-info.js` 问的就是 `ocr --version`） | 下一次在 Windows x64 上装发布资产时（与「安装版之后的首启链路」同一趟），把探测到的版本记回这一行；发新版时把 README 的版本行与资产对齐 |
 | 单实例锁 | 真机 | 开发实例与安装版共用同一份用户数据，验它要两个进程抢同一个目录，会打断正在跑的审查（`main.js`） | 装完安装版之后双击两次图标，确认第二个窗口静默退出而不是起两份 |
 | 卸载路径 | 真机 | 卸载会删用户数据目录，而这台机器上的会话与配置是唯一一份（`uninstall-handler.js`） | 在一台可以丢数据的机器上装一次、卸一次，确认 `ocr` 配置与 Key 的去留与 README 说的一致 |
