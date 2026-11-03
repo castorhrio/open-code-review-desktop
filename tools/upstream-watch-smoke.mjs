@@ -55,6 +55,17 @@ import {
   dodEvidenceCandidates,
   dodEvidenceCandidateViolations,
   dodEvidenceBodyViolations,
+  auditScriptClosure,
+  dodHarnessReachViolations,
+  DOD_HARNESS_PATH,
+  dodReasons,
+  dodReasonViolations,
+  DOD_REASON_MARK,
+  unverifiedTable,
+  unverifiedRowViolations,
+  UNVERIFIED_OWNERS,
+  UNVERIFIED_COLUMNS,
+  UNVERIFIED_UPSTREAM_DOC,
   DOD_EVIDENCE_SHAPES,
   dodEvidenceTarget,
   DOD_CANDIDATE_MARK,
@@ -3823,6 +3834,314 @@ if (!flags.selftest && !flags.noRespawn) {
       noAppVersion[0].includes("package.json 的 version") &&
       noAppVersion.slice(1).every((v) => v.includes(`v${pkg.version}`)),
     noAppVersion.join("；") || "no violation"
+  );
+}
+
+/* ---- a candidate that is a harness has to be a harness something runs ----
+ * The candidate rules settle "the pointer resolves" and "the record says the
+ * thing". Neither settles "does anything run it": a file under `tools/` can
+ * exist, contain every word its shape asks for, and still be dead code. The
+ * closure is computed from `package.json` (audit* scripts → `npm run` chains →
+ * `node <file>` → relative imports and `tools/...` literals), so the answer is
+ * derived rather than listed.
+ *
+ * The controls below are the ways this rule can be wrong: it can pass by having
+ * no harness candidate at all, and it can stay green when the script line that
+ * runs the candidate is deleted.
+ */
+{
+  const doc = fs.readFileSync(path.join(ROOT, PRODUCT_DOD_DOC), "utf8");
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
+  const realRead = (target) => {
+    try {
+      return fs.readFileSync(path.join(ROOT, target), "utf8");
+    } catch {
+      return null;
+    }
+  };
+  const closure = auditScriptClosure(pkg, realRead);
+  const candidates = dodEvidenceCandidates(doc);
+  const harnesses = candidates.filter(
+    (candidate) => candidate.path !== null && DOD_HARNESS_PATH.test(candidate.path)
+  );
+
+  check(
+    "every DoD candidate that is a harness is inside the audit* dependency closure",
+    dodHarnessReachViolations(doc, { pkg, read: realRead }).length === 0,
+    dodHarnessReachViolations(doc, { pkg, read: realRead }).join("；") || "no violation"
+  );
+  // The premise, stated separately: a closure that resolved nothing would make
+  // the rule above green for the wrong reason, and "nothing resolved" looks
+  // exactly like "everything is covered".
+  check(
+    "...and the closure really resolved: audit scripts were walked, files were reached, and at least one candidate is a harness",
+    closure.scripts.length >= 10 &&
+      closure.files.size >= 20 &&
+      closure.files.has("tools/upstream-watch-smoke.mjs") &&
+      harnesses.length >= 1,
+    JSON.stringify({
+      scripts: closure.scripts.length,
+      files: closure.files.size,
+      harnesses: harnesses.map((candidate) => candidate.path),
+    })
+  );
+
+  // The defect the rule exists for: the harness is there, the script line that
+  // runs it is not. A package.json whose only audit script runs one harness
+  // leaves every other candidate unreachable — the smallest version of "a round
+  // added a check and forgot the script". The control is two-sided on purpose:
+  // the harness nothing runs has to be named, and the one harness the script
+  // *does* run has to be left alone. A rule that named everything would pass the
+  // first half and still be useless.
+  const oneScript = { scripts: { "audit:only": "node tools/secret-scan.mjs" } };
+  const unreached = dodHarnessReachViolations(doc, { pkg: oneScript, read: realRead });
+  check(
+    "...and a package.json that runs only one of the candidate harnesses goes red on the other five, naming item and path, while the one it does run is not reported",
+    unreached.length === harnesses.length - 1 &&
+      unreached.every((violation) => violation.includes("没有任何")) &&
+      unreached.some((violation) => violation.includes("tools/release.mjs")) &&
+      unreached.some((violation) => violation.includes("tools/e2e-flow.mjs")) &&
+      !unreached.some((violation) => violation.includes("tools/secret-scan.mjs")),
+    unreached.join("；") || "no violation"
+  );
+
+  // A repository with no `audit*` scripts at all resolves nothing, so the rule
+  // must say so instead of reporting "no unreachable harnesses".
+  const noAudit = { ...pkg, scripts: { build: "vite build" } };
+  const emptyClosure = dodHarnessReachViolations(doc, { pkg: noAudit, read: realRead });
+  check(
+    "...and a package.json with no audit* scripts goes red rather than passing with an empty closure",
+    emptyClosure.length === harnesses.length &&
+      emptyClosure.every((violation) => violation.includes("依赖闭包 0 个文件")),
+    emptyClosure.join("；") || "no violation"
+  );
+}
+
+/* ---- an unchecked item has to say why it is still unchecked ----
+ * Six items sat unticked for many rounds with a candidate each and the audit was
+ * green the whole time, because "no tick" was a state nothing asked about. The
+ * reason line is the answer to "what would have to happen", and it has to be
+ * anchored to a record rather than being a mood.
+ *
+ * The controls are the five ways this rule can be wrong: it can pass by reading
+ * no reason at all, it can accept a placeholder, it can accept a reason that
+ * points nowhere, it can stay green when a ticked item keeps its stale reason,
+ * and it can ignore a reason that belongs to no item.
+ */
+{
+  const doc = fs.readFileSync(path.join(ROOT, PRODUCT_DOD_DOC), "utf8");
+  const exists = (target) => fs.existsSync(path.join(ROOT, target));
+  const lines = doc.split(/\r?\n/);
+  const items = dodChecklist(doc);
+  const reasons = dodReasons(doc);
+
+  check(
+    "every unchecked DoD item says why it is still unchecked, and the reason points at a record in this repository",
+    dodReasonViolations(doc, exists).length === 0,
+    dodReasonViolations(doc, exists).join("；") || "no violation"
+  );
+  // The premise: one reason per unchecked item, and the rule is reading them.
+  check(
+    "...and the rule is reading something: one reason per unchecked item, none for a ticked one",
+    reasons.length === items.filter((item) => !item.checked).length &&
+      items.every((item) => item.checked || reasons.some((reason) => reason.id === item.id)),
+    JSON.stringify({ items: items.length, reasons: reasons.length })
+  );
+
+  // The defect the rule exists for: the item is open and nobody has said why.
+  const first = items[0];
+  const firstReason = reasons.find((reason) => reason.id === first.id);
+  const withoutReason = lines
+    .filter((line, index) => index + 1 !== firstReason.line)
+    .join("\n");
+  const missingReason = dodReasonViolations(withoutReason, exists);
+  check(
+    "...and an item whose reason line was deleted goes red, naming the item",
+    missingReason.length === 1 &&
+      missingReason[0].includes(first.id) &&
+      missingReason[0].includes("没有写"),
+    missingReason.join("；") || "no violation"
+  );
+
+  // A placeholder is the shape of an answer, not an answer.
+  const placeholder = lines
+    .map((line, index) =>
+      index + 1 === firstReason.line
+        ? "  未勾原因：待定，等 `docs/measurements.md` 里那份记录出现之后再勾这一条。"
+        : line
+    )
+    .join("\n");
+  const placeholderViolations = dodReasonViolations(placeholder, exists);
+  check(
+    "...and a reason that says 待定 goes red, naming the placeholder",
+    placeholderViolations.length === 1 &&
+      placeholderViolations[0].includes("待定") &&
+      placeholderViolations[0].includes(first.id),
+    placeholderViolations.join("；") || "no violation"
+  );
+
+  // A reason that points at a file nobody can open is prose.
+  const dangling = lines
+    .map((line, index) =>
+      index + 1 === firstReason.line
+        ? "  未勾原因：等 `docs/not-a-real-record.md` 里那份记录出现之后再勾这一条。"
+        : line
+    )
+    .join("\n");
+  const danglingViolations = dodReasonViolations(dangling, exists);
+  check(
+    "...and a reason pointing at a file that is not there goes red, naming the path",
+    danglingViolations.length === 1 &&
+      danglingViolations[0].includes("docs/not-a-real-record.md") &&
+      danglingViolations[0].includes("仓里没有"),
+    danglingViolations.join("；") || "no violation"
+  );
+
+  // The other direction: a tick makes the reason false, so keeping it is red.
+  const ticked = lines
+    .map((line, index) =>
+      index + 1 === first.line
+        ? line.replace("- [ ]", "- [x]").replace(/\s*$/, " 证据：README.zh-CN.md")
+        : line
+    )
+    .join("\n");
+  const tickedViolations = dodReasonViolations(ticked, exists);
+  check(
+    "...and a ticked item that keeps its 未勾原因 goes red as a contradiction",
+    tickedViolations.length === 1 &&
+      tickedViolations[0].includes(first.id) &&
+      tickedViolations[0].includes("已经勾上"),
+    tickedViolations.join("；") || "no violation"
+  );
+
+  // A reason before the first item answers nothing.
+  const orphan = ["  未勾原因：这一条不属于任何条目，只是看起来像回答了问题。", doc].join("\n");
+  const orphanViolations = dodReasonViolations(orphan, exists);
+  check(
+    "...and a reason line that sits under no item goes red instead of being ignored",
+    orphanViolations.length === 1 && orphanViolations[0].includes("不在任何一条 DOD 之下"),
+    orphanViolations.join("；") || "no violation"
+  );
+}
+
+/* ---- "what we have not verified" is a table with an owner, or it is prose ----
+ * `docs/measurements.md` is the only place that records the boundary of the
+ * claims. A row that says "not verified" without saying whose business it is
+ * leaves the reader unable to act: upstream's gap, this repository's gap and a
+ * real machine's gap are three different next steps.
+ *
+ * The controls are the four ways this rule can be wrong: a row can lose its
+ * owner, an upstream row can be relabelled as ours while no check exists, an
+ * upstream row can stop naming where upstream is tracked, and the trigger can
+ * be emptied.
+ */
+{
+  const doc = fs.readFileSync(path.join(ROOT, "docs/measurements.md"), "utf8");
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
+  const exists = (target) => fs.existsSync(path.join(ROOT, target));
+  const realRead = (target) => {
+    try {
+      return fs.readFileSync(path.join(ROOT, target), "utf8");
+    } catch {
+      return null;
+    }
+  };
+  const harnesses = auditScriptClosure(pkg, realRead).files;
+  const table = unverifiedTable(doc);
+  const opts = { exists, harnesses };
+
+  check(
+    "every row of the 未验证清单 carries an owner (上游 / 本仓 / 真机) and a pointer to a record in this repository",
+    unverifiedRowViolations(doc, opts).length === 0,
+    unverifiedRowViolations(doc, opts).join("；") || "no violation"
+  );
+  // The premise: the table was found, has the four columns, and has rows.
+  check(
+    "...and the rule is reading something: the table exists with its four columns and at least six rows",
+    table.found &&
+      table.separator !== null &&
+      table.header.length === 1 &&
+      table.header[0].cells.join("|") === UNVERIFIED_COLUMNS.join("|") &&
+      table.rows.length >= 6 &&
+      table.rows.every((row) => UNVERIFIED_OWNERS.includes(row.cells[1])),
+    JSON.stringify({
+      found: table.found,
+      header: table.header.map((row) => row.cells),
+      rows: table.rows.length,
+      owners: table.rows.map((row) => row.cells[1]),
+    })
+  );
+
+  const lines = doc.split(/\r?\n/);
+  const firstRow = table.rows[0];
+  const dropOwner = lines
+    .map((line, index) =>
+      index + 1 === firstRow.line
+        ? `| ${firstRow.cells[0]} | ${firstRow.cells[2]} | ${firstRow.cells[3]} |`
+        : line
+    )
+    .join("\n");
+  const dropOwnerViolations = unverifiedRowViolations(dropOwner, opts);
+  check(
+    "...and a row that lost its owner column goes red, naming the row and the shape",
+    dropOwnerViolations.length === 1 &&
+      dropOwnerViolations[0].includes(`第 ${firstRow.line} 行`) &&
+      dropOwnerViolations[0].includes("3 格"),
+    dropOwnerViolations.join("；") || "no violation"
+  );
+
+  // The upstream row relabelled as ours: the paths it names are not in the
+  // audit closure, so "this is ours and we have not checked it" is not honest.
+  const upstreamRow = table.rows.find((row) => row.cells[1] === "上游");
+  const relabelled = lines
+    .map((line, index) =>
+      index + 1 === upstreamRow.line
+        ? `| ${upstreamRow.cells[0]} | 本仓 | ${upstreamRow.cells[2]} | ${upstreamRow.cells[3]} |`
+        : line
+    )
+    .join("\n");
+  const relabelledViolations = unverifiedRowViolations(relabelled, opts);
+  check(
+    "...and an upstream row relabelled 本仓 goes red, because nothing in the audit closure covers it",
+    relabelledViolations.length === 1 &&
+      relabelledViolations[0].includes("归本仓") &&
+      relabelledViolations[0].includes("依赖闭包"),
+    relabelledViolations.join("；") || "no violation"
+  );
+
+  // An upstream row that stops naming where upstream is tracked will never be
+  // revisited.
+  const untracked = lines
+    .map((line, index) =>
+      index + 1 === upstreamRow.line
+        ? `| ${upstreamRow.cells[0]} | 上游 | 报告是上游自己生成的 HTML，排版归上游，本仓只把文件交出去（\`docs/measurements.md\` 这一节记着边界）。 | ${upstreamRow.cells[3]} |`
+        : line
+    )
+    .join("\n");
+  const untrackedViolations = unverifiedRowViolations(untracked, opts);
+  check(
+    "...and an upstream row that no longer names the sync doc goes red",
+    untrackedViolations.length === 1 &&
+      untrackedViolations[0].includes(UNVERIFIED_UPSTREAM_DOC) &&
+      untrackedViolations[0].includes("归上游"),
+    untrackedViolations.join("；") || "no violation"
+  );
+
+  // An empty trigger turns the row into a permanent excuse.
+  const noTrigger = lines
+    .map((line, index) =>
+      index + 1 === firstRow.line
+        ? `| ${firstRow.cells[0]} | ${firstRow.cells[1]} | ${firstRow.cells[2]} |  |`
+        : line
+    )
+    .join("\n");
+  const noTriggerViolations = unverifiedRowViolations(noTrigger, opts);
+  check(
+    "...and a row with an empty trigger goes red, naming the row",
+    noTriggerViolations.length === 1 &&
+      noTriggerViolations[0].includes("触发条件") &&
+      noTriggerViolations[0].includes(`第 ${firstRow.line} 行`),
+    noTriggerViolations.join("；") || "no violation"
   );
 }
 

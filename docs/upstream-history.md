@@ -36,6 +36,35 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 
 ---
 
+## 上游状态（第 110 轮，2026-11-04）
+本轮复核：**上游 HEAD 前进了 1 个 commit。**`git ls-remote` 答上：`refs/heads/main` 从 `c452846` 前进到
+`5c039e8`（`feat(allowlist): add HAML, Slim and ERB template support (#1552)`，动的是
+`internal/config/allowlist/supported_file_types.json`、`system_rules.json` 与规则文档）；
+`refs/tags/v1.13.4` 仍指向 tag 对象 `1393158`，npm `latest` 仍是 `1.13.4`。tag 与 npm 未动，
+**pin 不前进**，对照表 5 行不动，无移植项——allowlist 与规则表是引擎侧，本仓只显示 CLI 给出的排除原因，
+不自己判定哪些文件进审查。
+
+本轮的产品改动是一件：**界面中文的「字号下限」与「字体栈顺序」从注释变成断言**。
+`styles.css` 的两段注释一直说阶梯最小 12px、栈是拉丁 → 中文 → 通用，但没有任何检查——而这正是 11px
+与「漏掉中文字族」能悄悄回来的方式。`tools/ui-cjk-typography.mjs` 因此多问两个问题，都对**真正带文字的叶子**
+读 `getComputedStyle`（不是读样式表：内联样式、被 merge 吃掉的类、库自己的默认值都绕得过样式表）：
+中文文本的 `font-size` 不得低于 12px；含中文的叶子，`font-family` 必须是拉丁 → 中文 → 通用（缺中文字族 /
+中文字族排在拉丁之前 / 通用字族之后还有真字族，三种各自点名）。逐屏前提也分成两条：没有中文标点算没读到散文，
+没有中文叶子算没读到字号与字族。
+
+它第一次跑就抓到一个真缺陷：结果页「固定在 d41c8b7」的徽章整块套着 `font-mono`，而 mono 栈里没有中文字族——
+「固定在」三个字是系统兜底画的，与 `App.tsx` 里 toast 那段注释描述的是同一个缺陷。修法是只把 commit 留在
+mono 里，标签回到正文字族（`src/components/ResultsPanel.tsx`）。
+
+反向控制也加了一组按**样式表**改坏的两格：把 `.text-meta` 的 12px 改成 11px、把 `--font-sans` 里的
+`Microsoft YaHei` 摘掉，各要求在 `settings-top` 上点名对应规则。两条 needle 从 `src/styles.css` 推导而不是抄一份，
+needle 指错时 `audit:static` 先红（`ui-cjk-typography-smoke.mjs` 同时断言阶梯最小值、声明栈的顺序与两条 needle 的推导）。
+
+**补记（第 111 轮）** 上面这段「tag 与 npm 未动」只对 11-04 当天成立：次日上游 HEAD 再前进到 `abb7abc`，
+并发布了 `v1.13.5`（tag 对象 `e739d39`，正式 Release），而 npm `latest` 仍是 `1.13.4`——所以 pin 与
+三处声明都没有跟着动：本程序 spawn 的是 npm 包里的二进制，pin 声明的是「实际会跑起来的那一版」。
+这一轮还核出那 3 个 commit 里有一条对本仓用户可见（`--max-tools` 调小在 1.13.4 上无效），细节写在第 111 轮的正文里。
+
 ## 上游状态（第 109 轮，2026-11-03）
 第 108 轮复核：**上游没有新内容。**`git ls-remote` 这一轮答上来了：`refs/heads/main` 仍是 `8f9c8b7`，
 `refs/tags/v1.13.4` 仍指向 tag 对象 `1393158`，`/releases/latest` 仍是 `v1.13.4`。三条通路答案一致，

@@ -35,7 +35,7 @@ tag v1.13.4
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`76ab46ac20f08a8bd8ac38881a8a826c7cb6495f`（第 110 轮：`git ls-remote` 答上，`refs/heads/main` 前进 `c452846` → `5c039e8`（1 个 commit：HAML / Slim / ERB 模板进 allowlist 与规则表），`refs/tags/v1.13.4` 仍指向 tag 对象 `1393158`，npm `latest` 仍是 `1.13.4`——tag 与 npm 未动，**pin 不前进**；通路：git）**
+**本轮 HEAD 核对：`76ab46ac20f08a8bd8ac38881a8a826c7cb6495f`（第 111 轮：`git ls-remote` 答上，`refs/heads/main` 前进 `5c039e8` → `abb7abc`（3 个 commit：低于模板值的 `--max-tools` 开始被采纳、裸 `diff --git` 头按分隔符切开、new-side hunk 匹配允许跳过空行重试），`refs/tags/v1.13.5` 指向 `abb7abc`（tag 对象 `e739d39`，正式 Release），npm `latest` 仍是 `1.13.4`——**tag 与 release 走了、npm 没走，pin 不前进**；通路：git）**
 
 ### 核对通路账
 
@@ -118,6 +118,7 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 | 108 | 2026-11-04 | git | `8f9c8b7` / `v1.13.4` / npm `1.13.4`，三条通路答案一致、无新内容，**pin 不前进、无移植项**；DoD 从「人读才能核」推到「脚本能核哪几条还没证据」：6 条各加一行 `证据候选：<仓内路径>`，新增 `dodEvidenceCandidates` / `dodEvidenceCandidateViolations`（每条至少一个候选、路径必须在仓里、候选必须挂在某一条之下），候选与证据共用同一个路径读法；八格反向控制，其中一格是这条规则第一次跑就抓到的自己——DoD 解释标记的那段散文含有这四个字，被「行里出现过标记」判成无主候选，规则改成「行首是标记」；两份 README 的安装段去掉内部场合的说法（「初审答辩环境」/「reviewed and demoed on」→「已验证环境」/「Verified environment」），新增 `readmeInternalTermViolations` 与五格反向控制（含「平台事实本身仍绿」）；界面中文排版从三屏扩到六屏（通知条 `?notice=overflow`、设置页、首屏引导卡），新增逐屏前提 `screensWithoutProsePunctuation`（一屏里没有任何全角标点即算没读到）与第二条反向控制（设置页那句的全角顿号改半角，要求点名 `settings-top`） | — |
 | 109 | 2026-11-03 | git | **上游 HEAD 前进**：`8f9c8b7` → `c452846`（3 个 commit：`.jsonc` 进 allowlist、EJS / Liquid / Nunjucks 模板支持、Scala 审查规则）；`refs/tags/v1.13.4` 与 npm `1.13.4` 均未变，**pin 不前进**；对照表 5 行的上游文件一个都没被这三个 commit 碰到，无移植项（三处都是引擎侧的 allowlist 与规则表，本仓只显示 CLI 给出的排除原因，不自己判定哪些文件进审查）；DoD 的证据从「候选指到哪」推到「候选文件里真有那份证据」：新增 `DOD_EVIDENCE_SHAPES`（14 条候选各声明该记录里必须出现的证据形状，DOD-6 另有一条 `mustNot`）与 `dodEvidenceBodyViolations`（每个候选都要有形状、形状表与候选双射、文件里必须真的有那份证据、读不到不算绿），七格反向控制（把 README 里的「非官方」抹掉、加一条没声明形状的候选、删掉 DOD-5 的候选、文件读不到、`config-handler.js` 开始自己写配置）；DOD-4 补一条指向 `tools/e2e-flow.cjs` 的候选——`.mjs` 只是跑真 Electron 的壳，预览与分支对比的断言在 `.cjs` 里，原候选指过去读不到那几条 check；`docs/measurements.md` 未验证清单补「浏览器依赖」一行，两份 README 的已知限制写明导出 HTML 报告的排版归上游 | — |
 | 110 | 2026-11-04 | git | **上游 HEAD 前进**：`c452846` → `5c039e8`（1 个 commit：HAML / Slim / ERB 模板进 `supported_file_types.json` 与 `system_rules.json`）；`refs/tags/v1.13.4`（`1393158`）与 npm `1.13.4` 均未变，**pin 不前进**；对照表 5 行的上游文件一个都没被这个 commit 碰到，无移植项（allowlist 与规则表是引擎侧，本仓只显示 CLI 给出的排除原因）；界面中文排版新增两条断言——字号下限 12px 与字体栈顺序（拉丁 → 中文 → 通用），第一次跑就在结果页抓到一个真缺陷：`` 固定在 <sha> `` 的徽章整块套着 `font-mono`，中文字族不在 mono 栈里，两个中文字由系统兜底 | — |
+| 111 | 2026-11-04 | git | **上游 HEAD 前进 + 第一次出现「tag / release 走了、npm 没走」**：`refs/heads/main` `5c039e8` → `abb7abc`（3 个 commit：`--max-tools` 低于模板值时开始被采纳、裸 `diff --git` 头按分隔符切开、new-side hunk 匹配允许跳过空行重试）；`refs/tags/v1.13.5` = `abb7abc`（tag 对象 `e739d39`，Release 已发布），npm `latest` 仍是 `1.13.4`，**pin 不前进**（pin 跟 npm 走，本程序 spawn 的是 npm 包里的二进制）；对照表 5 行一个都没被碰到，无移植项，但 `--max-tools` 那条对本仓用户可见（1.13.4 上把「每组最多工具调用轮数」调小会被模板默认值盖掉）；DoD 的证据从「候选指到哪」推到「候选真的被跑过」（`auditScriptClosure` + `dodHarnessReachViolations`），并给每个没勾的条目加一句「未勾原因」（`dodReasonViolations`）；`docs/measurements.md` 的「未验证清单」每行加归属（上游 / 本仓 / 真机）与可指认的路径（`unverifiedRowViolations`） | — |
 
 ### 对照表（上游前进时要重读的五处）
 
@@ -211,31 +212,51 @@ tool 结果文本**（`Error: diff not found for: …`、`Diffs exist for: …`�
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。搬完这里只留一句
    指针——「本文件只留当前一轮」不是约定而是断言（`previousRoundPointerViolations`）。
 
-## 当前状态（第 110 轮，2026-11-04）
-本轮复核：**上游 HEAD 前进了 1 个 commit。**`git ls-remote` 答上：`refs/heads/main` 从 `c452846` 前进到
-`5c039e8`（`feat(allowlist): add HAML, Slim and ERB template support (#1552)`，动的是
-`internal/config/allowlist/supported_file_types.json`、`system_rules.json` 与规则文档）；
-`refs/tags/v1.13.4` 仍指向 tag 对象 `1393158`，npm `latest` 仍是 `1.13.4`。tag 与 npm 未动，
-**pin 不前进**，对照表 5 行不动，无移植项——allowlist 与规则表是引擎侧，本仓只显示 CLI 给出的排除原因，
-不自己判定哪些文件进审查。
+## 当前状态（第 111 轮，2026-11-04）
+本轮复核：**上游 HEAD 前进了 3 个 commit，并且第一次出现「tag / release 走了、npm 没走」的情形。**
+`git ls-remote` 答上：`refs/heads/main` 从 `5c039e8` 前进到 `abb7abc`；`refs/tags/v1.13.5` 指向 `abb7abc`
+（tag 对象 `e739d39`，GitHub Release 也是正式发布，不是 draft / prerelease），而 npm `latest` 仍是 `1.13.4`。
 
-本轮的产品改动是一件：**界面中文的「字号下限」与「字体栈顺序」从注释变成断言**。
-`styles.css` 的两段注释一直说阶梯最小 12px、栈是拉丁 → 中文 → 通用，但没有任何检查——而这正是 11px
-与「漏掉中文字族」能悄悄回来的方式。`tools/ui-cjk-typography.mjs` 因此多问两个问题，都对**真正带文字的叶子**
-读 `getComputedStyle`（不是读样式表：内联样式、被 merge 吃掉的类、库自己的默认值都绕得过样式表）：
-中文文本的 `font-size` 不得低于 12px；含中文的叶子，`font-family` 必须是拉丁 → 中文 → 通用（缺中文字族 /
-中文字族排在拉丁之前 / 通用字族之后还有真字族，三种各自点名）。逐屏前提也分成两条：没有中文标点算没读到散文，
-没有中文叶子算没读到字号与字族。
+**pin 因此不前进，而这一轮才第一次需要把它写成规则**：本程序 spawn 的是 `@alibaba-group/open-code-review`
+这个 npm 包里的二进制（`ocr-service.js`），pin 声明的是「实际会跑起来的那一版」，所以它跟 npm 走，不跟 tag
+或 Release 走。第 103 轮 tag 与 npm 同时前进，两个口径看不出区别；这一轮把它们分开了，规则才有内容。
 
-它第一次跑就抓到一个真缺陷：结果页「固定在 d41c8b7」的徽章整块套着 `font-mono`，而 mono 栈里没有中文字族——
-「固定在」三个字是系统兜底画的，与 `App.tsx` 里 toast 那段注释描述的是同一个缺陷。修法是只把 commit 留在
-mono 里，标签回到正文字族（`src/components/ResultsPanel.tsx`）。
+三个 commit 对本仓的影响逐条核过：
 
-反向控制也加了一组按**样式表**改坏的两格：把 `.text-meta` 的 12px 改成 11px、把 `--font-sans` 里的
-`Microsoft YaHei` 摘掉，各要求在 `settings-top` 上点名对应规则。两条 needle 从 `src/styles.css` 推导而不是抄一份，
-needle 指错时 `audit:static` 先红（`ui-cjk-typography-smoke.mjs` 同时断言阶梯最小值、声明栈的顺序与两条 needle 的推导）。
+- `20d57cb` `fix(review): honor lower max-tools overrides`：`cmd/opencodereview/review_cmd.go` 里
+  `--max-tools` 现在「只要给了就赢过模板默认值」（新的 `resolveReviewMaxTools`），manifest 的 `execution`
+  多一个 `max_tool_request_times`（加法字段，本仓只读已知键，不需要改）。**这条对本仓是用户可见的**：
+  界面「调整这次审查的参数」里的「每组最多工具调用轮数」传的就是 `--max-tools`，而在 pin 的 1.13.4 上把它
+  调**小**会被模板默认值盖掉（调大有效），1.13.5 起才算数。无移植项——本仓一直照直传，改的是 CLI 侧的优先级；
+  等 npm 发布 1.13.5、pin 前进时这条自动成立。
+- `98f1dfe` `fix(diff): split a bare "diff --git" header at its separator`：`internal/diff/parser.go`，裸头
+  不再吞掉下一段；`abb7abc` `fix(diff): retry new-side hunk match without blank lines`：
+  `internal/diff/resolver.go`——**不是**对照表第 1 行那个 `internal/llm/resolver.go`（同名不同目录，读名字容易
+  混，所以点明）。两处都在引擎侧解析 diff，本仓不自己解析 diff，无移植项。
+- 对照表 5 行（`internal/llm/resolver.go`、`config_cmd.go`、`llm_cmd.go` / `providers.go`、`failure_class`）一个都
+  没被这三个 commit 碰到。
 
-上一轮（第 109 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-109-轮2026-11-03)，归档之后本文件不留第二份。
+本轮的产品改动是一件：**过线标准与「没验证过什么」从「写了检查」推到「检查真的跑过 / 边界有人认领」**。
+前几轮把 DoD 的候选推到「路径在仓里」与「文件里真有那句话」，可两者加起来仍然放过一个状态：候选指向一份
+**从不被执行**的检查——文件在、措辞对、没有任何 `audit*` 脚本跑到它。`tools/upstream-watch.mjs` 的
+`auditScriptClosure` 因此把依赖闭包**算**出来（`audit*` 脚本 → `npm run` 链 → `node <file>` → 相对 import 与
+`tools/...` 字面量），`dodHarnessReachViolations` 要求每个指向 harness 的候选都在闭包里；闭包算空时规则
+自报「没有对象」，而不是报绿。
+
+同一趟补上另一半：**「没勾」和「没人看过」不再长得一样**。6 条 DoD 连续多轮全 `[ ]`，每条都有候选、audit 一直绿，
+因为「没勾」是没有任何检查问过的状态。现在每条没勾的下面都要有一句 `未勾原因：<一句话 + 仓内路径>`
+（`dodReasonViolations`）：要指到仓里真实存在的记录、不许写「待定」这类占位词、勾上之后不许再留着（那会变成假话）、
+挂在条目之外的那一句会点名。它不催勾，只要求「为什么还没勾」是一个被回答过的状态。
+
+`docs/measurements.md` 的「未验证清单」也从自由表格变成有归属的表：每行要写清这项是**上游 / 本仓 / 真机**谁的
+事，并指到仓里一份可打开的记录（`unverifiedRowViolations`）。归本仓的行必须指到依赖闭包里的一份真检查
+（「这是我们的、还没验」只有在存在一份会跑的检查时才诚实），归上游的行必须指到本文件——不指过来的那一行没人会回头核。
+
+反向控制按「这条规则能怎么错」逐格写：闭包只跑一个 harness 时要点名剩下五个（而真被跑到的那一个不许被点名）、
+没有任何 `audit*` 脚本时不许报绿、删掉一条未勾原因要红、写「待定」要红、指到不存在的文件要红、勾上后留着原因要红、
+原因挂在条目之外要红；未验证清单去掉归属格、把上游行改成本仓、上游行不再指本文件、触发条件留空，各红一次。
+
+上一轮（第 110 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-110-轮2026-11-04)，归档之后本文件不留第二份。
 
 ## 上游真变了怎么办（命令驱动，而不是「记得看一眼」）
 ```bash

@@ -2090,6 +2090,422 @@ export const dodEvidenceBodyViolations = (doc, read = () => null) => {
   return violations;
 };
 
+// ---- a candidate that is a harness has to be a harness something runs ----
+//
+// `dodEvidenceCandidateViolations` settles "the pointer resolves" and
+// `dodEvidenceBodyViolations` settles "the record says the thing". Neither
+// settles the question a reader actually asks about a candidate that is a
+// *check*: does anything run it? A file under `tools/` can exist, can contain
+// every word its shape asks for, and still be dead code — nothing in
+// `package.json` invokes it, so the evidence it holds was never produced by a
+// run. That is the difference between "we wrote a check" and "the check ran",
+// and it is exactly the shape a round leaves behind when it adds a harness and
+// forgets the script line.
+//
+// So the closure is computed rather than listed: start from every `audit*`
+// script, follow `npm run <name>` into the scripts it chains, take the `node
+// <file>` invocations, then follow each of those files' relative imports and
+// `tools/...` literals until nothing new appears. A candidate that is a harness
+// must be inside that closure. Records (documents, source files, `package.json`)
+// are not harnesses and are not asked this question — they are read by
+// `dodEvidenceBodyViolations` instead.
+//
+// `read` is injected for the same reason as above: the controls have to be able
+// to hand in a doctored `package.json` and a doctored file body, and a default
+// that read the real disk would make "nothing runs this" impossible to test.
+export const AUDIT_SCRIPT_PREFIX = "audit";
+
+const NODE_INVOCATION = /\bnode\s+([\w./-]+\.(?:mjs|cjs|js))/g;
+const NPM_RUN_REFERENCE = /npm run ([\w:.-]+)/g;
+const RELATIVE_SPECIFIER = /(?:from\s+|require\(\s*|import\(\s*)["'](\.[^"']+)["']/g;
+const TOOLS_LITERAL = /["'](tools\/[\w./-]+\.(?:mjs|cjs|js))["']/g;
+const TOOLS_JOINED = /["']tools["']\s*,\s*["']([\w.-]+\.(?:mjs|cjs|js))["']/g;
+
+const normalizeRepoPath = (target) =>
+  path.posix.normalize(String(target).replace(/\\/g, "/")).replace(/^\.\//, "");
+
+/** Every file an `audit*` script can reach, plus the scripts that were walked.
+ *
+ *  `files` is a Set of repo-relative paths; a path only enters it when `read`
+ *  returns text for it, so "the closure contains it" and "the file is there" are
+ *  the same answer. */
+export const auditScriptClosure = (pkg, read = () => null) => {
+  const scripts = (pkg && pkg.scripts) || {};
+  const walked = new Set();
+  const files = new Set();
+  const queue = [];
+
+  const addFile = (target) => {
+    const normalized = normalizeRepoPath(target);
+    if (files.has(normalized)) return;
+    if (typeof read(normalized) !== "string") return;
+    files.add(normalized);
+    queue.push(normalized);
+  };
+
+  const walkScript = (name) => {
+    if (walked.has(name)) return;
+    walked.add(name);
+    const body = scripts[name];
+    if (typeof body !== "string") return;
+    for (const hit of body.matchAll(NPM_RUN_REFERENCE)) walkScript(hit[1]);
+    for (const hit of body.matchAll(NODE_INVOCATION)) addFile(hit[1]);
+  };
+
+  for (const name of Object.keys(scripts)) {
+    if (name.startsWith(AUDIT_SCRIPT_PREFIX)) walkScript(name);
+  }
+
+  while (queue.length) {
+    const file = queue.shift();
+    const body = read(file);
+    if (typeof body !== "string") continue;
+    for (const hit of body.matchAll(RELATIVE_SPECIFIER)) {
+      addFile(path.posix.join(path.posix.dirname(file), hit[1]));
+    }
+    for (const hit of body.matchAll(TOOLS_LITERAL)) addFile(hit[1]);
+    for (const hit of body.matchAll(TOOLS_JOINED)) addFile(path.posix.join("tools", hit[1]));
+  }
+
+  return { scripts: [...walked].sort(), files };
+};
+
+/** A candidate path that is a check rather than a record. */
+export const DOD_HARNESS_PATH = /^tools\/[\w./-]+\.(?:mjs|cjs)$/;
+
+export const dodHarnessReachViolations = (doc, { pkg = null, read = () => null } = {}) => {
+  const candidates = dodEvidenceCandidates(doc);
+  const closure = auditScriptClosure(pkg, read);
+  const violations = [];
+  const harnesses = candidates.filter(
+    (candidate) =>
+      candidate.id !== null && candidate.path !== null && DOD_HARNESS_PATH.test(candidate.path)
+  );
+
+  if (harnesses.length === 0) {
+    violations.push(
+      "DoD 的证据候选里没有一条指向 harness（`tools/**/*.mjs` / `*.cjs`）——" +
+        "这条规则因此没有对象，不能算绿：六条条目里至少有一条的证据是一份检查"
+    );
+  }
+
+  for (const candidate of harnesses) {
+    if (closure.files.has(candidate.path)) continue;
+    violations.push(
+      `第 ${candidate.line} 行：${candidate.id} 的证据候选 ${candidate.path} 是一份 harness，` +
+        `但没有任何 \`audit*\` 脚本跑到它（依赖闭包 ${closure.files.size} 个文件里没有它）——` +
+        "候选指向一份从不被执行的检查，等于「写了检查」而不是「检查跑过」"
+    );
+  }
+
+  return violations;
+};
+
+// ---- an unchecked item has to say why it is still unchecked ----
+//
+// The candidate rules answer "where would the evidence be". They do not answer
+// the question a reader of the bar actually has: *why is this still open*. Six
+// items sat unticked for many rounds with a candidate each, and the audit was
+// green the whole time — because "no tick" was a state nothing asked about. A
+// bar whose open items have no stated reason is a bar nobody is maintaining;
+// the difference between "we know what is missing" and "nobody has looked" is
+// one sentence per item, and it costs nothing to require it.
+//
+// The sentence is not a promise to tick. It is the answer to "what would have to
+// happen", and it has to be checkable in the same way everything else here is:
+//
+//   1. 每条没勾的都要有一句 — an unchecked item with no `未勾原因：` line is red.
+//   2. 那句话要指到仓里 — the reason must name at least one backticked path that
+//      exists, so "why not" is anchored to a record instead of being a mood.
+//   3. 不许是占位词 — 待定 / TODO / 以后再说 are refused: they are the shape of an
+//      answer, not an answer.
+//   4. 勾上了就不许再写 — a ticked item carrying a reason is a contradiction,
+//      and it is how a stale reason survives the tick that made it false.
+//   5. 不许挂在条目之外 — a reason line under no item answers nothing.
+export const DOD_REASON_MARK = "未勾原因：";
+export const DOD_REASON_MIN = 16;
+export const DOD_REASON_PLACEHOLDERS = Object.freeze([
+  "待定",
+  "TODO",
+  "以后再说",
+  "暂无",
+  "待补",
+  "还没想好",
+]);
+
+const BACKTICKED_TOKEN = /`([^`\n]+)`/g;
+const looksLikeRepoPath = (token) =>
+  /^[\w.-]+(\/[\w.-]+)+$/.test(token) || /\.(md|mjs|cjs|js|tsx|ts|json)$/.test(token);
+
+/** Every `未勾原因：` line in the DoD, with the ID of the item it sits under
+ *  (`null` when it sits under none). Same reading as `dodEvidenceCandidates`:
+ *  the line has to *start* with the mark, so prose about the rule is not a
+ *  reason. */
+export const dodReasons = (doc) => {
+  const items = dodChecklist(doc);
+  const byLine = new Map(items.map((item) => [item.line, item]));
+  const reasons = [];
+  let current = null;
+  String(doc == null ? "" : doc)
+    .split(/\r?\n/)
+    .forEach((text, index) => {
+      const line = index + 1;
+      const item = byLine.get(line);
+      if (item) {
+        current = item;
+        return;
+      }
+      const trimmed = text.trimStart();
+      if (!trimmed.startsWith(DOD_REASON_MARK)) return;
+      reasons.push({
+        line,
+        id: current === null ? null : current.id,
+        text: trimmed.slice(DOD_REASON_MARK.length).trim(),
+      });
+    });
+  return reasons;
+};
+
+export const dodReasonViolations = (doc, exists = () => true) => {
+  const items = dodChecklist(doc);
+  const reasons = dodReasons(doc);
+  const violations = [];
+  const byId = new Map();
+
+  for (const reason of reasons) {
+    if (reason.id === null) {
+      violations.push(
+        `第 ${reason.line} 行的「${DOD_REASON_MARK}」不在任何一条 DOD 之下——` +
+          "它看起来像回答了「为什么还没勾」，实际上一条都没回答（原因要写在其条目下面）"
+      );
+      continue;
+    }
+    if (byId.has(reason.id)) {
+      violations.push(
+        `第 ${reason.line} 行：${reason.id} 写了不止一条「${DOD_REASON_MARK}」——` +
+          "两条原因就是两个说法，读的人不知道哪条才是现在的"
+      );
+      continue;
+    }
+    byId.set(reason.id, reason);
+  }
+
+  for (const item of items) {
+    const reason = byId.get(item.id);
+    if (item.checked) {
+      if (reason) {
+        violations.push(
+          `第 ${reason.line} 行：${item.id} 已经勾上了，却还写着「${DOD_REASON_MARK}」——` +
+            "勾上之后那句「为什么还没勾」就是假话，留着它等于让下一个人读到过期结论"
+        );
+      }
+      continue;
+    }
+    if (!reason) {
+      violations.push(
+        `第 ${item.line} 行：${item.id || "这一条"}还没勾，却没有写「${DOD_REASON_MARK}<一句话 + 仓内路径>」——` +
+          "「没勾」和「没人看过」是同一个答案，只有写了原因的那一条才说明这份标准在被维护"
+      );
+      continue;
+    }
+    if (reason.text.length < DOD_REASON_MIN) {
+      violations.push(
+        `第 ${reason.line} 行：${item.id} 的「${DOD_REASON_MARK}」只有 ${reason.text.length} 个字——` +
+          `至少要 ${DOD_REASON_MIN} 个字说清「缺什么、什么条件下能勾」`
+      );
+    }
+    const placeholder = DOD_REASON_PLACEHOLDERS.find((word) => reason.text.includes(word));
+    if (placeholder !== undefined) {
+      violations.push(
+        `第 ${reason.line} 行：${item.id} 的「${DOD_REASON_MARK}」里写着「${placeholder}」——` +
+          "占位词是答案的形状而不是答案，它让「还没勾」看起来像已经解释过了"
+      );
+    }
+    const paths = [...reason.text.matchAll(BACKTICKED_TOKEN)]
+      .map((hit) => hit[1].trim())
+      .filter((token) => looksLikeRepoPath(token));
+    if (paths.length === 0) {
+      violations.push(
+        `第 ${reason.line} 行：${item.id} 的「${DOD_REASON_MARK}」没有指出任何仓内路径——` +
+          "原因要落在某份记录上（缺的是哪份检查、哪份实测），否则它只是一句心情"
+      );
+      continue;
+    }
+    const missing = paths.filter((target) => !exists(target));
+    if (missing.length) {
+      violations.push(
+        `第 ${reason.line} 行：${item.id} 的「${DOD_REASON_MARK}」指向 ${missing.join("、")}，但仓里没有这个文件——` +
+          "原因追不到记录，等于没写"
+      );
+    }
+  }
+
+  return violations;
+};
+
+// ---- "what we have not verified" is a table with an owner, or it is prose ----
+//
+// `docs/measurements.md` has two halves: what was measured, and — since round
+// 105 — what was *not*. The second half is the only place in this repository
+// that records the boundary of the claims, and it was a free-form table: a row
+// could say "not verified" and leave the reader unable to tell whether that is
+// upstream's business, this repository's, or a real machine's. Three different
+// owners mean three different next steps, and a row that names none of them is a
+// row nobody can act on.
+//
+// So each row carries an owner and a pointer:
+//
+//   1. 归属只有三种 — 上游 / 本仓 / 真机. Anything else is red, because a fourth
+//      word is a way of not choosing.
+//   2. 每行要指到仓里 — at least one backticked path that exists, so the row is
+//      anchored to a file a reader can open.
+//   3. 归本仓的必须指到一份真的会跑的检查 — the path has to be inside the
+//      `audit*` closure. "This is ours and we have not checked it" is only
+//      honest while there is a check that could; pointing at a file nothing runs
+//      is the same defect as a dead candidate.
+//   4. 归上游的要指到同步文档 — the upstream rows are tracked in
+//      `docs/OCR-UPSTREAM-SYNC.md`; a row that says "upstream's problem" without
+//      naming where upstream is tracked is a row that will never be revisited.
+//   5. 触发条件不许空 — the last cell is the answer to "when would we verify
+//      this", and an empty one turns the row into a permanent excuse.
+export const UNVERIFIED_HEADING = "## 未验证清单";
+export const UNVERIFIED_OWNERS = Object.freeze(["上游", "本仓", "真机"]);
+export const UNVERIFIED_TRIGGER_MIN = 8;
+export const UNVERIFIED_UPSTREAM_DOC = "docs/OCR-UPSTREAM-SYNC.md";
+export const UNVERIFIED_COLUMNS = Object.freeze([
+  "项",
+  "归属",
+  "为什么没验",
+  "下次要验的触发条件",
+]);
+
+/** The 未验证清单 table: its header cells and its data rows (1-based lines).
+ *  Rows before the separator are the header; a table with no separator has no
+ *  header and every row is data, which the rule reports rather than guesses. */
+export const unverifiedTable = (doc) => {
+  const lines = String(doc == null ? "" : doc).split(/\r?\n/);
+  const start = lines.findIndex((line) => line.trim().startsWith(UNVERIFIED_HEADING));
+  if (start === -1) return { found: false, header: [], rows: [], separator: null };
+
+  const header = [];
+  const rows = [];
+  let separator = null;
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (/^#{1,6}\s/.test(line.trim())) break;
+    if (!line.trim().startsWith("|")) continue;
+    const cells = line
+      .trim()
+      .replace(/^\|/, "")
+      .replace(/\|$/, "")
+      .split("|")
+      .map((cell) => cell.trim());
+    if (cells.every((cell) => /^:?-{2,}:?$/.test(cell))) {
+      separator = index + 1;
+      continue;
+    }
+    if (separator === null) header.push({ line: index + 1, cells });
+    else rows.push({ line: index + 1, cells });
+  }
+  return { found: true, header, rows, separator };
+};
+
+export const unverifiedRowViolations = (doc, { exists = () => true, harnesses = new Set() } = {}) => {
+  const table = unverifiedTable(doc);
+  const violations = [];
+
+  if (!table.found) {
+    violations.push(
+      `\`docs/measurements.md\` 里没有「${UNVERIFIED_HEADING}」这一节——` +
+        "「没验证过什么」是这份文档的另一半，删掉它，README 的「不覆盖」就没有对应的记录"
+    );
+    return violations;
+  }
+  if (table.separator === null) {
+    violations.push(
+      `「${UNVERIFIED_HEADING}」下面没有表格分隔行——` +
+        "没有分隔行就没有表头，读者不知道哪一格是归属、哪一格是触发条件"
+    );
+  }
+  if (table.rows.length === 0) {
+    violations.push(
+      `「${UNVERIFIED_HEADING}」里一行都没有——` +
+        "空表比没有表更糟：它看起来像「全都验证过了」"
+    );
+    return violations;
+  }
+
+  const headerCells = table.header.length ? table.header[table.header.length - 1].cells : [];
+  if (headerCells.length && headerCells.join("|") !== UNVERIFIED_COLUMNS.join("|")) {
+    violations.push(
+      `「${UNVERIFIED_HEADING}」的表头是「${headerCells.join(" | ")}」，` +
+        `形状应为「${UNVERIFIED_COLUMNS.join(" | ")}」——` +
+        "归属这一列是这条规则要读的东西，表头改了它就静默失效"
+    );
+  }
+
+  for (const row of table.rows) {
+    const cells = row.cells;
+    if (cells.length !== UNVERIFIED_COLUMNS.length) {
+      violations.push(
+        `第 ${row.line} 行：未验证清单的一行有 ${cells.length} 格，` +
+          `形状是「${UNVERIFIED_COLUMNS.join(" | ")}」——` +
+          "少一格就少一个答案，多一格则说明有人把两件事写进了一行"
+      );
+      continue;
+    }
+    const [item, owner, why, trigger] = cells;
+    if (!UNVERIFIED_OWNERS.includes(owner)) {
+      violations.push(
+        `第 ${row.line} 行：「${item}」的归属写成了「${owner}」——` +
+          `只许 ${UNVERIFIED_OWNERS.join(" / ")} 三种，` +
+          "第四种说法就是「还没想清楚这是谁的事」"
+      );
+    }
+    if (trigger.length < UNVERIFIED_TRIGGER_MIN) {
+      violations.push(
+        `第 ${row.line} 行：「${item}」的触发条件只有 ${trigger.length} 个字——` +
+          `至少要 ${UNVERIFIED_TRIGGER_MIN} 个字说清「什么条件下补验」，` +
+          "空着就等于这一行永远不会被回头看"
+      );
+    }
+    const paths = [...`${why} ${trigger}`.matchAll(BACKTICKED_TOKEN)]
+      .map((hit) => hit[1].trim())
+      .filter((token) => looksLikeRepoPath(token));
+    if (paths.length === 0) {
+      violations.push(
+        `第 ${row.line} 行：「${item}」没有指出任何仓内路径——` +
+          "一行「没验证」要能追到一份文件（哪份检查、哪份记录），否则它只是一句免责声明"
+      );
+      continue;
+    }
+    const missing = paths.filter((target) => !exists(target));
+    if (missing.length) {
+      violations.push(
+        `第 ${row.line} 行：「${item}」指向 ${missing.join("、")}，但仓里没有这个文件——` +
+          "指错的路径比没有路径更难发现"
+      );
+    }
+    if (owner === "本仓") {
+      const reachable = paths.filter((target) => harnesses.has(target));
+      if (reachable.length === 0) {
+        violations.push(
+          `第 ${row.line} 行：「${item}」归本仓，但指到的 ${paths.join("、")} 都不在 ` +
+            "`audit*` 的依赖闭包里——「这是我们的、还没验」只有在存在一份会跑的检查时才诚实"
+        );
+      }
+    }
+    if (owner === "上游" && !`${why} ${trigger}`.includes(UNVERIFIED_UPSTREAM_DOC)) {
+      violations.push(
+        `第 ${row.line} 行：「${item}」归上游，却没有指到 ${UNVERIFIED_UPSTREAM_DOC}——` +
+          "上游的事记在同步文档里，不指过去的那一行没人会回头核"
+      );
+    }
+  }
+
+  return violations;
+};
+
 // ---- the bar's own version facts: a pin that moved must not leave the DoD behind ----
 //
 // The DoD is the only input to the next round, and it states two version facts in

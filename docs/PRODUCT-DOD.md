@@ -39,23 +39,34 @@
 真的存在，于是「一直不勾」不再是一个合格的静默状态：没有候选的条目会被逐条点名。候选给多条时按行列，
 第一条算主记录。
 
+每条没勾的条目下面还有一行「未勾原因：<一句话 + 仓内路径>」：它回答的是另一半问题——**这一条为什么
+现在还不能勾、什么条件下能勾**。`dodReasonViolations` 要求每个 `[ ]` 都有这一句、句子要指到仓里一份
+真实存在的记录、不许写「待定」这类占位词，而已经勾上的条目反过来不许再留着它（勾上之后那句
+「为什么还没勾」就是假话）。它不催勾，只要求「还没勾」是一个被回答过的状态，而不是没人看过。
+
 - [ ] DOD-1：**非官方诚实**：README / 关于页 / 安装说明显著写明 unofficial；不冒充阿里巴巴官方产品
+  未勾原因：这一条要的是「陌生人第一眼就看见非官方」的外部证据，而仓里只有 `README.zh-CN.md` 与设置页的措辞断言，没有一次真人阅读记录；等陌生人试用反馈里出现「以为这是阿里官方桌面版」时补上。
   证据候选：README.zh-CN.md（首屏、安装段、归属声明三处的「非官方」声明）
   证据候选：src/components/SettingsPanel.tsx（设置页「关于」区的归属声明）
 - [ ] DOD-2：**引擎未改**：审查逻辑零分叉；仅拼 CLI、流式日志、解析 JSON、GUI
+  未勾原因：`ocr-service.js` 只 spawn 官方二进制这件事有断言，但「零分叉」要逐条对照上游 CLI 的参数面，而对照表只覆盖本仓实际用到的那些行；下一次升 pin 时把新增参数逐条核过再勾。
   证据候选：ocr-service.js（只 spawn 官方 CLI、拼参数、解析 JSON 与流式日志，无审查规则）
   证据候选：tools/service-smoke.mjs（按上游 resolver 语义重算「这次运行会打开哪条条目」）
 - [ ] DOD-3：**上游同步**：`docs/OCR-UPSTREAM-SYNC.md` pin 与 `npm run audit:upstream` 绿；跟进上游 tag 有记录（当前 pin v1.13.4 / 约定 SHA）
+  未勾原因：pin 与对照表有断言，但这一条要的是「跟进上游 tag 有记录」的连续性，而 `docs/OCR-UPSTREAM-SYNC.md` 的通路账里还留着几轮只核了 release 的欠账；等连续几轮 HEAD 都真的核过再勾。
   证据候选：docs/OCR-UPSTREAM-SYNC.md（pin 三处声明与对照表）
   证据候选：tools/upstream-watch-smoke.mjs（pin 与对照表的双射、通路账、DoD 版本事实）
 - [ ] DOD-4：**主路径可演示**：四范围 + `--preview`；成本护栏；完成/部分/失败/警告徽章；预算截断不显示「干净」；续跑仅在 CLI 支持的模式显示
+  未勾原因：四范围与 `--preview` 在真 Electron 里跑过（`tools/e2e-flow.mjs`），但「首启 → 引导 → 配 provider → 预览」这条答辩现场会走的链路还没有 harness，装完安装版之后的第一屏也没被脚本走过；补上首启链路再勾。
   证据候选：tools/e2e-flow.mjs（真 Electron + 真 CLI 走完预览与四范围）
   证据候选：tools/e2e-flow.cjs（真 Electron 里断言预览与分支对比范围的那几条 check）
   证据候选：src/components/ResultsPanel.tsx（完成／部分／失败／警告徽章与截断态）
 - [ ] DOD-5：**航运资产**：`v0.1.13`（或更新）`*-setup.exe` / portable 可装可启；内置二进制可达；未签名 SmartScreen 有说明
+  未勾原因：`docs/measurements.md` 记的真机面是 Linux x64，而发布面只有 Windows x64 的 `*-setup.exe`，安装包本身从未被脚本化装过一次；等 Windows x64 上装一次并记下首启结果再勾。
   证据候选：docs/measurements.md（真机记录，以及「没验证过什么」那一节）
   证据候选：tools/release.mjs（发版脚本停在人操边界前）
 - [ ] DOD-6：**安全底线**：Key 不进本程序副本；`asar` 保持 false（spawn 契约）；发版密钥扫描绿
+  未勾原因：`asar` 保持 false、Key 只经 `ocr config set` 写入、发版前密钥扫描（`tools/secret-scan.mjs`）三条都有断言，缺的是「装好的那一份里 Key 真的不在本程序目录」的实测；等真机上装一次、翻一遍用户数据目录再勾。
   证据候选：package.json（`asar` 保持 false 的 spawn 契约）
   证据候选：config-handler.js（Key 只经 `ocr config set` 写入，本程序不存副本）
   证据候选：tools/secret-scan.mjs（发版前的密钥扫描）
