@@ -50,6 +50,7 @@
   证据候选：tools/upstream-watch-smoke.mjs（pin 与对照表的双射、通路账、DoD 版本事实）
 - [ ] DOD-4：**主路径可演示**：四范围 + `--preview`；成本护栏；完成/部分/失败/警告徽章；预算截断不显示「干净」；续跑仅在 CLI 支持的模式显示
   证据候选：tools/e2e-flow.mjs（真 Electron + 真 CLI 走完预览与四范围）
+  证据候选：tools/e2e-flow.cjs（真 Electron 里断言预览与分支对比范围的那几条 check）
   证据候选：src/components/ResultsPanel.tsx（完成／部分／失败／警告徽章与截断态）
 - [ ] DOD-5：**航运资产**：`v0.1.13`（或更新）`*-setup.exe` / portable 可装可启；内置二进制可达；未签名 SmartScreen 有说明
   证据候选：docs/measurements.md（真机记录，以及「没验证过什么」那一节）

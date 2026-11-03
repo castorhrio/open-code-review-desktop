@@ -35,7 +35,7 @@ tag v1.13.4
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`76ab46ac20f08a8bd8ac38881a8a826c7cb6495f`（第 108 轮：`git ls-remote` 答上，`refs/heads/main` 仍是 `8f9c8b7`，`refs/tags/v1.13.4` 仍指向 tag 对象 `1393158`，`/releases/latest` 仍是 `v1.13.4`——三条通路答案一致，**pin 不前进**；通路：git）**
+**本轮 HEAD 核对：`76ab46ac20f08a8bd8ac38881a8a826c7cb6495f`（第 109 轮：`git ls-remote` 答上，`refs/heads/main` 前进 `8f9c8b7` → `c452846`，`refs/tags/v1.13.4` 仍指向 tag 对象 `1393158`，`/releases/latest` 仍是 `v1.13.4`——tag 与 npm 未动，**pin 不前进**；通路：git）**
 
 ### 核对通路账
 
@@ -116,6 +116,7 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 | 106 | 2026-11-03 | git | `76ab46a` / `v1.13.4` / npm `1.13.4`，三条通路答案一致、无新内容，**pin 不前进、无移植项**；界面中文排版从「手感」变成断言：新增 `tools/ui-cjk-typography.mjs`（真浏览器走结果页 / 长 finding / 阅读页三屏，把可见中文按块取出后跑与文档同源的三条规则，`pre` / `code` 整棵子树排除）与 `tools/ui-cjk-typography-smoke.mjs`（规则同源、三条规则各自点名、接线与反向控制前提），三条规则从 `tools/cjk-typography.mjs` 抽成可复用函数而不是抄一份；反向控制把报告里那句「固定到审查当时的那一版…」的全角逗号改成半角，要求同一趟走查变红并点名那一屏 | — |
 | 107 | 2026-11-03 | api | **上游 HEAD 前进**：`76ab46a` → `8f9c8b7`（1 个 commit：`fix(diff)` 让工作区模式保留被 `.gitignore` 匹配的**已跟踪**文件——`internal/diff/git.go` 的 `partitionDiffs` 在 `ModeWorkspace` 下不再套 `.gitignore`，因为工作区模式里未跟踪的忽略文件早已被滤掉，再套一次会误删已跟踪的改动）；`refs/tags/v1.13.4` 与 npm `1.13.4` 均未变，**pin 不前进**；对照表 5 行的上游文件一个都没被这个 commit 碰到，无移植项（本仓不自己过滤 diff，工作区范围就是 `ocr review --repo`，行为变化由 CLI 带来）；DoD 的版本事实进断言（`dodPinViolations`：过线标准里的每个 `vX.Y.Z` 只能是 pin 的 tag 或本程序版本），并修掉 DoD 里两处过期的 `v1.13.3` | — |
 | 108 | 2026-11-04 | git | `8f9c8b7` / `v1.13.4` / npm `1.13.4`，三条通路答案一致、无新内容，**pin 不前进、无移植项**；DoD 从「人读才能核」推到「脚本能核哪几条还没证据」：6 条各加一行 `证据候选：<仓内路径>`，新增 `dodEvidenceCandidates` / `dodEvidenceCandidateViolations`（每条至少一个候选、路径必须在仓里、候选必须挂在某一条之下），候选与证据共用同一个路径读法；八格反向控制，其中一格是这条规则第一次跑就抓到的自己——DoD 解释标记的那段散文含有这四个字，被「行里出现过标记」判成无主候选，规则改成「行首是标记」；两份 README 的安装段去掉内部场合的说法（「初审答辩环境」/「reviewed and demoed on」→「已验证环境」/「Verified environment」），新增 `readmeInternalTermViolations` 与五格反向控制（含「平台事实本身仍绿」）；界面中文排版从三屏扩到六屏（通知条 `?notice=overflow`、设置页、首屏引导卡），新增逐屏前提 `screensWithoutProsePunctuation`（一屏里没有任何全角标点即算没读到）与第二条反向控制（设置页那句的全角顿号改半角，要求点名 `settings-top`） | — |
+| 109 | 2026-11-03 | git | **上游 HEAD 前进**：`8f9c8b7` → `c452846`（3 个 commit：`.jsonc` 进 allowlist、EJS / Liquid / Nunjucks 模板支持、Scala 审查规则）；`refs/tags/v1.13.4` 与 npm `1.13.4` 均未变，**pin 不前进**；对照表 5 行的上游文件一个都没被这三个 commit 碰到，无移植项（三处都是引擎侧的 allowlist 与规则表，本仓只显示 CLI 给出的排除原因，不自己判定哪些文件进审查）；DoD 的证据从「候选指到哪」推到「候选文件里真有那份证据」：新增 `DOD_EVIDENCE_SHAPES`（14 条候选各声明该记录里必须出现的证据形状，DOD-6 另有一条 `mustNot`）与 `dodEvidenceBodyViolations`（每个候选都要有形状、形状表与候选双射、文件里必须真的有那份证据、读不到不算绿），七格反向控制（把 README 里的「非官方」抹掉、加一条没声明形状的候选、删掉 DOD-5 的候选、文件读不到、`config-handler.js` 开始自己写配置）；DOD-4 补一条指向 `tools/e2e-flow.cjs` 的候选——`.mjs` 只是跑真 Electron 的壳，预览与分支对比的断言在 `.cjs` 里，原候选指过去读不到那几条 check；`docs/measurements.md` 未验证清单补「浏览器依赖」一行，两份 README 的已知限制写明导出 HTML 报告的排版归上游 | — |
 
 ### 对照表（上游前进时要重读的五处）
 
@@ -209,7 +210,7 @@ tool 结果文本**（`Error: diff not found for: …`、`Diffs exist for: …`�
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。搬完这里只留一句
    指针——「本文件只留当前一轮」不是约定而是断言（`previousRoundPointerViolations`）。
 
-## 当前状态（第 108 轮，2026-11-04）
+## 当前状态（第 109 轮，2026-11-03）
 第 108 轮复核：**上游没有新内容。**`git ls-remote` 这一轮答上来了：`refs/heads/main` 仍是 `8f9c8b7`，
 `refs/tags/v1.13.4` 仍指向 tag 对象 `1393158`，`/releases/latest` 仍是 `v1.13.4`。三条通路答案一致，
 **pin 不前进**，对照表 5 行因此不动，无移植项。

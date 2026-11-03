@@ -54,6 +54,8 @@ import {
   dodChecklist,
   dodEvidenceCandidates,
   dodEvidenceCandidateViolations,
+  dodEvidenceBodyViolations,
+  DOD_EVIDENCE_SHAPES,
   dodEvidenceTarget,
   DOD_CANDIDATE_MARK,
   dodPinViolations,
@@ -3587,6 +3589,132 @@ if (!flags.selftest && !flags.noRespawn) {
     dodEvidenceCandidates(noted)[0].path === firstCandidate.path &&
       dodEvidenceCandidateViolations(noted, exists).length === 0,
     JSON.stringify(dodEvidenceCandidates(noted)[0])
+  );
+}
+
+/* ---- a candidate is a pointer; the pointer has to land on the evidence ----
+ * The candidate rule settles "every item names a record and the record exists".
+ * It cannot settle whether the record contains the evidence — and that was the
+ * state of the whole bar: six items, every candidate path present, nobody had
+ * opened one. The controls below are the ways this rule can be wrong: it can
+ * pass by reading nothing, it can pass while a candidate has no declared shape,
+ * it can stay green on a file that exists but lacks the evidence, it can accept
+ * a shape whose candidate was deleted, and it can miss the one item that is
+ * stated as an absence (`mustNot`).
+ */
+{
+  const doc = fs.readFileSync(path.join(ROOT, PRODUCT_DOD_DOC), "utf8");
+  const realRead = (target) => {
+    try {
+      return fs.readFileSync(path.join(ROOT, target), "utf8");
+    } catch {
+      return null;
+    }
+  };
+  const candidates = dodEvidenceCandidates(doc);
+  const lines = doc.split(/\r?\n/);
+
+  check(
+    "the live DoD's candidates really contain the evidence each item is about",
+    dodEvidenceBodyViolations(doc, realRead).length === 0,
+    dodEvidenceBodyViolations(doc, realRead).join("；") || "no violation"
+  );
+  // The premise, stated separately: a rule that reads no shape is green for the
+  // wrong reason, and "no shapes" looks exactly like "all covered".
+  check(
+    "...and the rule is reading something: all six IDs have a shape, and every candidate has one",
+    DOD_CHECKBOX_IDS.every((id) => DOD_EVIDENCE_SHAPES.some((shape) => shape.id === id)) &&
+      candidates.every((candidate) =>
+        DOD_EVIDENCE_SHAPES.some((shape) => shape.id === candidate.id && shape.path === candidate.path)
+      ) &&
+      DOD_EVIDENCE_SHAPES.every((shape) => shape.must.length > 0),
+    JSON.stringify({
+      ids: DOD_CHECKBOX_IDS.filter((id) => !DOD_EVIDENCE_SHAPES.some((s) => s.id === id)),
+      shapes: DOD_EVIDENCE_SHAPES.length,
+      candidates: candidates.length,
+    })
+  );
+
+  // The defect the rule exists for: the file is there, the evidence is not. The
+  // body is doctored rather than the document, because the candidate is fine —
+  // it is the record that stopped saying what the item is about.
+  const doctored = (target) =>
+    target === "README.zh-CN.md" ? String(realRead(target)).replace(/非官方/g, "官方") : realRead(target);
+  const missingBody = dodEvidenceBodyViolations(doc, doctored);
+  check(
+    "...and a candidate whose file exists but no longer says 非官方 goes red, naming the item, the path and the missing word",
+    missingBody.length === 1 &&
+      missingBody[0].includes("DOD-1") &&
+      missingBody[0].includes("README.zh-CN.md") &&
+      missingBody[0].includes("非官方"),
+    missingBody.join("；") || "no violation"
+  );
+
+  // A candidate added without saying what evidence it should hold is a pointer
+  // nobody has read — the exact shape the next round would leave behind.
+  const firstItem = dodChecklist(doc)[0];
+  const unshaped = lines
+    .map((line, index) =>
+      index + 1 === firstItem.line ? `${line}\n  证据候选：docs/hardening-log.md` : line
+    )
+    .join("\n");
+  const unshapedViolations = dodEvidenceBodyViolations(unshaped, realRead);
+  check(
+    "...and a candidate with no declared shape goes red, naming the path",
+    unshapedViolations.length === 1 &&
+      unshapedViolations[0].includes("docs/hardening-log.md") &&
+      unshapedViolations[0].includes("没有声明"),
+    unshapedViolations.join("；") || "no violation"
+  );
+
+  // The other side of the bijection: the table still holds a shape for a
+  // candidate the document no longer makes.
+  const fifth = dodChecklist(doc).find((item) => item.id === "DOD-5");
+  const stripped = lines
+    .filter((line, index) => {
+      const at = index + 1;
+      return !(at > fifth.line && candidates.some((c) => c.line === at && c.id === "DOD-5"));
+    })
+    .join("\n");
+  const strippedViolations = dodEvidenceBodyViolations(stripped, realRead);
+  check(
+    "...and a shape whose candidate was deleted from the DoD goes red instead of passing quietly",
+    strippedViolations.length === 2 &&
+      strippedViolations.every((v) => v.includes("DOD-5")) &&
+      strippedViolations.some((v) => v.includes("docs/measurements.md")) &&
+      strippedViolations.some((v) => v.includes("tools/release.mjs")),
+    strippedViolations.join("；") || "no violation"
+  );
+
+  // A file that cannot be read is not evidence: the check has no object, and
+  // "could not read it" must not be the same answer as "it is fine".
+  const unreadable = dodEvidenceBodyViolations(doc, (target) =>
+    target === "package.json" ? null : realRead(target)
+  );
+  check(
+    "...and a candidate whose file cannot be read goes red rather than counting as green",
+    unreadable.length === 1 &&
+      unreadable[0].includes("DOD-6") &&
+      unreadable[0].includes("package.json") &&
+      unreadable[0].includes("读不到"),
+    unreadable.join("；") || "no violation"
+  );
+
+  // DOD-6 is the one item stated as an absence ("本程序不存副本"), so it is the
+  // only place `mustNot` can be exercised: a config handler that started writing
+  // the file itself would still contain every `must` word.
+  const writes = (target) =>
+    target === "config-handler.js"
+      ? `${realRead(target)}\nfs.writeFileSync(configPath, JSON.stringify(view));`
+      : realRead(target);
+  const writesViolations = dodEvidenceBodyViolations(doc, writes);
+  check(
+    "...and a record that starts writing the config itself goes red on the absence DOD-6 states",
+    writesViolations.length === 1 &&
+      writesViolations[0].includes("DOD-6") &&
+      writesViolations[0].includes("config-handler.js") &&
+      writesViolations[0].includes("自己写配置文件"),
+    writesViolations.join("；") || "no violation"
   );
 }
 

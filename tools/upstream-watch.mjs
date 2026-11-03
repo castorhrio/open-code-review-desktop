@@ -1872,6 +1872,224 @@ export const dodEvidenceCandidateViolations = (doc, exists = () => true) => {
   return violations;
 };
 
+// ---- a candidate is a pointer; the pointer has to land on the evidence ----
+//
+// `dodEvidenceCandidateViolations` settles "every item says which record it would
+// cite, and that record exists". It cannot settle the other half: a file can
+// exist and still not contain the thing the item is about. That gap is not
+// hypothetical — it is the state the whole bar was in: six items, six candidate
+// paths, every path present, and nobody had opened one to see whether the
+// evidence was inside. "The pointer resolves" and "the evidence is there" are
+// different answers, and only the second one is what a tick means.
+//
+// So each candidate declares the shape its record must contain, and the rule
+// reads the file:
+//
+//   1. 每个候选都要有形状 — a candidate with no declared shape is a pointer
+//      nobody has read. It is red, because adding a candidate is exactly the
+//      moment to say what evidence it should hold; a table that silently
+//      ignored new candidates would let the next round add one and call it done.
+//   2. 形状表与候选是双射 — a shape whose (item, path) is no longer a candidate
+//      is red too. The two halves are one fact; when only one side moves, the
+//      reader cannot tell which of them is current.
+//   3. 文件里要真的有那份证据 — every `must` pattern must appear in the body and
+//      every `mustNot` pattern must not. The sentence names the item, the path
+//      and the missing (or forbidden) label, because "DOD-4 is red" without the
+//      word that is missing sends the reader back to reading the file by eye.
+//
+// What this rule still cannot say is whether the shape is the *right* shape: a
+// pattern is a claim about what the evidence looks like, written by the same
+// person who wrote the candidate. It can be too weak (a word that appears for
+// another reason) or too tight (a wording that changes). Both are visible in the
+// table below, which is the point — the claim is now one line a reader can argue
+// with, instead of a paragraph of prose nobody re-reads.
+export const DOD_EVIDENCE_SHAPES = Object.freeze([
+  {
+    id: "DOD-1",
+    path: "README.zh-CN.md",
+    must: [
+      { label: "非官方", pattern: /非官方/ },
+      { label: "未获其背书 / 无隶属关系", pattern: /未获其背书|无隶属关系/ },
+    ],
+  },
+  {
+    id: "DOD-1",
+    path: "src/components/SettingsPanel.tsx",
+    must: [
+      { label: "非官方", pattern: /非官方/ },
+      { label: "无隶属关系", pattern: /无隶属关系/ },
+    ],
+  },
+  {
+    id: "DOD-2",
+    path: "ocr-service.js",
+    must: [
+      { label: "spawn 官方二进制", pattern: /spawn\(/ },
+      { label: "--preview 参数", pattern: /--preview/ },
+      { label: "解析 CLI 的 JSON", pattern: /JSON\.parse/ },
+    ],
+  },
+  {
+    id: "DOD-2",
+    path: "tools/service-smoke.mjs",
+    must: [
+      { label: "按上游 resolver 语义重算", pattern: /resolver/ },
+      { label: "平台包名", pattern: /PLATFORM_PACKAGE/ },
+    ],
+  },
+  {
+    id: "DOD-3",
+    path: "docs/OCR-UPSTREAM-SYNC.md",
+    must: [
+      { label: "pin 的 tag", pattern: new RegExp(PINNED_UPSTREAM.tag.replace(/\./g, "\\.")) },
+      { label: "对照表", pattern: /对照表/ },
+    ],
+  },
+  {
+    id: "DOD-3",
+    path: "tools/upstream-watch-smoke.mjs",
+    must: [
+      { label: "DoD 勾选断言", pattern: /dodCheckboxViolations/ },
+      { label: "通路账断言", pattern: /ledgerTableViolations/ },
+    ],
+  },
+  {
+    id: "DOD-4",
+    path: "tools/e2e-flow.mjs",
+    must: [
+      { label: "真 Electron 进程", pattern: /spawn\(electronPath/ },
+      { label: "跑的是 e2e-flow.cjs", pattern: /e2e-flow\.cjs/ },
+    ],
+  },
+  {
+    id: "DOD-4",
+    path: "tools/e2e-flow.cjs",
+    must: [
+      { label: "预览", pattern: /preview/ },
+      { label: "分支对比范围", pattern: /range/ },
+    ],
+  },
+  {
+    id: "DOD-4",
+    path: "src/components/ResultsPanel.tsx",
+    must: [
+      { label: "四态徽章取自 STATUS", pattern: /STATUS/ },
+      { label: "徽章渲染", pattern: /<Badge/ },
+      { label: "预算截断态", pattern: /runLimitReached/ },
+    ],
+  },
+  {
+    id: "DOD-5",
+    path: "docs/measurements.md",
+    must: [
+      { label: "未验证清单", pattern: /未验证清单/ },
+      { label: "真机记录", pattern: /真机/ },
+    ],
+  },
+  {
+    id: "DOD-5",
+    path: "tools/release.mjs",
+    must: [
+      { label: "不 push", pattern: /does not push/ },
+      { label: "不发布 Release", pattern: /does not publish a GitHub Release/ },
+    ],
+  },
+  {
+    id: "DOD-6",
+    path: "package.json",
+    must: [{ label: "asar 保持 false", pattern: /"asar":\s*false/ }],
+  },
+  {
+    id: "DOD-6",
+    path: "config-handler.js",
+    must: [
+      { label: "写入只经 ocr.setConfig", pattern: /ocr\.setConfig\(/ },
+      { label: "Key 走 providers.<name>.api_key", pattern: /api_key/ },
+    ],
+    mustNot: [{ label: "自己写配置文件", pattern: /writeFile/ }],
+  },
+  {
+    id: "DOD-6",
+    path: "tools/secret-scan.mjs",
+    must: [
+      { label: "读配置里的 Key", pattern: /api_key/ },
+      { label: "扫描产物", pattern: /scan/ },
+    ],
+  },
+]);
+
+const dodShapeKey = (id, path) => `${id}\u0000${path}`;
+
+/** The DoD's candidates, read against the shape each one declares.
+ *
+ *  `read(path)` returns the file's text, or `null` when it cannot be read. It is
+ *  required rather than defaulted to a filesystem call: this module is imported
+ *  by checks that must be able to hand in a doctored body, and a default that
+ *  silently read the real file would make "the evidence is missing" impossible
+ *  to test — the one control that matters most. */
+export const dodEvidenceBodyViolations = (doc, read = () => null) => {
+  const candidates = dodEvidenceCandidates(doc);
+  const violations = [];
+  const shapes = DOD_EVIDENCE_SHAPES;
+  const shapeByKey = new Map(shapes.map((shape) => [dodShapeKey(shape.id, shape.path), shape]));
+
+  // 1. A candidate nobody has said anything about is a pointer, not evidence.
+  for (const candidate of candidates) {
+    if (candidate.id === null || candidate.path === null) continue; // the candidate rule's question
+    if (!shapeByKey.has(dodShapeKey(candidate.id, candidate.path))) {
+      violations.push(
+        `第 ${candidate.line} 行：${candidate.id} 的候选 ${candidate.path} 没有声明「这份记录里该有什么证据」——` +
+          "候选只证明文件在，不证明文件里有那份证据；没声明形状的候选等于没人读过它"
+      );
+    }
+  }
+
+  // 2. The table and the document are one fact, so a shape with no candidate is
+  //    the same defect from the other side.
+  const candidateKeys = new Set(
+    candidates
+      .filter((candidate) => candidate.id !== null && candidate.path !== null)
+      .map((candidate) => dodShapeKey(candidate.id, candidate.path))
+  );
+  for (const shape of shapes) {
+    if (!candidateKeys.has(dodShapeKey(shape.id, shape.path))) {
+      violations.push(
+        `${shape.id} 的证据形状表里还留着 ${shape.path}，但 DoD 里已经没有这条候选——` +
+          "形状表与候选是同一件事的两面，一边改了另一边没改，读的人就不知道哪份才是真的"
+      );
+    }
+  }
+
+  // 3. The body itself.
+  for (const shape of shapes) {
+    const body = read(shape.path);
+    if (typeof body !== "string") {
+      violations.push(
+        `${shape.id} 的证据候选 ${shape.path} 读不到内容——形状检查因此没有对象，不能算绿`
+      );
+      continue;
+    }
+    const missing = shape.must.filter((item) => !item.pattern.test(body));
+    if (missing.length) {
+      violations.push(
+        `${shape.id} 的证据候选 ${shape.path} 里找不到 ${missing
+          .map((item) => `「${item.label}」`)
+          .join("、")}——候选指向的文件在，但里面没有这一条要的证据，勾选那一步仍然没有着落`
+      );
+    }
+    const forbidden = (shape.mustNot || []).filter((item) => item.pattern.test(body));
+    if (forbidden.length) {
+      violations.push(
+        `${shape.id} 的证据候选 ${shape.path} 里出现了不该有的 ${forbidden
+          .map((item) => `「${item.label}」`)
+          .join("、")}——这一条要的是「没有这件事」，出现了就是反证`
+      );
+    }
+  }
+
+  return violations;
+};
+
 // ---- the bar's own version facts: a pin that moved must not leave the DoD behind ----
 //
 // The DoD is the only input to the next round, and it states two version facts in
