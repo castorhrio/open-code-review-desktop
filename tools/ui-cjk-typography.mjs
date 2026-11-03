@@ -16,6 +16,12 @@
 //   - the prose of the results screen (a long finding, the case where the model
 //     writes the most text), the reading/report screen, and the chrome around
 //     them (nav rail, header, buttons, notices);
+//   - the three surfaces that were the *last* to be covered, because they are
+//     the ones nobody thinks of as prose: the notice bar (sentences the main
+//     process writes about its own failure), the settings page (hints and
+//     explanations, the densest Chinese in the app), and the first-run guide
+//     card. All three are written by hand, one sentence at a time, which is
+//     exactly how a half-width comma gets in;
 //   - **not** anything inside `pre` / `code` / `textarea` / `input`: a code
 //     sample is not prose, and `foo(x,y)中` in a diff is not a typesetting
 //     defect. That exclusion is the difference between a rule and a nuisance,
@@ -188,11 +194,61 @@ export const SCREENS = [
     },
   },
   { name: "report-read", query: "", navigate: openReport },
+  // The notice bar: sentences the main process writes about work it could not
+  // do. `?notice=overflow` is the fixture that fills the bar past its bound, so
+  // the screen carries the most of them at once — and the bar is the one place
+  // where a sentence is *only* ever seen here (the drawer holds the same text,
+  // but inside `pre`, which this check skips on purpose).
+  {
+    name: "notice-overflow",
+    query: "?notice=overflow",
+    navigate: async (page) => {
+      await page.waitForTimeout(600);
+    },
+  },
+  // The settings page: hints, explanations and the about section. The densest
+  // hand-written Chinese in the app, and the screen a first run is sent to.
+  {
+    name: "settings-top",
+    query: "",
+    navigate: async (page) => {
+      await nav("设置")(page);
+      await page.waitForTimeout(900);
+    },
+  },
+  // The first-run guide card. Every other screen dismisses it (`STORAGE` carries
+  // `guide-dismissed: 1`), so its three steps had no coverage at all — and the
+  // steps are the first Chinese a new user reads.
+  {
+    name: "guide-first-run",
+    query: "",
+    storage: { "last-repo": "/home/x/work/payments-api", "ocr-theme-pref": "system" },
+    navigate: async (page) => {
+      await nav("审查")(page);
+      await page.waitForTimeout(900);
+    },
+  },
 ];
 
 /**
- * The reverse control: the same app with one rendered sentence's full-width
- * comma replaced by a half-width one.
+ * The punctuation a screen has to carry at least once to count as read.
+ *
+ * A screen that renders no full-width punctuation at all is not a screen this
+ * check has looked at — it is a screen whose blocks came back empty, or whose
+ * prose moved behind a `pre`, or a navigation that silently landed somewhere
+ * else. Green there would mean "nothing to report" and "nothing was read" at the
+ * same time, which is the failure mode this repository keeps finding. So the
+ * premise is asserted per screen rather than once for the run.
+ */
+export const PROSE_PUNCTUATION = /[，。、；：！？（）「」]/;
+
+/** Screens whose blocks carry no full-width punctuation, i.e. were not read. */
+export const screensWithoutProsePunctuation = (entries) =>
+  entries.filter((entry) => !entry.blocks.some((block) => PROSE_PUNCTUATION.test(String(block.text || "")))).map((entry) => entry.screen);
+
+/**
+ * The reverse control: the same app with rendered sentences' full-width commas
+ * replaced by half-width ones.
  *
  * Without it, a green here could mean "the rules are satisfied" or "the rules
  * never ran" — the two are indistinguishable from the outside, and the second is
@@ -200,31 +256,58 @@ export const SCREENS = [
  * from the real bundle, the same screens are walked, and the run is only allowed
  * to be green if the mutant is *red* and names the sentence that was broken.
  *
- * The needle is a sentence the report screen renders verbatim, so the mutation
- * lands in text this harness actually reads. `applied !== 1` is a build problem
- * (the sentence was reworded), not a typography finding, and it stops the run
- * rather than passing quietly.
+ * There is one needle per *kind* of screen, not one for the run: the report
+ * screen was the only one mutated while it was the only one walked, and adding
+ * three screens without adding a needle would have left them in exactly the
+ * state the report screen was in before — checked by a rule nobody had proved
+ * could fire there. The settings needle is the one that matters most: the
+ * settings page is hand-written prose, which is where a half-width comma
+ * actually comes from, while the report's sentence is a constant.
+ *
+ * Each needle is a sentence the screen renders verbatim, so the mutation lands
+ * in text this harness actually reads. `applied !== 1` is a build problem (the
+ * sentence was reworded), not a typography finding, and it stops the run rather
+ * than passing quietly.
  */
 export const NEEDLE = "固定到审查当时的那一版，之后分支再前进也不影响这份报告";
 export const MUTANT = "固定到审查当时的那一版,之后分支再前进也不影响这份报告";
+export const SETTINGS_NEEDLE = "不写配置、也不需要先保存";
+export const SETTINGS_MUTANT = "不写配置,也不需要先保存";
+
+/** Every mutation the reverse control applies, and the screen it must be caught on. */
+export const MUTATIONS = [
+  { needle: NEEDLE, mutant: MUTANT, screen: "report-read", quote: "「,之」", source: "src/components/ReportView.tsx" },
+  { needle: SETTINGS_NEEDLE, mutant: SETTINGS_MUTANT, screen: "settings-top", quote: "「,也」", source: "src/components/SettingsPanel.tsx" },
+];
 
 export function weakenedTypographyBundle() {
   fs.rmSync(WEAK_OUT, { recursive: true, force: true });
   fs.cpSync(OUT, WEAK_OUT, { recursive: true });
-  let applied = 0;
+  const applied = new Map(MUTATIONS.map((mutation) => [mutation.needle, 0]));
   for (const name of fs.readdirSync(path.join(WEAK_OUT, "assets"))) {
     if (!name.endsWith(".js")) continue;
     const file = path.join(WEAK_OUT, "assets", name);
-    const parts = fs.readFileSync(file, "utf8").split(NEEDLE);
-    if (parts.length === 1) continue;
-    applied += parts.length - 1;
-    fs.writeFileSync(file, parts.join(MUTANT));
+    let source = fs.readFileSync(file, "utf8");
+    for (const mutation of MUTATIONS) {
+      const parts = source.split(mutation.needle);
+      if (parts.length === 1) continue;
+      applied.set(mutation.needle, applied.get(mutation.needle) + parts.length - 1);
+      source = parts.join(mutation.mutant);
+    }
+    fs.writeFileSync(file, source);
   }
-  if (applied !== 1) {
+  const wrong = MUTATIONS.filter((mutation) => applied.get(mutation.needle) !== 1);
+  if (wrong.length) {
     console.error(
-      `The typography reverse control could not be built: the bundle contains ${applied} occurrence(s) of the report's pinned-commit ` +
-        `sentence, but exactly 1 is required.\n` +
-        "Re-read src/components/ReportView.tsx and the compiled string in out/assets/*.js; a reverse control that mutates nothing is a green that proves nothing."
+      "The typography reverse control could not be built: " +
+        wrong
+          .map(
+            (mutation) =>
+              `the bundle contains ${applied.get(mutation.needle)} occurrence(s) of ${mutation.source}'s sentence 「${snippet(mutation.needle, 24)}」, but exactly 1 is required`
+          )
+          .join("; ") +
+        ".\n" +
+        "Re-read the component and the compiled string in out/assets/*.js; a reverse control that mutates nothing is a green that proves nothing."
     );
     process.exit(2);
   }
@@ -238,9 +321,13 @@ const walk = async (page, port, screens) => {
   for (const screen of screens) {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`http://127.0.0.1:${port}/${screen.query}`, { waitUntil: "load" });
+    // Cleared first, then set: the screens share one page, so a key a previous
+    // screen wrote (`guide-dismissed`) would otherwise leak into the next one and
+    // the guide screen would render nothing while still reporting green.
     await page.evaluate((s) => {
+      localStorage.clear();
       for (const [k, v] of Object.entries(s)) localStorage.setItem(k, v);
-    }, STORAGE);
+    }, screen.storage || STORAGE);
     await page.reload({ waitUntil: "load" });
     await page.waitForTimeout(700);
     await screen.navigate(page);
@@ -282,24 +369,44 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
   );
   for (const violation of violations) console.log(`FAIL    ${formatViolation(violation)}`);
 
+  // The premise, per screen: a screen with no full-width punctuation anywhere is
+  // a screen this check did not read. Reported before the violations so a
+  // navigation that landed on the wrong page cannot pass as clean prose.
+  const unread = screensWithoutProsePunctuation(clean);
+  if (unread.length) {
+    console.log(
+      `FAIL    前提：${unread.join("、")} 这一屏没有取到任何含中文标点的文本——` +
+        "没有标点可查的屏，绿只说明它没被读到（导航落错页、正文挪进了 pre、或夹具没渲染）"
+    );
+    await browser.close();
+    cleanServer.close();
+    process.exit(2);
+  }
+
   // The reverse control runs even when the clean pass is red: a red clean pass
   // with a green mutant would mean the rules fire for some other reason, and
   // that is worth knowing before anyone starts editing prose.
   const weakServer = await serve(PORT + 1, weakenedTypographyBundle());
   const weak = await walk(page, PORT + 1, SCREENS);
   const weakViolations = weak.flatMap((entry) => entry.violations);
-  const caught = weakViolations.filter((v) => v.rule === "半角标点后接中文" && v.detail.includes("「,之」"));
-  if (!caught.length) {
+  const missed = [];
+  for (const mutation of MUTATIONS) {
+    const caught = weakViolations.filter(
+      (v) => v.rule === "半角标点后接中文" && v.file === mutation.screen && v.detail.includes(mutation.quote)
+    );
+    if (!caught.length) missed.push(mutation);
+    else console.log(`ok      反向控制：${mutation.screen} 上把「${snippet(mutation.needle, 20)}」的全角逗号改成半角，本检查点名了 ${caught.length} 处`);
+  }
+  if (missed.length) {
     console.log(
-      `FAIL    反向控制：把报告里那句「${snippet(NEEDLE, 24)}」的全角逗号改成半角之后，本检查没有变红——` +
-        "它看不见半角标点，所以它的绿不说明任何事"
+      `FAIL    反向控制：${missed.map((m) => `${m.screen}（${m.source}）`).join("、")} 上的全角逗号改成半角之后，本检查没有变红——` +
+        "它看不见那一屏的半角标点，所以那一屏的绿不说明任何事"
     );
     await browser.close();
     cleanServer.close();
     weakServer.close();
     process.exit(2);
   }
-  console.log(`ok      反向控制：同一屏上把一处全角逗号改成半角，本检查点名了 ${caught.length} 处（${caught[0].file}）`);
 
   await browser.close();
   cleanServer.close();

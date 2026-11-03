@@ -52,7 +52,10 @@ import {
   dodAuthorityViolations,
   dodCheckboxViolations,
   dodChecklist,
+  dodEvidenceCandidates,
+  dodEvidenceCandidateViolations,
   dodEvidenceTarget,
+  DOD_CANDIDATE_MARK,
   dodPinViolations,
   DOD_VERSION_TOKEN,
   DOD_CHECKBOX_IDS,
@@ -60,7 +63,9 @@ import {
   PRODUCT_DOD_DOC,
   DOD_DRAFT_TERMS,
   README_FILES,
+  README_INTERNAL_TERMS,
   firstScreenViolations,
+  readmeInternalTermViolations,
   DANGLING_LINE_ENDINGS,
   HUMAN_SECTIONS,
   humanSectionViolations,
@@ -3134,6 +3139,85 @@ if (!flags.selftest && !flags.noRespawn) {
   );
 }
 
+/* ---- the READMEs are read by strangers, not by the review panel ----
+ * The install section opened with "the environment this is reviewed and demoed
+ * on is Windows x64" / 「初审答辩环境：Windows x64」. Both sentences are true and
+ * both are about us: they name an internal occasion, so a first-time installer
+ * is told which audience the sentence was written for instead of which file to
+ * download. The wording is fixed; these checks keep it fixed.
+ *
+ * The controls are the two ways this rule could be wrong: it could pass by
+ * reading nothing (no README text at all), and it could refuse the platform fact
+ * along with the internal word — which would push the honest sentence out with
+ * the dishonest one.
+ */
+{
+  const readmes = README_FILES.map((name) => ({ path: name, text: fs.readFileSync(path.join(ROOT, name), "utf8") }));
+  const live = readmeInternalTermViolations(readmes);
+  check(
+    "neither README names an internal occasion (defence / review panel / demo) in its install steps",
+    live.length === 0,
+    live.join("；") || "no violation"
+  );
+
+  // The premise: the rule has to be reading the files, not an empty list.
+  check(
+    "...and the rule is reading both READMEs, not an empty list",
+    readmes.length === README_FILES.length &&
+      readmes.every((doc) => doc.text.length > 1000) &&
+      readmeInternalTermViolations([]).length === 0,
+    JSON.stringify(readmes.map((doc) => ({ path: doc.path, chars: doc.text.length })))
+  );
+
+  // The defect itself, put back where it was: the two sentences this round
+  // replaced. Each has to be named by file, line and word.
+  const zhBack = readmes.map((doc) =>
+    doc.path === "README.zh-CN.md"
+      ? { ...doc, text: doc.text.replace("**已验证环境：Windows x64", "**初审答辩环境：Windows x64") }
+      : doc
+  );
+  const zhViolations = readmeInternalTermViolations(zhBack);
+  check(
+    "...and the Chinese sentence this round replaced goes red, naming the file, the line and the word",
+    zhViolations.length === 1 &&
+      zhViolations[0].includes("README.zh-CN.md") &&
+      /第 \d+ 行/.test(zhViolations[0]) &&
+      zhViolations[0].includes("答辩"),
+    zhViolations.join("；") || "no violation"
+  );
+
+  const enBack = readmes.map((doc) =>
+    doc.path === "README.md"
+      ? { ...doc, text: doc.text.replace("**Verified environment: Windows x64", "**The environment this is reviewed and demoed on is Windows x64") }
+      : doc
+  );
+  const enViolations = readmeInternalTermViolations(enBack);
+  check(
+    "...and the English sentence goes red on the verb, not only on the Chinese noun",
+    enViolations.length === 1 &&
+      enViolations[0].includes("README.md") &&
+      enViolations[0].includes("demoed"),
+    enViolations.join("；") || "no violation"
+  );
+
+  // The honest half of the sentence is not the problem: the platform fact and
+  // the file to download are exactly what the install section should say, so a
+  // rule that refused them would be a rule against saying anything at all.
+  const honest = readmes.map((doc) => ({
+    ...doc,
+    text: doc.text.replace(
+      /^\*\*(?:Verified environment|已验证环境).*$/m,
+      "**Verified environment: Windows x64, using the `*-setup.exe`; macOS and Linux are source-only.**"
+    ),
+  }));
+  check(
+    "...and the platform fact itself stays green: the rule refuses the internal occasion, not the honest sentence",
+    readmeInternalTermViolations(honest).length === 0 &&
+      README_INTERNAL_TERMS.every((term) => !honest.some((doc) => doc.text.includes(term))),
+    readmeInternalTermViolations(honest).join("；") || "no violation"
+  );
+}
+
 /* ---- the product bar says it is in force, and one place says it ----
  * `README.md` sends contributors to the DoD and tells them to stop adding
  * features once it is full; the file it sent them to opened with "writable draft
@@ -3354,6 +3438,155 @@ if (!flags.selftest && !flags.noRespawn) {
       dodEvidenceTarget(`${DOD_EVIDENCE_MARK}\`docs/measurements.md\``),
       dodEvidenceTarget("没有证据的一句话"),
     ])
+  );
+}
+
+/* ---- an open item still has to say where its evidence would be ----
+ * `dodCheckboxViolations` only speaks about ticks, and all six items are
+ * unticked — so "no item names a single file" was a state the audit called
+ * green. The candidate rule is the other half: every item must say which record
+ * it would cite if it were closed today, and that path must exist.
+ *
+ * The controls below are the ways this rule can be wrong: it can pass by
+ * reading nothing (no candidate at all), it can pass while an item has none
+ * (the exact state the live document was in), it can accept a path that is not
+ * in the repository, it can accept a candidate that belongs to no item, and it
+ * can count the DoD's own explanation of the mark as coverage — which is what
+ * the first run of this rule did, on the live document.
+ */
+{
+  const doc = fs.readFileSync(path.join(ROOT, PRODUCT_DOD_DOC), "utf8");
+  const exists = (target) => fs.existsSync(path.join(ROOT, target));
+  const lines = doc.split(/\r?\n/);
+  const items = dodChecklist(doc);
+  const candidates = dodEvidenceCandidates(doc);
+
+  check(
+    "the live DoD passes the candidate rule: every item says where its evidence would be",
+    dodEvidenceCandidateViolations(doc, exists).length === 0,
+    dodEvidenceCandidateViolations(doc, exists).join("；") || "no violation"
+  );
+  // The premise, stated separately: a rule that reads no candidate is green for
+  // the wrong reason, and "no candidates" looks exactly like "all covered".
+  check(
+    "...and the rule is reading something: all six IDs carry a candidate, and every candidate sits under an item",
+    DOD_CHECKBOX_IDS.every((id) => candidates.some((c) => c.id === id)) &&
+      candidates.every((c) => c.id !== null && c.path !== null) &&
+      candidates.length >= DOD_CHECKBOX_IDS.length,
+    JSON.stringify(candidates.map((c) => ({ line: c.line, id: c.id, path: c.path })))
+  );
+
+  // The defect the rule exists for: an item that names nothing. Deleting DOD-5's
+  // candidates is the state the whole document was in before this round.
+  const fifth = items.find((item) => item.id === "DOD-5");
+  const stripped = lines
+    .filter((line, index) => {
+      const at = index + 1;
+      return !(at > fifth.line && candidates.some((c) => c.line === at && c.id === "DOD-5"));
+    })
+    .join("\n");
+  const strippedViolations = dodEvidenceCandidateViolations(stripped, exists);
+  check(
+    "...and an item with no candidate goes red, naming that ID and no other",
+    strippedViolations.length === 1 &&
+      strippedViolations[0].includes("DOD-5") &&
+      !strippedViolations[0].includes("DOD-4") &&
+      !strippedViolations[0].includes("DOD-6"),
+    strippedViolations.join("；") || "no violation"
+  );
+
+  // A candidate is a pointer, so a pointer nobody can follow is the failure: the
+  // path has to be in the repository, not merely plausible.
+  const firstCandidate = candidates[0];
+  const dangling = lines
+    .map((line, index) =>
+      index + 1 === firstCandidate.line
+        ? line.replace(firstCandidate.path, "docs/no-such-record.md")
+        : line
+    )
+    .join("\n");
+  const danglingViolations = dodEvidenceCandidateViolations(dangling, exists);
+  check(
+    "...and a candidate pointing at a file that does not exist goes red, naming the line and the path",
+    danglingViolations.length === 1 &&
+      danglingViolations[0].includes(`第 ${firstCandidate.line} 行`) &&
+      danglingViolations[0].includes("docs/no-such-record.md"),
+    danglingViolations.join("；") || "no violation"
+  );
+
+  // A candidate above the first item belongs to no ID: it reads as coverage and
+  // answers nothing, which is worse than an empty item because it looks done.
+  const orphan = lines
+    .map((line, index) =>
+      index + 1 === items[0].line ? `${DOD_CANDIDATE_MARK}docs/measurements.md\n${line}` : line
+    )
+    .join("\n");
+  const orphanViolations = dodEvidenceCandidateViolations(orphan, exists);
+  check(
+    "...and a candidate that sits under no item goes red instead of counting as coverage",
+    orphanViolations.length === 1 &&
+      orphanViolations[0].includes("不在任何一条 DOD 之下") &&
+      orphanViolations[0].includes(`第 ${items[0].line} 行`),
+    orphanViolations.join("；") || "no violation"
+  );
+
+  // The mark with nothing after it is the shape a hurried edit leaves behind.
+  const empty = lines
+    .map((line, index) => (index + 1 === firstCandidate.line ? `  ${DOD_CANDIDATE_MARK}` : line))
+    .join("\n");
+  const emptyViolations = dodEvidenceCandidateViolations(empty, exists);
+  check(
+    "...and a candidate with no path after the mark goes red, naming the line",
+    emptyViolations.length === 1 &&
+      emptyViolations[0].includes(`第 ${firstCandidate.line} 行`) &&
+      emptyViolations[0].includes("没有路径"),
+    emptyViolations.join("；") || "no violation"
+  );
+
+  // The bug this rule had on its first run: the DoD explains the mark in prose,
+  // and "the line contains the mark" made that explanation an orphan candidate.
+  // A mention is prose about the rule; a line that opens with the mark answers
+  // it. Both halves are asserted, because "ignore mentions" alone would also
+  // pass if the rule stopped reading candidates at all.
+  const proseLine = lines.findIndex(
+    (line) => line.includes(DOD_CANDIDATE_MARK) && !line.trimStart().startsWith(DOD_CANDIDATE_MARK)
+  );
+  const mentionUnderItem = lines
+    .map((line, index) =>
+      index + 1 === items[0].line
+        ? `${line}\n  说明：条目下面那行「${DOD_CANDIDATE_MARK}<仓内路径>」是候选，不是勾选`
+        : line
+    )
+    .join("\n");
+  check(
+    "...and a sentence that merely mentions the mark is not a candidate, while a line that opens with it still is",
+    proseLine !== -1 &&
+      !candidates.some((c) => c.line === proseLine + 1) &&
+      dodEvidenceCandidates(mentionUnderItem).length === candidates.length &&
+      dodEvidenceCandidateViolations(mentionUnderItem, exists).length === 0,
+    JSON.stringify({
+      proseLine: proseLine + 1,
+      counted: candidates.some((c) => c.line === proseLine + 1),
+      afterMention: dodEvidenceCandidates(mentionUnderItem).length,
+      live: candidates.length,
+    })
+  );
+
+  // One reader for both marks: the candidate path is read the same way the
+  // evidence path is, so a note after it or backticks around it cannot make the
+  // two rules disagree about which file a line names.
+  const noted = lines
+    .map((line, index) =>
+      index + 1 === firstCandidate.line
+        ? `  ${DOD_CANDIDATE_MARK}\`${firstCandidate.path}\`（第 108 轮）`
+        : line
+    )
+    .join("\n");
+  check(
+    "...and the candidate path is read like the evidence path: backticks and a note after it do not change the file",
+    dodEvidenceCandidates(noted)[0].path === firstCandidate.path &&
+      dodEvidenceCandidateViolations(noted, exists).length === 0,
+    JSON.stringify(dodEvidenceCandidates(noted)[0])
   );
 }
 

@@ -1471,6 +1471,59 @@ export const firstScreenViolations = (readmes) => {
   return violations;
 };
 
+// ---- the READMEs are read by strangers, not by the review panel ----
+//
+// The install section opened with "the environment this is reviewed and demoed
+// on is Windows x64" / 「初审答辩环境：Windows x64」. Both sentences are true and
+// both are about *us*: they name an internal occasion (a first-round defence)
+// and an internal verb (demoing), so a stranger reading the install steps is
+// told which audience the sentence was written for instead of what they need —
+// which platform this is verified on, and which file to download.
+//
+// The fix is a wording change, so the rule is about wording: the two READMEs may
+// not name the internal occasion. The words are refused by word rather than by
+// sentence, because the way this comes back is a sentence pasted in from a
+// report, and the sentence around it will be new each time.
+//
+// What the rule deliberately does *not* refuse is the platform fact itself:
+// "verified on Windows x64" is exactly what the install section should say, and
+// a rule that refused the platform name would push the honest sentence out along
+// with the internal one.
+export const README_INTERNAL_TERMS = Object.freeze([
+  "答辩",
+  "评审",
+  "初审",
+  "内部评审",
+  "内部试用",
+  "演示环境",
+]);
+// English side: the same occasion, written as a verb. Word-bounded so
+// "demolish"-style words are not this rule's business, and case-insensitive
+// because a heading may capitalise it.
+export const README_INTERNAL_PATTERN = /\bdemo(?:s|ed|ing)?\b/i;
+
+/** Internal-occasion vocabulary in the two READMEs. `readmes` is `[{ path, text }]`,
+ *  the same input as `firstScreenViolations`. */
+export const readmeInternalTermViolations = (readmes) => {
+  const violations = [];
+  for (const { path: source, text } of readmes) {
+    String(text == null ? "" : text)
+      .split(/\r?\n/)
+      .forEach((line, index) => {
+        const term = README_INTERNAL_TERMS.find((word) => line.includes(word));
+        const english = README_INTERNAL_PATTERN.exec(line);
+        const hit = term || (english === null ? "" : english[0]);
+        if (!hit) return;
+        violations.push(
+          `${source}：第 ${index + 1} 行出现内部场合的说法「${hit}」——` +
+            "README 的读者是第一次装这个应用的人，不是评审方；" +
+            "这一句该说的是「在哪个平台上验证过、下哪个文件」，而不是这句话是写给谁看的"
+        );
+      });
+  }
+  return violations;
+};
+
 // ---- the product bar has one authority, and it has to say whose it is ----
 //
 // `README.md` tells contributors that the next change may only come from an
@@ -1596,17 +1649,24 @@ export const dodChecklist = (doc) => {
   return items;
 };
 
-/** The path a checked item cites, or `null`. The first token after the mark, so
- *  `证据：docs/measurements.md（第 104 轮）` reads as the file and the note after
- *  it is free text. Backticks around the path are stripped: both spellings are
- *  what a person writes. */
-export const dodEvidenceTarget = (text) => {
-  const at = String(text == null ? "" : text).indexOf(DOD_EVIDENCE_MARK);
+/** The path written after one of the DoD's two marks, or `null`. The first token
+ *  after the mark, so `证据：docs/measurements.md（第 104 轮）` reads as the file and
+ *  the note after it is free text. Backticks around the path are stripped: both
+ *  spellings are what a person writes.
+ *
+ *  One reader for both marks (`证据：` on a ticked item, `证据候选：` under any
+ *  item), because two copies of "where does the path end" is how the two
+ *  spellings start disagreeing about a note and the same file gets reported as
+ *  existing by one rule and missing by the other. */
+const dodPathAfterMark = (text, mark) => {
+  const at = String(text == null ? "" : text).indexOf(mark);
   if (at === -1) return null;
-  const rest = String(text).slice(at + DOD_EVIDENCE_MARK.length).trim();
+  const rest = String(text).slice(at + mark.length).trim();
   const token = rest.split(/[\s（()）、，,]/)[0] || "";
   return token.replace(/^`+|`+$/g, "") || null;
 };
+
+export const dodEvidenceTarget = (text) => dodPathAfterMark(text, DOD_EVIDENCE_MARK);
 
 export const dodCheckboxViolations = (doc, exists = () => true) => {
   const items = dodChecklist(doc);
@@ -1690,6 +1750,121 @@ export const dodCheckboxViolations = (doc, exists = () => true) => {
       violations.push(
         `第 ${item.line} 行：${item.id || "这一条"}的证据指向 ${target}，但仓里没有这个文件——` +
           "勾选追不到记录，等于没有证据"
+      );
+    }
+  }
+
+  return violations;
+};
+
+// ---- an open item still has to say where its evidence would be ----
+//
+// `dodCheckboxViolations` settles "a tick must point at a record": it refuses a
+// `[x]` with no `证据：`. It cannot refuse anything about an item that is never
+// ticked — and every one of the six items was unticked, so the whole bar sat in
+// a state the audit called green while no item named a single file. "Nothing to
+// report" and "nobody has looked" are the same answer to that check, and only
+// one of them means the bar is being maintained.
+//
+// So the other half is stated too, as a *candidate* rather than evidence: every
+// item must say where its evidence would be (`证据候选：<仓内路径>`), and that
+// path must exist. A candidate is not a tick — ticking still belongs to the
+// scheduler side, and the item's text is untouched — it is the answer to "if
+// this item were closed today, which file in this repository would a reader
+// open". The distinction is deliberate and is enforced in both directions:
+//
+//   1. 每条都要有候选 — all six IDs must carry at least one `证据候选：` line.
+//      An item with none is named by ID, because that is how the next round's
+//      brief refers to it.
+//   2. 候选要落在仓里 — the cited path must exist, so a candidate cannot be a
+//      reassuring name. That is the same rule `dodCheckboxViolations` makes for
+//      evidence, and for the same reason: a pointer nobody can follow is prose.
+//   3. 候选要挂在某一条下面 — a `证据候选：` line before the first item, or
+//      after the list, belongs to no ID. It looks like coverage and answers
+//      nothing, so it is red rather than ignored.
+//   4. 候选是「行首」，不是「出现过」 — a candidate line *starts* with the mark.
+//      The DoD's own paragraph explains the mark, so it contains the four
+//      characters mid-sentence; reading "the line mentions it" made that
+//      explanation an orphan candidate and the live document red on the first
+//      run. A mention is prose about the rule, a line that opens with the mark
+//      is an answer to it, and only the second one is coverage.
+//
+// What this rule still cannot say is whether a candidate is *good*. It says the
+// pointer exists and that every item has one; whether that file really records
+// the item is a human read, which is why the DoD's own text keeps the burden on
+// the scheduler side.
+export const DOD_CANDIDATE_MARK = "证据候选：";
+
+/** Every `证据候选：` line in the DoD, with the ID of the item it sits under
+ *  (`null` when it sits under none). Line numbers are 1-based document lines.
+ *
+ *  "A candidate line" is a line whose first non-space character starts the mark,
+ *  not a line that contains it: the DoD explains the mark in prose, and a rule
+ *  that counted the explanation would report the document's own instructions as
+ *  an orphan candidate. */
+export const dodEvidenceCandidates = (doc) => {
+  const items = dodChecklist(doc);
+  const byLine = new Map(items.map((item) => [item.line, item]));
+  const candidates = [];
+  let current = null;
+  String(doc == null ? "" : doc)
+    .split(/\r?\n/)
+    .forEach((text, index) => {
+      const line = index + 1;
+      const item = byLine.get(line);
+      if (item) {
+        current = item;
+        return;
+      }
+      if (!text.trimStart().startsWith(DOD_CANDIDATE_MARK)) return;
+      candidates.push({
+        line,
+        id: current === null ? null : current.id,
+        path: dodPathAfterMark(text, DOD_CANDIDATE_MARK),
+      });
+    });
+  return candidates;
+};
+
+export const dodEvidenceCandidateViolations = (doc, exists = () => true) => {
+  const candidates = dodEvidenceCandidates(doc);
+  if (candidates.length === 0) {
+    return [
+      "DoD 里一行「" + DOD_CANDIDATE_MARK + "<仓内路径>」都没有：六条条目因此谁也没说" +
+        "「要勾我该去翻哪份记录」，一直不勾就成了一种看起来合格的静默状态",
+    ];
+  }
+
+  const violations = [];
+  const claimed = new Set(candidates.map((candidate) => candidate.id).filter((id) => id !== null));
+  const missing = DOD_CHECKBOX_IDS.filter((id) => !claimed.has(id));
+  if (missing.length) {
+    violations.push(
+      `${missing.join("、")} 没有写「${DOD_CANDIDATE_MARK}<仓内路径>」：` +
+        "条目可以还没勾，但它必须指出若勾上该追哪份记录——没有候选的那一条，" +
+        "下一轮既不知道该去读什么，也没法判断自己是不是已经做到了"
+    );
+  }
+
+  for (const candidate of candidates) {
+    if (candidate.id === null) {
+      violations.push(
+        `第 ${candidate.line} 行的「${DOD_CANDIDATE_MARK}」不在任何一条 DOD 之下——` +
+          "它看起来像是给某一条补了候选，实际上一条都没补上（候选要写在其条目下面一行）"
+      );
+      continue;
+    }
+    if (candidate.path === null) {
+      violations.push(
+        `第 ${candidate.line} 行：${candidate.id} 的「${DOD_CANDIDATE_MARK}」后面没有路径——` +
+          "候选必须指向仓里的一份记录，空着等于没写"
+      );
+      continue;
+    }
+    if (!exists(candidate.path)) {
+      violations.push(
+        `第 ${candidate.line} 行：${candidate.id} 的证据候选指向 ${candidate.path}，但仓里没有这个文件——` +
+          "候选是「将来要引用的那份记录」，指向不存在的路径，勾选那一步仍然没有着落"
       );
     }
   }

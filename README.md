@@ -74,7 +74,7 @@ Everything below was exercised against the real CLI, without spending tokens unl
 
 ## Install
 
-**The environment this is reviewed and demoed on is Windows x64, using the `*-setup.exe`.**
+**Verified environment: Windows x64, using the `*-setup.exe`.**
 
 **Option A — Windows installer (recommended).** Download the `*-setup.exe` for the release you want from [Releases](../../releases) and run it. The wizard lets you pick the install directory, shows the install path when it finishes, offers to launch the app, and creates desktop + Start-menu shortcuts **plus a Start-menu "卸载 / Uninstall" entry**. Per-user install by default, no administrator rights. Because it is unsigned, SmartScreen may warn — choose *More info → Run anyway*.
 

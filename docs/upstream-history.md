@@ -36,6 +36,110 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 
 ---
 
+## 上游状态（第 108 轮，2026-11-04）
+第 108 轮复核：**上游没有新内容。**`git ls-remote` 这一轮答上来了：`refs/heads/main` 仍是 `8f9c8b7`，
+`refs/tags/v1.13.4` 仍指向 tag 对象 `1393158`，`/releases/latest` 仍是 `v1.13.4`。三条通路答案一致，
+**pin 不前进**，对照表 5 行因此不动，无移植项。
+
+本轮按控制仓简报做 P0-1 的收尾、P1-2 与 P1-1，三件都不新增产品功能。
+
+**P0-1：过线标准从「人读才能核」推到「脚本能核哪几条还没证据」。** 上一轮把 DoD 的版本事实拉进了断言，
+但 `dodCheckboxViolations` 只对**勾上的**条目说话，而 6 条全是 `[ ]`——于是「六条里没有一条指出过任何一份
+记录」是审计判绿的状态。「没什么可报」与「没人看过」对那条检查是同一个答案，而只有后者说明这份标准还在被维护。
+
+- 每条 DOD 下面加一行缩进的 `证据候选：<仓内路径>`（`docs/PRODUCT-DOD.md`）：它回答的是另一半问题——
+  **这一条若要勾，该去仓里翻哪份记录**。候选不是勾选，也不代替证据；勾选仍归 scheduler 侧，条目正文一个字没动。
+- 新增 `dodEvidenceCandidates` / `dodEvidenceCandidateViolations`（`tools/upstream-watch.mjs`）：每条 ID 至少一个
+  候选、候选路径必须真的在仓里、候选必须挂在某一条之下（写在第一条之前或清单之后属于「没有 ID 的候选」，
+  看着像覆盖、实际一条都没补上）。
+- 候选路径与证据路径共用同一个读法（`dodPathAfterMark`）：反引号与后面的括注都不改变「这一行指的是哪个文件」，
+  两处各写一份「路径到哪结束」正是两条规则开始对同一行给出不同答案的方式。
+- 反向控制（`tools/upstream-watch-smoke.mjs`）八格：正向全绿；前提（6 个 ID 都有候选、没有无主候选、候选数 ≥ 6）；
+  删掉 DOD-5 的候选只点名 DOD-5；候选指向 `docs/no-such-record.md` 点名行号与路径；候选写在第一条之前点名行号；
+  标记后面没有路径点名行号；**正文里提到标记不算候选**（见下）；候选路径的反引号与括注不改变文件名。
+- 这条规则第一次跑就抓到自己：DoD 里解释这个标记的那段散文**含有**这四个字，于是「行里出现过标记」把说明本身
+  判成了无主候选，活文档当场变红。规则改成「行首是标记」——提到标记是散文，以标记开头才是回答，两半都进了断言
+  （否则「忽略提及」在规则完全停止读取候选时也会绿）。
+
+**P1-2：README 的安装段不再出现内部场合的说法。** 上一轮在安装段顶部写的是「初审答辩环境：Windows x64」/
+「the environment this is reviewed and demoed on is Windows x64」。两句都真，但都在讲**我们**：一个内部场合
+（初审答辩）与一个内部动词（demo），第一次装这个应用的人读到的是「这句话是写给谁看的」，而不是「哪个平台验证过、
+下哪个文件」。改成「已验证环境：Windows x64，使用 `*-setup.exe`」/「Verified environment: Windows x64, using the
+`*-setup.exe`」——平台事实与文件名都留着，去掉的只是场合。
+
+- 新增 `readmeInternalTermViolations`（`tools/upstream-watch.mjs`）：两份 README 里不许出现内部场合的词
+  （`答辩` / `评审` / `初审` / `内部评审` / `内部试用` / `演示环境`，英文侧 `demo` / `demoed` / `demoing`）。
+  按词拒绝而不是按句，因为这句话回来的方式是「从某份报告里粘一句」，句子每次都不一样。
+- 反向控制五格：正向全绿；前提（两份 README 都真的读到了，不是空清单）；中文那句粘回去点名文件、行号与「答辩」；
+  英文那句粘回去点名「demoed」（只挡中文名词的规则挡不住它）；**平台事实本身仍绿**——把「macOS 与 Linux 只有源码」
+  写进同一句必须不红，否则这条规则会连诚实的那半句一起赶走。
+
+**P1-1：界面中文排版从三屏扩到六屏。** 上一轮把界面排版从手感变成断言，但只走了三屏（结果页选中一条
+finding、长 finding、阅读页）。漏掉的三处恰好是**手写**中文最密的地方：通知条（主进程自己写的失败句）、
+设置页（提示与解释，全应用最密）、首屏引导卡（新用户读到的第一段中文）。手写句子是半角逗号进来的唯一途径，
+而模型返回的 finding 反而是最不容易出这种错的那一类。
+
+- `tools/ui-cjk-typography.mjs` 新增三屏：`notice-overflow`（`?notice=overflow`，通知条被填到上限的那一屏）、
+  `settings-top`、`guide-first-run`。规则函数一个没动——三屏复用同一份 `uiTypographyViolations`。
+- 引导卡要**单独一份 storage**：其余各屏共用的 `STORAGE` 带 `guide-dismissed: 1`，继承它的引导屏会一张卡都不渲染
+  却照样报绿。`walk` 改成「先 `localStorage.clear()` 再写这一屏的 storage」，否则上一屏写的键会漏进下一屏。
+- 新增逐屏前提 `screensWithoutProsePunctuation`：一屏里**没有任何全角标点**就算没读到（导航落错页、正文挪进
+  `pre`、夹具没渲染），直接退 2 而不是报绿。「没什么可报」与「什么都没读到」在一条只数违规的检查里是同一个答案。
+- 反向控制从一条变两条（`MUTATIONS`）：报告那句之外，加设置页「不写配置、也不需要先保存」的顿号改半角，
+  要求点名 `settings-top`。只加屏不加针，新屏就停在报告屏加针之前的状态——被一条没人证明能在那里触发的规则看着。
+- `tools/ui-cjk-typography-smoke.mjs`（`audit:static`，无浏览器）补四格：六屏清单逐字断言（少一屏即红）、
+  引导屏确实退出了 `guide-dismissed`、逐屏前提的正反两向（有散文的屏绿、只有裸标签的屏被点名）、
+  以及「每条针都还在它渲染的那个组件里」从只查第一条改成查全部。
+
+本轮改动：`tools/upstream-watch.mjs`（新增候选规则与 README 内部词规则）、`tools/upstream-watch-smoke.mjs`
+（八格 + 五格断言）、`tools/ui-cjk-typography.mjs`（三屏 + 逐屏前提 + 第二条反向控制）、
+`tools/ui-cjk-typography-smoke.mjs`（四格断言）、`docs/PRODUCT-DOD.md`（6 条各加证据候选与一段说明）、
+两份 README（各一句）、`docs/measurements.md`（本轮验证数字 + 未验证清单加「导出 HTML 排版归上游」）、
+本文件与归档。
+
+## 上游状态（第 107 轮，2026-11-03）
+第 107 轮复核：**上游 HEAD 前进，pin 不动。**`git ls-remote` 这一轮超时（124），GitHub API 答上：
+`refs/heads/main` 从 `76ab46a` 前进到 `8f9c8b7`（1 个 commit，2026-11-03T02:23:33Z），`refs/tags/v1.13.4`
+仍指向 tag 对象 `1393158`，`/releases/latest` 与 npm `latest` 同为 `1.13.4`。发布的版本没动，所以
+**pin 不前进**，对照表 5 行因此不动。
+
+那个 commit 是 `fix(diff): keep tracked gitignored files in workspace review`（#1837），只改
+`internal/diff/git.go` 与它的测试：`partitionDiffs` 在 `ModeWorkspace` 下不再套 `.gitignore`。理由写在
+代码注释里——工作区模式里未跟踪的忽略文件早已被滤掉，再套一次只会误删**已跟踪**的改动（`git add -f`
+进 `bin/` 的那种）。对本仓的影响是**无移植项**：本程序不自己过滤 diff，工作区范围就是
+`ocr review --repo <path>`（`ocr-service.js` 的 `MODES.workspace`），文件清单与计数都来自 CLI 的 JSON，
+所以这条修复的形状是「用户会看到工作区审查多出几个文件」，不是「我们要改代码」。它也不在对照表那 5 行
+里（provider 解析、`config set` 语法、内置服务表、空服务表、`failure_class`），表不动。
+
+本轮按控制仓简报做 P0-1 与 P0-2，两件都不新增产品功能。
+
+**P0-1：DoD 里的版本事实从人工记忆变成断言。** 过线标准里写着两个版本：封装的上游发布
+（`对照上游 ocr vX.Y.Z`）与本程序自己的版本（`v0.1.N`）。第 103 轮 pin 从 v1.13.3 升到 v1.13.4 时，
+DoD 里那两处（头部「发版」行与 DOD-3 的括注）**没有跟着改**，而没有任何检查看得见——一句话里的版本号
+不是任何规则读的形状。读的人因此以为封装的是旧引擎，而「下一刀还剩什么」正是对着这份文件回答的。
+
+- 新增 `dodPinViolations(doc, { pinned, appVersion })`（`tools/upstream-watch.mjs`）：DoD 里出现的每个
+  `vX.Y.Z` 只能是 **pin 的 tag** 或 **本程序版本**，其余一律红，并点名行号、那个 token 与两个被比较的值。
+  规则写在**值**上而不是句子上：过期的 pin 与「历史版本事实」是同一类错误（后者该进归档与 README，
+  不该进过线标准），一条规则同时挡住。
+- `appVersion` 是**必填**而不是默认值：少了第二个允许值，本程序自己的 `v0.1.13` 会被判成过期 pin，
+  而一条分不清两者的规则会被第一个撞上它的人关掉。所以调用方漏传本身是红的（`package.json 的 version` 那句）。
+- 反向控制（`tools/upstream-watch-smoke.mjs`）五格：把 pin 的 tag 换回 `v1.13.3`，要求**每一行**都被点名
+  （本轮是第 7、39 行）；「规则真的读到了东西」（两个版本都在 token 列表里，否则绿只说明它什么都没读）；
+  历史版本 `v1.13.1` 写进 DoD 也红；同一句里出现第三个版本 `v1.13.5` 红而本程序版本绿；漏传 `appVersion` 红。
+- 同时把 DoD 那两处改成 `v1.13.4`。这是**事实订正**，不是改条目：6 条 DoD 的 ID、勾选状态与正文一个字没动
+  （`dodCheckboxViolations` 照旧全绿）。scheduler 侧那份同源副本的同一处仍是 `v1.13.3`，需要那边同步一次——
+  本仓的断言只能管本仓这份。
+
+**P0-2：答辩平台写进安装段第一句。** 两份 README 的 Install / 安装 段顶部各加一句：初审答辩环境是
+Windows x64、用 `*-setup.exe`。此前「Windows 是唯一端到端验证过的平台」写在 Known limitations / 已知限制
+里（第 104 轮从首屏下沉过去的），位置对，但读者要翻到那一节才知道；安装段是「我要不要下载」的决策点，
+一句话放在那里比一节更早生效。没有新增平台承诺，也没有动代码。
+
+本轮改动：`tools/upstream-watch.mjs`（新增 `dodPinViolations` / `DOD_VERSION_TOKEN`）、
+`tools/upstream-watch-smoke.mjs`（五格断言）、`docs/PRODUCT-DOD.md`（两处版本号）、两份 README（各一句）、
+本文件与归档。
+
 ## 上游状态（第 106 轮，2026-11-03）
 第 106 轮复核：**上游没有新内容。**`git ls-remote` 这一轮答上来了：`refs/heads/main` 仍是 `76ab46a`
 （与第 101–105 轮同一个 commit），`refs/tags/v1.13.4` 指向 tag 对象 `1393158`，`/releases/latest` 与

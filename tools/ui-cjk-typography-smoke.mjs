@@ -20,17 +20,26 @@
 //      the text. A failure a reader cannot find is a failure they re-run instead
 //      of fix.
 //   3. **Wired, and the reverse control's premise holds.** The harness is in
-//      `audit:app` (it needs `out/`), this file is in `audit:static`, and the
+//      `audit:app` (it needs `out/`), this file is in `audit:static`, and every
 //      sentence the browser harness mutates still exists verbatim in the source
 //      that renders it — otherwise that harness exits 2 on a reworded sentence
 //      and the reverse control silently stops being one.
+//   4. **The screen list and the per-screen premise.** Which screens are walked
+//      is asserted (a screen that quietly left the list is a green that shrank),
+//      and so is the rule that a screen with no full-width punctuation anywhere
+//      counts as unread rather than clean.
 //
 // No Electron, no browser, no build: plain Node. Run with
 // `npm run audit:typography-ui-rules`.
 import fs from "node:fs";
 import path from "node:path";
 import { typographyViolations } from "./cjk-typography.mjs";
-import { MUTANT, NEEDLE, SCREENS, uiTypographyViolations } from "./ui-cjk-typography.mjs";
+import {
+  MUTATIONS,
+  SCREENS,
+  screensWithoutProsePunctuation,
+  uiTypographyViolations,
+} from "./ui-cjk-typography.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 
@@ -148,12 +157,45 @@ const rulesOf = (violations) => violations.map((violation) => violation.rule);
   );
   check("clean rendered prose is green", clean.length === 0, JSON.stringify(clean));
 
-  // The screens the harness walks are the three surfaces where the app writes the
-  // most Chinese. A screen list that lost one of them would still be green.
+  // The screens the harness walks are the surfaces where the app writes the most
+  // Chinese. A screen list that lost one of them would still be green, so the
+  // list itself is asserted — including the three that were added last, because
+  // "the notice bar / settings / guide are covered" is exactly the claim that
+  // decays into a comment when nothing reads it.
   check(
-    "the harness walks the findings screen, the long-finding screen and the report",
-    SCREENS.map((screen) => screen.name).join(",") === "results-findings,results-long-finding,report-read",
+    "the harness walks the findings, long-finding, report, notice, settings and guide screens",
+    SCREENS.map((screen) => screen.name).join(",") ===
+      "results-findings,results-long-finding,report-read,notice-overflow,settings-top,guide-first-run",
     SCREENS.map((screen) => screen.name).join(",")
+  );
+
+  // The guide screen is the only one that overrides the shared storage, and it
+  // has to: `STORAGE` carries `guide-dismissed: 1`, so a screen that inherited it
+  // would render no card at all and still report green.
+  const guide = SCREENS.find((screen) => screen.name === "guide-first-run");
+  check(
+    "...and the guide screen opts out of the dismissed flag the other screens share",
+    Boolean(guide && guide.storage && !("guide-dismissed" in guide.storage)),
+    JSON.stringify(guide && guide.storage)
+  );
+
+  // The premise: a screen whose blocks carry no full-width punctuation was not
+  // read. Asserted on the function, in both directions — a screen with prose is
+  // green, a screen with only bare labels is named.
+  const read = [{ screen: "settings-top", blocks: [{ where: "p", text: "这里改的是官方 CLI 的用户级配置，本程序只调用 ocr config set 写入。" }] }];
+  const unread = [
+    { screen: "notice-overflow", blocks: [{ where: "p", text: "窗口就绪前有 2 条事件超出缓冲上限" }] },
+    { screen: "guide-first-run", blocks: [{ where: "div", text: "选择要审查的仓库目录" }, { where: "span", text: "3" }] },
+  ];
+  check(
+    "a screen with no full-width punctuation anywhere is named as unread, and a screen with prose is not",
+    screensWithoutProsePunctuation([...read, ...unread]).join(",") === "notice-overflow,guide-first-run",
+    JSON.stringify(screensWithoutProsePunctuation([...read, ...unread]))
+  );
+  check(
+    "...and the premise is not vacuous: it reads the blocks it is given",
+    screensWithoutProsePunctuation(read).length === 0 && screensWithoutProsePunctuation(unread).length === 2,
+    JSON.stringify({ read: screensWithoutProsePunctuation(read), unread: screensWithoutProsePunctuation(unread) })
   );
 }
 
@@ -184,14 +226,23 @@ const rulesOf = (violations) => violations.map((violation) => violation.rule);
     JSON.stringify({ rules: scripts["audit:typography-ui-rules"], static: scripts["audit:static"] })
   );
 
-  // The reverse control mutates one sentence in the built bundle. If the sentence
-  // is reworded, the harness exits 2 — correct, but only if someone notices. This
-  // makes the premise a red assertion in the suite that runs on every change.
-  const report = fs.readFileSync(path.join(ROOT, "src/components/ReportView.tsx"), "utf8");
+  // The reverse control mutates one sentence per screen kind in the built bundle.
+  // If a sentence is reworded, the harness exits 2 — correct, but only if someone
+  // notices. This makes the premise a red assertion in the suite that runs on
+  // every change, for every mutation rather than for the first one.
+  const missing = MUTATIONS.filter((mutation) => {
+    const source = fs.readFileSync(path.join(ROOT, mutation.source), "utf8");
+    return !source.includes(mutation.needle) || source.includes(mutation.mutant);
+  });
   check(
-    "the sentence the reverse control mutates still exists verbatim in the report it renders",
-    report.includes(NEEDLE) && !report.includes(MUTANT),
-    NEEDLE
+    "every sentence the reverse control mutates still exists verbatim in the component that renders it",
+    missing.length === 0,
+    JSON.stringify(missing.map((mutation) => ({ source: mutation.source, needle: mutation.needle })))
+  );
+  check(
+    "...and each mutation names a screen the harness actually walks",
+    MUTATIONS.every((mutation) => SCREENS.some((screen) => screen.name === mutation.screen)),
+    JSON.stringify(MUTATIONS.map((mutation) => mutation.screen))
   );
 }
 
@@ -200,4 +251,4 @@ if (failures.length) {
   for (const name of failures) console.log(`  - ${name}`);
   process.exit(1);
 }
-console.log("\n所有断言通过（规则同源、三条规则各自点名、接线与反向控制前提）。");
+console.log("\n所有断言通过（规则同源、三条规则各自点名、六屏清单与逐屏前提、接线与反向控制前提）。");

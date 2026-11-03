@@ -34,12 +34,30 @@
 必须同时写「证据：<仓内路径>」，指向仓里那份记录（`tools/upstream-watch.mjs` 的
 `dodCheckboxViolations`）。ID 与勾选状态以 scheduler 侧同源副本为准，编码侧只补 ID、不改勾选。
 
+条目下面缩进的那行「证据候选：<仓内路径>」先回答另一半问题：**这一条若要勾，该去仓里翻哪份记录**。
+它不是勾选，也不代替证据——`dodEvidenceCandidateViolations` 只要求每条都至少有一个候选、且候选路径
+真的存在，于是「一直不勾」不再是一个合格的静默状态：没有候选的条目会被逐条点名。候选给多条时按行列，
+第一条算主记录。
+
 - [ ] DOD-1：**非官方诚实**：README / 关于页 / 安装说明显著写明 unofficial；不冒充阿里巴巴官方产品
+  证据候选：README.zh-CN.md（首屏、安装段、归属声明三处的「非官方」声明）
+  证据候选：src/components/SettingsPanel.tsx（设置页「关于」区的归属声明）
 - [ ] DOD-2：**引擎未改**：审查逻辑零分叉；仅拼 CLI、流式日志、解析 JSON、GUI
+  证据候选：ocr-service.js（只 spawn 官方 CLI、拼参数、解析 JSON 与流式日志，无审查规则）
+  证据候选：tools/service-smoke.mjs（按上游 resolver 语义重算「这次运行会打开哪条条目」）
 - [ ] DOD-3：**上游同步**：`docs/OCR-UPSTREAM-SYNC.md` pin 与 `npm run audit:upstream` 绿；跟进上游 tag 有记录（当前 pin v1.13.4 / 约定 SHA）
+  证据候选：docs/OCR-UPSTREAM-SYNC.md（pin 三处声明与对照表）
+  证据候选：tools/upstream-watch-smoke.mjs（pin 与对照表的双射、通路账、DoD 版本事实）
 - [ ] DOD-4：**主路径可演示**：四范围 + `--preview`；成本护栏；完成/部分/失败/警告徽章；预算截断不显示「干净」；续跑仅在 CLI 支持的模式显示
+  证据候选：tools/e2e-flow.mjs（真 Electron + 真 CLI 走完预览与四范围）
+  证据候选：src/components/ResultsPanel.tsx（完成／部分／失败／警告徽章与截断态）
 - [ ] DOD-5：**航运资产**：`v0.1.13`（或更新）`*-setup.exe` / portable 可装可启；内置二进制可达；未签名 SmartScreen 有说明
+  证据候选：docs/measurements.md（真机记录，以及「没验证过什么」那一节）
+  证据候选：tools/release.mjs（发版脚本停在人操边界前）
 - [ ] DOD-6：**安全底线**：Key 不进本程序副本；`asar` 保持 false（spawn 契约）；发版密钥扫描绿
+  证据候选：package.json（`asar` 保持 false 的 spawn 契约）
+  证据候选：config-handler.js（Key 只经 `ocr config set` 写入，本程序不存副本）
+  证据候选：tools/secret-scan.mjs（发版前的密钥扫描）
 
 ---
 
