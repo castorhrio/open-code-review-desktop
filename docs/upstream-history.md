@@ -36,6 +36,55 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 
 ---
 
+## 上游状态（第 111 轮，2026-11-04）
+本轮复核：**上游 HEAD 前进了 3 个 commit，并且第一次出现「tag / release 走了、npm 没走」的情形。**
+`git ls-remote` 答上：`refs/heads/main` 从 `5c039e8` 前进到 `abb7abc`；`refs/tags/v1.13.5` 指向 `abb7abc`
+（tag 对象 `e739d39`，GitHub Release 也是正式发布，不是 draft / prerelease），而 npm `latest` 仍是 `1.13.4`。
+
+**pin 因此不前进，而这一轮才第一次需要把它写成规则**：本程序 spawn 的是 `@alibaba-group/open-code-review`
+这个 npm 包里的二进制（`ocr-service.js`），pin 声明的是「实际会跑起来的那一版」，所以它跟 npm 走，不跟 tag
+或 Release 走。第 103 轮 tag 与 npm 同时前进，两个口径看不出区别；这一轮把它们分开了，规则才有内容。
+
+三个 commit 对本仓的影响逐条核过：
+
+- `20d57cb` `fix(review): honor lower max-tools overrides`：`cmd/opencodereview/review_cmd.go` 里
+  `--max-tools` 现在「只要给了就赢过模板默认值」（新的 `resolveReviewMaxTools`），manifest 的 `execution`
+  多一个 `max_tool_request_times`（加法字段，本仓只读已知键，不需要改）。**这条对本仓是用户可见的**：
+  界面「调整这次审查的参数」里的「每组最多工具调用轮数」传的就是 `--max-tools`，而在 pin 的 1.13.4 上把它
+  调**小**会被模板默认值盖掉（调大有效），1.13.5 起才算数。无移植项——本仓一直照直传，改的是 CLI 侧的优先级；
+  等 npm 发布 1.13.5、pin 前进时这条自动成立。
+- `98f1dfe` `fix(diff): split a bare "diff --git" header at its separator`：`internal/diff/parser.go`，裸头
+  不再吞掉下一段；`abb7abc` `fix(diff): retry new-side hunk match without blank lines`：
+  `internal/diff/resolver.go`——**不是**对照表第 1 行那个 `internal/llm/resolver.go`（同名不同目录，读名字容易
+  混，所以点明）。两处都在引擎侧解析 diff，本仓不自己解析 diff，无移植项。
+- 对照表 5 行（`internal/llm/resolver.go`、`config_cmd.go`、`llm_cmd.go` / `providers.go`、`failure_class`）一个都
+  没被这三个 commit 碰到。
+
+本轮的产品改动是一件：**过线标准与「没验证过什么」从「写了检查」推到「检查真的跑过 / 边界有人认领」**。
+前几轮把 DoD 的候选推到「路径在仓里」与「文件里真有那句话」，可两者加起来仍然放过一个状态：候选指向一份
+**从不被执行**的检查——文件在、措辞对、没有任何 `audit*` 脚本跑到它。`tools/upstream-watch.mjs` 的
+`auditScriptClosure` 因此把依赖闭包**算**出来（`audit*` 脚本 → `npm run` 链 → `node <file>` → 相对 import 与
+`tools/...` 字面量），`dodHarnessReachViolations` 要求每个指向 harness 的候选都在闭包里；闭包算空时规则
+自报「没有对象」，而不是报绿。
+
+同一趟补上另一半：**「没勾」和「没人看过」不再长得一样**。6 条 DoD 连续多轮全 `[ ]`，每条都有候选、audit 一直绿，
+因为「没勾」是没有任何检查问过的状态。现在每条没勾的下面都要有一句 `未勾原因：<一句话 + 仓内路径>`
+（`dodReasonViolations`）：要指到仓里真实存在的记录、不许写「待定」这类占位词、勾上之后不许再留着（那会变成假话）、
+挂在条目之外的那一句会点名。它不催勾，只要求「为什么还没勾」是一个被回答过的状态。
+
+`docs/measurements.md` 的「未验证清单」也从自由表格变成有归属的表：每行要写清这项是**上游 / 本仓 / 真机**谁的
+事，并指到仓里一份可打开的记录（`unverifiedRowViolations`）。归本仓的行必须指到依赖闭包里的一份真检查
+（「这是我们的、还没验」只有在存在一份会跑的检查时才诚实），归上游的行必须指到本文件——不指过来的那一行没人会回头核。
+
+反向控制按「这条规则能怎么错」逐格写：闭包只跑一个 harness 时要点名剩下五个（而真被跑到的那一个不许被点名）、
+没有任何 `audit*` 脚本时不许报绿、删掉一条未勾原因要红、写「待定」要红、指到不存在的文件要红、勾上后留着原因要红、
+原因挂在条目之外要红；未验证清单去掉归属格、把上游行改成本仓、上游行不再指本文件、触发条件留空，各红一次。
+
+**补记（第 112 轮）**：第 111 轮记下的 `--max-tools` 那条用户可见差距，正文归档后就没有别的
+地方持有它了，所以第 112 轮把它写进 `docs/PRODUCT-DOD.md` 的 DOD-2 未勾原因——那一句由
+`dodReasonViolations` 读，欠账因此有了一个不随归档消失的家。本文档的规矩是段落写入后不再改写，
+所以这里只追加这一句去向，不动上面那段。
+
 ## 上游状态（第 110 轮，2026-11-04）
 本轮复核：**上游 HEAD 前进了 1 个 commit。**`git ls-remote` 答上：`refs/heads/main` 从 `c452846` 前进到
 `5c039e8`（`feat(allowlist): add HAML, Slim and ERB template support (#1552)`，动的是

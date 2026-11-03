@@ -128,7 +128,7 @@ preload.js               contextBridge 接口
 ## 已知限制
 
 - 需要 `PATH` 上有 Git。每个目标要各自的构建环境：macOS dmg 必须在 macOS 上构建，Linux AppImage / deb 在 Linux（或 WSL / Docker），Windows 安装包在 Windows。
-- **各平台验证到哪一层。** Windows x64 是唯一端到端验证过的平台，**也是 Releases 唯一发布过的平台**（迄今 12 个 Release 全是 setup + portable + `latest.yml` + blockmap）。Linux x64 上，CLI 层（`audit:service` / `audit:config` / `audit:git` / `audit:providers`）、真 Electron（`audit:guards` / `audit:exit` / `audit:e2e`）与 UI 那几套（`audit:ui` / `audit:contrast` / `audit:ui-scaled`，Xvfb 下的无头 Chromium）在 2026-11-03 对 `ocr v1.13.4` 全绿——这一次**不覆盖** Linux 打包产物本身（没跑 `npm run dist:linux`）、真显示器与 GPU、应用内更新、单实例锁与卸载路径。macOS 从未构建、从未运行，按完全未验证对待。数字与复现方式见 [`docs/measurements.md`](docs/measurements.md)；**没验证过什么**、以及每项下次要验的触发条件，写在同一份文件的最后一节。
+- **各平台验证到哪一层。** Windows x64 是唯一端到端验证过的平台，**也是 Releases 唯一发布过的平台**（迄今 12 个 Release 全是 setup + portable + `latest.yml` + blockmap）。Linux x64 上，CLI 层（`audit:service` / `audit:config` / `audit:git` / `audit:providers`）、真 Electron（`audit:guards` / `audit:exit` / `audit:e2e` / `audit:e2e-first-run`）与 UI 那几套（`audit:ui` / `audit:contrast` / `audit:ui-scaled`，Xvfb 下的无头 Chromium）在 2026-11-04 对 `ocr v1.13.4` 全绿——这一次**不覆盖** Linux 打包产物本身（没跑 `npm run dist:linux`）、真显示器与 GPU、应用内更新、单实例锁与卸载路径。macOS 从未构建、从未运行，按完全未验证对待。数字与复现方式见 [`docs/measurements.md`](docs/measurements.md)；**没验证过什么**、以及每项下次要验的触发条件，写在同一份文件的最后一节。
 - **自动更新只对 NSIS 安装版生效。** portable 每次解压到临时目录，没有可替换的安装根，只能跳下载页。
 - 每次发版必须把 `latest.yml` 与 `*-setup.exe.blockmap` 一起传到 Release，否则更新器根本看不到有版本可更；`latest-mac.yml` / `latest-linux.yml` 要等到那两个平台真的构建并发布时才是必须项。
 - 安装包**未做代码签名**，首次运行会有 SmartScreen 提示。

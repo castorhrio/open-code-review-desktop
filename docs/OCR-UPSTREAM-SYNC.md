@@ -35,7 +35,7 @@ tag v1.13.4
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`76ab46ac20f08a8bd8ac38881a8a826c7cb6495f`（第 111 轮：`git ls-remote` 答上，`refs/heads/main` 前进 `5c039e8` → `abb7abc`（3 个 commit：低于模板值的 `--max-tools` 开始被采纳、裸 `diff --git` 头按分隔符切开、new-side hunk 匹配允许跳过空行重试），`refs/tags/v1.13.5` 指向 `abb7abc`（tag 对象 `e739d39`，正式 Release），npm `latest` 仍是 `1.13.4`——**tag 与 release 走了、npm 没走，pin 不前进**；通路：git）**
+**本轮 HEAD 核对：`76ab46ac20f08a8bd8ac38881a8a826c7cb6495f`（第 112 轮：`git ls-remote` 答上，`refs/heads/main` 停在 `abb7abc`——与第 111 轮核对到的是同一个 commit，本轮没有前进；`refs/tags/v1.13.5` 仍指向 `abb7abc`（tag 对象 `e739d39`），npm `latest` 仍是 `1.13.4`——**HEAD、tag、npm 三个口径本轮一致，pin 不动**；通路：git）**
 
 ### 核对通路账
 
@@ -119,8 +119,7 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 | 109 | 2026-11-03 | git | **上游 HEAD 前进**：`8f9c8b7` → `c452846`（3 个 commit：`.jsonc` 进 allowlist、EJS / Liquid / Nunjucks 模板支持、Scala 审查规则）；`refs/tags/v1.13.4` 与 npm `1.13.4` 均未变，**pin 不前进**；对照表 5 行的上游文件一个都没被这三个 commit 碰到，无移植项（三处都是引擎侧的 allowlist 与规则表，本仓只显示 CLI 给出的排除原因，不自己判定哪些文件进审查）；DoD 的证据从「候选指到哪」推到「候选文件里真有那份证据」：新增 `DOD_EVIDENCE_SHAPES`（14 条候选各声明该记录里必须出现的证据形状，DOD-6 另有一条 `mustNot`）与 `dodEvidenceBodyViolations`（每个候选都要有形状、形状表与候选双射、文件里必须真的有那份证据、读不到不算绿），七格反向控制（把 README 里的「非官方」抹掉、加一条没声明形状的候选、删掉 DOD-5 的候选、文件读不到、`config-handler.js` 开始自己写配置）；DOD-4 补一条指向 `tools/e2e-flow.cjs` 的候选——`.mjs` 只是跑真 Electron 的壳，预览与分支对比的断言在 `.cjs` 里，原候选指过去读不到那几条 check；`docs/measurements.md` 未验证清单补「浏览器依赖」一行，两份 README 的已知限制写明导出 HTML 报告的排版归上游 | — |
 | 110 | 2026-11-04 | git | **上游 HEAD 前进**：`c452846` → `5c039e8`（1 个 commit：HAML / Slim / ERB 模板进 `supported_file_types.json` 与 `system_rules.json`）；`refs/tags/v1.13.4`（`1393158`）与 npm `1.13.4` 均未变，**pin 不前进**；对照表 5 行的上游文件一个都没被这个 commit 碰到，无移植项（allowlist 与规则表是引擎侧，本仓只显示 CLI 给出的排除原因）；界面中文排版新增两条断言——字号下限 12px 与字体栈顺序（拉丁 → 中文 → 通用），第一次跑就在结果页抓到一个真缺陷：`` 固定在 <sha> `` 的徽章整块套着 `font-mono`，中文字族不在 mono 栈里，两个中文字由系统兜底 | — |
 | 111 | 2026-11-04 | git | **上游 HEAD 前进 + 第一次出现「tag / release 走了、npm 没走」**：`refs/heads/main` `5c039e8` → `abb7abc`（3 个 commit：`--max-tools` 低于模板值时开始被采纳、裸 `diff --git` 头按分隔符切开、new-side hunk 匹配允许跳过空行重试）；`refs/tags/v1.13.5` = `abb7abc`（tag 对象 `e739d39`，Release 已发布），npm `latest` 仍是 `1.13.4`，**pin 不前进**（pin 跟 npm 走，本程序 spawn 的是 npm 包里的二进制）；对照表 5 行一个都没被碰到，无移植项，但 `--max-tools` 那条对本仓用户可见（1.13.4 上把「每组最多工具调用轮数」调小会被模板默认值盖掉）；DoD 的证据从「候选指到哪」推到「候选真的被跑过」（`auditScriptClosure` + `dodHarnessReachViolations`），并给每个没勾的条目加一句「未勾原因」（`dodReasonViolations`）；`docs/measurements.md` 的「未验证清单」每行加归属（上游 / 本仓 / 真机）与可指认的路径（`unverifiedRowViolations`） | — |
-
-### 对照表（上游前进时要重读的五处）
+| 112 | 2026-11-04 | git | **上游没动**：`refs/heads/main` 仍是 `abb7abc`、`refs/tags/v1.13.5` 仍是 `abb7abc`（tag 对象 `e739d39`）、npm `latest` 仍是 `1.13.4`，三个口径一致，**pin 不动**、对照表 5 行无需重读、无移植项；`--max-tools` 那条用户可见的差距不留在会被归档的正文里，改记进 `docs/PRODUCT-DOD.md` 的 DOD-2 未勾原因（那一句有断言读）；本轮产品改动是把 DOD-4 缺的首启链路做成 harness：`tools/e2e-first-run.cjs` + `tools/e2e-first-run.mjs`，17 条 check 走「空档案 → 引导 → 选仓 → 配 provider → 清单 → 成本确认挡住的那次 `scan`」，判定抽进 `tools/e2e-first-run-steps.cjs` 由 `audit:e2e-first-run-rules` 钉住，harness 挂在 `audit:app`（`audit:e2e-first-run`） | — |
 
 「最近一次对照」只写**那一项最近被人工重新核对**的轮次。该列没有列出本轮，表示本轮
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
@@ -212,51 +211,43 @@ tool 结果文本**（`Error: diff not found for: …`、`Diffs exist for: …`�
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。搬完这里只留一句
    指针——「本文件只留当前一轮」不是约定而是断言（`previousRoundPointerViolations`）。
 
-## 当前状态（第 111 轮，2026-11-04）
-本轮复核：**上游 HEAD 前进了 3 个 commit，并且第一次出现「tag / release 走了、npm 没走」的情形。**
-`git ls-remote` 答上：`refs/heads/main` 从 `5c039e8` 前进到 `abb7abc`；`refs/tags/v1.13.5` 指向 `abb7abc`
-（tag 对象 `e739d39`，GitHub Release 也是正式发布，不是 draft / prerelease），而 npm `latest` 仍是 `1.13.4`。
+## 当前状态（第 112 轮，2026-11-04）
+本轮复核：**上游什么都没动。** `git ls-remote` 答上：`refs/heads/main` 仍是 `abb7abc`（与第 111 轮核对到的同一个 commit），
+`refs/tags/v1.13.5` 仍指向它（tag 对象 `e739d39`），npm `latest` 仍是 `1.13.4`。三个口径本轮一致，pin 因此不动，对照表 5 行无需重读，
+无移植项。上一轮写下的那条规则（**pin 跟 npm 走，不跟 tag 或 Release 走**）是常驻规则，不是那一轮的结论，所以这里只重述一句：
+下一次 npm 发到 `1.13.5` 时，pin 前进的那一轮要同时重读对照表 5 行。
 
-**pin 因此不前进，而这一轮才第一次需要把它写成规则**：本程序 spawn 的是 `@alibaba-group/open-code-review`
-这个 npm 包里的二进制（`ocr-service.js`），pin 声明的是「实际会跑起来的那一版」，所以它跟 npm 走，不跟 tag
-或 Release 走。第 103 轮 tag 与 npm 同时前进，两个口径看不出区别；这一轮把它们分开了，规则才有内容。
+第 111 轮发现的 `--max-tools` 那条用户可见差距（pin 的 1.13.4 上把「每组最多工具调用轮数」调**小**会被模板默认值盖掉）
+本轮**从正文搬进 `docs/PRODUCT-DOD.md` 的 DOD-2 未勾原因**。理由是这份文件本身的规矩：正文每轮归档，只有当前一轮留在这里，
+而「上游发了才算解决」的欠账如果只写在正文里，归档之后就没有任何人再持有它——DOD-2 那一句是有断言读的（`dodReasonViolations`
+要求它指到仓里真实存在的记录），欠账因此有了一个不会随归档消失的家。
 
-三个 commit 对本仓的影响逐条核过：
+本轮的产品改动是一件：**把 DOD-4 缺的「首启 → 引导 → 配 provider → 预览」做成 harness**。
+根因不在产品而在证据：`tools/e2e-flow.cjs` 一进来就 `localStorage.setItem("last-repo", …)` 并把引导卡关掉，它证明的是范围引擎，
+装完安装版之后的第一屏没有任何脚本走过。新增的 `tools/e2e-first-run.cjs`（`npm run audit:e2e-first-run`，挂在 `audit:app`）
+17 条 check 走的是一个人真的会走的路径，其中三个决定不是装饰：
 
-- `20d57cb` `fix(review): honor lower max-tools overrides`：`cmd/opencodereview/review_cmd.go` 里
-  `--max-tools` 现在「只要给了就赢过模板默认值」（新的 `resolveReviewMaxTools`），manifest 的 `execution`
-  多一个 `max_tool_request_times`（加法字段，本仓只读已知键，不需要改）。**这条对本仓是用户可见的**：
-  界面「调整这次审查的参数」里的「每组最多工具调用轮数」传的就是 `--max-tools`，而在 pin 的 1.13.4 上把它
-  调**小**会被模板默认值盖掉（调大有效），1.13.5 起才算数。无移植项——本仓一直照直传，改的是 CLI 侧的优先级；
-  等 npm 发布 1.13.5、pin 前进时这条自动成立。
-- `98f1dfe` `fix(diff): split a bare "diff --git" header at its separator`：`internal/diff/parser.go`，裸头
-  不再吞掉下一段；`abb7abc` `fix(diff): retry new-side hunk match without blank lines`：
-  `internal/diff/resolver.go`——**不是**对照表第 1 行那个 `internal/llm/resolver.go`（同名不同目录，读名字容易
-  混，所以点明）。两处都在引擎侧解析 diff，本仓不自己解析 diff，无移植项。
-- 对照表 5 行（`internal/llm/resolver.go`、`config_cmd.go`、`llm_cmd.go` / `providers.go`、`failure_class`）一个都
-  没被这三个 commit 碰到。
+- **档案是一次性的，不是「删掉用户的」。** `HOME`（与三个 Windows 变量）、Electron 的 `userData`、因而渲染层的 `localStorage`
+  全在 `require("main.js")` 之前指向一个临时目录；引导卡能出现是因为那份档案本来就是空的，而不是因为脚本把它调成空的。
+  这条规矩的代价写在 `tools/e2e-first-run-steps.cjs`：判不出来就**不开应用**，因为这条链路要写一个假 API Key，
+  重定向若没生效，它会进开发者真实的 `~/.opencodereview/config.json`。链路末尾另有一条 check 把那份真实文件的摘要与开跑前比一次。
+- **拒绝是谁挡的要由进程自己说。** 引导卡、运行门与设置页的措辞都能被渲染层自己圆过去，所以 spawn 是被记下来的
+  （`child_process.spawn` 在 `main.js` 拉进 service 之前被包住）：填 Key 之前必须**零个** `review` / `scan`，
+  成本确认后点「取消」必须**仍零个**，点「仍然开始」必须**恰好一个**且带着用户设的 `--max-tokens-budget`。
+  `--preview` 不算——预览不花钱，这是产品的立身之本，分类把它单独放开。
+- **provider 是假的，请求也出不了这台机器。** 端点是 `http://127.0.0.1:9/v1`（discard 端口，没人监听），CLI 的连通测试在机器内部失败，
+  一个包都不发出去；不调真 API、不花 token。
 
-本轮的产品改动是一件：**过线标准与「没验证过什么」从「写了检查」推到「检查真的跑过 / 边界有人认领」**。
-前几轮把 DoD 的候选推到「路径在仓里」与「文件里真有那句话」，可两者加起来仍然放过一个状态：候选指向一份
-**从不被执行**的检查——文件在、措辞对、没有任何 `audit*` 脚本跑到它。`tools/upstream-watch.mjs` 的
-`auditScriptClosure` 因此把依赖闭包**算**出来（`audit*` 脚本 → `npm run` 链 → `node <file>` → 相对 import 与
-`tools/...` 字面量），`dodHarnessReachViolations` 要求每个指向 harness 的候选都在闭包里；闭包算空时规则
-自报「没有对象」，而不是报绿。
+它第一次跑抓到的是**它自己**的三处错，都不是产品缺陷但都会让它假绿：fixture 把 HEAD 切回 `main`，于是「feature」分支徽章永远等不到；
+Radix 的 select trigger 带的是 `role="combobox"` 而**没有** `aria-haspopup`，用后者找它等于永远点不开；
+确认框经 Portal 渲染在 `document.body`，用 `main button` 找「取消」找不到，看上去像护栏没出现。
+第三处还顺带纠了一个更早的误判：`llm test` 那一次 spawn 的 `HOME` 不是 harness 的临时目录——那是 `config-handler.js`
+**自己**为「按填写值测试」造的第二个一次性档案（保存过的 Key 会盖过 `OCR_LLM_*`，见那里的注释），
+所以判定改成「没有任何孩子跑在开发者的真实档案里」，并把那类档案认成允许的、而不是当成泄漏。
 
-同一趟补上另一半：**「没勾」和「没人看过」不再长得一样**。6 条 DoD 连续多轮全 `[ ]`，每条都有候选、audit 一直绿，
-因为「没勾」是没有任何检查问过的状态。现在每条没勾的下面都要有一句 `未勾原因：<一句话 + 仓内路径>`
-（`dodReasonViolations`）：要指到仓里真实存在的记录、不许写「待定」这类占位词、勾上之后不许再留着（那会变成假话）、
-挂在条目之外的那一句会点名。它不催勾，只要求「为什么还没勾」是一个被回答过的状态。
+它还差的那一半也记在 DOD-4 的未勾原因里：真截断一次预算要花的钱本程序不替用户花，「单个提交」与「全量扫描」两条范围到目前只有预览级证据。
 
-`docs/measurements.md` 的「未验证清单」也从自由表格变成有归属的表：每行要写清这项是**上游 / 本仓 / 真机**谁的
-事，并指到仓里一份可打开的记录（`unverifiedRowViolations`）。归本仓的行必须指到依赖闭包里的一份真检查
-（「这是我们的、还没验」只有在存在一份会跑的检查时才诚实），归上游的行必须指到本文件——不指过来的那一行没人会回头核。
-
-反向控制按「这条规则能怎么错」逐格写：闭包只跑一个 harness 时要点名剩下五个（而真被跑到的那一个不许被点名）、
-没有任何 `audit*` 脚本时不许报绿、删掉一条未勾原因要红、写「待定」要红、指到不存在的文件要红、勾上后留着原因要红、
-原因挂在条目之外要红；未验证清单去掉归属格、把上游行改成本仓、上游行不再指本文件、触发条件留空，各红一次。
-
-上一轮（第 110 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-110-轮2026-11-04)，归档之后本文件不留第二份。
+上一轮（第 111 轮）的正文见 [upstream-history.md](upstream-history.md#上游状态第-111-轮2026-11-04)，归档之后本文件不留第二份。
 
 ## 上游真变了怎么办（命令驱动，而不是「记得看一眼」）
 ```bash

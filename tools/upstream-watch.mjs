@@ -1971,6 +1971,15 @@ export const DOD_EVIDENCE_SHAPES = Object.freeze([
   },
   {
     id: "DOD-4",
+    path: "tools/e2e-first-run.cjs",
+    must: [
+      { label: "一次性档案", pattern: /throwaway profile/ },
+      { label: "引导卡", pattern: /三步开始第一次审查/ },
+      { label: "成本确认", pattern: /这次扫描的规模不小/ },
+    ],
+  },
+  {
+    id: "DOD-4",
     path: "src/components/ResultsPanel.tsx",
     must: [
       { label: "四态徽章取自 STATUS", pattern: /STATUS/ },

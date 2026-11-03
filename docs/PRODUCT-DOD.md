@@ -49,7 +49,7 @@
   证据候选：README.zh-CN.md（首屏、安装段、归属声明三处的「非官方」声明）
   证据候选：src/components/SettingsPanel.tsx（设置页「关于」区的归属声明）
 - [ ] DOD-2：**引擎未改**：审查逻辑零分叉；仅拼 CLI、流式日志、解析 JSON、GUI
-  未勾原因：`ocr-service.js` 只 spawn 官方二进制这件事有断言，但「零分叉」要逐条对照上游 CLI 的参数面，而对照表只覆盖本仓实际用到的那些行；下一次升 pin 时把新增参数逐条核过再勾。
+  未勾原因：`ocr-service.js` 只 spawn 官方二进制这件事有断言，但「零分叉」要逐条对照上游 CLI 的参数面，而对照表只覆盖本仓实际用到的那些行。已经有一条是漏网的：上游 1.13.5 才让 `--max-tools`「给了就赢过模板默认值」，而 npm 至今只发到 1.13.4，所以界面「调整这次审查的参数」里把「每组最多工具调用轮数」调**小**这件事，按 `docs/OCR-UPSTREAM-SYNC.md` 记的 pin 仍然会被静默盖掉——参数面没有逐条核过，就还不能勾。
   证据候选：ocr-service.js（只 spawn 官方 CLI、拼参数、解析 JSON 与流式日志，无审查规则）
   证据候选：tools/service-smoke.mjs（按上游 resolver 语义重算「这次运行会打开哪条条目」）
 - [ ] DOD-3：**上游同步**：`docs/OCR-UPSTREAM-SYNC.md` pin 与 `npm run audit:upstream` 绿；跟进上游 tag 有记录（当前 pin v1.13.4 / 约定 SHA）
@@ -57,9 +57,10 @@
   证据候选：docs/OCR-UPSTREAM-SYNC.md（pin 三处声明与对照表）
   证据候选：tools/upstream-watch-smoke.mjs（pin 与对照表的双射、通路账、DoD 版本事实）
 - [ ] DOD-4：**主路径可演示**：四范围 + `--preview`；成本护栏；完成/部分/失败/警告徽章；预算截断不显示「干净」；续跑仅在 CLI 支持的模式显示
-  未勾原因：四范围与 `--preview` 在真 Electron 里跑过（`tools/e2e-flow.mjs`），但「首启 → 引导 → 配 provider → 预览」这条答辩现场会走的链路还没有 harness，装完安装版之后的第一屏也没被脚本走过；补上首启链路再勾。
+  未勾原因：首启链路已经有人走过了——空档案 → 引导卡三步 → 选仓 → 配 provider → 清单自己算出来 → 成本确认挡住的那一次 `scan`，全在真 Electron 里跑（`tools/e2e-first-run.cjs`）；还缺的是另外两半：「预算截断不显示干净」目前只有界面层证据（`src/components/ResultsPanel.tsx`），真截断一次要花的钱本程序不替用户花；四范围里「单个提交」与「全量扫描」也只到预览级，运行级的证据在 `tools/e2e-flow.cjs` 里只有工作区与分支对比两条。
   证据候选：tools/e2e-flow.mjs（真 Electron + 真 CLI 走完预览与四范围）
   证据候选：tools/e2e-flow.cjs（真 Electron 里断言预览与分支对比范围的那几条 check）
+  证据候选：tools/e2e-first-run.cjs（真 Electron 里走完首启 → 引导 → 配 provider → 预览，以及成本确认挡住的那次 spawn）
   证据候选：src/components/ResultsPanel.tsx（完成／部分／失败／警告徽章与截断态）
 - [ ] DOD-5：**航运资产**：`v0.1.13`（或更新）`*-setup.exe` / portable 可装可启；内置二进制可达；未签名 SmartScreen 有说明
   未勾原因：`docs/measurements.md` 记的真机面是 Linux x64，而发布面只有 Windows x64 的 `*-setup.exe`，安装包本身从未被脚本化装过一次；等 Windows x64 上装一次并记下首启结果再勾。

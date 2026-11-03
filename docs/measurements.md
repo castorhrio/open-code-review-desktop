@@ -15,11 +15,12 @@ README 的 Status 段只写**能力**（能渲染 1200 条、有耗时上限断�
 | 2026-11-04 | 第 108 轮：README 安装段不再出现内部场合的说法（「初审答辩环境」/「reviewed and demoed on」改成「已验证环境」/「Verified environment」） | `audit:upstream` 新增 5 条检查（正向 + 前提 + 中英两句各自的反向控制 + 「平台事实本身仍绿」），全绿 | `npm run audit:upstream` |
 | 2026-11-04 | 第 108 轮：界面中文排版从三屏扩到六屏（通知条 `?notice=overflow`、设置页、首屏引导卡） | `audit:typography-ui` 查了 6 屏共 373 块可见文本（原三屏 202 块），两条反向控制各自点名（`report-read` 与 `settings-top`）；`audit:typography-ui-rules` 全绿（六屏清单、逐屏前提正反两向、两条针都在源组件里） | `PW_CHANNEL=bundled node tools/ui-cjk-typography.mjs`；`node tools/ui-cjk-typography-smoke.mjs` |
 | 2026-11-03 | 跨平台验证面：第 103 轮升 pin 到 `ocr v1.13.4` 时在 Linux x64 上真跑一遍 | `audit:guards` 24 条、`audit:exit` 5 条、`audit:e2e` 18 条（真 Electron + 真 CLI）、`audit:ui` 112 条、`audit:contrast` 978 处文本 0 处低于 AA、`audit:ui-scaled` 1.25 与 1.5 各 11 条，全绿；二进制自报 `v1.13.4 (76ab46a) linux/amd64` | `xvfb-run -a npm run audit:guards`（`PW_CHANNEL=bundled`），Electron 33.4.11 |
+| 2026-11-04 | 第 112 轮：首启链路第一次被脚本走过（空档案 → 引导卡三步 → 选仓 → 配 provider → 清单 → 成本确认） | `audit:e2e-first-run` 17 条全绿（真 Electron + 真 CLI，`--no-sandbox` 重试被走到，末行写「sandbox relaxed」）；同一次跑里记到 23 个子进程、其中恰有一个 `scan` 带着 `--max-tokens-budget 300000`，而「取消」那一趟一个都没起；`audit:e2e-first-run-rules` 69 条全绿（含「一个不认识的 CLI 命令即使数量对得上也要红」那一格） | `xvfb-run -a node tools/e2e-first-run.mjs`；`node tools/e2e-first-run-steps-smoke.mjs`，Electron 33.4.11，`ocr v1.13.4` 二进制，provider 是 `http://127.0.0.1:9/v1` 的假条目 |
 
 上面那一行是**验证面**，不是又一个数字，所以它把「怎么跑出来的」也写清楚：这台机器没有 Edge，
 UI 三条靠 Playwright 自带的 chromium（`PW_CHANNEL=bundled`）——Playwright 不是本仓依赖，
 `npm install` 会把它当多余包装掉，所以跑 `audit:ui` 前要按 README 的说法补一份（`--no-save` 即可）。
-这台机器的 `chrome-sandbox` 不是 setuid root，真 Electron 那三条都以 `--no-sandbox` 运行，
+这台机器的 `chrome-sandbox` 不是 setuid root，真 Electron 那四条都以 `--no-sandbox` 运行，
 harness 会自己说明「sandbox relaxed」。这一行**不覆盖**：Linux / macOS 的打包产物（没跑
 `npm run dist:linux`）、真显示器与 GPU、安装版的自动更新、以及单实例锁与卸载路径；macOS 至今
 一次都没跑过任何一条。发布面同样只有 Windows——12 个 Release 的资产全是 `*-setup.exe` /
@@ -31,7 +32,7 @@ harness 会自己说明「sandbox relaxed」。这一行**不覆盖**：Linux / 
 `tools/ui-audit/audit.mjs` 里的检查，改坏了会红；「渲染一次真实扫描的载荷」写成了
 读夹具的检查。README 承诺的是这一层，不是上表里的某一格。
 
-## 未验证清单（截至 2026-11-03）
+## 未验证清单（截至 2026-11-04）
 
 上面每一行都是「跑过什么」。这一节是它的反面：**没跑过什么**，以及下次要验的触发条件。
 两份 README 的 Known limitations / 已知限制 与这一节说的是同一件事，两处互相指向——那边写
@@ -42,6 +43,7 @@ harness 会自己说明「sandbox relaxed」。这一行**不覆盖**：Linux / 
 | 应用内更新（NSIS 安装版） | 真机 | 更新器要走完「已安装的旧版本 → 下载 → 校验 → 重启」四步，这台机器上只有开发实例；装一次再升一次会覆盖用户数据目录（`update-service.js`） | 下一次发版前，在 Windows x64 上装 `v0.1.13` 再升到新版本，记下四步各自的结果 |
 | Linux / macOS 打包产物 | 真机 | 只跑过源码级门禁；`npm run dist:linux` 没跑过，macOS 一次都没构建（`tools/release.mjs`） | 第一次真的要发布这两个平台时；在那之前 README 的发布面只写 Windows |
 | 真显示器与 GPU | 真机 | 这台机器没有显示器，UI 三条都在 Xvfb 下的无头 Chromium 里跑（`tools/ui-audit/audit.mjs`） | 有人在一台带显示器的机器上打开安装版，看一遍首屏、结果页与 1.25 / 1.5 缩放 |
+| 安装版之后的首启链路 | 真机 | 首启 → 引导 → 配 provider → 预览这条链路从第 112 轮起有 harness 了（`tools/e2e-first-run.cjs`），但它跑的是源码树里的 Electron 加真 CLI；装完 `*-setup.exe` 之后的第一屏——图标起的那份、内置二进制可达的那份——仍然只有人眼看过 | 在 Windows x64 上装一次 `v0.1.13` 或更新的安装包，把首启那一屏的结果记下来；这一趟同时也是 DOD-5 缺的那半边 |
 | 单实例锁 | 真机 | 开发实例与安装版共用同一份用户数据，验它要两个进程抢同一个目录，会打断正在跑的审查（`main.js`） | 装完安装版之后双击两次图标，确认第二个窗口静默退出而不是起两份 |
 | 卸载路径 | 真机 | 卸载会删用户数据目录，而这台机器上的会话与配置是唯一一份（`uninstall-handler.js`） | 在一台可以丢数据的机器上装一次、卸一次，确认 `ocr` 配置与 Key 的去留与 README 说的一致 |
 | 导出 HTML 报告的中文排版 | 上游 | 报告是上游 `ocr` 自己生成的 HTML，排版（标点、行高、字体栈）归上游，本仓只负责把文件交出去；本仓的排版断言（`audit:typography` / `audit:typography-ui`）看的是自己的文档与界面，看不到那份 HTML；上游那一行记在 `docs/OCR-UPSTREAM-SYNC.md` 的对照表里 | 上游改报告模板时（对照表里 `report` 那一行变动），或有人反馈导出件的中文排版问题时；在那之前 README 不承诺导出件的排版 |
