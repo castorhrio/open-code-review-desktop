@@ -2352,6 +2352,186 @@ export const dodReasonViolations = (doc, exists = () => true) => {
   return violations;
 };
 
+// ---- "how many are ticked" is one sentence, and it has to agree with the boxes
+//
+// Six items, each with a candidate and a reason, still left a reader of the bar
+// with a question nothing answered: *how many are closed right now*. The number
+// was implied by walking six checkboxes, so the sentence a next round wants to
+// quote — 「已勾 N 条 / 未勾 M 条」 — lived nowhere and was retyped from memory
+// each time. A count that is retyped is a count that drifts, and a drifted count
+// is indistinguishable from a bar that changed.
+//
+// So the DoD carries the count as one section: a fixed sentence, then one row per
+// item with its state and a one-line summary. The rule reads both halves and
+// compares them to the checkboxes:
+//
+//   1. 数字要对得上 — the sentence's 已勾 N 条 / 未勾 M 条 must equal what the
+//      `[x]` / `[ ]` lines actually say. That comparison is the whole point.
+//   2. 状态列要对得上 — every row's 已勾 / 未勾 must be the item's own state, so
+//      a tick that was flipped in one place and not the other is named, not
+//      averaged away.
+//   3. 六个 ID 一个不多一个不少 — a missing row is how the count stays "six"
+//      while an item quietly disappears; an unknown ID is a row about something
+//      else that still gets counted.
+//   4. 摘要不许新造事实 — the summary sentence must cite a record the item's own
+//      `未勾原因：` (or its `证据：`, once ticked) already cites. A summary that
+//      introduces a *new* file is a second claim, and the two disagree the first
+//      time either one moves. This is what keeps the table a restatement: the
+//      moment it may say something new, it is a second authority for the bar.
+export const DOD_SUMMARY_HEADING = "## 勾选状态一览";
+export const DOD_SUMMARY_COLUMNS = Object.freeze(["条目", "状态", "一句话"]);
+export const DOD_SUMMARY_STATE_WORDS = Object.freeze({ checked: "已勾", open: "未勾" });
+export const DOD_SUMMARY_COUNT = /已勾\s*(\d+)\s*条[、，]\s*未勾\s*(\d+)\s*条/;
+export const DOD_SUMMARY_MIN = 10;
+
+/** The 「勾选状态一览」section: the prose above its table, the header cells and the
+ *  data rows, with 1-based line numbers. `found` is false when the heading is
+ *  absent, so a caller can say "there is no count" instead of "the count is
+ *  wrong" — two different repairs. */
+export const dodSummaryTable = (doc) => {
+  const lines = String(doc == null ? "" : doc).split(/\r?\n/);
+  const start = lines.findIndex((line) => line.trim().startsWith(DOD_SUMMARY_HEADING));
+  if (start === -1) return { found: false, line: null, intro: [], header: [], rows: [], separator: null };
+  const intro = [];
+  const header = [];
+  const rows = [];
+  let separator = null;
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (/^#{1,6}\s/.test(line.trim())) break;
+    if (!line.trim().startsWith("|")) {
+      if (separator === null) intro.push({ line: index + 1, text: line });
+      continue;
+    }
+    const cells = line
+      .trim()
+      .replace(/^\|/, "")
+      .replace(/\|$/, "")
+      .split("|")
+      .map((cell) => cell.trim());
+    if (cells.every((cell) => /^:?-{2,}:?$/.test(cell))) {
+      separator = index + 1;
+      continue;
+    }
+    if (separator === null) header.push({ line: index + 1, cells });
+    else rows.push({ line: index + 1, cells });
+  }
+  return { found: true, line: start + 1, intro, header, rows, separator };
+};
+
+export const dodSummaryViolations = (doc, exists = () => true) => {
+  const table = dodSummaryTable(doc);
+  if (!table.found) {
+    return [
+      `DoD 里没有「${DOD_SUMMARY_HEADING.replace(/^##\s*/, "")}」这一节——` +
+        "「现在勾了几条」只能靠人数方括号，而数出来的那个数字不会留下任何记录",
+    ];
+  }
+  const violations = [];
+  const items = dodChecklist(doc);
+  const reasons = new Map(dodReasons(doc).map((reason) => [reason.id, reason]));
+  const checkedCount = items.filter((item) => item.checked).length;
+  const openCount = items.length - checkedCount;
+
+  // 1. the count.
+  const count = DOD_SUMMARY_COUNT.exec(table.intro.map((entry) => entry.text).join("\n"));
+  if (count === null) {
+    violations.push(
+      `第 ${table.line} 行：这一节里没有「已勾 N 条、未勾 M 条」这句话——` +
+        "一张状态表不等于一个数字，下一轮要引用的正是那个数字"
+    );
+  } else if (Number(count[1]) !== checkedCount || Number(count[2]) !== openCount) {
+    violations.push(
+      `第 ${table.line} 行：这一节写的是已勾 ${count[1]} 条、未勾 ${count[2]} 条，` +
+        `而方括号里实际是已勾 ${checkedCount} 条、未勾 ${openCount} 条——` +
+        "计数与勾选状态是同一件事，两处说法必须一致"
+    );
+  }
+
+  // 2. the header, so the columns cannot be reordered under the reader.
+  if (table.header.length !== 1) {
+    violations.push(
+      `第 ${table.line} 行：状态表的表头有 ${table.header.length} 行（应为 1 行「${DOD_SUMMARY_COLUMNS.join(" | ")}」）——` +
+        "没有表头，第二列是状态还是备注就没人说得清"
+    );
+  } else if (table.header[0].cells.join("|") !== DOD_SUMMARY_COLUMNS.join("|")) {
+    violations.push(
+      `第 ${table.header[0].line} 行：状态表的列是「${table.header[0].cells.join(" / ")}」，` +
+        `应为「${DOD_SUMMARY_COLUMNS.join(" / ")}」——列换了位置，读的人会把状态当成一句话`
+    );
+  }
+
+  // 3. one row per locked ID.
+  const seen = new Map();
+  for (const row of table.rows) {
+    const id = row.cells[0] || "";
+    if (seen.has(id)) {
+      violations.push(
+        `第 ${row.line} 行：${id} 在状态表里出现了两次（上一次在第 ${seen.get(id)} 行）——同一个条目只能有一个状态`
+      );
+      continue;
+    }
+    seen.set(id, row.line);
+  }
+  const missing = DOD_CHECKBOX_IDS.filter((id) => !seen.has(id));
+  if (missing.length) {
+    violations.push(`状态表里少了 ${missing.join("、")}：「已勾 N 条」只有在每条都占一行时才数得清`);
+  }
+  const unknown = [...seen.keys()].filter((id) => !DOD_CHECKBOX_IDS.includes(id));
+  if (unknown.length) {
+    violations.push(`状态表里的 ${unknown.join("、")} 不是过线标准的条目——多出来的一行把计数变成了另一个东西`);
+  }
+
+  // 4. the state, and a summary that restates rather than adds.
+  const byId = new Map(items.filter((item) => item.id !== null).map((item) => [item.id, item]));
+  for (const row of table.rows) {
+    const [id, state, summary = ""] = row.cells;
+    const item = byId.get(id);
+    if (item === undefined) continue;
+    const want = item.checked ? DOD_SUMMARY_STATE_WORDS.checked : DOD_SUMMARY_STATE_WORDS.open;
+    if (state !== DOD_SUMMARY_STATE_WORDS.checked && state !== DOD_SUMMARY_STATE_WORDS.open) {
+      violations.push(
+        `第 ${row.line} 行：${id} 的状态写成了「${state}」——` +
+          `只有「${DOD_SUMMARY_STATE_WORDS.checked}」与「${DOD_SUMMARY_STATE_WORDS.open}」两种`
+      );
+      continue;
+    }
+    if (state !== want) {
+      violations.push(
+        `第 ${row.line} 行：${id} 在状态表里是「${state}」，而方括号里是「${want}」——` +
+          "同一件事的两个地方对不上，读的人不知道该信哪一边"
+      );
+    }
+    if (summary.trim().length < DOD_SUMMARY_MIN) {
+      violations.push(`第 ${row.line} 行：${id} 的一句话说只有 ${summary.trim().length} 个字，等于没写`);
+      continue;
+    }
+    const cited = [...summary.matchAll(BACKTICKED_TOKEN)]
+      .map((hit) => hit[1].trim())
+      .filter((token) => looksLikeRepoPath(token));
+    if (cited.length === 0) {
+      violations.push(`第 ${row.line} 行：${id} 的一句话说没有指到任何仓内路径——摘要也要落在某份记录上`);
+      continue;
+    }
+    const missingFiles = cited.filter((target) => !exists(target));
+    if (missingFiles.length) {
+      violations.push(`第 ${row.line} 行：${id} 的一句话说指向 ${missingFiles.join("、")}，但仓里没有这个文件`);
+      continue;
+    }
+    const reason = reasons.get(id);
+    const anchorText = item.checked ? item.text : reason ? reason.text : "";
+    if (!cited.some((target) => anchorText.includes(target))) {
+      violations.push(
+        `第 ${row.line} 行：${id} 的一句话说指向 ${cited.join("、")}，` +
+          `而该条自己的「${DOD_REASON_MARK}」/「${DOD_EVIDENCE_MARK}」里没有提到它——` +
+          "摘要是复述，不是第二个说法；两处指着不同的记录，改一处另一处就成了假话"
+      );
+    }
+  }
+
+  return violations;
+};
+
 // ---- "what we have not verified" is a table with an owner, or it is prose ----
 //
 // `docs/measurements.md` has two halves: what was measured, and — since round

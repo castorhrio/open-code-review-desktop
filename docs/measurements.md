@@ -17,24 +17,27 @@ README 的 Status 段只写**能力**（能渲染 1200 条、有耗时上限断�
 | 2026-11-03 | 跨平台验证面：第 103 轮升 pin 到 `ocr v1.13.4` 时在 Linux x64 上真跑一遍 | `audit:guards` 24 条、`audit:exit` 5 条、`audit:e2e` 18 条（真 Electron + 真 CLI）、`audit:ui` 112 条、`audit:contrast` 978 处文本 0 处低于 AA、`audit:ui-scaled` 1.25 与 1.5 各 11 条，全绿；二进制自报 `v1.13.4 (76ab46a) linux/amd64` | `xvfb-run -a npm run audit:guards`（`PW_CHANNEL=bundled`），Electron 33.4.11 |
 | 2026-11-04 | 第 112 轮：首启链路第一次被脚本走过（空档案 → 引导卡三步 → 选仓 → 配 provider → 清单 → 成本确认） | `audit:e2e-first-run` 17 条全绿（真 Electron + 真 CLI，`--no-sandbox` 重试被走到，末行写「sandbox relaxed」）；同一次跑里记到 23 个子进程、其中恰有一个 `scan` 带着 `--max-tokens-budget 300000`，而「取消」那一趟一个都没起；`audit:e2e-first-run-rules` 69 条全绿（含「一个不认识的 CLI 命令即使数量对得上也要红」那一格） | `xvfb-run -a node tools/e2e-first-run.mjs`；`node tools/e2e-first-run-steps-smoke.mjs`，Electron 33.4.11，`ocr v1.13.4` 二进制，provider 是 `http://127.0.0.1:9/v1` 的假条目 |
 | 2026-11-04 | 第 113 轮升 pin 到 `ocr v1.13.5`：对照表 5 行同批重读之后，整套门禁在新二进制上重跑 | `audit:static` 24 项全绿（其中 `audit:upstream` 345 条、`audit:e2e-first-run-rules` 69 条、`audit:config` 与 `audit:service`、`audit:git` 都跑在换过的二进制上）；`audit:ui` 112 条、`audit:ui-scaled` 1.25 与 1.5 各 11 条、`audit:typography-ui` 6 屏 373 块可见文本 / 457 个带文字的叶子、`audit:contrast` 980 处文本 0 处低于 AA；真 Electron 四条 `audit:guards` 24、`audit:exit` 5、`audit:e2e` 18、`audit:e2e-first-run` 17 全绿，末行都写「sandbox relaxed」。首启那一条同时证明新 pin 的 allowlist 扩张没有动到夹具：`go.mod` 仍是「暂不支持的类型」、`testdata/sample.json` 仍是「默认排除路径」，排除块仍是两行两个理由 | `PW_CHANNEL=bundled PLAYWRIGHT_MODULE=<带 playwright 的 node_modules> xvfb-run -a npm run audit`，Electron 33.4.11，二进制自报 `v1.13.5 (abb7abcd) linux/amd64` |
+| 2026-11-04 | 第 114 轮：参数面（DOD-2 的实证面）从手感变成门禁——`tools/cli-surface.mjs` 读被 pin 的那一版二进制的 `--help`（12 条命令）与本仓真的交给 `spawn` 的 18 条命令行，双向对照 | `npm run audit:surface` 全绿：自检 46 条（含 4 条看仓库而不是夹具：`llm test` 的 needle 真在 `config-handler.js` 里、两个消费模块的 flag 字面量与表双向相等、同步文档仍有两条 run 命令的 `--help` 对照行、`audit:surface` 真挂在 `audit:static` 里）+ 门禁「57 行要拼 × help 逐条一致 / 10 行不收 / 15 行有理由地不用」；二进制自报 `v1.13.5 (abb7abcd)`。这一遍第一次跑抓到的是自制夹具自己的两处错：合成命令行把 `--preview` 与 `--resume` 拼在同一条上（46 条里 12 条因此假红），以及「值长得像 flag」那格的期望写成了两个 flag（`--rule --repo /r` 在 CLI 眼里只有一个 flag）；改的是期望与前提，不是规则。`npm run audit:static` 25 项全绿（2362 条 ok 行，exit 0），新增的那一项使 `audit:static` 从本轮起需要本机已装 CLI | `node tools/cli-surface-smoke.mjs`；`node tools/cli-surface.mjs`；`npm run audit:static`（Linux x64，二进制 `v1.13.5 (abb7abcd)`） |
+| 2026-11-04 | 第 117 轮：**打包产物第一次被脚本启动**——`release/linux-unpacked` 里的可执行文件（不是源码树里的 Electron）在一次性 HOME 下起来，经 DevTools 协议读界面 | `npm run audit:packaged` 11 条全绿：渲染层来自 `应用目录/out`、首屏引导卡三步在、应用自报「安装版」且 `installDir` 就是打包树、设置页徽章写「安装版 · linux」、内置 CLI 在打包树里（`binarySource=package`）并自报 `v1.13.5 (abb7abcd) linux/amd64`、配置落在一次性档案里、开发者真实 `~/.opencodereview/config.json` 摘要不变；反向控制把同一套断言指向源码树，必须变红并点名安装目录与 CLI 位置（实测点名 2 条）；规则本身 24 条由 `audit:packaged-rules` 钉住（含「`audit:packaged` 不许进 `audit:app`」）| `PLAYWRIGHT_MODULE=<带 playwright 的 node_modules> xvfb-run -a node tools/e2e-packaged.mjs`；`node tools/e2e-packaged-smoke.mjs`，Electron 33.4.11 |
+| 2026-11-04 | 第 119 轮：`audit:static` 的第二个环境依赖（本机 git tag 历史）第一次量出来——`audit:surface` 要本机已装 CLI，这一条要本 checkout 的 tag | 在 `git clone --depth 1 --no-tags file:///opt/open-code-review-desktop` 的副本里：`node tools/release-pin.mjs` 退出码 2，末行写「这个 checkout 里一个 tag 都没有（`git tag -l 'v*'` 是空的）：`--depth` 克隆与 tarball 解出来的目录都长这样」，不再说「没有发布」——那句话会把人指向另一个项目的 tag；同一副本里 `node tools/release-pin-smoke.mjs` 30 条全绿，因为规则那一半只驱动谓词、不碰 git。门禁与规则因此分得开：浅克隆里能跑的仍能跑，不能跑的那一半自己说明原因 | `node tools/release-pin.mjs`；`node tools/release-pin-smoke.mjs`（副本在 `/var/tmp/shallow-probe`；完整 clone 上同两条也全绿） |
 
-上面那一行是**验证面**，不是又一个数字，所以它把「怎么跑出来的」也写清楚：这台机器没有 Edge，
-UI 三条靠 Playwright 自带的 chromium（`PW_CHANNEL=bundled`）——Playwright 不是本仓依赖，
-`npm install` 会把它当多余包装掉，所以跑 `audit:ui` 前要按 README 的说法补一份（`--no-save` 即可）。
-这台机器的 `chrome-sandbox` 不是 setuid root，真 Electron 那四条都以 `--no-sandbox` 运行，
-harness 会自己说明「sandbox relaxed」。这一行**不覆盖**：Linux / macOS 的打包产物（没跑
-`npm run dist:linux`）、真显示器与 GPU、安装版的自动更新、以及单实例锁与卸载路径；macOS 至今
-一次都没跑过任何一条。发布面同样只有 Windows——12 个 Release 的资产全是 `*-setup.exe` /
-`*-portable.exe` / `latest.yml` / blockmap，没有一份 mac 或 linux 包。所以「发布到哪、验证到哪」
-现在是同一句话，写在两份 README 的首屏与限制清单里。Windows x64 仍是唯一端到端（含安装包）验证过的平台。
+## 这张表怎么读：验证面，以及不可复现的那一半
+
+表里那几条「整套门禁重跑」的读数是**验证面**，不是又一个数字，所以它们把「怎么跑出来的」
+也写清楚：这台机器没有 Edge，UI 三条靠 Playwright 自带的 chromium（`PW_CHANNEL=bundled`）——
+Playwright 不是本仓依赖，`npm install` 会把它当多余包装掉，所以跑 `audit:ui` 前要按 README
+的说法补一份（`--no-save` 即可）。这台机器的 `chrome-sandbox` 不是 setuid root，真 Electron
+那四条都以 `--no-sandbox` 运行，harness 会自己说明「sandbox relaxed」。这些行**不覆盖**：
+Linux / macOS 的打包产物（没跑 `npm run dist:linux`）、真显示器与 GPU、安装版的自动更新、
+以及单实例锁与卸载路径；macOS 至今一次都没跑过任何一条。发布面同样只有 Windows——12 个
+Release 的资产全是 `*-setup.exe` / `*-portable.exe` / `latest.yml` / blockmap，没有一份 mac 或
+linux 包。所以「发布到哪、验证到哪」现在是同一句话，写在两份 README 的首屏与限制清单里。
+Windows x64 仍是唯一端到端（含安装包）验证过的平台。
 
 这些数字不可复现成同一个值：审查耗时取决于服务商、网络与仓库，渲染耗取决于机器。
 能复现的是**断言**——「1200 条全部渲染出来」「挂载不超过上限」写成了
 `tools/ui-audit/audit.mjs` 里的检查，改坏了会红；「渲染一次真实扫描的载荷」写成了
 读夹具的检查。README 承诺的是这一层，不是上表里的某一格。
-| 2026-11-04 | 第 114 轮：参数面（DOD-2 的实证面）从手感变成门禁——`tools/cli-surface.mjs` 读被 pin 的那一版二进制的 `--help`（12 条命令）与本仓真的交给 `spawn` 的 18 条命令行，双向对照 | `npm run audit:surface` 全绿：自检 46 条（含 4 条看仓库而不是夹具：`llm test` 的 needle 真在 `config-handler.js` 里、两个消费模块的 flag 字面量与表双向相等、同步文档仍有两条 run 命令的 `--help` 对照行、`audit:surface` 真挂在 `audit:static` 里）+ 门禁「57 行要拼 × help 逐条一致 / 10 行不收 / 15 行有理由地不用」；二进制自报 `v1.13.5 (abb7abcd)`。这一遍第一次跑抓到的是自制夹具自己的两处错：合成命令行把 `--preview` 与 `--resume` 拼在同一条上（46 条里 12 条因此假红），以及「值长得像 flag」那格的期望写成了两个 flag（`--rule --repo /r` 在 CLI 眼里只有一个 flag）；改的是期望与前提，不是规则。`npm run audit:static` 25 项全绿（2362 条 ok 行，exit 0），新增的那一项使 `audit:static` 从本轮起需要本机已装 CLI | `node tools/cli-surface-smoke.mjs`；`node tools/cli-surface.mjs`；`npm run audit:static`（Linux x64，二进制 `v1.13.5 (abb7abcd)`） |
-| 2026-11-04 | 第 117 轮：**打包产物第一次被脚本启动**——`release/linux-unpacked` 里的可执行文件（不是源码树里的 Electron）在一次性 HOME 下起来，经 DevTools 协议读界面 | `npm run audit:packaged` 11 条全绿：渲染层来自 `应用目录/out`、首屏引导卡三步在、应用自报「安装版」且 `installDir` 就是打包树、设置页徽章写「安装版 · linux」、内置 CLI 在打包树里（`binarySource=package`）并自报 `v1.13.5 (abb7abcd) linux/amd64`、配置落在一次性档案里、开发者真实 `~/.opencodereview/config.json` 摘要不变；反向控制把同一套断言指向源码树，必须变红并点名安装目录与 CLI 位置（实测点名 2 条）；规则本身 24 条由 `audit:packaged-rules` 钉住（含「`audit:packaged` 不许进 `audit:app`」）| `PLAYWRIGHT_MODULE=<带 playwright 的 node_modules> xvfb-run -a node tools/e2e-packaged.mjs`；`node tools/e2e-packaged-smoke.mjs`，Electron 33.4.11 |
-| 2026-11-04 | 第 119 轮：`audit:static` 的第二个环境依赖（本机 git tag 历史）第一次量出来——`audit:surface` 要本机已装 CLI，这一条要本 checkout 的 tag | 在 `git clone --depth 1 --no-tags file:///opt/open-code-review-desktop` 的副本里：`node tools/release-pin.mjs` 退出码 2，末行写「这个 checkout 里一个 tag 都没有（`git tag -l 'v*'` 是空的）：`--depth` 克隆与 tarball 解出来的目录都长这样」，不再说「没有发布」——那句话会把人指向另一个项目的 tag；同一副本里 `node tools/release-pin-smoke.mjs` 30 条全绿，因为规则那一半只驱动谓词、不碰 git。门禁与规则因此分得开：浅克隆里能跑的仍能跑，不能跑的那一半自己说明原因 | `node tools/release-pin.mjs`；`node tools/release-pin-smoke.mjs`（副本在 `/var/tmp/shallow-probe`；完整 clone 上同两条也全绿） |
 
 ## 未验证清单（截至 2026-11-04）
 
