@@ -2162,10 +2162,21 @@ export const DOD_EVIDENCE_SHAPES = Object.freeze([
   {
     id: "DOD-4",
     path: "src/components/ResultsPanel.tsx",
+    // 第 131 轮把徽章从「自己查 STATUS 表」改成 `statusBadge()`（它同时负责把被上限截短
+    // 的运行改说成「未审完」），这一屏因此不再出现 `STATUS` 这个词。形状跟着实现走：
+    // 断言的是「这一屏的徽章来自那一处派生」，不是「这一屏还认得那张表」。
     must: [
-      { label: "四态徽章取自 STATUS", pattern: /STATUS/ },
+      { label: "徽章取自 statusBadge", pattern: /statusBadge/ },
       { label: "徽章渲染", pattern: /<Badge/ },
       { label: "预算截断态", pattern: /runLimitReached/ },
+    ],
+  },
+  {
+    id: "DOD-4",
+    path: "tools/format-notice-smoke.mjs",
+    must: [
+      { label: "结束提示语由徽章派生", pattern: /completionNotice/ },
+      { label: "STATUS 闭集", pattern: /KNOWN_STATUS_KEYS/ },
     ],
   },
   {

@@ -32,6 +32,24 @@ export const SEVERITY_LABEL: Record<string, string> = {
   "": "未标注",
 };
 
+/**
+ * The badge a state this build cannot name earns.
+ *
+ * `unknown` used to be the one muted badge in the table, and that was a second
+ * opinion about a fact `completionNotice` had already decided: a run whose state
+ * was not recorded must not be read as finished (tone `warning`), while the badge
+ * beside it wore the neutral grey that means "no information here". A person reads
+ * the badge first, and grey reads as "nothing to see", not as "do not read this as
+ * done" — so the badge takes the warn tone too, and the two surfaces say the same
+ * thing in the same voice. `tools/format-notice-smoke.mjs` pins the choice.
+ *
+ * The same appearance is used for a status word this build has never heard of
+ * (`statusBadge`'s fallback): an unrecognised word is not evidence that the run
+ * finished either, and two different greys for "no status" and "a status I do not
+ * know" would be a distinction nobody can act on.
+ */
+const UNKNOWN_BADGE_CLS = "border-warn/40 bg-warn/10 text-warn";
+
 /** `status` / `manifest.terminal_state` vocabulary of the CLI. */
 export const STATUS: Record<string, { label: string; cls: string }> = {
   success: { label: "完成", cls: "border-ok/40 bg-ok/10 text-ok" },
@@ -40,9 +58,13 @@ export const STATUS: Record<string, { label: string; cls: string }> = {
   completed_with_warnings: { label: "有警告", cls: "border-warn/40 bg-warn/10 text-warn" },
   completed_with_errors: { label: "部分失败", cls: "border-warn/40 bg-warn/10 text-warn" },
   failed: { label: "失败", cls: "border-bad/40 bg-bad/10 text-bad" },
-  skipped: { label: "已跳过", cls: "border-line bg-raised text-muted" },
+  // `skipped` is the empty manifest upstream returns when nothing ran at all
+  // (`emptyManifest`, `internal/session/manifest.go`). It is not a finished run,
+  // and `completionNotice` already announces it in the warning tone — so the
+  // badge takes the warn tone too, for the same reason `unknown` does.
+  skipped: { label: "已跳过", cls: "border-warn/40 bg-warn/10 text-warn" },
   aborted: { label: "已中断", cls: "border-warn/40 bg-warn/10 text-warn" },
-  unknown: { label: "状态未记录", cls: "border-line bg-raised text-muted" },
+  unknown: { label: "状态未记录", cls: UNKNOWN_BADGE_CLS },
 };
 
 export const EXCLUDE_REASON: Record<string, string> = {
@@ -219,6 +241,12 @@ export function runLimitReached(value: RunResult | null | undefined): boolean {
  * not finish, and folding them into a second word for the same fact would lose
  * the difference between "stopped at a limit" and "some files failed".
  *
+ * A state this build cannot name — no status at all, or a word the CLI has added
+ * since — wears `UNKNOWN_BADGE_CLS`, the warn tone, for the same reason: the
+ * sentence that announces the run (`completionNotice`) already refuses to call it
+ * finished, and a grey badge next to a warning sentence is two answers to one
+ * question.
+ *
  * `id` is the seam the render is checked against — `tools/e2e-fake-provider.cjs`
  * reads it off the real results screen (`data-run-status`) instead of scraping a
  * class name, so "the badge says which state it is in" is a value and not a
@@ -228,7 +256,7 @@ export function statusBadge(value: RunResult | null | undefined): { id: string; 
   const st = terminalState(value);
   const named = STATUS[st];
   const label = named ? named.label : st || "未知";
-  const cls = named ? named.cls : "border-line bg-raised text-muted";
+  const cls = named ? named.cls : UNKNOWN_BADGE_CLS;
   const finished = st === "complete" || st === "success";
   if (!finished || !runLimitReached(value)) return { id: st || "unknown", label, cls };
   return { id: "limited", label: "未审完", cls: "border-warn/40 bg-warn/10 text-warn" };

@@ -35,7 +35,7 @@ tag v1.13.5
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`abb7abcd5c5196fa0278dc87db85780fa269562f`（第 130 轮：`git fetch upstream --tags` 本轮通了，`refs/heads/main` 仍是 `d3cd23f`——第 127 轮记下的那个 Starlark commit，`git log 8041473..upstream/main` 现在只有它一个；`refs/tags/v1.13.5` 与 npm `latest` 仍分别答 `v1.13.5` / `1.13.5`，**pin 不动**（pin 跟的是发布版本，不是默认分支）；通路：git）
+**本轮 HEAD 核对：`abb7abcd5c5196fa0278dc87db85780fa269562f`（第 132 轮：`git fetch upstream --tags` 本轮通了，`refs/heads/main` 前进到 `36eec0c`——两个 commit 分别是 GitHub Action 的评论重写与 `pages/` 官网的 provider 展示，都不在对照表 5 行里；`refs/tags/v1.13.5` 与 npm `latest` 仍分别答 `v1.13.5` / `1.13.5`，**pin 不动**（pin 跟的是发布版本，不是默认分支）；通路：git）
 
 ### 核到的上游 HEAD（核对的落点，不是 pin）
 
@@ -45,7 +45,7 @@ pin 说封装的是哪个**发布版本**（`v1.13.5`，二进制自报的那个
 已前进」，而那六轮的通路账一行行写着「无新内容」——一个总在响的标记等于没有标记。所以这一行的
 轮次必须与通路账末行相等（`checkedHeadViolations`），`upstream:check` 比的也是这一行，而不是 pin。
 
-**本轮核到的上游 HEAD：`d3cd23faeafddfb01abf759d5a0c683187d19af7`（第 130 轮）**
+**本轮核到的上游 HEAD：`36eec0c0269d0687a761fb3291ccbf427ab9336f`（第 132 轮）**
 
 ### 核对通路账
 
@@ -148,6 +148,8 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 | 128 | 2026-11-04 | none | **这一轮没有核对上游**：产品侧只改了图标与图标门禁（`tools/icon-rules.mjs` / `icon-rules-smoke.mjs`、`build/make-icon.cjs` 的三色改从 `src/styles.css` 解析），通路上一次都没走，账也没记——本轮（第 129 轮）把这一行补上，是为了让「第 128 轮核过没有」有答案，而不是把它当成核过 | `[UPSTREAM-DEBT]` HEAD |
 | 129 | 2026-11-04 | git | `d3cd23f` / `v1.13.5` / npm `1.13.5`，三条通路答案一致：`refs/heads/main` 仍是第 127 轮记下的那个 Starlark commit（`git fetch upstream --tags` 通了，`git log 8041473..upstream/main` 只有它一个），`refs/tags/v1.13.5` 与 npm `latest` 未变，**pin 不前进、无移植项**（那一个 commit 动的是 allowlist、规则表与 `pages/` 文档，对照表 5 行一个都没被碰到）；本轮产品改动是把「上一轮核到的 HEAD」从散文变成机器可读的一行：`docs/OCR-UPSTREAM-SYNC.md` 机器可读区新增「核到的上游 HEAD」固定行（`d3cd23f…`，第 129 轮），`tools/upstream-watch.mjs` 新增 `findCheckedHead` / `checkedHeadViolations` / `referenceFromDoc`，`upstream:check` 改比这一行而不是 release pin——第 121 轮起它连续六轮喊「已前进」，而那六轮的账都写着「无新内容」，一个总在响的标记等于没有标记；`formatDrift` 的静默句因此改口「与上一轮核到的一致」，前进句多一句「上一次核到是第 N 轮」 | — |
 | 130 | 2026-11-04 | git | `d3cd23f` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**（`git fetch upstream --tags` 通了，`refs/heads/main` 仍是第 127 轮记下的那个 Starlark commit，`git log 8041473..upstream/main` 只有它一个；对照表 5 行一个都没被这批改动碰到）；本轮产品改动是**运行级四种结局第一次真跑**：新增 `tools/fake-provider.mjs`（按被 pin 的那一版二进制真发的请求形态作答，相位按声明的工具分，第二次 review 轮跳过 `<confirmed_findings>` 已确认的文件）、`tools/fake-provider-cli.mjs`（一次性仓库 + 一次性 `HOME`，provider 走 CLI 自己的 `config set`）与 `tools/fake-provider-smoke.mjs`（`npm run audit:provider`，挂进 `audit:static`），完成态 / 预算截断 / 全量扫描 / provider 挂掉四趟共 44 条检查，全程 loopback、0 token | — |
+| 131 | 2026-11-04 | none | **这一轮没有核对上游**：产品侧只改了结束提示语的语气（`src/lib/format.ts` 的 `completionNotice()` 改成从 `statusBadge()` 的 `id` 派生、`src/store.tsx` 补 `error` 分支、新增 `tools/format-notice-smoke.mjs`），通路上一次都没走、账也没记——本轮（第 132 轮）把这一行补上，是为了让「第 131 轮核过没有」有答案，而不是把它当成核过 | `[UPSTREAM-DEBT]` HEAD |
+| 132 | 2026-11-04 | git | **上游 HEAD 前进**：`d3cd23f` → `36eec0c`（`git fetch upstream --tags` 通了，`git log d3cd23f..upstream/main` 两个 commit：`90444ea fix(action): only rewrite the bot's own summary comment (#1560)` 改的是 `action.yml` 与 `scripts/github-actions/post-review-comments.js`（上游 CI 侧，本仓不跑 Action、不发评论），`36eec0c feat(pages): showcase supported model providers (#1862)` 是 `pages/` 官网的 provider 展示与五语文案；`refs/tags/v1.13.5` 与 npm `1.13.5` 均未变，**pin 不前进**；对照表 5 行的上游文件一个都没被碰到，**无移植项**）；本轮产品改动是徽章与提示语用同一种声音说话——`STATUS.unknown` / `skipped` 与「叫不出名字的状态」都取 warn 色，`tools/format-notice-smoke.mjs` 新增「徽章颜色就是提示语语气」的整表断言（两条反向控制）、`STATUS` 闭集断言、以及按字符走的 `stripComments`（旧正则会把 `"https://…"` 剥掉）；`DOD_EVIDENCE_SHAPES` 里 `ResultsPanel.tsx` 那一格从 `STATUS` 改成 `statusBadge`（第 131 轮之后这一屏不再出现那个词，形状表停在旧词上会让本套断言一直红） | — |
 
 「最近一次对照」只写**那一项最近被人工重新核对**的轮次。该列没有列出本轮，表示本轮
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
@@ -239,36 +241,35 @@ tool 结果文本**（`Error: diff not found for: …`、`Diffs exist for: …`�
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。搬完这里只留一句
    指针——「本文件只留当前一轮」不是约定而是断言（`previousRoundPointerViolations`）。
 
-## 当前状态（第 130 轮，2026-11-04）
+## 当前状态（第 132 轮，2026-11-04）
 
-本轮复核：**上游没动。** `git fetch upstream --tags` 通了，`refs/heads/main` 仍是 `d3cd23f`——第 127 轮记下的
-那个 Starlark commit，`git log 8041473..upstream/main` 现在也只有它一个；`refs/tags/v1.13.5` 与 npm
-`latest` 仍分别答 `v1.13.5` / `1.13.5`，三个口径一致，**pin 不动、无移植项**（那 18 个变更文件早就逐个读过：
-allowlist、规则表与 `pages/` 文档，对照表 5 行一个都没被碰到）。
+本轮复核：**上游 HEAD 前进了** `d3cd23f` → `36eec0c`（`git fetch upstream --tags` 通了，`git log
+d3cd23f..upstream/main` 两个 commit）。两个都不在对照表 5 行里，**pin 不动、无移植项**：
 
-本轮产品改动是**运行级的四种结局第一次交给真跑**。此前本仓每一条运行级结论都建立在「拒绝连接的端口」
-（`http://127.0.0.1:9/v1`）上：它能证明拒绝（「一个子进程都没起」「成本确认挡住了那次 scan」），但证明不了
-完成——没有东西应答时每个文件都失败，一次运行永远走不到 `complete`、也永远发布不出一条发现。于是
-「单个提交 / 全量扫描」只到预览级，「截断不显示干净」只有界面层证据。
+- `90444ea fix(action): only rewrite the bot's own summary comment (#1560)`——改的是 GitHub Action 的
+  `scripts/github-actions/post-review-comments.js` 与 `action.yml`（只重写机器人自己那条汇总评论）。
+  这是**上游 CI 侧**的调用面，本仓不跑 Action、也不发评论，无移植项。
+- `36eec0c feat(pages): showcase supported model providers (#1862)`——`pages/` 官网新增
+  `ProvidersSection` 与 11 个 provider 图标、五语文案。纯站点，无 CLI / 配置 / 输出面变化。
 
-现在 `tools/fake-provider.mjs` 按被 pin 的 `ocr v1.13.5` 真发的请求形态作答，相位按请求声明的工具区分
-（没有工具＝plan 预检、`code_comment`＝review、`approve_all_comments`＝review 后的过滤），不按提示词措辞——
-措辞是上游的，工具名是协议。它还会跳过第二次 review 轮里 `<confirmed_findings>` 已点名的文件：上游那一趟
-写着「不要重复」，一个忽略它的替身会让同一条发现被发布两次，那不是解析错误，只是一次看着像「2 条」的运行。
-`tools/fake-provider-cli.mjs` 把替身接在一次性仓库（`main` / `feature` / 一行未提交改动）与一次性 `HOME` 上，
-provider 用 CLI 自己的 `config set custom_providers.…` 写入而不是手写 `config.json`，所以真实用户的 Key 与
-配置一次都不在测试里。
+`refs/tags/v1.13.5` 与 npm `latest`（`1.13.5`）未变，三个口径一致。
 
-`npm run audit:provider`（挂进 `audit:static`）因此真跑四趟，全程 loopback、0 token：完成态
-（`status=complete`、1 条标记发现、4 次请求；第二趟 review 真带着 `<confirmed_findings>`，靠跳过才只有 1 条）、
-预算截断（**`status` 仍是 `complete`**，`summary.budget_exceeded=true` 且带 `token_budget_reached` 警告，已发布
-的那条发现没被擦掉）、全量扫描（**`status=success`**，问 `<current_file_path>` 而不是 `<review_files>`）、
-provider 答 500（非零退出、0 条发现）。两处措辞差异对界面是有意义的：截断不在 `status` 里，所以
-`runLimitReached()` 必须看 `summary.budget_exceeded` 与 `review_limit_reached`（它一直这么看，现在有真跑撑着）；
-扫描的 `success` 与 review 的 `complete` 不是一个词，`STATUS` 表里两个都得在。还缺的一半写在 DoD-4 的未勾原因里：
-把这份 fixture 交给 Electron 起一次界面、断言截断的那一屏不写「完成」。
+本轮产品改动是**徽章与提示语终于用同一种声音说话**。第 131 轮把结束时的语气改成从徽章派生，但
+`STATUS.unknown` 的徽章仍是中性灰——「没有信息」与「不要当完成读」是两句话，而它们说的是同一件事；
+`skipped`（上游只在「什么都没跑」的空 manifest 上用这个词）同样如此。现在两者都取 warn 色，
+`statusBadge()` 对**叫不出名字的状态**（没有 status，或上游将来新增的词）也走同一个常量，于是
+「徽章的颜色就是提示语的语气」成了一条可以对整张表断言的规则（`tools/format-notice-smoke.mjs`：
+success↔ok / warning↔warn / error↔bad，两条反向控制——中性灰的旧 `unknown`、一律涂成 ok 色的实现
+都必须被抓住）。同一份 smoke 里另加两件事：`STATUS` 的 key 集合是闭集（上游加词会红，而不是静默
+产出一个没人断言过的 `data-run-status`），以及 `stripComments` 换成按字符走的剥离器（旧的两条正则
+会把 `"https://…"` 从 `//` 处剥掉，自测里带一条反向控制钉住这个理由）。
 
-上一轮（第 129 轮）的正文见 [`upstream-history.md`](upstream-history.md#上游状态第-129-轮2026-11-04)，归档之后本文件不留第二份。
+`docs/PRODUCT-DOD.md` 的 DOD-4 未勾原因跟着实现同步：`tools/format-notice-smoke.mjs` 成为它的证据
+候选之一，`tools/upstream-watch.mjs` 的 `DOD_EVIDENCE_SHAPES` 里 `ResultsPanel.tsx` 那一格从
+「四态徽章取自 STATUS」改成「徽章取自 statusBadge」——第 131 轮之后这一屏不再出现 `STATUS` 这个词，
+形状表停在旧词上会让 `audit:upstream` 一直红（它确实红了，本轮修的就是它）。
+
+上一轮（第 131 轮）的正文见 [`upstream-history.md`](upstream-history.md#上游状态第-131-轮2026-11-04)，归档之后本文件不留第二份。
 
 ### 参数面：`ocr review --help` / `ocr scan --help` 与本仓真的拼出的每一行
 

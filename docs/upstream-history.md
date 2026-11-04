@@ -36,6 +36,42 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 
 ---
 
+## 上游状态（第 131 轮，2026-11-04）
+
+这一轮**没有核对上游**：产品侧只改了「运行结束时的语气」——`src/lib/format.ts` 的 `completionNotice()`
+改成从 `statusBadge()` 的 `id` 派生语气（`COMPLETION_TONE` 表），`src/store.tsx` 的结束 toast 补上
+`error` 这一支，新增 `tools/format-notice-smoke.mjs` 钉住十种结局的语气与标题。通路上一次都没走，
+账也没记——本轮（第 132 轮）把这一行补上，是为了让「第 131 轮核过没有」有答案，而不是把它当成核过。
+
+## 上游状态（第 130 轮，2026-11-04）
+
+本轮复核：**上游没动。** `git fetch upstream --tags` 通了，`refs/heads/main` 仍是 `d3cd23f`——第 127 轮记下的
+那个 Starlark commit，`git log 8041473..upstream/main` 现在也只有它一个；`refs/tags/v1.13.5` 与 npm
+`latest` 仍分别答 `v1.13.5` / `1.13.5`，三个口径一致，**pin 不动、无移植项**（那 18 个变更文件早就逐个读过：
+allowlist、规则表与 `pages/` 文档，对照表 5 行一个都没被碰到）。
+
+本轮产品改动是**运行级的四种结局第一次交给真跑**。此前本仓每一条运行级结论都建立在「拒绝连接的端口」
+（`http://127.0.0.1:9/v1`）上：它能证明拒绝（「一个子进程都没起」「成本确认挡住了那次 scan」），但证明不了
+完成——没有东西应答时每个文件都失败，一次运行永远走不到 `complete`、也永远发布不出一条发现。于是
+「单个提交 / 全量扫描」只到预览级，「截断不显示干净」只有界面层证据。
+
+现在 `tools/fake-provider.mjs` 按被 pin 的 `ocr v1.13.5` 真发的请求形态作答，相位按请求声明的工具区分
+（没有工具＝plan 预检、`code_comment`＝review、`approve_all_comments`＝review 后的过滤），不按提示词措辞——
+措辞是上游的，工具名是协议。它还会跳过第二次 review 轮里 `<confirmed_findings>` 已点名的文件：上游那一趟
+写着「不要重复」，一个忽略它的替身会让同一条发现被发布两次，那不是解析错误，只是一次看着像「2 条」的运行。
+`tools/fake-provider-cli.mjs` 把替身接在一次性仓库（`main` / `feature` / 一行未提交改动）与一次性 `HOME` 上，
+provider 用 CLI 自己的 `config set custom_providers.…` 写入而不是手写 `config.json`，所以真实用户的 Key 与
+配置一次都不在测试里。
+
+`npm run audit:provider`（挂进 `audit:static`）因此真跑四趟，全程 loopback、0 token：完成态
+（`status=complete`、1 条标记发现、4 次请求；第二趟 review 真带着 `<confirmed_findings>`，靠跳过才只有 1 条）、
+预算截断（**`status` 仍是 `complete`**，`summary.budget_exceeded=true` 且带 `token_budget_reached` 警告，已发布
+的那条发现没被擦掉）、全量扫描（**`status=success`**，问 `<current_file_path>` 而不是 `<review_files>`）、
+provider 答 500（非零退出、0 条发现）。两处措辞差异对界面是有意义的：截断不在 `status` 里，所以
+`runLimitReached()` 必须看 `summary.budget_exceeded` 与 `review_limit_reached`（它一直这么看，现在有真跑撑着）；
+扫描的 `success` 与 review 的 `complete` 不是一个词，`STATUS` 表里两个都得在。还缺的一半写在 DoD-4 的未勾原因里：
+把这份 fixture 交给 Electron 起一次界面、断言截断的那一屏不写「完成」。
+
 ## 上游状态（第 129 轮，2026-11-04）
 
 本轮复核：**上游没动。** `git fetch upstream --tags` 通了，`refs/heads/main` 仍是 `d3cd23f`——第 127 轮记下的
