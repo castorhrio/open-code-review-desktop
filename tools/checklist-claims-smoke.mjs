@@ -21,8 +21,13 @@ import {
   checklistStatus,
   citesChecklistStep,
   claimKey,
+  claimsSummaryLine,
+  claimsSummaryViolations,
   dodCheckboxOf,
   pastedReading,
+  quotedRowCounts,
+  readClaimsSummary,
+  recordedCountViolations,
   unverifiedRows,
 } from "./checklist-claims.mjs";
 import { auditScriptClosure } from "./upstream-watch.mjs";
@@ -49,7 +54,14 @@ const ROW_PORTABLE = `| 免安装版（portable）的运行面 | 真机 | 没打
  *  所以它不该被要求进第 9 节的对照表。 */
 const ROW_UPDATE = `| 应用内更新（NSIS 安装版） | 真机 | 没跑过 | 下一次发版前装一次；\`${CHECKLIST_DOC}\` 第 8 节写明这一项不在那一趟里 |`;
 
-const measurementsDoc = ({ rows = [ROW_FIRST_RUN, ROW_KEY, ROW_PORTABLE, ROW_UPDATE], why = {} } = {}) => {
+const measuredRow = ({ rows = 4, cited = 3 } = {}) =>
+  `| 2026-11-04 | 门禁自己那句读数 | 打印「未验证清单 ${rows} 行，其中 ${cited} 行按清单的某一步去验」 | 命令 |`;
+
+const measurementsDoc = ({
+  rows = [ROW_FIRST_RUN, ROW_KEY, ROW_PORTABLE, ROW_UPDATE],
+  why = {},
+  reading = "| 2026-11-04 | 某次跑 | 绿 | 命令 |",
+} = {}) => {
   const body = rows.map((row) => {
     const name = row.split("|")[1].trim();
     if (!why[name]) return row;
@@ -62,7 +74,7 @@ const measurementsDoc = ({ rows = [ROW_FIRST_RUN, ROW_KEY, ROW_PORTABLE, ROW_UPD
     "",
     "| 日期 | 场景 | 实测 | 来源 |",
     "| --- | --- | --- | --- |",
-    "| 2026-11-04 | 某次跑 | 绿 | 命令 |",
+    reading,
     "",
     "## 未验证清单（截至 2026-11-04）",
     "",
@@ -308,7 +320,139 @@ const lineOf = (doc, name) => {
   );
 }
 
-/* ---- 7. 仓库本身，而不是夹具 ---- */
+/* ---- 7. 门禁自己那句话 ------
+ * 第 122 轮立的纪律是「数字要有断言」，而那条纪律没有覆盖它自己的读数：终端里那句
+ * 「未验证清单 11 行，其中 6 行按清单的某一步去验」是手写模板，读的人拿表格去数，
+ * 数出来的数不一样时没有任何东西会红。所以这句话改由现算得到，再把印出来的句子读
+ * 回来与表格比一次；同时要求 `docs/measurements.md` 里最后一句引用它的读数也必须
+ * 与现在的表格相等——历史行留着当时的数字，只有最后一句是「现在」。
+ *
+ * 反向控制按「改坏一个数字」各来一格：行数、其中数、对照表行数、状态、以及把
+ * 「其中 M 行」整段删掉（读不回数字时不许静默通过）。
+ */
+{
+  const base = good();
+  const rows = unverifiedRows(base.measurementsDoc);
+  const claims = checklistClaimRows(base.checklistDoc);
+  const line = claimsSummaryLine({ status: "pending", claimRows: claims, rows });
+  const parsed = readClaimsSummary(line);
+
+  check(
+    "前提：门禁那句读数印出来能读回四个数字（对照表 3 行 / 未验证清单 4 行 / 其中 3 行 / 状态 pending）",
+    parsed.status === "pending" && parsed.claims === 3 && parsed.rows === 4 && parsed.cited === 3,
+    JSON.stringify(parsed)
+  );
+  check(
+    "基线：门禁自己那句读数与表格相等（绿）",
+    claimsSummaryViolations({ line, status: "pending", claimRows: claims, rows }).length === 0,
+    claimsSummaryViolations({ line, status: "pending", claimRows: claims, rows }).join("；") || "没有违规"
+  );
+
+  const wrongRows = claimsSummaryViolations({
+    line: line.replace("未验证清单 4 行", "未验证清单 10 行"),
+    status: "pending",
+    claimRows: claims,
+    rows,
+  });
+  check(
+    "把行数改成 10（表格是 4）：点名这个数字，两句都带上",
+    wrongRows.length === 1 && wrongRows[0].includes("10") && wrongRows[0].includes("4") && wrongRows[0].includes("未验证清单的行数"),
+    wrongRows.join("；") || "没有违规"
+  );
+
+  const wrongCited = claimsSummaryViolations({
+    line: line.replace("其中 3 行按清单的某一步去验", "其中 2 行按清单的某一步去验"),
+    status: "pending",
+    claimRows: claims,
+    rows,
+  });
+  check(
+    "把「其中 M 行」改错：点名那一项",
+    wrongCited.length === 1 && wrongCited[0].includes("其中按清单某一步去验的行数"),
+    wrongCited.join("；") || "没有违规"
+  );
+
+  const wrongClaims = claimsSummaryViolations({
+    line: line.replace("第 9 节对照表 3 行", "第 9 节对照表 5 行"),
+    status: "pending",
+    claimRows: claims,
+    rows,
+  });
+  check(
+    "把对照表行数改错：点名那一项",
+    wrongClaims.length === 1 && wrongClaims[0].includes("第 9 节对照表的行数"),
+    wrongClaims.join("；") || "没有违规"
+  );
+
+  const wrongStatus = claimsSummaryViolations({
+    line: line.replace("状态 pending", "状态 executed"),
+    status: "pending",
+    claimRows: claims,
+    rows,
+  });
+  check(
+    "把状态改错：点名清单状态",
+    wrongStatus.length === 1 && wrongStatus[0].includes("清单状态") && wrongStatus[0].includes("executed"),
+    wrongStatus.join("；") || "没有违规"
+  );
+
+  const missingCited = claimsSummaryViolations({
+    line: line.replace("，其中 3 行按清单的某一步去验", ""),
+    status: "pending",
+    claimRows: claims,
+    rows,
+  });
+  check(
+    "把「其中 M 行」整段删掉：读不出就红（不许静默跳过）",
+    missingCited.length === 1 && missingCited[0].includes("读不出"),
+    missingCited.join("；") || "没有违规"
+  );
+
+  const readMatching = recordedCountViolations({ measurementsDoc: measurementsDoc({ reading: measuredRow() }), rows });
+  check("读数行记的是 4 / 3：绿（正向控制）", readMatching.length === 0, readMatching.join("；") || "没有违规");
+
+  const readWrongDoc = measurementsDoc({ reading: measuredRow({ rows: 10 }) });
+  const readWrongLine = quotedRowCounts(readWrongDoc)[0].line;
+  const readWrong = recordedCountViolations({ measurementsDoc: readWrongDoc, rows });
+  check(
+    "读数行记的是 10 而行数是 4：点名那一行与两个数字",
+    readWrong.length === 1 &&
+      readWrong[0].includes("10") &&
+      readWrong[0].includes("4") &&
+      readWrong[0].includes(`第 ${readWrongLine} 行`),
+    readWrong.join("；") || "没有违规"
+  );
+
+  const readHalf = recordedCountViolations({
+    measurementsDoc: measurementsDoc({ reading: "| 2026-11-04 | 门禁 | 打印「未验证清单 4 行」 | 命令 |" }),
+    rows,
+  });
+  check(
+    "只记行数、不记「其中 M 行」：红（两个数字要一起记）",
+    readHalf.length === 1 && readHalf[0].includes("其中 M 行"),
+    readHalf.join("；") || "没有违规"
+  );
+
+  const readAbsent = recordedCountViolations({ measurementsDoc: measurementsDoc(), rows });
+  check(
+    "整个文件没有一句引用这两个数字：红（读数只出现在终端里不算记录）",
+    readAbsent.length === 1 && readAbsent[0].includes("没有任何一行记下"),
+    readAbsent.join("；") || "没有违规"
+  );
+
+  // 历史行允许留住当时的数字：只有最后一句是「现在」。
+  const twoQuotes = measurementsDoc({
+    reading: [measuredRow({ rows: 7, cited: 5 }), measuredRow()].join("\n"),
+  });
+  const historyThenNow = recordedCountViolations({ measurementsDoc: twoQuotes, rows });
+  check(
+    "上面留着旧读数、最后一句是新读数：绿（只核最后一句）",
+    historyThenNow.length === 0,
+    historyThenNow.join("；") || "没有违规"
+  );
+}
+
+/* ---- 8. 仓库本身，而不是夹具 ---- */
 
 {
   const measurements = read(MEASUREMENTS_DOC) || "";
@@ -316,6 +460,24 @@ const lineOf = (doc, name) => {
   const dod = read(DOD_DOC) || "";
   const violations = checklistClaimViolations({ measurementsDoc: measurements, checklistDoc: checklist, dodDoc: dod });
   check(`仓库里的三份文档是绿的（${CHECKLIST_DOC} / ${MEASUREMENTS_DOC} / ${DOD_DOC}）`, violations.length === 0, violations.join("；"));
+
+  // 门禁自己那句读数：数字由现算得到、能被读回来、且与仓库里的表格相等。
+  const liveRows = unverifiedRows(measurements);
+  const liveClaims = checklistClaimRows(checklist);
+  const liveStatus = checklistStatus(checklist);
+  const liveLine = claimsSummaryLine({ status: liveStatus, claimRows: liveClaims, rows: liveRows });
+  const liveSummary = claimsSummaryViolations({ line: liveLine, status: liveStatus, claimRows: liveClaims, rows: liveRows });
+  check(
+    "仓库里：门禁那句读数能被读回来、且与表格逐项相等（不是同义反复——反向控制在夹具里各改坏一个数字）",
+    liveSummary.length === 0 && readClaimsSummary(liveLine).rows === liveRows.length,
+    liveSummary.join("；") || JSON.stringify(readClaimsSummary(liveLine))
+  );
+  const liveRecorded = recordedCountViolations({ measurementsDoc: measurements, rows: liveRows });
+  check(
+    "仓库里：实测表最后一句引用「未验证清单 N 行 / 其中 M 行」的读数与现在的表格相等",
+    liveRecorded.length === 0,
+    liveRecorded.join("；") || "没有违规"
+  );
 
   const claims = checklistClaimRows(checklist);
   const targets = claims.map((claim) => claimKey(claim.target));
@@ -344,7 +506,7 @@ const lineOf = (doc, name) => {
   );
 }
 
-/* ---- 8. 接线 ---- */
+/* ---- 9. 接线 ---- */
 
 {
   const pkg = JSON.parse(read("package.json"));

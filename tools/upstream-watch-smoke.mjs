@@ -60,6 +60,8 @@ import {
   DOD_HARNESS_PATH,
   dodReasons,
   dodReasonViolations,
+  dodConfirmationViolations,
+  DOD_CONFIRMATION_MARK,
   DOD_REASON_MARK,
   unverifiedTable,
   unverifiedRowViolations,
@@ -4050,6 +4052,92 @@ if (!flags.selftest && !flags.noRespawn) {
     "...and a reason line that sits under no item goes red instead of being ignored",
     orphanViolations.length === 1 && orphanViolations[0].includes("不在任何一条 DOD 之下"),
     orphanViolations.join("；") || "no violation"
+  );
+}
+
+/* ---- a reason that hands the call to someone else has to say what they check ----
+ * DOD-2 sat on the bar with a reason that named the decider and not the decision:
+ * 「这一条仍不勾，因为勾选归 scheduler 侧」. That sentence is true and useless — it
+ * says the item is blocked and never what the other party has to confirm, which is
+ * how an item stays unticked for many rounds while every audit is green.
+ *
+ * The controls are the four ways this rule can be wrong: it can pass when the
+ * clause is simply missing, when the clause is a stub, when the clause points at a
+ * file nobody can open, and when the clause names no record at all.
+ */
+{
+  const doc = fs.readFileSync(path.join(ROOT, PRODUCT_DOD_DOC), "utf8");
+  const exists = (target) => fs.existsSync(path.join(ROOT, target));
+  const lines = doc.split(/\r?\n/);
+  const reasons = dodReasons(doc);
+  const delegating = reasons.filter((reason) => /归\s*scheduler\s*侧/.test(reason.text));
+
+  check(
+    "every DoD reason that hands the call to scheduler says what scheduler has to confirm",
+    dodConfirmationViolations(doc, exists).length === 0,
+    dodConfirmationViolations(doc, exists).join("；") || "no violation"
+  );
+  // The premise: the rule is reading something. A document with no delegating
+  // reason would satisfy the rule for the wrong reason.
+  check(
+    "...and the rule is reading something: exactly one reason delegates, and it is DOD-2's",
+    delegating.length === 1 && delegating[0].id === "DOD-2",
+    JSON.stringify(delegating.map((reason) => ({ id: reason.id, line: reason.line })))
+  );
+
+  const two = delegating[0];
+  const withoutClause = lines
+    .map((line, index) =>
+      index + 1 === two.line ? line.slice(0, line.indexOf(DOD_CONFIRMATION_MARK)) : line
+    )
+    .join("\n");
+  const missing = dodConfirmationViolations(withoutClause, exists);
+  check(
+    "...and deleting the clause goes red, naming the item and saying the delegation is one-sided",
+    missing.length === 1 && missing[0].includes("DOD-2") && missing[0].includes("没有写"),
+    missing.join("；") || "no violation"
+  );
+
+  const stub = lines
+    .map((line, index) =>
+      index + 1 === two.line ? `${line.slice(0, line.indexOf(DOD_CONFIRMATION_MARK))}${DOD_CONFIRMATION_MARK}勾选。` : line
+    )
+    .join("\n");
+  const stubViolations = dodConfirmationViolations(stub, exists);
+  check(
+    "...and a clause that is only a shrug goes red on its length",
+    stubViolations.length === 1 && stubViolations[0].includes("只有") && stubViolations[0].includes("个字"),
+    stubViolations.join("；") || "no violation"
+  );
+
+  const dangling = lines
+    .map((line, index) =>
+      index + 1 === two.line
+        ? `${line.slice(0, line.indexOf(DOD_CONFIRMATION_MARK))}${DOD_CONFIRMATION_MARK}核对 \`docs/not-a-real-record.md\` 里那张表是否与本仓一致（编码侧不勾）。`
+        : line
+    )
+    .join("\n");
+  const danglingViolations = dodConfirmationViolations(dangling, exists);
+  check(
+    "...and a clause pointing at a file that is not there goes red, naming the path",
+    danglingViolations.length === 1 &&
+      danglingViolations[0].includes("docs/not-a-real-record.md") &&
+      danglingViolations[0].includes("仓里没有"),
+    danglingViolations.join("；") || "no violation"
+  );
+
+  const noRecord = lines
+    .map((line, index) =>
+      index + 1 === two.line
+        ? `${line.slice(0, line.indexOf(DOD_CONFIRMATION_MARK))}${DOD_CONFIRMATION_MARK}核对一下两边说的是不是同一件事，然后再决定勾不勾这一条。`
+        : line
+    )
+    .join("\n");
+  const noRecordViolations = dodConfirmationViolations(noRecord, exists);
+  check(
+    "...and a clause that names no record goes red instead of passing as prose",
+    noRecordViolations.length === 1 && noRecordViolations[0].includes("没有指出任何仓内路径"),
+    noRecordViolations.join("；") || "no violation"
   );
 }
 

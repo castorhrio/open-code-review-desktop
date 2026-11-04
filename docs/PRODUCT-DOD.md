@@ -49,7 +49,7 @@
   证据候选：README.zh-CN.md（首屏、安装段、归属声明三处的「非官方」声明）
   证据候选：src/components/SettingsPanel.tsx（设置页「关于」区的归属声明）
 - [ ] DOD-2：**引擎未改**：审查逻辑零分叉；仅拼 CLI、流式日志、解析 JSON、GUI
-  未勾原因：原先那句「参数面仍有成片没逐条核过」从第 114 轮起是假话——`tools/cli-surface.mjs` 把本仓真的交给 `spawn` 的 18 条命令行与 12 条命令的 `--help` 双向比了一遍（57 行要拼 / 10 行不收 / 15 行有理由地不用，另含 `--preview` 不带 `--resume` 与版本行归属两条契约），第 111 轮记的 `--max-tools` 差距也已在这张表里逐字对上；这一条仍不勾，因为勾选归 scheduler 侧，且它对照的是**参数面**，不是上游规则表本身——这条边界写在 `docs/OCR-UPSTREAM-SYNC.md` 第 114 轮。
+  未勾原因：原先那句「参数面仍有成片没逐条核过」从第 114 轮起是假话——`tools/cli-surface.mjs` 把本仓真的交给 `spawn` 的 18 条命令行与 12 条命令的 `--help` 双向比了一遍（57 行要拼 / 10 行不收 / 15 行有理由地不用，另含 `--preview` 不带 `--resume` 与版本行归属两条契约），第 111 轮记的 `--max-tools` 差距也已在这张表里逐字对上；这一条仍不勾，因为勾选归 scheduler 侧，且它对照的是**参数面**，不是上游规则表本身——这条边界写在 `docs/OCR-UPSTREAM-SYNC.md` 第 114 轮。scheduler 侧要确认的是：把 `tools/cli-surface.mjs` 里那张参数表当作「引擎未改」的证据写进它那份同源副本，并核对两件事——本仓与副本的六条 ID / 方括号逐条一致、勾选时证据写成 `tools/cli-surface.mjs`；编码侧不自报勾选。
   证据候选：ocr-service.js（只 spawn 官方 CLI、拼参数、解析 JSON 与流式日志，无审查规则）
   证据候选：tools/service-smoke.mjs（按上游 resolver 语义重算「这次运行会打开哪条条目」）
 - [ ] DOD-3：**上游同步**：`docs/OCR-UPSTREAM-SYNC.md` pin 与 `npm run audit:upstream` 绿；跟进上游 tag 有记录（当前 pin v1.13.5 / 约定 SHA）
@@ -86,7 +86,7 @@
 | 条目 | 状态 | 一句话 |
 | --- | --- | --- |
 | DOD-1 | 未勾 | 缺陌生人第一眼的记录，仓里只有措辞断言（`README.zh-CN.md`） |
-| DOD-2 | 未勾 | 参数面已与 `tools/cli-surface.mjs` 双向对上，但勾选归 scheduler 侧 |
+| DOD-2 | 未勾 | 参数面已与 `tools/cli-surface.mjs` 双向对上，勾选与副本核对归 scheduler 侧 |
 | DOD-3 | 未勾 | pin 有断言，通路账里还留着只核了 release 的欠轮（`docs/OCR-UPSTREAM-SYNC.md`） |
 | DOD-4 | 未勾 | 首启链路已走过一遍，缺运行级的「单个提交 / 全量扫描」与真截断（`tools/e2e-first-run.cjs`） |
 | DOD-5 | 未勾 | 真机面是 Linux x64，Windows 安装包从未被脚本装过（`docs/measurements.md`） |

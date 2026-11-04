@@ -2352,6 +2352,67 @@ export const dodReasonViolations = (doc, exists = () => true) => {
   return violations;
 };
 
+// ---- a reason that hands the call to someone else has to say what they check ----
+//
+// DOD-2 carried this sentence as its stated reason for many rounds: 「这一条仍不勾，
+// 因为勾选归 scheduler 侧」. That is a division of labour, not a reason. It names who
+// decides and never what they decide, so the item can be neither ticked nor shown to
+// be missing anything: every round reads it, agrees with it, and moves on. It was the
+// only item on the bar that was stuck *because nobody had written down what the other
+// party has to confirm* — an absence that no count, no candidate and no path check
+// can see.
+//
+// So a reason that delegates must answer the second half in the same line:
+// 「scheduler 侧要确认的是：<一句话>」, and the clause is held to the same standard as
+// everything else here — long enough to be a sentence rather than a shrug, and citing
+// a record in this repository so the confirmation has something to land on. What the
+// rule cannot judge is whether the clause is the *right* confirmation; what it can
+// refuse is leaving the delegation one-sided.
+export const DOD_DELEGATION = /归\s*scheduler\s*侧/;
+export const DOD_CONFIRMATION_MARK = "scheduler 侧要确认的是：";
+export const DOD_CONFIRMATION_MIN = 24;
+
+export const dodConfirmationViolations = (doc, exists = () => true) => {
+  const violations = [];
+  for (const reason of dodReasons(doc)) {
+    if (!DOD_DELEGATION.test(reason.text)) continue;
+    const at = reason.text.indexOf(DOD_CONFIRMATION_MARK);
+    if (at === -1) {
+      violations.push(
+        `第 ${reason.line} 行：${reason.id || "这一条"}把决定交给 scheduler 侧，却没有写「${DOD_CONFIRMATION_MARK}<要确认的对象>」——` +
+          "「归 scheduler 侧」说的是谁决定，不是缺什么；照这样写，这一条永远勾不上、也永远看不出缺了什么"
+      );
+      continue;
+    }
+    const clause = reason.text.slice(at + DOD_CONFIRMATION_MARK.length).trim();
+    if (clause.length < DOD_CONFIRMATION_MIN) {
+      violations.push(
+        `第 ${reason.line} 行：${reason.id} 的「${DOD_CONFIRMATION_MARK}」后面只有 ${clause.length} 个字——` +
+          `至少要 ${DOD_CONFIRMATION_MIN} 个字说清要确认的是哪件事、落在哪份记录上`
+      );
+      continue;
+    }
+    const paths = [...clause.matchAll(BACKTICKED_TOKEN)]
+      .map((hit) => hit[1].trim())
+      .filter((token) => looksLikeRepoPath(token));
+    if (paths.length === 0) {
+      violations.push(
+        `第 ${reason.line} 行：${reason.id} 的「${DOD_CONFIRMATION_MARK}」没有指出任何仓内路径——` +
+          "确认对象要落在某份记录上（哪份表、哪份实测），否则它仍然是「让别人去看点东西」"
+      );
+      continue;
+    }
+    const missing = paths.filter((target) => !exists(target));
+    if (missing.length) {
+      violations.push(
+        `第 ${reason.line} 行：${reason.id} 的「${DOD_CONFIRMATION_MARK}」指向 ${missing.join("、")}，但仓里没有这个文件——` +
+          "确认对象追不到记录，等于没写"
+      );
+    }
+  }
+  return violations;
+};
+
 // ---- "how many are ticked" is one sentence, and it has to agree with the boxes
 //
 // Six items, each with a candidate and a reason, still left a reader of the bar

@@ -35,7 +35,7 @@ tag v1.13.5
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`abb7abcd5c5196fa0278dc87db85780fa269562f`（第 122 轮：HEAD 由 `npm run upstream:check` 的 api 通路答上（`git ls-remote` 超时，`refs/heads/main` 仍是第 121 轮记下的 `8041473`），`/releases/latest` 与 npm `latest` 仍分别答 `v1.13.5` / `1.13.5`，**pin 不动**（pin 跟的是发布版本，不是默认分支）；通路：api）**
+**本轮 HEAD 核对：`abb7abcd5c5196fa0278dc87db85780fa269562f`（第 123 轮：HEAD 由 `npm run upstream:check` 的 api 通路答上（`git ls-remote` 超时，`refs/heads/main` 仍是第 121 轮记下的 `8041473`），`/releases/latest` 与 npm `latest` 仍分别答 `v1.13.5` / `1.13.5`，**pin 不动**（pin 跟的是发布版本，不是默认分支）；通路：api）**
 
 ### 核对通路账
 
@@ -130,6 +130,7 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 | 120 | 2026-11-04 | git | `abb7abc` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**；本轮只补 DOD-5 的真机面：新增 `docs/win-install-checklist.md`（逐项写清验什么、期望读数、读数记回 `docs/measurements.md` 哪一行，期望值从 `package.json` 的 `build.nsis` 与 `build/installer.nsh` 读出），未验证清单据此多两行、四行触发条件改指清单步骤，DOD-5 与 DOD-6 的未勾原因各加一句，勾选状态不动 | — |
 | 121 | 2026-11-04 | api | **上游 HEAD 前进**：`abb7abc` → `8041473`（1 个 commit：`feat(rules): add C# review rules (#1840)`——新增 `internal/config/rules/rule_docs/csharp.md`、`internal/config/rules/system_rules.json` 加一行并补测试、`pages/` 下 5 份多语审查规则文档，共 8 个文件；`git ls-remote` 超时 124，HEAD 由 GitHub API 答上）；`refs/tags/v1.13.5` 与 npm `1.13.5` 均未变，**pin 不前进**（pin 跟的是发布版本，不是默认分支）；对照表 5 行的上游文件一个都没被这个 commit 碰到，**无移植项**；本轮产品改动是把 `docs/win-install-checklist.md` 里那两个期望版本从「人记得回来改」变成「脚本会点名」：`tools/release-pin.mjs` 新增 `checklistVersionViolations`（清单里每个 `X.Y.Z` 只能是最新发布 tag 的版本或它带的 `ocr` 版本，§4.2 那两行必须与之一致，也可以写成「以那条命令的读数为准」且不写数字），`tools/release-pin-smoke.mjs` 30 → 41 条 | — |
 | 122 | 2026-11-04 | api | `8041473` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**（`git ls-remote` 超时 124，HEAD / tag / release 由 GitHub API 答上；HEAD 仍是第 121 轮记下的那个 C# 规则 commit，对照表 5 行的上游文件一个都没被碰到）；本轮把「清单存在 ≠ 读数已贴回」这条缝补上：新增 `tools/checklist-claims.mjs`（`npm run audit:checklist-claims`，挂进 `audit:static`）——未验证清单里「按清单第 N 步去验」的行必须引用清单路径、第 9 节对照表与未验证清单双向对上（删清单的行、删第 9 节的行各堵一个洞）、DOD-5 / DOD-6 勾上时那两行的「为什么没验」必须已换成带日期与「读数」二字的实测读数；`docs/win-install-checklist.md` 新增 §10「最小可行子集（5 分钟）」（只做第 1、2.2、4.2、5.2 四格就能各留一条读数，并写明没跑到的行不许删）；`使用说明.md` 进中文排版的显式清单 | — |
+| 123 | 2026-11-04 | api | `8041473` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**（`git ls-remote` 超时，HEAD / tag / release 由 GitHub API 答上；HEAD 仍是第 121 轮记下的 C# 规则 commit `8041473`，它那 8 个变更文件 `internal/config/rules/rule_docs/csharp.md`、`system_rules.json` + 测试、`pages/` 五份多语审查规则文档，一个都不在对照表 5 行里，也无本仓要移植的调用面）；本轮把两处「欠账没有落点」回敬给规则本身：`tools/checklist-claims.mjs` 的门禁读数改由现算得到并读回校验（`claimsSummaryLine` / `readClaimsSummary` / `claimsSummaryViolations`），`docs/measurements.md` 里最后一句引用「未验证清单 N 行 / 其中 M 行」的读数必须与表格相等（`recordedCountViolations`），`tools/upstream-watch.mjs` 新增 `dodConfirmationViolations`——把决定交给 scheduler 侧的未勾原因必须写清「scheduler 侧要确认的是：…」并指到仓内记录（DOD-2 由此从「一句话没有落点」变成一句可核对的话，勾选状态不动） | — |
 
 「最近一次对照」只写**那一项最近被人工重新核对**的轮次。该列没有列出本轮，表示本轮
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
@@ -221,7 +222,7 @@ tool 结果文本**（`Error: diff not found for: …`、`Diffs exist for: …`�
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。搬完这里只留一句
    指针——「本文件只留当前一轮」不是约定而是断言（`previousRoundPointerViolations`）。
 
-## 当前状态（第 122 轮，2026-11-04）
+## 当前状态（第 123 轮，2026-11-04）
 本轮复核：**上游没动。** `npm run upstream:check` 走 api 通路答上 `refs/heads/main` 仍是第 121 轮记下的 `8041473`（`git ls-remote` 超时 124），`/releases/latest` 与 npm `latest` 仍分别答 `v1.13.5` / `1.13.5`——三个口径一致，**pin 不动**、对照表 5 行无需重读、**无移植项**。
 
 本轮产品侧只做一件事：**把第 120–121 轮建立的「真机清单 + 版本门禁」链条闭合。** 那两轮之后，链条上还剩一处只靠人的纪律连接的地方——清单文件头写着「这份文件是一次操作的说明书，不是验证记录」，但这句话本身没有断言：把 `docs/measurements.md` 未验证清单里那两行删掉，欠账就消失了，而 run 还是绿的。

@@ -146,6 +146,145 @@ export const pastedReading = (cell) => {
 };
 
 /**
+ * 门禁自己那句读数。第 122 轮把「清单存在 ≠ 读数已贴回」写成断言时，这句话还
+ * 有个尾巴没被自己的规则覆盖：它里面四个数字（状态、第 9 节几行、未验证清单几行、
+ * 其中几行按某一步去验）都是「数出来的」，而读者拿这张表去数，数出来的可能不是
+ * 这个数——第 122 轮的提交与 `docs/measurements.md` 里记的是 11 行，另一位数出 10 行，
+ * 而没有任何检查会红。数字要有断言，这条纪律对这句话也成立。
+ *
+ * 所以这句话不再手写在 run 里，而是由这个函数从三个数组现算；它的反面
+ * `readClaimsSummary` 把印出来的句子重新读成数字。两个方向一起，才叫「读数」：
+ * 写进句子的数字与表格里的数字是同一件事，读回来的数字又与自己相等。
+ */
+export const claimsSummaryLine = ({
+  status,
+  claimRows = [],
+  rows = [],
+  checklistPath = CHECKLIST_DOC,
+  measurementsPath = MEASUREMENTS_DOC,
+}) => {
+  const cited = rows.filter((row) => citesChecklistStep(row.trigger, checklistPath)).length;
+  return (
+    `真机清单的欠账：${checklistPath} 状态 ${status}，第 9 节对照表 ${claimRows.length} 行，` +
+    `${measurementsPath} 未验证清单 ${rows.length} 行，其中 ${cited} 行按清单的某一步去验`
+  );
+};
+
+/** 从印出来的那句话里把四个数字读回来。读不出（`null`）是一个要报的结果，
+ *  不是「跳过」：句子形状变了却不报，等于读数又回到没人核对的状态。 */
+export const CLAIMS_SUMMARY_SHAPE = Object.freeze({
+  status: /状态\s*([^\s，]+)，/,
+  claims: /第 9 节对照表\s*(\d+)\s*行/,
+  rows: /未验证清单\s*(\d+)\s*行/,
+  cited: /其中\s*(\d+)\s*行按清单的某一步去验/,
+});
+
+export const readClaimsSummary = (line) => {
+  const text = String(line == null ? "" : line);
+  const pick = (pattern) => {
+    const hit = pattern.exec(text);
+    return hit === null ? null : hit[1];
+  };
+  const claims = pick(CLAIMS_SUMMARY_SHAPE.claims);
+  const rows = pick(CLAIMS_SUMMARY_SHAPE.rows);
+  const cited = pick(CLAIMS_SUMMARY_SHAPE.cited);
+  return {
+    status: pick(CLAIMS_SUMMARY_SHAPE.status),
+    claims: claims === null ? null : Number(claims),
+    rows: rows === null ? null : Number(rows),
+    cited: cited === null ? null : Number(cited),
+  };
+};
+
+/**
+ * 「印出来的数字」与「算出来的数字」对不对得上。
+ *
+ * 这一条能红的唯一方式是那句话不再由现算得到——比如有人图省事把 11 写进模板、
+ * 或者把某一项数漏。它不是同义反复：两边走的是两条路（一边是模板插值，一边是
+ * 正则读回），反向控制就是拿一句被改坏一个数字的话喂进来。
+ */
+export const claimsSummaryViolations = ({ line, status, claimRows = [], rows = [], checklistPath = CHECKLIST_DOC }) => {
+  const parsed = readClaimsSummary(line);
+  const violations = [];
+  const want = {
+    rows: rows.length,
+    cited: rows.filter((row) => citesChecklistStep(row.trigger, checklistPath)).length,
+    claims: claimRows.length,
+    status,
+  };
+  const label = { rows: "未验证清单的行数", cited: "其中按清单某一步去验的行数", claims: "第 9 节对照表的行数", status: "清单状态" };
+  for (const key of ["status", "claims", "rows", "cited"]) {
+    if (parsed[key] === null) {
+      violations.push(
+        `门禁这句话里读不出「${label[key]}」（形状见 tools/checklist-claims.mjs 的 CLAIMS_SUMMARY_SHAPE）：` +
+          "读数要能被读回来才叫读数，形状变了却不报，等于这句话又回到没人核对的状态"
+      );
+      continue;
+    }
+    if (parsed[key] === want[key]) continue;
+    violations.push(
+      `门禁这句话里的「${label[key]}」是 ${parsed[key]}，而表格里实际是 ${want[key]}：` +
+        "这句话是给人核对的第一手数字，它与表格对不上时，读的人会以为欠账比实际多或少"
+    );
+  }
+  return violations;
+};
+
+/**
+ * `docs/measurements.md` 里那句被引用最多的数字：门禁打印的「未验证清单 N 行，
+ * 其中 M 行按清单的某一步去验」。实测表是历史读数，逐行都留着当时的样子；但
+ * **最后一句**说「现在有几行」的读数必须与这张表现在相等——不然它就从「读数」
+ * 变成了「去年的一句话」，而没有任何东西会红。
+ */
+export const QUOTED_ROW_COUNT = /未验证清单\s*(\d+)\s*行/;
+export const QUOTED_CITED_COUNT = /其中\s*(\d+)\s*行按清单的某一步去验/;
+
+/** 实测表里每一句引用这两个数字的行（1-based 行号）。 */
+export const quotedRowCounts = (doc) => {
+  const hits = [];
+  String(doc == null ? "" : doc)
+    .split(/\r?\n/)
+    .forEach((text, index) => {
+      const rows = QUOTED_ROW_COUNT.exec(text);
+      if (rows === null) return;
+      const cited = QUOTED_CITED_COUNT.exec(text);
+      hits.push({ line: index + 1, rows: Number(rows[1]), cited: cited === null ? null : Number(cited[1]) });
+    });
+  return hits;
+};
+
+export const recordedCountViolations = ({ measurementsDoc, rows = [], checklistPath = CHECKLIST_DOC, measurementsPath = MEASUREMENTS_DOC }) => {
+  const quoted = quotedRowCounts(measurementsDoc);
+  const cited = rows.filter((row) => citesChecklistStep(row.trigger, checklistPath)).length;
+  if (quoted.length === 0) {
+    return [
+      `${measurementsPath} 里没有任何一行记下门禁那句读数（形状：「未验证清单 N 行，其中 M 行按清单的某一步去验」）：` +
+        "这两个数字每一轮都有人引用，却只在终端里出现过一次——下一次它腐掉时，没人能看出是哪一轮开始腐的",
+    ];
+  }
+  const last = quoted[quoted.length - 1];
+  const violations = [];
+  if (last.cited === null) {
+    violations.push(
+      `${measurementsPath} 第 ${last.line} 行引用了「未验证清单 ${last.rows} 行」，却没写「其中 M 行按清单的某一步去验」：` +
+        "两个数字要一起记，只记一个，另一个腐掉时这一行仍然是绿的"
+    );
+  } else if (last.cited !== cited) {
+    violations.push(
+      `${measurementsPath} 第 ${last.line} 行写「其中 ${last.cited} 行按清单的某一步去验」，而实际是 ${cited} 行：` +
+        "读数与表格是同一件事，两个说法必须一致"
+    );
+  }
+  if (last.rows !== rows.length) {
+    violations.push(
+      `${measurementsPath} 第 ${last.line} 行写「未验证清单 ${last.rows} 行」，而这张表现在有 ${rows.length} 行：` +
+        "欠账行数变了就要补一行新读数（历史行留着当时的样子），否则最后一次读数成了假话"
+    );
+  }
+  return violations;
+};
+
+/**
  * 三件事的违规清单。空数组是唯一可接受的结果。
  *
  * 参数都是文档正文（字符串），不是路径：这样反向控制可以只改一个事实，而不必在
@@ -300,12 +439,15 @@ if (isEntryPoint) {
   const status = checklistStatus(checklistDoc);
   const claims = checklistClaimRows(checklistDoc);
   const rows = unverifiedRows(measurementsDoc);
-  const violations = checklistClaimViolations({ measurementsDoc, checklistDoc, dodDoc });
+  const summaryLine = claimsSummaryLine({ status, claimRows: claims, rows });
+  const violations = [
+    // 门禁自己那句话先过一遍自己的规则：印出来的数字要能读回来、且与表格相等。
+    ...claimsSummaryViolations({ line: summaryLine, status, claimRows: claims, rows }),
+    ...recordedCountViolations({ measurementsDoc, rows }),
+    ...checklistClaimViolations({ measurementsDoc, checklistDoc, dodDoc }),
+  ];
 
-  console.log(
-    `真机清单的欠账：${CHECKLIST_DOC} 状态 ${status}，第 9 节对照表 ${claims.length} 行，` +
-      `${MEASUREMENTS_DOC} 未验证清单 ${rows.length} 行，其中 ${rows.filter((row) => citesChecklistStep(row.trigger)).length} 行按清单的某一步去验`
-  );
+  console.log(summaryLine);
   for (const violation of violations) console.log(`FAIL    ${violation}`);
   if (violations.length) {
     console.log(

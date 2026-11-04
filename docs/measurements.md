@@ -25,6 +25,8 @@ README 的 Status 段只写**能力**（能渲染 1200 条、有耗时上限断�
 
 | 2026-11-04 | 第 122 轮：「清单存在 ≠ 读数已贴回」进断言——`tools/checklist-claims.mjs` 问三件事（未验证清单里「按清单第 N 步去验」的行必须引用清单路径；第 9 节对照表与未验证清单双向对上；DOD-5 / DOD-6 勾上时那两行的「为什么没验」必须已换成带日期与「读数」二字的实测读数） | `npm run audit:checklist-claims` 全绿：34 条检查 0 条红，门禁打印「清单状态 pending，第 9 节对照表 9 行，未验证清单 11 行，其中 6 行按清单的某一步去验，0 处问题」。反向控制在真仓库上各跑一次：把 `docs/win-install-checklist.md` 临时改名 → 退出码 1，两句点名（文件读不到 + 未验证清单里 4 行「按它去验」的补法失去落点，逐行给行号与行名）；改回即绿。`npm run audit:static` 27 项全绿（2464 条 ok 行，exit 0），新增的那一项只读文档、不读 git 与网络，所以浅克隆里也能跑 | `node tools/checklist-claims-smoke.mjs`；`node tools/checklist-claims.mjs`；`npm run audit:static`（Linux x64，二进制 `v1.13.5 (abb7abcd)`） |
 
+| 2026-11-04 | 第 123 轮：门禁自己那句读数进断言（`claimsSummaryLine` / `readClaimsSummary` / `claimsSummaryViolations` / `recordedCountViolations`），DOD-2 的「归 scheduler 侧」也要求写出要确认的对象（`dodConfirmationViolations`） | `npm run audit:checklist-claims` 48 条全绿（原 34 + 14），门禁打印「……未验证清单 11 行，其中 6 行按清单的某一步去验」，`npm run audit:upstream` 351 条 ok 行 0 条红（原 345 + 6）；反向控制在真仓库上各跑一次：把本文件第 26 行的 11 改成 10 → 退出码 1 并点名第 26 行「写「未验证清单 10 行」，而这张表现在有 11 行」，把 DOD-2 的确认句删掉 → smoke 点名第 52 行「把决定交给 scheduler 侧，却没有写「scheduler 侧要确认的是：…」」 | `node tools/checklist-claims.mjs`；`node tools/checklist-claims-smoke.mjs`；`node tools/upstream-watch-smoke.mjs`（Linux x64，二进制 `v1.13.5 (abb7abcd)`） |
+
 ## 这张表怎么读：验证面，以及不可复现的那一半
 
 表里那几条「整套门禁重跑」的读数是**验证面**，不是又一个数字，所以它们把「怎么跑出来的」
