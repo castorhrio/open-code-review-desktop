@@ -247,30 +247,84 @@ export function statusBadge(value: RunResult | null | undefined): { id: string; 
  * DOD-4 promises a budget-truncated run never reads as clean, and "审查完成" is the
  * cleanest thing this app says.
  *
- * Nothing here is a second opinion: the label is `statusBadge`'s, and the warning
- * tone follows the same `runLimitReached` signal the badge and the band use. The
- * wording names which limit — a budget stop and a tool-round stop are the two the
- * CLI reports, and the fix for them differs (raise the budget, or widen the
- * rounds).
+ * Nothing here is a second opinion: the label is `statusBadge`'s, and the tone is
+ * derived from the badge's own `id` — not from the exit code, and not from a
+ * second reading of `runLimitReached`. That is the whole point of the seam: the
+ * badge is what a person reads first, so the sentence that disappears (the toast)
+ * and the sentence nobody sees (the live region) must not be able to disagree
+ * with it. Deriving the tone from `badge.id` rather than only special-casing
+ * `limited` is what makes the other unfinished endings honest too: a `partial` /
+ * `completed_with_errors` run used to be announced in the success tone, and a
+ * `failed` run — which the CLI can report with exit code 0 — was announced as
+ * 「审查完成」.
+ *
+ * The wording names which limit for the truncated case: a budget stop and a
+ * tool-round stop are the two the CLI reports, and the fix for them differs
+ * (raise the budget, or widen the rounds). Every other unfinished ending keeps
+ * its own badge word, because 部分完成 / 部分失败 / 失败 already say what happened
+ * and folding them into one sentence would lose the difference.
+ *
+ * `tone` is what the caller does with it: `success` → a success toast, `warning`
+ * → a warning toast, `error` → an error toast. A tone this app cannot name is
+ * never `success` — an unrecognised state is not a claim that the run finished.
  */
+export type CompletionTone = "success" | "warning" | "error";
+
+/**
+ * The tone each badge id earns. `statusBadge`'s ids, not the CLI's words: the
+ * badge has already decided what this run is, and this table only says how loudly
+ * to say it.
+ *
+ * `unknown` is deliberately absent — it falls through to `warning` below, because
+ * a state this build cannot name is not evidence that the run finished.
+ */
+const COMPLETION_TONE: Record<string, CompletionTone> = {
+  complete: "success",
+  success: "success",
+  limited: "warning",
+  partial: "warning",
+  completed_with_warnings: "warning",
+  completed_with_errors: "warning",
+  aborted: "warning",
+  failed: "error",
+};
+
 export function completionNotice(value: RunResult | null | undefined): {
   label: string;
   title: string;
   description: string;
-  tone: "success" | "warning";
+  tone: CompletionTone;
 } {
   const badge = statusBadge(value);
   const comments = value?.comments?.length ?? 0;
-  if (badge.id !== "limited") {
-    return { label: badge.label, title: `审查${badge.label}`, description: `${comments} 条评论`, tone: "success" };
+  const tone = COMPLETION_TONE[badge.id] ?? "warning";
+
+  if (tone === "success") {
+    return { label: badge.label, title: `审查${badge.label}`, description: `${comments} 条评论`, tone };
   }
-  const budget = Boolean(value?.summary?.budget_exceeded);
-  return {
-    label: badge.label,
-    title: budget ? "审查停在了 token 预算上限" : "审查停在了审查上限",
-    description: `已审完的 ${comments} 条评论保留在下方，后面的文件没有审到。提高上限或缩小范围再跑一次。`,
-    tone: "warning",
-  };
+
+  if (badge.id === "limited") {
+    const budget = Boolean(value?.summary?.budget_exceeded);
+    return {
+      label: badge.label,
+      title: budget ? "审查停在了 token 预算上限" : "审查停在了审查上限",
+      description: `已审完的 ${comments} 条评论保留在下方，后面的文件没有审到。提高上限或缩小范围再跑一次。`,
+      tone,
+    };
+  }
+
+  if (badge.id === "unknown") {
+    // No status at all is not a finished run: say what is known (the count) and
+    // that the state was not recorded, rather than borrowing 完成.
+    return {
+      label: badge.label,
+      title: "审查结束，但这次运行的状态没有记录",
+      description: `${comments} 条评论`,
+      tone,
+    };
+  }
+
+  return { label: badge.label, title: `审查${badge.label}`, description: `${comments} 条评论`, tone };
 }
 
 /**
@@ -410,8 +464,8 @@ export function cliReason(text: string): string {
  *
  * A toast has one line of title and a description below it. A failed run used to
  * take `error.split("\n")[0]` for the title — the CLI's own wording, naming
- * providers and flags — and put the translated hint, the one line written for a
- * person, second. ReviewPanel had already worked out that the hint belongs first;
+ * providers and flags — and put the translated hint, the one line written for
+ * a person, second. ReviewPanel had already worked out that the hint belongs first;
  * the run-failure toast had not, so the same error read differently depending on
  * which surface reported it.
  *

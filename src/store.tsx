@@ -508,9 +508,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // was said over a run whose later files were never dispatched. The
         // wording comes from `completionNotice`, which reads the same signals
         // the badge and the band do — one decision, three surfaces.
+        //
+        // The tone is the badge's, not the exit code's: a `failed` run can also
+        // exit 0, and it used to be announced in the success tone here while the
+        // badge beside it said 失败. `error` is a third tone for exactly that
+        // case, so the toast and the badge cannot disagree about how bad it was.
         const done = completionNotice(r.value);
         setRunLabel(done.label);
-        if (done.tone === "warning") toast.warning(done.title, { description: done.description, duration: 12000 });
+        if (done.tone === "error") toast.error(done.title, { description: done.description, duration: 15000 });
+        else if (done.tone === "warning") toast.warning(done.title, { description: done.description, duration: 12000 });
         else toast.success(done.title, { description: done.description });
       }
       if (r.value) {
