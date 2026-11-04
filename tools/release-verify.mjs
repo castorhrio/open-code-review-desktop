@@ -35,6 +35,13 @@
 //   the *latest tag* shipped, which is always the last release; this answers what
 //   **this** tree will ship, before the tag exists. That is the reading which says
 //   whether the next release closes the `1.13.0`-vs-pin gap or re-publishes it.
+// - `build.win.signExecutable` says whether the signing step is skipped, and four
+//   documents tell the reader the artefacts are unsigned. Those are one fact in two
+//   places; flipping the flag without editing the sentences is how a release ends up
+//   described as something it is not. This does not verify a signature — it cannot.
+// - `build.publish[0].url` is the feed installed clients read. `releases/latest/download/`
+//   is the only form that keeps working after the next tag; a pinned tag freezes the
+//   update feed for every machine that already downloaded this one.
 //
 // WHY THE PREDICATES ARE INJECTED
 // Every rule below takes its answers (`entries`, `latest`, `sizeAndDigest`,
@@ -363,6 +370,88 @@ export const unpackedCliViolations = ({ pinnedVersion, cliManifestVersion, winBi
   return violations;
 };
 
+/**
+ * Whether the sentence "the artefacts are unsigned" still holds, asked of the build
+ * config rather than of a document.
+ *
+ * `build.win.signExecutable: false` is electron-builder's "skip Windows code signing"
+ * switch (26.x: *"Set to `false` to skip Windows code signing while still editing
+ * executable resources"*). It is why every published release is unsigned, why both
+ * READMEs tell the reader to expect SmartScreen, and why `docs/win-install-checklist.md`
+ * 第 1 步 exists at all. Those sentences and that flag are one fact in two places, and
+ * `verify:dist` is the command that reads the config — so it is the place to notice the
+ * drift. Absent is **not** "still false": the default is to sign when a certificate is
+ * available, so a missing key says the same thing as `true` to a reader who is about to
+ * be told they will see a SmartScreen prompt.
+ *
+ * This does not verify a signature — it cannot, and says so. What it refuses is a flip
+ * that leaves those documents promising the opposite.
+ */
+export const SIGNING_DOCS = Object.freeze([
+  { path: "README.md", claim: /unsigned/i },
+  { path: "README.zh-CN.md", claim: /未做代码签名|未签名|不签名/ },
+  { path: "使用说明.md", claim: /未签名/ },
+  { path: "docs/win-install-checklist.md", claim: /未签名/ },
+]);
+
+export const signingViolations = ({ signExecutable, docs = [] }) => {
+  const byPath = new Map((docs || []).map((doc) => [doc && doc.path, doc]));
+  const claims = SIGNING_DOCS.filter((entry) => {
+    const doc = byPath.get(entry.path);
+    return doc && typeof doc.text === "string" && entry.claim.test(doc.text);
+  }).map((entry) => entry.path);
+  if (signExecutable === false) {
+    const silent = SIGNING_DOCS.filter((entry) => !claims.includes(entry.path)).map((entry) => entry.path);
+    if (silent.length === 0) return [];
+    return [
+      "构建配置显式跳过签名（`build.win.signExecutable: false`），而这几份文档不再对它承诺的那件事：" +
+        `${silent.join(" / ")}——未签名的包会撞 SmartScreen，那是那一句「未签名 / unsigned」唯一的用处`,
+    ];
+  }
+  return [
+    `build.win.signExecutable 读到的不是 \`false\`（是 ${JSON.stringify(signExecutable)}，没写也等于「会去签」），而 ${claims.join(" / ") || "文档"} 仍写着未签名 / 未做代码签名：` +
+      "先把那几句改掉，再让这一格变绿——签名之后的产物与「更多信息 → 仍要运行」那条路是两件事，而这一条验不了签名本身",
+  ];
+};
+
+/**
+ * The auto-update feed the installed build is going to read.
+ *
+ * `build.publish[0].url` is not a packaging detail: it is baked into `latest.yml`'s
+ * consumers through `electron-updater`, and the README promises "the installed build
+ * checks the published release on launch". `releases/latest/download/` is the form that
+ * keeps that promise across releases; `releases/download/vX.Y.Z/` freezes the feed at one
+ * release, so every client updates to that version forever and never sees the next one.
+ * A missing `publish` is a third answer: then nothing was ever emitted for a client to
+ * read, and the README's sentence is the one that is wrong.
+ */
+export const LATEST_FEED_URL = /^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/releases\/latest\/download\/$/;
+
+export const feedSourceViolations = ({ publish }) => {
+  if (!Array.isArray(publish) || publish.length === 0) {
+    return [
+      "构建配置里没有 `build.publish`：`latest.yml` 不是任何服务器会读到的东西，而已装客户端「启动时检查已发布的 Release」那句话就没有源（README 的 In-app updates 与已知限制都指着它）",
+    ];
+  }
+  const [first] = publish;
+  if (!first || typeof first !== "object") {
+    return ["`build.publish` 第一项不是一个对象：自动更新源读不出来，这一条不判绿"];
+  }
+  if (first.provider !== "generic") {
+    return [`自动更新源现在的 provider 是 ${JSON.stringify(first.provider)}，不是 \`generic\`：这一套的更新走的是「把 latest.yml 放在 Release 上」那条路，换 provider 要连着改 ` + "`update-service.js`" + " 与两份 README"];
+  }
+  if (typeof first.url !== "string" || first.url === "") {
+    return ["`build.publish[0]` 没有 `url`：没有源，客户端无从判断有没有新版"];
+  }
+  if (!LATEST_FEED_URL.test(first.url)) {
+    return [
+      `自动更新源是 ${JSON.stringify(first.url)}，不是 \`https://github.com/<owner>/<repo>/releases/latest/download/\`：` +
+        "钉在某个 tag 上（`releases/download/vX.Y.Z/`）等于把 feed 冻在那一版——已装客户端会一直更新到它，永远看不见下一版；少了结尾的 `/` 也接不上 `latest.yml`",
+    ];
+  }
+  return [];
+};
+
 /* ---- the run ---- */
 
 const results = [];
@@ -501,6 +590,26 @@ export const main = async () => {
     unpackedDir: path.join(parsed.dir, parsed.unpacked),
   });
   check(`产物里带的是 pin 的那一版 CLI（${pinVersion(PINNED_UPSTREAM)}）`, cliViolations.length === 0, cliViolations.join("；"));
+
+  const docs = SIGNING_DOCS.map(({ path: target }) => {
+    try {
+      return { path: target, text: fs.readFileSync(path.join(ROOT, target), "utf8") };
+    } catch (_) {
+      return { path: target, text: "" };
+    }
+  });
+  const signing = signingViolations({ signExecutable: win.signExecutable, docs });
+  const claiming = SIGNING_DOCS.filter((entry, index) => entry.claim.test(docs[index].text)).map((entry) => entry.path);
+  console.log(
+    `签名：${win.signExecutable === false ? "这一步被显式跳过（`build.win.signExecutable: false`），" : `配置里读到 ${JSON.stringify(win.signExecutable)}——没有被跳过，`}` +
+      `还写着「未签名」的是 ${claiming.join(" / ") || "（没有）"}`
+  );
+  check("关于「未签名」的那几句与构建配置仍互相成立（这一条不验签名本身）", signing.length === 0, signing.join("；"));
+
+  const feed = feedSourceViolations({ publish: build.publish });
+  const firstPublish = Array.isArray(build.publish) ? build.publish[0] : null;
+  console.log(`自动更新源：${firstPublish && firstPublish.url ? firstPublish.url : "（没有 build.publish[0].url）"}`);
+  check("自动更新源仍是 `releases/latest/download/`（已装的那一台能不能看见下一版）", feed.length === 0, feed.join("；"));
 
   const failed = results.filter((result) => !result.ok);
   console.log(`\n发布产物：${results.length} 条检查，${failed.length} 条红`);

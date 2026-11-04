@@ -35,7 +35,7 @@ tag v1.13.5
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`abb7abcd5c5196fa0278dc87db85780fa269562f`（第 140 轮：`git ls-remote upstream` 超时 124，HEAD 与 tag 由 GitHub API 答上——`refs/heads/main` 仍是第 132 轮记下的 `36eec0c`，`refs/tags/v1.13.5` 仍 peel 到 `abb7abc`，`npm view` 答 `latest` 仍是 `1.13.5`，三个口径与上一轮一致，无新内容；**pin 不动**（pin 跟的是发布版本，不是默认分支）；通路：api）
+**本轮 HEAD 核对：`abb7abcd5c5196fa0278dc87db85780fa269562f`（第 141 轮：`git ls-remote upstream` 超时 124，HEAD 与 tag 由 GitHub API 答上——`refs/heads/main` 仍是第 132 轮记下的 `36eec0c`，`refs/tags/v1.13.5` 仍 peel 到 `abb7abc`，`npm view` 答 `latest` 仍是 `1.13.5`，三个口径与上一轮一致，无新内容；**pin 不动**（pin 跟的是发布版本，不是默认分支）；通路：api）
 
 ### 核到的上游 HEAD（核对的落点，不是 pin）
 
@@ -45,7 +45,7 @@ pin 说封装的是哪个**发布版本**（`v1.13.5`，二进制自报的那个
 已前进」，而那六轮的通路账一行行写着「无新内容」——一个总在响的标记等于没有标记。所以这一行的
 轮次必须与通路账末行相等（`checkedHeadViolations`），`upstream:check` 比的也是这一行，而不是 pin。
 
-**本轮核到的上游 HEAD：`36eec0c0269d0687a761fb3291ccbf427ab9336f`（第 140 轮）**
+**本轮核到的上游 HEAD：`36eec0c0269d0687a761fb3291ccbf427ab9336f`（第 141 轮）**
 
 ### 核对通路账
 
@@ -158,6 +158,7 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 | 138 | 2026-11-04 | git | `36eec0c` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**（`git ls-remote upstream` 与 GitHub API 的 commits 都答 `36eec0c`，仍是第 132 轮记下的那个 commit；`refs/tags/v1.13.5` 与 npm `latest` 未变；对照表 5 行一个都没被碰到）；本轮产品改动是把最小子集再压短一档：`docs/win-install-checklist.md` 新增 §10.0「只留一条读数（约 3 分钟）」（装一次默认目录 → 记 §1 SmartScreen → 填一个可丢弃的 Key → 跑 §5.2 两条 grep，第 1 格给 DOD-5、第 5.2 格给 DOD-6），第 10 节标题改成「（3 分钟起）」，10.1 里第 1 格与第 5.2 格标上「可单独跑」；`tools/checklist-claims.mjs` 的 `subsetFormViolations` 多问三件事（标题含「3 分钟」、标着的格恰好是 1 与 5.2、两格按第 9 节落在两条不同的 DoD 上），`tools/checklist-claims-smoke.mjs` 78 → 83 条；`docs/measurements.md` 那两行的触发条件各补一句「只有三分钟就走 §10.0」；另做具名 pass `distill`（只动注释）：`ResultsPanel.tsx` 的 `REF_READ_HINT` 与 `FileViewer` 两处块注释把「工作区是选择不是兜底」写了两遍，头部只留「三种失败不互换」、理由并到 `if (!file.ok)` 分支，`FileViewer` 头部 17 行 → 5 行（`no sticky` 不变量留着，量测出处指向 README） | — |
 | 139 | 2026-11-05 | git | `36eec0c` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**（`git ls-remote` 答 `refs/heads/main` 仍是第 132 轮记下的 `36eec0c`，`refs/tags/v1.13.5` 仍 peel 到 `abb7abc`，`npm view` 答 `latest` 为 `1.13.5`；对照表 5 行一个都没被碰到）；本轮产品改动全在航运面：`build/fetch-binaries.cjs` 有了第二个来源（GitHub release asset 取不到时改取 npm registry 里同一版本的 `@alibaba-group/ocr-<平台>-<架构>`，两边字节都按可得的摘要核对，落位改成原子写并先清掉 `.part` / `.staged` 残留），`package.json` 的 `build.win.signExecutable` 设为 `false`，`tools/release.mjs` 不再按机器名拒绝、改按 `crossDistBlockers` 缺哪一样拒绝（`releaseHost`；`tools/release-guard-smoke.mjs` 检查点 166 → 184）；这台 Linux x64 机器第一次造出过完整的四件 Windows 产物（读数记在 `docs/measurements.md`，含随后被 OOM 杀掉那两次重跑），DOD-5 / DOD-6 一个字没勾——造得出与装得上是两条读数 | — |
 | 140 | 2026-11-05 | api | `36eec0c` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**（`git ls-remote upstream` 超时 124，HEAD 与 tag 由 GitHub API 答上、`refs/heads/main` 仍是第 132 轮记下的 `36eec0c`，release 与 npm 分别是 `v1.13.5` 与 `1.13.5`；对照表 5 行一个都没被碰到）；本轮产品改动是「发之前本地能验到哪一层」的下一层：新增 `tools/release-verify.mjs`（`npm run verify:dist`）——按 `package.json` 自己的 `build.win.target` / `build.nsis.differentialPackage` / `build.publish` 推出该有几件，再核对它们是不是同一版、`latest.yml` 写的 `size` 与 `sha512` 是否与磁盘字节（流式现算）相符、打包树里那份 CLI 是不是 pin 的那一版；`RELEASE_STEPS` 因此在 `dist` 与 `secret-scan` 之间多一格 `verify-dist`，发版命令不能再跳过它；这台机器上真实的 `release/` 第一次被点名（`makensis` 被 OOM 杀掉两次后剩下的 504 KB `setup.exe` 加三件缺失，exit 1），而「下一版发出去带的是 `ocr 1.13.5`」这条读数在 tag 存在之前就读到了——`npm run audit:release-pin` 只能回答已经发布的那一版；规则 61 条由 `tools/release-verify-smoke.mjs`（`audit:release-verify-rules`，挂进 `audit:static`）钉住，解析那一半的夹具是**已发布 v0.1.13 的 `latest.yml` 原文**（它没有顶层 `size`，第一版把这一格当必需，真产物反而会红） | — |
+| 141 | 2026-11-05 | api | `36eec0c` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**（`git ls-remote upstream` 又超时 124，HEAD 与 tag 由 GitHub API 答上、`refs/heads/main` 仍是第 132 轮记下的 `36eec0c`，`refs/tags/v1.13.5` 仍 peel 到 `abb7abc`，`npm view` 答 `latest` 为 `1.13.5`；对照表 5 行一个都没被碰到）；本轮不扩功能，补的是「已经声明却没有断言」的三处：① 新增 `tools/fetch-binaries-smoke.mjs`（`npm run audit:fetch-binaries`，挂进 `audit:static`）把第 139 轮那处唯一无 smoke 的航运面改动钉住——什么算通路答不上来、答不上来之后先问谁、`.part` / `.staged` 在「问这份二进制在不在」之前真的被清掉、`npm pack` 那行怎么读，73 条；`build/fetch-binaries.cjs` 因此加了入口守卫并导出那几个判定（require 它不下载，这是它能进静态门禁的前提）；② `docs/win-install-checklist.md` §10.0 的第 4 步从「原样复制 §5.2 那两条」改成**一条** PowerShell（两个计数、一次输出），`tools/checklist-claims.mjs` 的 `subsetFormViolations` 随之多问第 10.0 那条与 §5.2 是不是同一件事（同两个目录、同一个 `-Pattern`、只留一行可复制），`tools/checklist-claims-smoke.mjs` 83 → 96 条；③ `tools/release-verify-smoke.mjs` 61 → 75 条，把 `build.win.signExecutable=false` 与 `build.publish[0].url` 这两个配置值本身钉进 `verify:dist` 的口径（翻成 `true` 会让结论变，且点名那几份还写着「未签名」的文档）| — |
 
 「最近一次对照」只写**那一项最近被人工重新核对**的轮次。该列没有列出本轮，表示本轮
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
@@ -249,31 +250,42 @@ tool 结果文本**（`Error: diff not found for: …`、`Diffs exist for: …`�
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。搬完这里只留一句
    指针——「本文件只留当前一轮」不是约定而是断言（`previousRoundPointerViolations`）。
 
-## 当前状态（第 140 轮，2026-11-05）
+## 当前状态（第 141 轮，2026-11-05）
 
-本轮复核：**上游没动**。`git ls-remote upstream` 超时 124，`refs/heads/main` 由 GitHub API 答上，仍是第
+本轮复核：**上游没动**。`git ls-remote upstream` 又超时 124，`refs/heads/main` 由 GitHub API 答上，仍是第
 132 轮记下的那个 commit（`pages/` 官网的 provider 展示与五语文案）；`refs/tags/v1.13.5` 仍 peel 到
-`abb7abc`、npm `latest` 仍是 `1.13.5`，三个口径一致，**pin 不动、无移植项**，对照表 5 行无需重读。
+`abb7abc`、`npm view` 答 `latest` 仍是 `1.13.5`，三个口径与上一轮一致，**pin 不动、无移植项**，
+对照表 5 行无需重读。
 
-本轮产品侧继续做航运面：**「造得出来」之后那一层——这套字节能不能上传——现在也有读数了**。新增
-`tools/release-verify.mjs`（`npm run verify:dist`），它问四件事：该有几件（由 `package.json` 自己的
-`build.win.target` / `build.nsis.differentialPackage` / `build.publish` 推出来，不抄一份清单）、是不是同一版
-（目录里混着上一版的产物会单独点名，因为上传是按文件名挑的）、`latest.yml` 写的 `size` 与 `sha512` 是否与磁盘
-字节相符（流式现算，不看文件名像不像），以及打包树里那份 `ocr` 是不是 pin 的那一版。`RELEASE_STEPS` 因此在
-`dist` 与 `secret-scan` 之间多出一格 `verify-dist`——发版命令不能再靠人看出来。
+DoD 还差的是 DOD-5 / DOD-6 那一趟真机跑，而它在编码侧不能被断言补上（第 134 轮已把这件事写死）。
+所以本轮**不扩功能**，只补三处「已经声明、却没有断言」的缺口——每一处都是某一天改坏了而门禁不会红的地方：
 
-两条读数都记在 `docs/measurements.md`。第一条是红的，而红正是本轮要的形态：这台机器上真实的 `release/` 是
-`makensis` 被 OOM 杀掉两次之后留下的残骸——`setup.exe` 504,146 字节（同一次成功的构建是 97,223,736），
-blockmap / portable / `latest.yml` 三件缺，命令点名这三件并以 1 退出。第二条是绿的：
-`win-unpacked/resources/app` 里那份 `@alibaba-group/open-code-review` 写 **1.13.5**、win32 那份
-`opencodereview.exe` 在——**下一版发出去带的是 pin 的那一版 CLI**。这一条 `npm run audit:release-pin`
-答不了（它读最新发布 tag，也就是已经发出去的那一版带 `1.13.0`），而它在 tag 存在之前就读得到。
+1. **第 139 轮那处唯一没有 smoke 的航运面改动**：`build/fetch-binaries.cjs` 的两个来源与原子落位。新增
+   `tools/fetch-binaries-smoke.mjs`（`npm run audit:fetch-binaries`，挂进 `audit:static`）73 条，钉的是
+   「什么算通路答不上来」（`checksum mismatch` 必须**不**算——把它算进去，六个目标里一个下载坏了就让剩下的
+   五个不再问 GitHub）、「答不上来之后先问谁」（`sourceOrder` 抽成纯函数）、`.part` / `.staged` 必须在
+   「这份二进制在不在」那一次问话**之前**被清掉（真磁盘清一次，接线再钉一次）、`npm pack` 那行怎么读
+   （最后一行才是名字，名字不在最后一行时抛而不是交出一个错名字）。为此 `build/fetch-binaries.cjs` 加了
+   `require.main` 入口守卫并导出那几个判定——require 它不下载任何东西，这是它能进静态门禁的前提，也是
+   本文件里第一条被断言的形状。
+2. **真机清单那「3 分钟」不再要求复制两件事**：`docs/win-install-checklist.md` §10.0 的第 4 步现在是一条
+   PowerShell，两个计数一次输出（`user config: 1 / install dir: 0`）。代价是同两个目录第一次写在两个地方，
+   所以 `tools/checklist-claims.mjs` 的 `subsetFormViolations` 多问第六件事：§10.0 那条与 §5.2 那两处必须是
+   同一件事——同两个路径字面量、同一个 `-Pattern`、且只留一行可复制；§5.2 读不出路径时判红而不是静默通过。
+   `tools/checklist-claims-smoke.mjs` 83 → 96 条。**反向控制真跑在仓库上**：把 §10.0 那条里的安装目录换成
+   `D:\Apps\Open Code Review` 后 `npm run audit:checklist-claims` 以 1 退出，并点名第 366 行、两边各是哪个
+   目录；改回即绿。
+3. **第 140 轮那句「发布前产物可被命令问出」的口径钉到配置值本身**：`tools/release-verify.mjs` 现在读
+   `build.win.signExecutable` 与 `build.publish[0].url`。前者是四份文档那句「未签名 / unsigned」的外部依据
+   （electron-builder 26.x 里这个键的意思就是「跳过 Windows 代码签名」），翻成 `true` 或干脆不写，
+   `verify:dist` 的结论就变，并点名是哪几份文档还在那样承诺；后者必须是 `…/releases/latest/download/`——
+   钉在某个 tag 上等于把更新源冻在那一版，已装的那一台永远看不见下一版。`tools/release-verify-smoke.mjs`
+   61 → 75 条，其中一格是拿真 `package.json` 与真文档取的读数。
 
-**这仍不勾 DOD-5、也不勾 DOD-6。**「这套字节自相一致、且是同一版」与「装得上」是两条读数，后者仍然只在
-Windows 真机上——那一趟写在 `docs/win-install-checklist.md`。本轮也没给它补读数：这台机器的空闲内存与磁盘
-都不支持再跑一次完整构建，所以未验证清单多了一行——`verify:dist` 的绿目前只在按真字节组装的一次性树上取过。
+**这三处都不勾 DOD-5、也不勾 DOD-6。** 本轮改的是「那一趟跑起来更短、更零歧义、且改坏了会红」，
+而不是那一趟本身——缺的仍然是一台 Windows x64 与四个读数。
 
-上一轮（第 139 轮）的正文见 [`upstream-history.md`](upstream-history.md#上游状态第-139-轮2026-11-05)，归档之后本文件不留第二份。
+上一轮（第 140 轮）的正文见 [`upstream-history.md`](upstream-history.md#上游状态第-140-轮2026-11-05)，归档之后本文件不留第二份。
 
 ### 参数面：`ocr review --help` / `ocr scan --help` 与本仓真的拼出的每一行
 

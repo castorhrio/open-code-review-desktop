@@ -105,7 +105,7 @@ npm run dist:linux       # Linux AppImage + deb (build on Linux/WSL)
 
 > **The Windows set no longer needs a Windows machine.** Since round 139, `npm run dist:win` on this repository's Linux x64 box produced `*-setup.exe`, `*-portable.exe`, `latest.yml` and the blockmap — the same four kinds of file every published release carries. Four things have to be in place: the Windows `ocr` (`npm run fetch:binaries win`, which now also answers from the npm registry when GitHub's release-asset CDN cannot be reached), `wine` on `PATH` (electron-builder runs the installer it just built to obtain the uninstaller stub), the Windows Electron distribution, and roughly 2 GB free memory (the 7z and makensis steps have been OOM-killed here). The artefacts stay unsigned, as every published release is. **Building is not installing**: the wizard, SmartScreen, the uninstall path and where the key ends up are still Windows-machine evidence — `docs/win-install-checklist.md` is that run, and `docs/measurements.md` says which readings are missing. The two mirror variables for a box that cannot reach GitHub's asset CDN are named in `使用说明.md`.
 
-> **Building is not publishing either, and the difference is not visible.** One killed rebuild here left `release/` holding a `*-setup.exe` of 504 KB — named like a release, 0.5% of its size — with no `latest.yml` beside it. `npm run verify:dist` asks the three questions a glance cannot: whether every file this build's own config calls for is actually there, whether they are all the one version and match the `size` and `sha512` that feed states (it hashes the bytes; a published feed with the wrong hash means every installed client's update fails at verification, on someone else's machine), and which `ocr` the packaged app will spawn. On today's tree that last answer is `1.13.5`, equal to the pin — so the release cut from this tree is the one that closes the gap quoted above, and it is readable before any tag exists. `npm run release <x.y.z>` now runs this check as a step between packaging and the key scan.
+> **Building is not publishing either, and the difference is not visible.** One killed rebuild here left `release/` holding a `*-setup.exe` of 504 KB — named like a release, 0.5% of its size — with no `latest.yml` beside it. `npm run verify:dist` asks the three questions a glance cannot: whether every file this build's own config calls for is actually there, whether they are all the one version and match the `size` and `sha512` that feed states (it hashes the bytes; a published feed with the wrong hash means every installed client's update fails at verification, on someone else's machine), and which `ocr` the packaged app will spawn. Since round 141 it also reads two values straight out of that same config, because both are promises made in prose: whether `build.win.signExecutable` really is `false` — the external basis for the "unsigned, so SmartScreen may warn" sentence four documents carry — and whether `build.publish[0].url` is still the `releases/latest/download/` feed rather than one frozen at a tag. On today's tree that last answer is `1.13.5`, equal to the pin — so the release cut from this tree is the one that closes the gap quoted above, and it is readable before any tag exists. `npm run release <x.y.z>` now runs this check as a step between packaging and the key scan.
 
 ## First run
 
@@ -185,7 +185,7 @@ Everything is checked by rendering the real bundle against a stubbed IPC bridge 
 ```
 npm run audit           # audit:static, then audit:app — everything below
 npm run audit:static    # typecheck + packaging + install + bridge + config + diagnostics +
-                        #   service + git + update — plain Node, no build, no Electron
+                        #   service + git + update + fetch-binaries — plain Node, no build, no Electron
 npm run audit:app       # build + ui + ui-scaled + contrast + guards + exit + e2e + first-run + secrets
 npm run audit:packaging # every runtime module is in the build.files allowlist
 npm run audit:bridge    # preload.js and the Bridge interface agree, both ways
@@ -196,6 +196,9 @@ npm run audit:git       # the code pane reads the reviewed snapshot, not the wor
 npm run audit:update    # the update state machine, with the updater stubbed
 npm run audit:release   # what a release must not start from, the order it runs in,
                         #   and the move that recovers a locked win-unpacked build
+npm run audit:fetch-binaries # the ocr binary's two sources and its atomic landing — which error
+                        #   means "this route is down", which leftovers are cleared before the
+                        #   "is it there?" check, how `npm pack` output is read; no download
 npm run audit:ui        # 65 states x 3 window sizes x 2 themes
 npm run audit:contrast  # WCAG AA for every text/background pair
 npm run audit:guards    # navigation + window-open policy, in real Electron

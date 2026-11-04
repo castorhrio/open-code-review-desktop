@@ -36,6 +36,30 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 
 ---
 
+## 上游状态（第 140 轮，2026-11-05）
+
+本轮复核：**上游没动**。`git ls-remote upstream` 超时 124，`refs/heads/main` 由 GitHub API 答上，仍是第
+132 轮记下的那个 commit（`pages/` 官网的 provider 展示与五语文案）；`refs/tags/v1.13.5` 仍 peel 到
+`abb7abc`、npm `latest` 仍是 `1.13.5`，三个口径一致，**pin 不动、无移植项**，对照表 5 行无需重读。
+
+本轮产品侧继续做航运面：**「造得出来」之后那一层——这套字节能不能上传——现在也有读数了**。新增
+`tools/release-verify.mjs`（`npm run verify:dist`），它问四件事：该有几件（由 `package.json` 自己的
+`build.win.target` / `build.nsis.differentialPackage` / `build.publish` 推出来，不抄一份清单）、是不是同一版
+（目录里混着上一版的产物会单独点名，因为上传是按文件名挑的）、`latest.yml` 写的 `size` 与 `sha512` 是否与磁盘
+字节相符（流式现算，不看文件名像不像），以及打包树里那份 `ocr` 是不是 pin 的那一版。`RELEASE_STEPS` 因此在
+`dist` 与 `secret-scan` 之间多出一格 `verify-dist`——发版命令不能再靠人看出来。
+
+两条读数都记在 `docs/measurements.md`。第一条是红的，而红正是本轮要的形态：这台机器上真实的 `release/` 是
+`makensis` 被 OOM 杀掉两次之后留下的残骸——`setup.exe` 504,146 字节（同一次成功的构建是 97,223,736），
+blockmap / portable / `latest.yml` 三件缺，命令点名这三件并以 1 退出。第二条是绿的：
+`win-unpacked/resources/app` 里那份 `@alibaba-group/open-code-review` 写 **1.13.5**、win32 那份
+`opencodereview.exe` 在——**下一版发出去带的是 pin 的那一版 CLI**。这一条 `npm run audit:release-pin`
+答不了（它读最新发布 tag，也就是已经发出去的那一版带 `1.13.0`），而它在 tag 存在之前就读得到。
+
+**这仍不勾 DOD-5、也不勾 DOD-6。**「这套字节自相一致、且是同一版」与「装得上」是两条读数，后者仍然只在
+Windows 真机上——那一趟写在 `docs/win-install-checklist.md`。本轮也没给它补读数：这台机器的空闲内存与磁盘
+都不支持再跑一次完整构建，所以未验证清单多了一行——`verify:dist` 的绿目前只在按真字节组装的一次性树上取过。
+
 ## 上游状态（第 139 轮，2026-11-05）
 
 本轮复核：**上游没动**。`git ls-remote` 的 `refs/heads/main` 答 `36eec0c`，仍是第 132 轮记下的那个

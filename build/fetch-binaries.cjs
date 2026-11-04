@@ -75,6 +75,25 @@ function isTransportFailure(err) {
   return /no answer within|ECONN|ETIMEDOUT|EAI_AGAIN|EHOSTUNREACH|ENETUNREACH|socket hang up|socket disconnected|disconnected before secure|other side closed|HTTP [45]\d\d|getaddrinfo/i.test(msg);
 }
 
+/**
+ * Which source is asked first: `github` or `registry`.
+ *
+ * The second source exists because the first one is not always reachable from the
+ * box that has to package, so "who is asked first" is the promise itself, not an
+ * implementation detail. Two facts say "don't start the slow one" — the operator
+ * asked (`OCR_FETCH_PREFER_REGISTRY`, or a manifest on that same CDN this box could
+ * not read), and this run has already met one failure that was about the *route*
+ * rather than about the bytes. A checksum mismatch deliberately does NOT move this:
+ * one target's wrong bytes say nothing about the next target's route, and dropping
+ * the fast source for all six because one download was corrupted is how a bad
+ * manifest quietly becomes "we shipped unverified bytes".
+ */
+function sourceOrder({ preferRegistry = false, channelDown = null } = {}) {
+  if (preferRegistry) return "registry";
+  if (channelDown !== null) return "registry";
+  return "github";
+}
+
 function download(url, maxRedirects = 10) {
   if (!url.startsWith("https")) return Promise.reject(new Error(`Refusing non-HTTPS download: ${url}`));
   if (maxRedirects <= 0) return Promise.reject(new Error(`Too many redirects: ${url}`));
@@ -165,6 +184,24 @@ function manifestDigest(checksums, target) {
 const registryCopies = new Map();
 
 /**
+ * The tarball name `npm pack` prints, out of whatever it wrote to stdout.
+ *
+ * npm puts the archive name on the LAST stdout line and may put notices before it;
+ * a registry that refused answers with nothing at all. So the last line is the
+ * candidate, and a candidate that is empty or not a `.tgz` is said out loud — the
+ * alternative is handing `tar -xzf` a name that came from a warning line and
+ * letting it report a confusing failure three steps later.
+ */
+function tarballNameFrom(listed) {
+  const text = String(listed == null ? "" : listed).trim();
+  const tgz = text.split(/\r?\n/).pop();
+  if (!tgz || !tgz.endsWith(".tgz")) {
+    throw new Error(`npm pack 没有报出 tarball 名（拿到 ${JSON.stringify(text)}）`);
+  }
+  return tgz;
+}
+
+/**
  * The same version's binary as the npm registry publishes it.
  *
  * `npm pack` fetches the tarball the registry holds and npm itself checks it
@@ -187,11 +224,7 @@ function registryBinary(target, version, workDir) {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
       });
-      const tgz = listed
-        .trim()
-        .split(/\r?\n/)
-        .pop();
-      if (!tgz || !tgz.endsWith(".tgz")) throw new Error(`npm pack 没有报出 tarball 名（拿到 ${JSON.stringify(listed.trim())}）`);
+      const tgz = tarballNameFrom(listed);
       execFileSync("tar", ["-xzf", path.join(dir, tgz), "-C", dir, `package/bin/${binaryName(target.os)}`], {
         stdio: ["ignore", "pipe", "pipe"],
       });
@@ -232,6 +265,22 @@ async function installBinary(target, sourceFile, version, digest, source) {
   return "fetched";
 }
 
+/** The two shapes of "not yet the file" an interrupted run leaves beside a binary.
+ *  They are never "the file", so anything that asks whether the binary is present
+ *  must first be rid of them — otherwise a `.part` from a killed download outlives
+ *  the very check that is supposed to notice the binary is missing. */
+function interruptedSiblings(binFile) {
+  return [`${binFile}.part`, `${binFile}.staged`];
+}
+
+/** Drop them. `rm` is injectable so the cleanup can be driven without a disk —
+ *  what is being pinned is *which* paths are cleared and with what options. */
+function clearInterruptedSiblings(binFile, { rm = fs.rmSync } = {}) {
+  const cleared = interruptedSiblings(binFile);
+  for (const leftover of cleared) rm(leftover, { force: true });
+  return cleared;
+}
+
 async function fetchTarget(target, { version, urlPattern, checksums, workDir, preferRegistry = false }) {
   const binDir = path.join(SCOPE_DIR, path.basename(target.pkg), "bin");
   const binFile = path.join(binDir, binaryName(target.os));
@@ -239,7 +288,7 @@ async function fetchTarget(target, { version, urlPattern, checksums, workDir, pr
   // An interrupted run leaves `.part` / `.staged` siblings behind; they are shapes
   // of "not yet the file", never shapes of "the file", so they are dropped before
   // anything asks whether the binary is present.
-  for (const leftover of [`${binFile}.part`, `${binFile}.staged`]) fs.rmSync(leftover, { force: true });
+  clearInterruptedSiblings(binFile);
 
   // The registry copy is asked for only when a digest is actually needed: with the
   // upstream manifest in hand, pulling a 56 MB tarball to prove a file is itself
@@ -285,14 +334,16 @@ async function fetchTarget(target, { version, urlPattern, checksums, workDir, pr
   let got = null;
   let url = buildUrl(urlPattern, version, target.os, target.arch);
   if (target.os === "windows") url += ".exe";
-  if (preferRegistry) {
+  if (sourceOrder({ preferRegistry, channelDown: releaseAssetChannelDown }) === "registry") {
     // A route that trickles instead of stalling never trips the socket timeout: that
     // is how one 56 MB asset occupied an hour on the packaging box while the registry
     // answered in seconds. `OCR_FETCH_PREFER_REGISTRY=1`, or a manifest this box could
     // not read, says "don't start the slow one".
-    log(`${target.key}: 按要求先走 npm registry（OCR_FETCH_PREFER_REGISTRY 或上游清单不可达）`);
-  } else if (releaseAssetChannelDown !== null) {
-    log(`${target.key}: release-asset CDN 这一趟已经答过一次不通（${releaseAssetChannelDown}），直接走 registry`);
+    log(
+      preferRegistry
+        ? `${target.key}: 按要求先走 npm registry（OCR_FETCH_PREFER_REGISTRY 或上游清单不可达）`
+        : `${target.key}: release-asset CDN 这一趟已经答过一次不通（${releaseAssetChannelDown}），直接走 registry`
+    );
   } else {
     try {
       fs.mkdirSync(binDir, { recursive: true });
@@ -386,7 +437,27 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+/* Being required must not start a download: `tools/fetch-binaries-smoke.mjs` drives
+ * the decisions below (which source is asked first, what counts as "the route was
+ * down", which leftovers get cleared, how `npm pack` output is read) inside
+ * `npm run audit:fetch-binaries`, which is part of `audit:static` — a script that
+ * fetches 270 MB cannot be a static gate. */
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  TARGETS,
+  DOWNLOAD_TIMEOUT_MS,
+  binaryName,
+  buildUrl,
+  clearInterruptedSiblings,
+  interruptedSiblings,
+  isTransportFailure,
+  manifestDigest,
+  sourceOrder,
+  tarballNameFrom,
+};

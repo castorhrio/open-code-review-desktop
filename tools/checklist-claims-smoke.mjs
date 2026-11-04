@@ -30,9 +30,15 @@ import {
   quotedRowCounts,
   readClaimsSummary,
   recordedCountViolations,
+  GREP_STEP_HEADING,
+  SUBSET_SOLO_HEADING,
+  shellPathLiterals,
+  shellPatternLiterals,
+  subsectionCommands,
   subsetFormViolations,
   subsetGridRows,
   subsetPastebackRows,
+  subsetSoloCommandViolations,
   SUBSET_BLANK,
   SUBSET_DATE_PLACEHOLDER,
   SUBSET_MINUTES_MARK,
@@ -116,17 +122,43 @@ const SUBSET_PASTEBACK = [
   "| 装好之后 Key 落在哪 | 真机 | 读数（YYYY-MM-DD）：____ | 已按 `docs/win-install-checklist.md` 第 5.2 步跑过 |",
 ];
 
+/** §5.2 那两条命令：「扫哪两个目录」的权威。夹具照真文档一样把第二条写成跨两行的管道。 */
+const SECTION_52 = [
+  "## 5. 配置与 Key 落在哪",
+  "",
+  "### 5.2 翻两个地方",
+  "",
+  "```powershell",
+  'Select-String -Path "$env:USERPROFILE\\.opencodereview\\config.json" -Pattern "api_key"',
+  'Get-ChildItem -Recurse -File "$env:LOCALAPPDATA\\Programs\\Open Code Review" -Include *.json |',
+  '  Select-String -Pattern "api_key"',
+  "```",
+  "",
+];
+
+/** §10.0 那一条合成命令（第 141 轮）：与上面那两处同两个目录、同一个 pattern、一次输出。 */
+const SOLO_COMMAND =
+  '"user config: " + @(Select-String -Path "$env:USERPROFILE\\.opencodereview\\config.json" -Pattern "api_key").Count' +
+  ' + " / install dir: " + @(Get-ChildItem -Recurse -File "$env:LOCALAPPDATA\\Programs\\Open Code Review" -Include *.json' +
+  ' | Select-String -Pattern "api_key").Count';
+
+/** 反向控制用的「另一个目录」：第 2.2 步改过安装目录时人真的会写出的那种形状。 */
+const SOLO_OTHER_DIR = '"D:\\Apps\\Open Code Review"';
+
 const checklistDoc = ({
   status = CHECKLIST_PENDING_MARK,
   claims = CLAIM_ROWS,
   grid = SUBSET_GRID,
   pasteback = SUBSET_PASTEBACK,
+  solo = [SOLO_COMMAND],
+  soloHeading = "### 10.0 只留一条读数（约 3 分钟）",
 } = {}) =>
   [
     "# Windows x64 安装包真机清单",
     "",
     `> 状态：**${status}**。这份文件是一次操作的说明书，不是验证记录。`,
     "",
+    ...SECTION_52,
     "## 9. 读数记回哪一行",
     "",
     "| 清单项 | 记回 `docs/measurements.md` 的哪一行 | 推进哪条 DoD |",
@@ -134,6 +166,12 @@ const checklistDoc = ({
     ...claims,
     "",
     "## 10. 最小可行子集（3 分钟起）",
+    "",
+    soloHeading,
+    "",
+    "```powershell",
+    ...solo,
+    "```",
     "",
     "### 10.1 四格读数（照这一张填）",
     "",
@@ -936,6 +974,138 @@ const lineOf = (doc, name) => {
       "模板指向的那一行已从未验证清单搬走：点名那一行与那个名字",
       violations.length === 1 && violations[0].includes("装好之后 Key 落在哪") && violations[0].includes("没有这一行"),
       violations.join("；") || "没有违规"
+    );
+  }
+}
+
+/* ---- 9b. §10.0 那一条合成命令，与 §5.2 那两处 ----
+ *
+ * 第 138 轮把三分钟那条路写成「复制 §5.2 那两条」，两次复制、两种读数，而第二条还跨两行；
+ * 第 141 轮合成一条之后，同两个目录第一次出现在两个地方。副本不核对就会各自漂：把 §10.0 那条里
+ * 的安装目录改成第 2.2 步选的那个，跑的人扫的是 `D:\Apps\…`，贴回来的读数却记在「默认安装目录」
+ * 那一行名下——而整份清单仍是绿的。所以这一格只改一个事实：换目录、拆两行、改 pattern、
+ * 删整节、清空围栏、把 §5.2 那一节改名。
+ */
+{
+  const violationsOfSolo = (patch) => subsetSoloCommandViolations({ checklistDoc: checklistDoc(), ...patch });
+
+  check(
+    "前提：§5.2 与 §10.0 两处围栏都读得出，且 §5.2 真的给得出两个路径",
+    (() => {
+      const grep = subsectionCommands(checklistDoc(), GREP_STEP_HEADING);
+      const solo = subsectionCommands(checklistDoc(), SUBSET_SOLO_HEADING);
+      return Boolean(grep && grep.length === 3 && solo && solo.length === 1 && shellPathLiterals(grep.map((e) => e.text).join("\n")).length === 2);
+    })(),
+    JSON.stringify({
+      grep: subsectionCommands(checklistDoc(), GREP_STEP_HEADING),
+      solo: subsectionCommands(checklistDoc(), SUBSET_SOLO_HEADING),
+    })
+  );
+  check(
+    "前提：夹具里那一条与那两处的路径与 pattern 各是一组（否则下面每一格反向控制都证明不了什么）",
+    JSON.stringify(shellPathLiterals(SOLO_COMMAND)) ===
+      JSON.stringify(shellPathLiterals(SECTION_52.join("\n"))) &&
+      JSON.stringify(shellPatternLiterals(SOLO_COMMAND)) === JSON.stringify(shellPatternLiterals(SECTION_52.join("\n"))),
+    JSON.stringify({ solo: shellPathLiterals(SOLO_COMMAND), grep: shellPathLiterals(SECTION_52.join("\n")) })
+  );
+  check("基线：§10.0 那条与 §5.2 那两处是同一件事（绿）", violationsOfSolo({}).length === 0, violationsOfSolo({}).join("；"));
+  check(
+    "……且它是第 10 节那一条门禁的一部分（谓词绿不代表 run 里在问）",
+    subsetFormViolations({ checklistDoc: checklistDoc(), measurementsDoc: measurementsDoc() }).length === 0,
+    subsetFormViolations({ checklistDoc: checklistDoc(), measurementsDoc: measurementsDoc() }).join("；")
+  );
+
+  // 1. 目录换成第 2.2 步改过的那一个——两处扫的不再是同一个地方。
+  {
+    const broken = checklistDoc({ solo: [SOLO_COMMAND.replace('"$env:LOCALAPPDATA\\Programs\\Open Code Review"', SOLO_OTHER_DIR)] });
+    const violations = violationsOfSolo({ checklistDoc: broken });
+    const wantLine = subsectionCommands(broken, SUBSET_SOLO_HEADING)[0].line;
+    check(
+      "把 §10.0 那条里的安装目录改成别处（`D:\\Apps\\…`）：点名那一行，两边缺哪一处、多哪一处都写出来",
+      violations.length === 1 &&
+        violations[0].includes(`第 ${wantLine} 行`) &&
+        violations[0].includes("$env:LOCALAPPDATA\\Programs\\Open Code Review") &&
+        violations[0].includes("D:\\Apps\\Open Code Review"),
+      violations.join("；") || "没有违规"
+    );
+    const throughGate = subsetFormViolations({ checklistDoc: broken, measurementsDoc: measurementsDoc() });
+    check("……同一格走第 10 节那条门禁也必须红（新规则不是只能单独问的谓词）", throughGate.length === 1, throughGate.join("；") || "没有违规");
+  }
+
+  // 2. §10.0 那一节不见了（三分钟那条路退回两件事）。
+  {
+    const broken = checklistDoc().replace(/### 10\.0 只留一条读数（约 3 分钟）[\s\S]*?```\n\n/, "");
+    const violations = violationsOfSolo({ checklistDoc: broken });
+    check(
+      "§10.0 那一节整节不见了：点名「读不到 §10.0 那条合成命令的围栏块」",
+      violations.length === 1 && violations[0].includes("10.0") && violations[0].includes("围栏"),
+      violations.join("；") || "没有违规"
+    );
+  }
+
+  // 3. 小节在，围栏里一行命令都没有（空围栏比没有围栏更会骗人）。
+  {
+    const broken = checklistDoc({ solo: [] });
+    const violations = violationsOfSolo({ checklistDoc: broken });
+    check(
+      "§10.0 留着标题与围栏、里面一行命令都没有：点名「一行命令都没有」，不说「没有那一节」",
+      violations.length === 1 && violations[0].includes("一行命令都没有"),
+      violations.join("；") || "没有违规"
+    );
+  }
+
+  // 4. 拆成两行（「复制一件事」这条承诺没了）。
+  {
+    const at = SOLO_COMMAND.indexOf(' + " / install dir: "');
+    const broken = checklistDoc({ solo: [SOLO_COMMAND.slice(0, at), SOLO_COMMAND.slice(at + 3)] });
+    const violations = violationsOfSolo({ checklistDoc: broken });
+    check(
+      "把那条命令拆成两行：点名行数与「只复制一件事」（路径仍然两边相等，所以红的只能是这一条）",
+      violations.length === 1 && violations[0].includes("2 行命令") && violations[0].includes("复制一件事"),
+      violations.join("；") || "没有违规"
+    );
+  }
+
+  // 5. pattern 改掉一格：两处找的不是同一个东西。
+  {
+    const broken = checklistDoc({ solo: [SOLO_COMMAND.replaceAll('"api_key"', '"apikey"')] });
+    const violations = violationsOfSolo({ checklistDoc: broken });
+    check(
+      "把 §10.0 那条的 `-Pattern` 改成 apikey：点名 `-Pattern` 那一半（目录仍一致，所以只红这一条）",
+      violations.length === 1 && violations[0].includes("-Pattern") && violations[0].includes("apikey"),
+      violations.join("；") || "没有违规"
+    );
+  }
+
+  // 6. §5.2 那一节的小节标题不见了：权威读不到，比对不许静默通过。
+  {
+    const broken = checklistDoc().replace("### 5.2 翻两个地方\n\n", "");
+    const violations = violationsOfSolo({ checklistDoc: broken });
+    check(
+      "§5.2 的小节标题被删掉：点名「读不到 §5.2 那一节的围栏命令」（没有权威时不静默通过）",
+      subsectionCommands(checklistDoc(), GREP_STEP_HEADING) !== null &&
+        subsectionCommands(broken, GREP_STEP_HEADING) === null &&
+        violations.length === 1 &&
+        violations[0].includes("5.2") &&
+        violations[0].includes("权威"),
+      violations.join("；") || "没有违规"
+    );
+  }
+
+  // 7. 真仓库：那一条确实与 §5.2 是同一件事。
+  {
+    const checklist = read(CHECKLIST_DOC) || "";
+    const live = subsetSoloCommandViolations({ checklistDoc: checklist });
+    check(
+      `仓库里：${CHECKLIST_DOC} 的 §10.0 那一条与 §5.2 那两处是同一件事（一行、同两个目录、同一个 pattern）`,
+      live.length === 0,
+      live.join("；") || "没有违规"
+    );
+    const solo = subsectionCommands(checklist, SUBSET_SOLO_HEADING) || [];
+    check(
+      "仓库里：§10.0 那一节读得出一行命令（不是夹具里那条）",
+      solo.length === 1 && solo[0].text.includes("Select-String"),
+      JSON.stringify(solo.map((entry) => entry.line))
     );
   }
 }

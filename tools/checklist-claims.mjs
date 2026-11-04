@@ -486,6 +486,10 @@ export const measurementTableViolations = ({ measurementsDoc, measurementsPath =
  * 前面任何一格，装一次、填一个可丢弃的 Key 就能各留一条读数，分别给 DOD-5 与 DOD-6。
  * 这一条因此还问：标着「可单独跑」的恰好是这两格，且它们按第 9 节的归属真的落在两条
  * 不同的 DoD 上——标错了格，或者两格都归同一条 DoD，那「各留一条读数」就是假话。
+ *
+ * 第 141 轮加的是第六件事：§10.0 那条**合成命令**与 §5.2 那两处必须是同一件事。合成之前是两次
+ * 复制（「3 分钟」并不成立），合成之后是同两个目录写在两个地方——所以绑一次：同两个路径、同一个
+ * `-Pattern`、且只留一行可复制。细节写在 `subsetSoloCommandViolations` 上面。
  */
 export const SUBSET_STEPS = Object.freeze(["1", "2.2", "4.2", "5.2"]);
 export const SUBSET_BLANK = "____";
@@ -576,6 +580,136 @@ export const subsetPastebackRows = (doc) => {
     rows.push({ line: index + 1, name: cells[0], cells });
   }
   return rows;
+};
+
+/* ---- 10.0 那一条合成命令（第 141 轮） ----
+ *
+ * 第 138 轮把三分钟那条路写成「原样复制 §5.2 那两条命令」，可两条命令就是两次复制、两种期望读数，
+ * 而 §5.2 那两条里第二条还跨了两行——「3 分钟」在那一刻其实不成立。第 141 轮把它合成一条
+ * （两个计数、一次输出）。合成之后多出来的东西不是便利，是一个**副本**：同两个目录现在写在两个地方，
+ * 而清单的第 9 节把读数记回的是 §5.2 那一处。副本不核对就会各自漂——把 §10.0 那条里的安装目录改成
+ * `D:\Apps\…`，跑的人扫的是别的目录，贴回来的读数说的却是默认目录，而整份清单仍是绿的。
+ *
+ * 所以这一条把 §10.0 那条命令绑回 §5.2：
+ *   1. 两处围栏块都读得出来，且 §5.2 里真的读得出路径（读不出就红——那等于这一条没有权威）；
+ *   2. §10.0 的块里**只有一行**命令：「复制一件事」是这一节的承诺，拆成两行就回到第 138 轮之前；
+ *   3. 两条命令里出现的路径字面量（`$env:…`、`X:\…`、含 `\` 的那些）必须**两边相等**，
+ *      `-Pattern` 的值也一样——差一个目录就是两个不同的读数。
+ */
+export const SUBSET_SOLO_HEADING = /^###\s*10\.0/;
+export const GREP_STEP_HEADING = /^###\s*5\.2/;
+
+/**
+ * 某个小节（`### 5.2` / `### 10.0`）里围栏块中的非空行，带行号。
+ *
+ * 返回 `null` 表示**小节不存在**，返回空数组表示「小节在，里面没有可复制的那件事」——两者是不同的
+ * 欠账，合成一句话会让读的人不知道该补哪一样。围栏外的正文一律不取：这一条问的是「要复制的那件事」，
+ * 而散文里提到同一个路径不算副本。
+ */
+export const subsectionCommands = (doc, headingPattern) => {
+  const lines = String(doc == null ? "" : doc).split(/\r?\n/);
+  const start = lines.findIndex((line) => headingPattern.test(line.trim()));
+  if (start === -1) return null;
+  const out = [];
+  let inFence = false;
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const trimmed = lines[index].trim();
+    if (/^##/.test(trimmed)) break;
+    if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence && trimmed !== "") out.push({ line: index + 1, text: trimmed });
+  }
+  return out;
+};
+
+/** 命令里的引号字面量（双引号与单引号都算——PowerShell 两种都接受）。 */
+export const shellQuotedLiterals = (text) => {
+  const found = [];
+  const pattern = /"([^"\r\n]*)"|'([^'\r\n]*)'/g;
+  let hit;
+  while ((hit = pattern.exec(String(text == null ? "" : text))) !== null) found.push(hit[1] ?? hit[2]);
+  return found;
+};
+
+/** 看起来像一个文件系统位置的引号字面量：`$env:` 开头、盘符开头，或含反斜杠。 */
+export const isShellPathLiteral = (literal) => {
+  const text = String(literal == null ? "" : literal);
+  return /^\$env:/i.test(text) || /^[A-Za-z]:[\\/]/.test(text) || text.includes("\\");
+};
+
+/** 一条命令里出现的路径字面量集合（去重、保序）。 */
+export const shellPathLiterals = (text) => [...new Set(shellQuotedLiterals(text).filter(isShellPathLiteral))];
+
+/** 一条命令里 `-Pattern` 的值集合：两处比的是不是同一个东西。 */
+export const shellPatternLiterals = (text) => {
+  const found = [];
+  const pattern = /-Pattern\s+"([^"\r\n]*)"|-Pattern\s+'([^'\r\n]*)'/g;
+  let hit;
+  while ((hit = pattern.exec(String(text == null ? "" : text))) !== null) found.push(hit[1] ?? hit[2]);
+  return [...new Set(found)];
+};
+
+const symmetricDiff = (want, got) => {
+  const a = [...new Set(want || [])];
+  const b = [...new Set(got || [])];
+  return { missing: a.filter((item) => !b.includes(item)), extra: b.filter((item) => !a.includes(item)) };
+};
+
+export const subsetSoloCommandViolations = ({ checklistDoc, checklistPath = CHECKLIST_DOC }) => {
+  const grep = subsectionCommands(checklistDoc, GREP_STEP_HEADING);
+  const solo = subsectionCommands(checklistDoc, SUBSET_SOLO_HEADING);
+  if (grep === null) {
+    return [
+      `${checklistPath} 里读不到 §5.2 那一节的围栏命令（\`### 5.2\`）：那两条命令是「扫哪两个目录」的权威，` +
+        "它不见了，第 10 节那条合成命令就没有可对照的另一半了",
+    ];
+  }
+  const grepText = grep.map((entry) => entry.text).join("\n");
+  const wantPaths = shellPathLiterals(grepText);
+  if (wantPaths.length === 0) {
+    return [
+      `${checklistPath} §5.2 的围栏命令里读不出任何路径字面量（\`$env:…\`、\`X:\\…\` 或含 \`\\\` 的引号串）：` +
+        "这一条靠那两处路径作权威，读不出时比对无从问起——不静默通过",
+    ];
+  }
+  if (solo === null) {
+    return [
+      `${checklistPath} 里读不到 §10.0 那条合成命令的围栏块（\`### 10.0\`）：三分钟那条路因此又变成「复制两件事」，` +
+        "而这一节存在的理由就是让被打断的人一次复制、一次输出",
+    ];
+  }
+  if (solo.length === 0) {
+    return [
+      `${checklistPath} §10.0 那一节的围栏块里一行命令都没有：读得出小节却读不出要复制的那件事，` +
+        "空围栏比没有围栏更容易被读成「已经写好了」",
+    ];
+  }
+
+  const violations = [];
+  const firstLine = solo[0].line;
+  if (solo.length !== 1) {
+    violations.push(
+      `${checklistPath} 第 ${firstLine} 行起，§10.0 的围栏里有 ${solo.length} 行命令，应为 1 行：` +
+        "这一节对读者的承诺是「三分钟里只复制一件事」，拆成两行就回到第 138 轮那个「两条命令、两种读数」的形状"
+    );
+  }
+  const soloText = solo.map((entry) => entry.text).join("\n");
+  const checks = [
+    ["扫的目录", wantPaths, shellPathLiterals(soloText)],
+    ["`-Pattern` 的值", shellPatternLiterals(grepText), shellPatternLiterals(soloText)],
+  ];
+  for (const [label, want, got] of checks) {
+    const { missing, extra } = symmetricDiff(want, got);
+    if (!missing.length && !extra.length) continue;
+    violations.push(
+      `${checklistPath} 第 ${firstLine} 行那条合成命令与 §5.2 不是同一件事——${label}：§5.2 里有而这条没有「${missing.join("、") || "（无）"}」，` +
+        `这条多出「${extra.join("、") || "（无）"}」：同一个读数写在两个地方，第 9 节把读数记回的是 §5.2 那一处，` +
+        "两处各扫一个目录时，贴回来的读数说的是另一个目录"
+    );
+  }
+  return violations;
 };
 
 export const subsetFormViolations = ({
@@ -746,6 +880,10 @@ export const subsetFormViolations = ({
         "贴回时替换的是同名行，名字错了就没有落点——要么改模板，要么那一行已经被搬走了"
     );
   }
+
+  // 5. 第 141 轮：§10.0 那一条合成命令必须与 §5.2 是同一件事（同两个目录、同一个 pattern、
+  //    且只有一行可复制）。写在两个地方的读数不核对就会各自漂。
+  violations.push(...subsetSoloCommandViolations({ checklistDoc: checklist, checklistPath }));
 
   return violations;
 };

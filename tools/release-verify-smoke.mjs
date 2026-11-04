@@ -22,19 +22,26 @@ import path from "node:path";
 
 import {
   LATEST_FILE,
+  LATEST_FEED_URL,
   ROLE_WHY,
+  SIGNING_DOCS,
   VERIFY_COMMAND,
   artifactNameFor,
   distArtifactViolations,
+  feedSourceViolations,
   parseArgs,
   parseLatestYml,
   requiredRoles,
+  signingViolations,
   unpackedCliViolations,
 } from "./release-verify.mjs";
 import { RELEASE_STEPS, planRelease } from "./release-guard.mjs";
 import { PINNED_UPSTREAM, auditScriptClosure, pinVersion } from "./upstream-watch.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
+/** The run's own source: two of the checks below ask whether `main()` really calls a
+ *  predicate rather than leaving it exported and unread. */
+const sourceOfVerify = fs.readFileSync(path.join(ROOT, "tools", "release-verify.mjs"), "utf8");
 const results = [];
 const check = (name, ok, detail = "") => {
   results.push({ name, ok: Boolean(ok), detail });
@@ -355,6 +362,118 @@ releaseDate: '2026-11-05T00:00:00.000Z'
     "...and the refusal names the command a reader can copy",
     parseArgs(["--nope"]).error.includes(VERIFY_COMMAND),
     parseArgs(["--nope"]).error
+  );
+}
+
+/* ---- 8b. the two config values the run now reads ----
+ *
+ * Until round 141 these were only *derived* here: `build.win.signExecutable` because
+ * nothing read it at all, `build.publish[0].url` because `requiredRoles` used only its
+ * presence to decide whether a feed file is owed. Both are promises made to a reader —
+ * "unsigned, so SmartScreen may warn" in four documents, and "the installed build checks
+ * the published release on launch" — so both are now asked of the config itself, which is
+ * the only place a drift is visible before the release is.
+ *
+ * The fixture docs are built from each document's own claim (`entry.claim.source`), which
+ * is also the premise check below: a fixture that matches by luck would make the reversal
+ * prove nothing.
+ */
+{
+  const docsSayingIt = SIGNING_DOCS.map(({ path: target, claim }) => ({ path: target, text: `正文里那句：${claim.source}` }));
+  const docsSilentOn = (target) => docsSayingIt.map((doc) => (doc.path === target ? { ...doc, text: "这一份把签名的事一句没提。" } : doc));
+
+  check(
+    "premise: each fixture doc matches its own claim, and the silenced one does not",
+    SIGNING_DOCS.every((entry, index) => entry.claim.test(docsSayingIt[index].text)) &&
+      !SIGNING_DOCS[2].claim.test(docsSilentOn(SIGNING_DOCS[2].path)[2].text),
+    JSON.stringify(docsSayingIt.map((doc) => doc.text.slice(0, 24)))
+  );
+  check(
+    "signExecutable false + the four documents saying so: nothing to complain",
+    signingViolations({ signExecutable: false, docs: docsSayingIt }).length === 0,
+    signingViolations({ signExecutable: false, docs: docsSayingIt }).join("；")
+  );
+  const flipped = signingViolations({ signExecutable: true, docs: docsSayingIt });
+  check(
+    "...flipping signExecutable to true changes the conclusion, and names every document that still says unsigned",
+    flipped.length === 1 &&
+      flipped[0].includes("README.md") &&
+      flipped[0].includes("README.zh-CN.md") &&
+      flipped[0].includes("使用说明.md") &&
+      flipped[0].includes("docs/win-install-checklist.md"),
+    flipped.join("；") || "没有违规"
+  );
+  check(
+    "...an absent flag is read as \u201cwill sign\u201d, not as \u201cstill false\u201d",
+    signingViolations({ signExecutable: undefined, docs: docsSayingIt }).length === 1,
+    signingViolations({ signExecutable: undefined, docs: docsSayingIt }).join("；") || "没有违规"
+  );
+  const silenced = SIGNING_DOCS[2].path;
+  const oneSilent = signingViolations({ signExecutable: false, docs: docsSilentOn(silenced) });
+  check(
+    "...the flag still false but one document stopped saying it: that document is named, and only it",
+    oneSilent.length === 1 &&
+      oneSilent[0].includes(silenced) &&
+      SIGNING_DOCS.filter((entry) => entry.path !== silenced).every((entry) => !oneSilent[0].includes(entry.path)),
+    oneSilent.join("；") || "没有违规"
+  );
+
+  const GOOD_FEED_URL = "https://github.com/castorhrio/open-code-review-desktop/releases/latest/download/";
+  check("premise: the feed url this repository ships passes the shape the rule requires", LATEST_FEED_URL.test(GOOD_FEED_URL), GOOD_FEED_URL);
+  check("publish pointing at releases/latest/download/: nothing to complain", feedSourceViolations({ publish: [{ provider: "generic", url: GOOD_FEED_URL }] }).length === 0, feedSourceViolations({ publish: [{ provider: "generic", url: GOOD_FEED_URL }] }).join("；"));
+  const pinned = feedSourceViolations({ publish: [{ provider: "generic", url: "https://github.com/castorhrio/open-code-review-desktop/releases/download/v0.1.13/" }] });
+  check(
+    "...a feed pinned to one tag goes red, because installed clients would never see the next release",
+    pinned.length === 1 && pinned[0].includes("releases/download/v0.1.13"),
+    pinned.join("；") || "没有违规"
+  );
+  const noSlash = feedSourceViolations({ publish: [{ provider: "generic", url: GOOD_FEED_URL.replace(/\/$/, "") }] });
+  check(
+    "...a missing trailing slash is the same failure shape: the feed file never resolves",
+    noSlash.length === 1,
+    noSlash.join("；") || "没有违规"
+  );
+  check(
+    "...no publish config at all is refused rather than skipped: the README promises in-app updates",
+    feedSourceViolations({ publish: undefined }).length === 1 && feedSourceViolations({ publish: [] }).length === 1,
+    JSON.stringify({ undef: feedSourceViolations({ publish: undefined }).length, empty: feedSourceViolations({ publish: [] }).length })
+  );
+  const provider = feedSourceViolations({ publish: [{ provider: "github", url: GOOD_FEED_URL }] });
+  check(
+    "...another provider is named as such, not judged on its url",
+    provider.length === 1 && provider[0].includes("\"github\""),
+    provider.join("；") || "没有违规"
+  );
+  check(
+    "...a first entry that is not an object is refused (an unreadable feed is not an empty one)",
+    feedSourceViolations({ publish: [null] }).length === 1 && feedSourceViolations({ publish: ["x"] }).length === 1,
+    JSON.stringify({ null: feedSourceViolations({ publish: [null] }).length })
+  );
+
+  // The two readings this file cannot fake: the repository's own values.
+  const realPkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
+  const realDocs = SIGNING_DOCS.map(({ path: target }) => {
+    try {
+      return { path: target, text: fs.readFileSync(path.join(ROOT, target), "utf8") };
+    } catch (_) {
+      return { path: target, text: "" };
+    }
+  });
+  check(
+    "...and in this repository: signExecutable is false, all four documents still say so, and the feed is releases/latest",
+    signingViolations({ signExecutable: realPkg.build.win.signExecutable, docs: realDocs }).length === 0 &&
+      feedSourceViolations({ publish: realPkg.build.publish }).length === 0,
+    JSON.stringify({
+      signExecutable: realPkg.build.win.signExecutable,
+      silent: SIGNING_DOCS.filter((entry, index) => !entry.claim.test(realDocs[index].text)).map((entry) => entry.path),
+      url: realPkg.build.publish && realPkg.build.publish[0] && realPkg.build.publish[0].url,
+    })
+  );
+  check(
+    "...so the run actually asks both (exported predicates nobody calls are not a gate)",
+    sourceOfVerify.includes("signingViolations({ signExecutable: win.signExecutable, docs })") &&
+      sourceOfVerify.includes("feedSourceViolations({ publish: build.publish })"),
+    "main() 里没有那两行"
   );
 }
 
