@@ -36,6 +36,17 @@
 // runs as a check), but how far the tag sits behind the pin stays a printed
 // sentence, because closing it needs a Windows machine.
 //
+// A second document copies these answers, so it is gated too. `docs/win-install-checklist.md`
+// (第 120 轮) has to be followable cold, which means it states the two numbers
+// outright: the program version and the `ocr` version to expect in 设置 → 关于与卸载.
+// Both change the moment a release is cut, and a stale expectation in a checklist
+// turns no other gate red — it just makes the file untrustworthy exactly where it
+// is supposed to be trusted. So `checklistVersionViolations` requires every
+// `X.Y.Z` in that file to be one of the two numbers read here, and requires the
+// two rows carrying the expectation to agree with them (or to defer to this
+// command and quote no number at all). gated, not reported: the document is in
+// this repository, so there is a machine that can fix it.
+//
 // The gate is also why `audit:static` now has a second environment dependency —
 // the first is `audit:surface`'s installed CLI, this one is the checkout's git tag
 // history. From a `--depth 1` clone or an unpacked tarball `git tag -l` is empty,
@@ -268,6 +279,109 @@ export const measurementAnswerViolations = ({ doc, tag, version }) => {
   return violations;
 };
 
+/**
+ * The numbers in `docs/win-install-checklist.md` are copies of what this script
+ * reads, so the copy is compared against the source.
+ *
+ * 第 120 轮 wrote that checklist to be followed once on a Windows machine, and it
+ * has to be followable *cold*: a person with the installer in front of them needs
+ * the expected reading, not a pointer. So §4.2 says the program version and the
+ * `ocr` version in so many characters. Two of those characters are answers that
+ * `main()` above reads out of git (the latest release tag's version, and the CLI
+ * version that tag's lockfile resolved), and both of them change the moment a
+ * release is cut — which is exactly when nobody is looking at the checklist. A
+ * stale expected version does not turn any other gate red; it just makes the
+ * checklist untrustworthy, and "the checklist says the window shows 1.13.0"
+ * would then be wrong in the one situation the file exists for.
+ *
+ * So: every `X.Y.Z` anywhere in the file must be one of those two numbers, and
+ * the two rows that carry the expectation must be there and must agree. The
+ * second shape is allowed on purpose — a row that says 「以 `npm run
+ * audit:release-pin` 的读数为准」 and quotes no number cannot rot, and a rule that
+ * forces a number into every edit would push people back into hand-copying.
+ *
+ * Empty versions are violations, not skipped comparisons: `includes("")` is true
+ * for every line, so an empty answer would turn this check into a check that
+ * always passes — the same trap `measurementAnswerViolations` refuses below.
+ */
+export const WIN_CHECKLIST_DOC = "docs/win-install-checklist.md";
+
+/** The two rows of §4.2 that carry a version expectation, by their first cell. */
+export const CHECKLIST_VERSION_ROWS = Object.freeze([
+  { name: "程序版本", which: "release", why: "装完之后设置页「关于与卸载」那张卡的第一行，读数必须与安装包同版本" },
+  { name: "ocr CLI", which: "cli", why: "这一格是「这一份发布里带的是哪一版 `ocr`」，它由 tag 的 lockfile 决定" },
+]);
+
+/** The phrase that makes a row rot-proof: it defers to the command instead of
+ *  quoting a number. Kept next to the rule because the rule reads for it. */
+export const CHECKLIST_DEFER_PHRASE = "读数为准";
+
+/** `X.Y.Z` triples in one line, ignoring `1.2.3.4` and `v1.2.3beta` shapes. */
+export const versionLiteralsIn = (line) =>
+  [...new Set(String(line == null ? "" : line).match(/(?<![\d.])\d+\.\d+\.\d+(?![\d.])/g) || [])];
+
+export const checklistVersionViolations = ({ doc, releaseVersion, cliVersion, docPath = WIN_CHECKLIST_DOC }) => {
+  const text = String(doc == null ? "" : doc);
+  if (!releaseVersion || !cliVersion) {
+    return [
+      `${docPath} 的期望版本要与「那一份发布」比，而这一趟读到的发布版本是 ${JSON.stringify(releaseVersion)}、` +
+        `里面带的 \`ocr\` 是 ${JSON.stringify(cliVersion)}：缺一半就无从比起（空串与每一行都相等）`
+    ];
+  }
+  if (text.trim() === "") {
+    return [`${docPath} 是空的或读不到：清单里的期望版本无从核对——一份空文件不会说它错了`];
+  }
+  const lines = text.split(/\r?\n/);
+  const allowed = { [releaseVersion]: "release", [cliVersion]: "cli" };
+  const violations = [];
+  lines.forEach((line, index) => {
+    for (const literal of versionLiteralsIn(line)) {
+      if (allowed[literal]) continue;
+      violations.push(
+        `${docPath} 第 ${index + 1} 行写着 ${literal}：清单里的版本只能是那一份发布的 ${releaseVersion} ` +
+          `或它里面带的 \`ocr\` ${cliVersion}——写成别的数字，读者会拿它去对实机读数`
+      );
+    }
+  });
+
+  const rowOf = (name) => {
+    const pattern = new RegExp(`^\\|\\s*${name}\\s*\\|`);
+    const at = lines.findIndex((line) => pattern.test(line.trim()));
+    return at === -1 ? null : { line: at + 1, row: lines[at] };
+  };
+
+  for (const want of CHECKLIST_VERSION_ROWS) {
+    const found = rowOf(want.name);
+    if (found === null) {
+      violations.push(
+        `${docPath} 里没有「${want.name}」那一行（第一格是 \`${want.name}\`）：` +
+          `${want.why}——这一格要能被这一条核对到`
+      );
+      continue;
+    }
+    const expected = want.which === "release" ? releaseVersion : cliVersion;
+    const literals = versionLiteralsIn(found.row);
+    if (!found.row.includes(expected)) {
+      // The deferring shape is legal only for the row whose answer is the one the
+      // command prints, and only while it quotes no number at all.
+      const defers = want.which === "cli" && literals.length === 0 && found.row.includes(CHECKLIST_DEFER_PHRASE);
+      if (!defers) {
+        violations.push(
+          `${docPath} 第 ${found.line} 行（${want.name}）没有写 ${expected}：` +
+            `${want.why}${literals.length ? `；这一行现在写的是 ${literals.join("、")}` : ""}`
+        );
+      }
+    }
+    if (want.which === "cli" && !found.row.includes(MEASUREMENT_COMMAND) && !found.row.includes(CHECKLIST_DEFER_PHRASE)) {
+      violations.push(
+        `${docPath} 第 ${found.line} 行（${want.name}）既没有写 \`${MEASUREMENT_COMMAND}\`、也没有说以那条命令的读数为准：` +
+          "这一格的答案不是凭印象写的，读它的人要知道去哪里重取"
+      );
+    }
+  }
+  return violations;
+};
+
 /* ---- the run ---- */
 
 const git = (...args) => execFileSync("git", args, { cwd: ROOT, encoding: "utf8" });
@@ -383,6 +497,22 @@ export const main = () => {
   const doc = fs.readFileSync(path.join(ROOT, MEASUREMENTS_DOC), "utf8");
   const measured = measurementAnswerViolations({ doc, tag: latest.tag, version: shipped || "" });
   check(`${MEASUREMENTS_DOC} 记的答案是这一趟跑出来的那一份（${latest.tag} / ${shipped || "?"}）`, measured.length === 0, measured.join("；"));
+
+  // The checklist's two expected versions are copies of the answers above, so the
+  // gate is the same fact asked twice. Cutting a release changes both numbers at
+  // once: this check goes red until whoever cut it comes back and writes them
+  // down, which is the whole point of asserting a document nobody edits.
+  const checklist = fs.readFileSync(path.join(ROOT, WIN_CHECKLIST_DOC), "utf8");
+  const checklistViolations = checklistVersionViolations({
+    doc: checklist,
+    releaseVersion: latest.version,
+    cliVersion: shipped || "",
+  });
+  check(
+    `${WIN_CHECKLIST_DOC} 的期望版本是这一份发布读出来的那一份（${latest.version} / ${shipped || "?"}）`,
+    checklistViolations.length === 0,
+    checklistViolations.join("；")
+  );
 
   const failed = results.filter((result) => !result.ok);
   console.log(`\n发布 pin：${results.length} 条检查，${failed.length} 条红`);

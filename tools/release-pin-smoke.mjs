@@ -19,6 +19,10 @@ import path from "node:path";
 import {
   MEASUREMENTS_DOC,
   MEASUREMENT_COMMAND,
+  WIN_CHECKLIST_DOC,
+  CHECKLIST_DEFER_PHRASE,
+  checklistVersionViolations,
+  versionLiteralsIn,
   cliLockVersion,
   compareVersions,
   desktopReleaseTags,
@@ -275,6 +279,97 @@ check(
 );
 check("lockfile 解析：读不出版本时是 null，而不是空串", cliLockVersion({ packages: {} }) === null && cliLockVersion(lockWith(OLD)) === OLD);
 
+// ---- the expected versions printed in the Windows checklist ----
+//
+// `docs/win-install-checklist.md` has to be followable by someone holding the
+// installer, so §4.2 states two numbers to expect. Both are copied from this
+// script's own answers, and both change on the day a release is cut — the day
+// nobody is reading a checklist. These fixtures are the checklist's two rows, one
+// wrong fact at a time.
+const checklistDoc = () =>
+  [
+    "# Windows x64 安装包真机清单",
+    "",
+    `从 Releases 下载 \`open-code-review-desktop-${RELEASE_VERSION}-setup.exe\`。`,
+    "",
+    "## 4. 从图标起的那一份",
+    "",
+    "| 行 | 期望读数 |",
+    "| --- | --- |",
+    `| 程序版本 | \`v${RELEASE_VERSION}\`（与安装包同版本） |`,
+    `| ocr CLI | \`v${OLD}\`——这是 \`v${RELEASE_VERSION}\` 这份发布里带的那一版（\`${MEASUREMENT_COMMAND}\` 的答案） |`,
+    "| 可执行文件 | `<安装目录>\\opencodereview.exe` |",
+    "",
+  ].join("\n");
+
+const checklistGreen = (doc, releaseVersion = RELEASE_VERSION, cliVersion = OLD) =>
+  checklistVersionViolations({ doc, releaseVersion, cliVersion });
+
+const withoutCliRow = (doc) =>
+  doc
+    .split("\n")
+    .filter((line) => !line.startsWith("| ocr CLI |"))
+    .join("\n");
+
+check(
+  "前提：一张写了那两个版本的清单是绿的（这两行就是清单 §4.2 的形状）",
+  checklistGreen(checklistDoc()).length === 0,
+  checklistGreen(checklistDoc()).join("；")
+);
+check(
+  "前提：版本字面量的读法不把 1.25 / 1.5 这种小数与四段版本当版本号",
+  versionLiteralsIn("真显示器与 GPU、1.25 / 1.5 缩放").length === 0 && versionLiteralsIn("1.2.3.4").length === 0,
+  JSON.stringify([versionLiteralsIn("真显示器与 GPU、1.25 / 1.5 缩放"), versionLiteralsIn("1.2.3.4")])
+);
+
+const staleCli = checklistDoc().replace(`\`v${OLD}\``, "`v1.12.13`");
+check(
+  "反向控制：`ocr CLI` 那一格写着一个不存在的版本 → 红并点名行号与两边允许的值",
+  checklistGreen(staleCli).some((line) => line.includes("1.12.13") && /第 \d+ 行/.test(line) && line.includes(OLD)),
+  checklistGreen(staleCli).join("；")
+);
+
+const staleApp = checklistDoc().replace(`\`v${RELEASE_VERSION}\`（与安装包同版本）`, "`v0.1.12`（与安装包同版本）");
+check(
+  "反向控制：`程序版本` 那一格写着上一版的版本号 → 红并点名那一行",
+  checklistGreen(staleApp).some((line) => line.includes("程序版本") && line.includes("0.1.12")),
+  checklistGreen(staleApp).join("；")
+);
+
+const checklistNoCommand = checklistDoc().replace(MEASUREMENT_COMMAND, "人工读一遍");
+check(
+  "反向控制：`ocr CLI` 那一格既没写命令也没说以读数为准 → 红（数字对了也不够）",
+  checklistGreen(checklistNoCommand).some((line) => line.includes("ocr CLI") && line.includes("重取")),
+  checklistGreen(checklistNoCommand).join("；")
+);
+
+const deferred = checklistDoc().replace(
+  `| ocr CLI | \`v${OLD}\`——这是 \`v${RELEASE_VERSION}\` 这份发布里带的那一版（\`${MEASUREMENT_COMMAND}\` 的答案） |`,
+  `| ocr CLI | 以 \`${MEASUREMENT_COMMAND}\` 的${CHECKLIST_DEFER_PHRASE} |`
+);
+check(
+  "反向控制的另一面：那一格只说「以那条命令的读数为准」且不写数字 → 绿（不会过期的那一种写法）",
+  checklistGreen(deferred).length === 0,
+  checklistGreen(deferred).join("；")
+);
+
+check(
+  "反向控制：读不到发布版本时把空串当答案 → 红（includes('') 恒真的那一格）",
+  checklistGreen(checklistDoc(), RELEASE_VERSION, "").length === 1,
+  checklistGreen(checklistDoc(), RELEASE_VERSION, "").join("；")
+);
+
+check(
+  "反向控制：`ocr CLI` 那一行被删掉 → 红（不是「无话可说」）",
+  checklistGreen(withoutCliRow(checklistDoc())).some((line) => line.includes("ocr CLI")),
+  checklistGreen(withoutCliRow(checklistDoc())).join("；")
+);
+
+check(
+  "反向控制：清单读成了空文件 → 红（空文件不会说它错了）",
+  checklistVersionViolations({ doc: "", releaseVersion: RELEASE_VERSION, cliVersion: OLD }).length === 1
+);
+
 // ---- the wiring ----
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
 const read = (file) => {
@@ -304,6 +399,25 @@ check(
   `接线：${MEASUREMENTS_DOC} 那一行指的正是这条命令`,
   String(read(MEASUREMENTS_DOC) || "").includes(MEASUREMENT_COMMAND),
   `文档里找不到 ${MEASUREMENT_COMMAND}`
+);
+
+// ---- the checklist in this repository, not the fixture ----
+//
+// The gate half (`main()`) is what compares those numbers against git; this half
+// only needs the file to still carry the two rows the gate reads for. Without it,
+// deleting §4.2 would leave the gate with nothing to compare and nothing to say.
+const checklistFile = String(read(WIN_CHECKLIST_DOC) || "");
+check(
+  `仓库里的 ${WIN_CHECKLIST_DOC} 有「程序版本」与「ocr CLI」两行（门禁读的就是这两行）`,
+  checklistFile.includes("| 程序版本 |") && checklistFile.includes("| ocr CLI |"),
+  `${WIN_CHECKLIST_DOC} 里找不到这两行`
+);
+check(
+  `仓库里的 ${WIN_CHECKLIST_DOC} 的 ocr CLI 那一格指的是这条命令（或者说以它的读数为准）`,
+  checklistFile
+    .split("\n")
+    .some((line) => line.startsWith("| ocr CLI |") && (line.includes(MEASUREMENT_COMMAND) || line.includes(CHECKLIST_DEFER_PHRASE))),
+  `${WIN_CHECKLIST_DOC} 的 ocr CLI 那一行既没写 ${MEASUREMENT_COMMAND} 也没写「${CHECKLIST_DEFER_PHRASE}」`
 );
 
 const failed = results.filter((result) => !result.ok);

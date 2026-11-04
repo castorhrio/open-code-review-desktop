@@ -152,7 +152,7 @@ Get-ChildItem "$env:USERPROFILE\Desktop" -Filter "*Open Code Review*"
 | 行 | 期望读数 |
 | --- | --- |
 | 程序版本 | `v0.1.13`（与安装包同版本） |
-| ocr CLI | `v1.13.0`——这是 `v0.1.13` 这份发布里带的那一版（`npm run audit:release-pin` 的答案），不是源码树的 pin；下一次发版后以那条命令的读数为准 |
+| ocr CLI | `v1.13.0`——这是 `v0.1.13` 这份发布里带的那一版（`npm run audit:release-pin` 的答案），不是源码树的 pin；下一次发版后以那条命令的读数为准。**这一格里的数字有断言**：`npm run audit:release-pin` 会把本页出现的每个 `X.Y.Z` 与最新发布 tag 的读数逐个比，发版之后忘了回来改，`audit:static` 会红并点名行号 |
 | 可执行文件 | `<安装目录>\resources\app\node_modules\@alibaba-group\ocr-win32-x64\bin\opencodereview.exe` |
 | 可执行文件来源 | `CLI 自带平台包`（也就是 `binarySource=package`，说明找到的是随程序装进来的那份，不是全局安装） |
 | 安装目录 | 第 2.2 步选的目录本身（是 `resources` 的上一级，不是 `resources\app`） |

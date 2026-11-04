@@ -36,6 +36,20 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 
 ---
 
+## 上游状态（第 120 轮，2026-11-04）
+
+本轮复核：**上游什么都没动。** `npm run upstream:check` 走 git 通路答上 `refs/heads/main` 仍是 `abb7abc`，`/releases/latest` 由 GitHub API 答 `v1.13.5`，npm `latest` 由 `npm view` 答 `1.13.5`——三处口径一致，**pin 不动、对照表 5 行无需重读、无移植项**。
+
+本轮不改能力，只把 DOD-5 那条「真机面」从「没人写过该验什么」推到「一次真机跑就能勾」：新增
+[`win-install-checklist.md`](win-install-checklist.md)，逐项写清 SmartScreen 的三种读数、NSIS 向导四个页面各该看到什么
+（期望值全从 `package.json` 的 `build.nsis` 与 `build/installer.nsh` 读出，不是凭印象）、桌面与开始菜单两个快捷方式、
+装完之后「关于与卸载」六行的读数、直接问内置二进制的那一版、portable 的注册表查询、卸载两个入口的「删了哪四项、
+留了哪两处」，以及每一格读数记回 `docs/measurements.md` 的哪一行。`docs/measurements.md` 的未验证清单因此多两行
+（装好之后 Key 落在哪、免安装版的运行面），另外四行的触发条件改成指着清单里的具体步骤；`docs/PRODUCT-DOD.md`
+的 DOD-5 与 DOD-6 未勾原因各加一句「那一趟写成哪份文件」，勾选状态一个字没动。
+
+清单本身不是证据：它只说明知道该验什么，读数贴回之前那几行仍是「没验过」。
+
 ## 上游状态（第 119 轮，2026-11-04）
 
 本轮复核：**上游什么都没动。** `npm run upstream:check` 走 git 通路答上 `refs/heads/main` 仍是 `abb7abc`（第 111–114、116–118 轮核到的都是它），`/releases/latest` 由 GitHub API 答 `v1.13.5`，npm `latest` 由 `npm view` 答 `1.13.5`——三处口径一致，**pin 不动、对照表 5 行无需重读、无移植项**。

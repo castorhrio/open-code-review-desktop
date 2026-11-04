@@ -21,6 +21,8 @@ README 的 Status 段只写**能力**（能渲染 1200 条、有耗时上限断�
 | 2026-11-04 | 第 117 轮：**打包产物第一次被脚本启动**——`release/linux-unpacked` 里的可执行文件（不是源码树里的 Electron）在一次性 HOME 下起来，经 DevTools 协议读界面 | `npm run audit:packaged` 11 条全绿：渲染层来自 `应用目录/out`、首屏引导卡三步在、应用自报「安装版」且 `installDir` 就是打包树、设置页徽章写「安装版 · linux」、内置 CLI 在打包树里（`binarySource=package`）并自报 `v1.13.5 (abb7abcd) linux/amd64`、配置落在一次性档案里、开发者真实 `~/.opencodereview/config.json` 摘要不变；反向控制把同一套断言指向源码树，必须变红并点名安装目录与 CLI 位置（实测点名 2 条）；规则本身 24 条由 `audit:packaged-rules` 钉住（含「`audit:packaged` 不许进 `audit:app`」）| `PLAYWRIGHT_MODULE=<带 playwright 的 node_modules> xvfb-run -a node tools/e2e-packaged.mjs`；`node tools/e2e-packaged-smoke.mjs`，Electron 33.4.11 |
 | 2026-11-04 | 第 119 轮：`audit:static` 的第二个环境依赖（本机 git tag 历史）第一次量出来——`audit:surface` 要本机已装 CLI，这一条要本 checkout 的 tag | 在 `git clone --depth 1 --no-tags file:///opt/open-code-review-desktop` 的副本里：`node tools/release-pin.mjs` 退出码 2，末行写「这个 checkout 里一个 tag 都没有（`git tag -l 'v*'` 是空的）：`--depth` 克隆与 tarball 解出来的目录都长这样」，不再说「没有发布」——那句话会把人指向另一个项目的 tag；同一副本里 `node tools/release-pin-smoke.mjs` 30 条全绿，因为规则那一半只驱动谓词、不碰 git。门禁与规则因此分得开：浅克隆里能跑的仍能跑，不能跑的那一半自己说明原因 | `node tools/release-pin.mjs`；`node tools/release-pin-smoke.mjs`（副本在 `/var/tmp/shallow-probe`；完整 clone 上同两条也全绿） |
 
+| 2026-11-04 | 第 121 轮：`docs/win-install-checklist.md` §4.2 那两个期望版本进了门禁——清单里每个 `X.Y.Z` 只能是最新发布 tag 的版本或它带的 `ocr` 版本 | `npm run audit:release-pin` 5 条全绿（最新 tag `v0.1.13` / 带 `ocr 1.13.0`；新那一项逐字核对清单第 155 行）；同一命令在本轮新增的反向控制上真跑过一次：把那一格改成 `v1.13.9` 后退出码 1、点名「第 155 行写着 1.13.9」并给出两边允许的值，改回即绿；`tools/release-pin-smoke.mjs` 30 → 41 条 | `node tools/release-pin.mjs`；`node tools/release-pin-smoke.mjs`（Linux x64，完整 clone，`git tag -l` 非空） |
+
 ## 这张表怎么读：验证面，以及不可复现的那一半
 
 表里那几条「整套门禁重跑」的读数是**验证面**，不是又一个数字，所以它们把「怎么跑出来的」

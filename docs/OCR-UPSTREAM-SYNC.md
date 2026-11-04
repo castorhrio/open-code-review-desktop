@@ -35,7 +35,7 @@ tag v1.13.5
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`abb7abcd5c5196fa0278dc87db85780fa269562f`（第 120 轮：HEAD 由 `npm run upstream:check` 的 git 通路答上（`refs/heads/main` 仍是 `abb7abc`），/releases/latest` 由 GitHub API 答 `v1.13.5`、npm `latest` 由 `npm view` 答 `1.13.5`，三处口径一致，**pin 不动**；通路：git）**
+**本轮 HEAD 核对：`abb7abcd5c5196fa0278dc87db85780fa269562f`（第 121 轮：HEAD 由 `npm run upstream:check` 的 api 通路答上（`git ls-remote` 超时，`refs/heads/main` 已从 `abb7abc` 前进到 `8041473`），`/releases/latest` 与 npm `latest` 仍分别答 `v1.13.5` / `1.13.5`，**pin 不动**（pin 跟的是发布版本，不是默认分支）；通路：api）**
 
 ### 核对通路账
 
@@ -128,6 +128,7 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 | 118 | 2026-11-04 | api | `abb7abc` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**；本轮把「发布资产里带的是哪一版 `ocr`」从人读变成脚本能答：新增 `tools/release-pin.mjs`（`npm run audit:release-pin`）——按 tag 的 `package.json` 名字筛出本产品的发布（这份 checkout 里还躺着上游的 `v0.2.x` / `v1.13.x`，只按版本号选会答到另一个产品），读那份 tag 的 `package.json` 依赖区间与同一份 `package-lock.json` 的解析版本，再把源码树的依赖区间 + lockfile 解析与 pin 双向对上；结果：`v0.1.13` 里带的是 `ocr 1.13.0`，源码树这一侧是 `1.13.5`，差的两版写成一句话、不设成永久红（发版要 Windows 机器）；`docs/measurements.md` 那一行必须写 tag、版本与命令，否则红——规则 28 条由 `tools/release-pin-smoke.mjs` 钉住，挂进 `audit:static` | — |
 | 119 | 2026-11-04 | git | `abb7abc` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**（`npm run upstream:check` 走 git 通路答上 HEAD，release 与 npm 分别由 GitHub API 与 `npm view` 答上）；本轮把第 118 轮那套「发布资产版本」的账补齐：`releaseAssetViolations` 不再自己从 tag 名里剥 `v` 前缀（版本由 `releaseTagOf` 解析后传入，一处事实一处解析，空版本算红而不是跳过比对），`main()` 在 tag 列表为空时点名「浅克隆 / tarball」而不是说「没有发布」（那会把人指向另一个项目的 tag），`audit:static` 的第二个环境依赖（本机 git tag 历史）在 `git clone --depth 1 --no-tags` 的副本上真跑一次（退出码 2、smoke 仍 30 条全绿）并登记进 `docs/measurements.md` 的未验证清单 | — |
 | 120 | 2026-11-04 | git | `abb7abc` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**；本轮只补 DOD-5 的真机面：新增 `docs/win-install-checklist.md`（逐项写清验什么、期望读数、读数记回 `docs/measurements.md` 哪一行，期望值从 `package.json` 的 `build.nsis` 与 `build/installer.nsh` 读出），未验证清单据此多两行、四行触发条件改指清单步骤，DOD-5 与 DOD-6 的未勾原因各加一句，勾选状态不动 | — |
+| 121 | 2026-11-04 | api | **上游 HEAD 前进**：`abb7abc` → `8041473`（1 个 commit：`feat(rules): add C# review rules (#1840)`——新增 `internal/config/rules/rule_docs/csharp.md`、`internal/config/rules/system_rules.json` 加一行并补测试、`pages/` 下 5 份多语审查规则文档，共 8 个文件；`git ls-remote` 超时 124，HEAD 由 GitHub API 答上）；`refs/tags/v1.13.5` 与 npm `1.13.5` 均未变，**pin 不前进**（pin 跟的是发布版本，不是默认分支）；对照表 5 行的上游文件一个都没被这个 commit 碰到，**无移植项**；本轮产品改动是把 `docs/win-install-checklist.md` 里那两个期望版本从「人记得回来改」变成「脚本会点名」：`tools/release-pin.mjs` 新增 `checklistVersionViolations`（清单里每个 `X.Y.Z` 只能是最新发布 tag 的版本或它带的 `ocr` 版本，§4.2 那两行必须与之一致，也可以写成「以那条命令的读数为准」且不写数字），`tools/release-pin-smoke.mjs` 30 → 41 条 | — |
 
 「最近一次对照」只写**那一项最近被人工重新核对**的轮次。该列没有列出本轮，表示本轮
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
@@ -219,20 +220,16 @@ tool 结果文本**（`Error: diff not found for: …`、`Diffs exist for: …`�
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。搬完这里只留一句
    指针——「本文件只留当前一轮」不是约定而是断言（`previousRoundPointerViolations`）。
 
-## 当前状态（第 120 轮，2026-11-04）
-本轮复核：**上游什么都没动。** `npm run upstream:check` 走 git 通路答上 `refs/heads/main` 仍是 `abb7abc`，`/releases/latest` 由 GitHub API 答 `v1.13.5`，npm `latest` 由 `npm view` 答 `1.13.5`——三处口径一致，**pin 不动、对照表 5 行无需重读、无移植项**。
+## 当前状态（第 121 轮，2026-11-04）
+本轮复核：**上游 HEAD 前进了，但没有新发布。** `npm run upstream:check` 走 api 通路答上 `refs/heads/main` 已从 `abb7abc` 前进到 `8041473`（`git ls-remote` 超时 124），`/releases/latest` 与 npm `latest` 仍分别答 `v1.13.5` / `1.13.5`——**pin 不动**：pin 跟的是被封装的那个发布版本，不是默认分支。
 
-本轮不改能力，只把 DOD-5 那条「真机面」从「没人写过该验什么」推到「一次真机跑就能勾」：新增
-[`win-install-checklist.md`](win-install-checklist.md)，逐项写清 SmartScreen 的三种读数、NSIS 向导四个页面各该看到什么
-（期望值全从 `package.json` 的 `build.nsis` 与 `build/installer.nsh` 读出，不是凭印象）、桌面与开始菜单两个快捷方式、
-装完之后「关于与卸载」六行的读数、直接问内置二进制的那一版、portable 的注册表查询、卸载两个入口的「删了哪四项、
-留了哪两处」，以及每一格读数记回 `docs/measurements.md` 的哪一行。`docs/measurements.md` 的未验证清单因此多两行
-（装好之后 Key 落在哪、免安装版的运行面），另外四行的触发条件改成指着清单里的具体步骤；`docs/PRODUCT-DOD.md`
-的 DOD-5 与 DOD-6 未勾原因各加一句「那一趟写成哪份文件」，勾选状态一个字没动。
+那个 commit 是 `feat(rules): add C# review rules (#1840)`，8 个文件：新增 `internal/config/rules/rule_docs/csharp.md`，`internal/config/rules/system_rules.json` 加一行并补测试，另 5 个是 `pages/` 下的多语审查规则文档。上面 5 个对照点的上游文件（`internal/llm/resolver.go`、`cmd/opencodereview/config_cmd.go`、`llm_cmd.go` / `providers.go`、`internal/session/manifest.go` 里那两张 `failure_class` 枚举）一个都没被碰到——**无移植项**，等它进下一个发布时再按那 5 行重读一遍。
 
-清单本身不是证据：它只说明知道该验什么，读数贴回之前那几行仍是「没验过」。
+本轮产品侧只有一件事：**`docs/win-install-checklist.md` §4.2 里那两个期望版本，从「人记得回来改」变成「脚本会点名」。** 那张清单要能被人拿着安装包冷读，所以 §4.2 把「程序版本」与「`ocr CLI`」两个读数写成了具体字符；而这两个数字都出自最新发布 tag，一次发版就会同时变——正是没人会去翻清单的时刻。旧的写法只在文件里留了一句「下一次发版后以那条命令的读数为准」，没有人会回来执行它。
 
-上一轮（第 119 轮）的正文见 [`upstream-history.md`](upstream-history.md#上游状态第-119-轮2026-11-04)，归档之后本文件不留第二份。
+`tools/release-pin.mjs` 因此多一条 `checklistVersionViolations`：清单里出现的每个 `X.Y.Z` 只能是最新发布 tag 的版本、或那个 tag 的 lockfile 解析出的 `ocr` 版本；`方法`上「程序版本」那一格必须写发布的版本，`ocr CLI` 那一格必须写那一份发布里带的版本、并指出 `npm run audit:release-pin`——或者写成「以那条命令的读数为准」且**一个数字都不写**（不会过期的那一种写法）。它点名文件名与行号，`audit:static` 里那一项先红。规则本身由 `tools/release-pin-smoke.mjs` 从 30 条加到 41 条钉住，反向控制包括「写一个不存在的版本即点名行号」「删掉那一行即红」「空文件即红」「不写数字的那一种写法仍绿」，另加两条看仓库而不是夹具的（清单里那两行还在、`ocr CLI` 那一格还指着那条命令）。
+
+上一轮（第 120 轮）的正文见 [`upstream-history.md`](upstream-history.md#上游状态第-120-轮2026-11-04)，归档之后本文件不留第二份。
 
 ### 参数面：`ocr review --help` / `ocr scan --help` 与本仓真的拼出的每一行
 
