@@ -35,7 +35,7 @@ tag v1.13.5
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`abb7abcd5c5196fa0278dc87db85780fa269562f`（第 129 轮：`git fetch upstream --tags` 本轮通了，`refs/heads/main` 仍是 `d3cd23f`——第 127 轮记下的那个 Starlark commit，`git log 8041473..upstream/main` 现在只有它一个；`refs/tags/v1.13.5` 与 npm `latest` 仍分别答 `v1.13.5` / `1.13.5`，**pin 不动**（pin 跟的是发布版本，不是默认分支）；通路：git）
+**本轮 HEAD 核对：`abb7abcd5c5196fa0278dc87db85780fa269562f`（第 130 轮：`git fetch upstream --tags` 本轮通了，`refs/heads/main` 仍是 `d3cd23f`——第 127 轮记下的那个 Starlark commit，`git log 8041473..upstream/main` 现在只有它一个；`refs/tags/v1.13.5` 与 npm `latest` 仍分别答 `v1.13.5` / `1.13.5`，**pin 不动**（pin 跟的是发布版本，不是默认分支）；通路：git）
 
 ### 核到的上游 HEAD（核对的落点，不是 pin）
 
@@ -45,7 +45,7 @@ pin 说封装的是哪个**发布版本**（`v1.13.5`，二进制自报的那个
 已前进」，而那六轮的通路账一行行写着「无新内容」——一个总在响的标记等于没有标记。所以这一行的
 轮次必须与通路账末行相等（`checkedHeadViolations`），`upstream:check` 比的也是这一行，而不是 pin。
 
-**本轮核到的上游 HEAD：`d3cd23faeafddfb01abf759d5a0c683187d19af7`（第 129 轮）**
+**本轮核到的上游 HEAD：`d3cd23faeafddfb01abf759d5a0c683187d19af7`（第 130 轮）**
 
 ### 核对通路账
 
@@ -147,6 +147,7 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 | 127 | 2026-11-04 | git | **上游 HEAD 前进**：`8041473` → `d3cd23f`（1 个 commit：`feat(lang): review Starlark files (#1851)`——`internal/config/allowlist/supported_file_types.json` 加 `.bzl` / `.bazel` / `.star` 三个扩展名、`internal/config/rules/system_rules.json` 加两行、`internal/tool/file_find.go` 把 `BUILD` / `WORKSPACE` 加进无扩展名白名单，其余是 `pages/` 多语文档与新增的 `rule_docs/starlark.md`）；`refs/tags/v1.13.5` 与 npm `1.13.5` 均未变，**pin 不前进**（pin 跟的是发布版本，不是默认分支）；对照表 5 行的上游文件一个都没被这批改动碰到，**无移植项**（allowlist 与规则表在引擎侧，本仓只显示 CLI 给出的排除原因，不自己判定哪些文件进审查）；本轮产品改动是应用图标——`build/make-icon.cjs` 改成按几何画（4×4 超采样、描边随尺寸加粗、`.ico` 六个尺寸各自渲染），换掉原来那张字形与底色只有 1.38:1、缩到 16 就变空方块的渲染 | — |
 | 128 | 2026-11-04 | none | **这一轮没有核对上游**：产品侧只改了图标与图标门禁（`tools/icon-rules.mjs` / `icon-rules-smoke.mjs`、`build/make-icon.cjs` 的三色改从 `src/styles.css` 解析），通路上一次都没走，账也没记——本轮（第 129 轮）把这一行补上，是为了让「第 128 轮核过没有」有答案，而不是把它当成核过 | `[UPSTREAM-DEBT]` HEAD |
 | 129 | 2026-11-04 | git | `d3cd23f` / `v1.13.5` / npm `1.13.5`，三条通路答案一致：`refs/heads/main` 仍是第 127 轮记下的那个 Starlark commit（`git fetch upstream --tags` 通了，`git log 8041473..upstream/main` 只有它一个），`refs/tags/v1.13.5` 与 npm `latest` 未变，**pin 不前进、无移植项**（那一个 commit 动的是 allowlist、规则表与 `pages/` 文档，对照表 5 行一个都没被碰到）；本轮产品改动是把「上一轮核到的 HEAD」从散文变成机器可读的一行：`docs/OCR-UPSTREAM-SYNC.md` 机器可读区新增「核到的上游 HEAD」固定行（`d3cd23f…`，第 129 轮），`tools/upstream-watch.mjs` 新增 `findCheckedHead` / `checkedHeadViolations` / `referenceFromDoc`，`upstream:check` 改比这一行而不是 release pin——第 121 轮起它连续六轮喊「已前进」，而那六轮的账都写着「无新内容」，一个总在响的标记等于没有标记；`formatDrift` 的静默句因此改口「与上一轮核到的一致」，前进句多一句「上一次核到是第 N 轮」 | — |
+| 130 | 2026-11-04 | git | `d3cd23f` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**（`git fetch upstream --tags` 通了，`refs/heads/main` 仍是第 127 轮记下的那个 Starlark commit，`git log 8041473..upstream/main` 只有它一个；对照表 5 行一个都没被这批改动碰到）；本轮产品改动是**运行级四种结局第一次真跑**：新增 `tools/fake-provider.mjs`（按被 pin 的那一版二进制真发的请求形态作答，相位按声明的工具分，第二次 review 轮跳过 `<confirmed_findings>` 已确认的文件）、`tools/fake-provider-cli.mjs`（一次性仓库 + 一次性 `HOME`，provider 走 CLI 自己的 `config set`）与 `tools/fake-provider-smoke.mjs`（`npm run audit:provider`，挂进 `audit:static`），完成态 / 预算截断 / 全量扫描 / provider 挂掉四趟共 44 条检查，全程 loopback、0 token | — |
 
 「最近一次对照」只写**那一项最近被人工重新核对**的轮次。该列没有列出本轮，表示本轮
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
@@ -238,22 +239,36 @@ tool 结果文本**（`Error: diff not found for: …`、`Diffs exist for: …`�
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。搬完这里只留一句
    指针——「本文件只留当前一轮」不是约定而是断言（`previousRoundPointerViolations`）。
 
-## 当前状态（第 129 轮，2026-11-04）
+## 当前状态（第 130 轮，2026-11-04）
 
 本轮复核：**上游没动。** `git fetch upstream --tags` 通了，`refs/heads/main` 仍是 `d3cd23f`——第 127 轮记下的
 那个 Starlark commit，`git log 8041473..upstream/main` 现在也只有它一个；`refs/tags/v1.13.5` 与 npm
-`latest` 仍分别答 `v1.13.5` / `1.13.5`，三个口径一致，**pin 不动、无移植项**（那一个 commit 动的是
+`latest` 仍分别答 `v1.13.5` / `1.13.5`，三个口径一致，**pin 不动、无移植项**（那 18 个变更文件早就逐个读过：
 allowlist、规则表与 `pages/` 文档，对照表 5 行一个都没被碰到）。
 
-本轮产品改动是给「核到哪儿」这件事一个落点。`upstream:check` 一直是把上游 HEAD 和 **pin**（发布版本）比，
-而默认分支本来就该走在 tag 前面，于是从第 121 轮起它连续六轮打印「[UPSTREAM-MOVED] 上游 HEAD 已前进：
-abb7abc → 8041473」——同一时间那六轮的通路账一行行写着「无新内容」。一个总在响的标记等于没有标记，而工具
-每轮都和文档唱反调，读的人最后两边都不信。现在机器可读区多一行「核到的上游 HEAD」（整串 40 位 + 第几轮），
-`checkedHeadViolations` 要求它的轮次与通路账末行相等，`upstream:check` 比的是这一行；静默句因此改口
-「与上一轮核到的一致」，前进句多一句「上一次核到是第 N 轮」。顺带把第 128 轮欠的一行账补上——那一轮只改了
-图标与图标门禁、通路上一次都没走，账里记 `none` + `[UPSTREAM-DEBT]`，不是记成核过。
+本轮产品改动是**运行级的四种结局第一次交给真跑**。此前本仓每一条运行级结论都建立在「拒绝连接的端口」
+（`http://127.0.0.1:9/v1`）上：它能证明拒绝（「一个子进程都没起」「成本确认挡住了那次 scan」），但证明不了
+完成——没有东西应答时每个文件都失败，一次运行永远走不到 `complete`、也永远发布不出一条发现。于是
+「单个提交 / 全量扫描」只到预览级，「截断不显示干净」只有界面层证据。
 
-上一轮（第 127 轮）的正文见 [`upstream-history.md`](upstream-history.md#上游状态第-127-轮2026-11-04)，归档之后本文件不留第二份。
+现在 `tools/fake-provider.mjs` 按被 pin 的 `ocr v1.13.5` 真发的请求形态作答，相位按请求声明的工具区分
+（没有工具＝plan 预检、`code_comment`＝review、`approve_all_comments`＝review 后的过滤），不按提示词措辞——
+措辞是上游的，工具名是协议。它还会跳过第二次 review 轮里 `<confirmed_findings>` 已点名的文件：上游那一趟
+写着「不要重复」，一个忽略它的替身会让同一条发现被发布两次，那不是解析错误，只是一次看着像「2 条」的运行。
+`tools/fake-provider-cli.mjs` 把替身接在一次性仓库（`main` / `feature` / 一行未提交改动）与一次性 `HOME` 上，
+provider 用 CLI 自己的 `config set custom_providers.…` 写入而不是手写 `config.json`，所以真实用户的 Key 与
+配置一次都不在测试里。
+
+`npm run audit:provider`（挂进 `audit:static`）因此真跑四趟，全程 loopback、0 token：完成态
+（`status=complete`、1 条标记发现、4 次请求；第二趟 review 真带着 `<confirmed_findings>`，靠跳过才只有 1 条）、
+预算截断（**`status` 仍是 `complete`**，`summary.budget_exceeded=true` 且带 `token_budget_reached` 警告，已发布
+的那条发现没被擦掉）、全量扫描（**`status=success`**，问 `<current_file_path>` 而不是 `<review_files>`）、
+provider 答 500（非零退出、0 条发现）。两处措辞差异对界面是有意义的：截断不在 `status` 里，所以
+`runLimitReached()` 必须看 `summary.budget_exceeded` 与 `review_limit_reached`（它一直这么看，现在有真跑撑着）；
+扫描的 `success` 与 review 的 `complete` 不是一个词，`STATUS` 表里两个都得在。还缺的一半写在 DoD-4 的未勾原因里：
+把这份 fixture 交给 Electron 起一次界面、断言截断的那一屏不写「完成」。
+
+上一轮（第 129 轮）的正文见 [`upstream-history.md`](upstream-history.md#上游状态第-129-轮2026-11-04)，归档之后本文件不留第二份。
 
 ### 参数面：`ocr review --help` / `ocr scan --help` 与本仓真的拼出的每一行
 

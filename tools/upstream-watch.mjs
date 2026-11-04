@@ -2152,6 +2152,15 @@ export const DOD_EVIDENCE_SHAPES = Object.freeze([
   },
   {
     id: "DOD-4",
+    path: "tools/fake-provider-smoke.mjs",
+    must: [
+      { label: "预算截断真跑", pattern: /budget_exceeded/ },
+      { label: "全量扫描真跑", pattern: /current_file_path/ },
+      { label: "不出网", pattern: /loopback/ },
+    ],
+  },
+  {
+    id: "DOD-4",
     path: "src/components/ResultsPanel.tsx",
     must: [
       { label: "四态徽章取自 STATUS", pattern: /STATUS/ },

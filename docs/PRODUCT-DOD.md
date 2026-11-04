@@ -57,10 +57,11 @@
   证据候选：docs/OCR-UPSTREAM-SYNC.md（pin 三处声明与对照表）
   证据候选：tools/upstream-watch-smoke.mjs（pin 与对照表的双射、通路账、DoD 版本事实）
 - [ ] DOD-4：**主路径可演示**：四范围 + `--preview`；成本护栏；完成/部分/失败/警告徽章；预算截断不显示「干净」；续跑仅在 CLI 支持的模式显示
-  未勾原因：首启链路已经有人走过了——空档案 → 引导卡三步 → 选仓 → 配 provider → 清单自己算出来 → 成本确认挡住的那一次 `scan`，全在真 Electron 里跑（`tools/e2e-first-run.cjs`）；还缺的是另外两半：「预算截断不显示干净」目前只有界面层证据（`src/components/ResultsPanel.tsx`），真截断一次要花的钱本程序不替用户花；四范围里「单个提交」与「全量扫描」也只到预览级，运行级的证据在 `tools/e2e-flow.cjs` 里只有工作区与分支对比两条。
+  未勾原因：首启链路已经有人走过了——空档案 → 引导卡三步 → 选仓 → 配 provider → 清单自己算出来 → 成本确认挡住的那一次 `scan`，全在真 Electron 里跑（`tools/e2e-first-run.cjs`）；「预算截断」从第 130 轮起也不用真花钱了——`tools/fake-provider.mjs` 按被 pin 的那一版二进制真发的请求形态作答，`npm run audit:provider` 在本机 loopback 上真跑出一次 `summary.budget_exceeded=true` 的截断（连同完成态、全量扫描、provider 挂掉共四种结局，0 token）。还缺的是把这份 fixture 交给 Electron 的那一半：「截断那一屏不写『完成』」目前仍只有界面层证据（`src/components/ResultsPanel.tsx` 的 `runLimitReached`），没有一屏真渲染过截断载荷；四范围里「单个提交」也仍只到预览级（运行级现在有工作区、分支对比与全量扫描三条）。
   证据候选：tools/e2e-flow.mjs（真 Electron + 真 CLI 走完预览与四范围）
   证据候选：tools/e2e-flow.cjs（真 Electron 里断言预览与分支对比范围的那几条 check）
   证据候选：tools/e2e-first-run.cjs（真 Electron 里走完首启 → 引导 → 配 provider → 预览，以及成本确认挡住的那次 spawn）
+  证据候选：tools/fake-provider-smoke.mjs（真 CLI 在假 provider 上跑出的四种结局：完成 / 预算截断 / 全量扫描 / provider 挂掉）
   证据候选：src/components/ResultsPanel.tsx（完成／部分／失败／警告徽章与截断态）
 - [ ] DOD-5：**航运资产**：`v0.1.13`（或更新）`*-setup.exe` / portable 可装可启；内置二进制可达；未签名 SmartScreen 有说明
   未勾原因：`docs/measurements.md` 记的真机面是 Linux x64，而发布面只有 Windows x64 的 `*-setup.exe`，安装包本身从未被装过一次；缺的那一趟已经写成 `docs/win-install-checklist.md`（逐项写明验什么、期望读数、读数记回哪一行），有人按它在 Windows x64 上装一次、把读数贴回 `docs/measurements.md` 之后，这一条才具备被勾的条件。
@@ -88,7 +89,7 @@
 | DOD-1 | 未勾 | 缺陌生人第一眼的记录，仓里只有措辞断言（`README.zh-CN.md`） |
 | DOD-2 | 未勾 | 参数面已与 `tools/cli-surface.mjs` 双向对上，勾选与副本核对归 scheduler 侧 |
 | DOD-3 | 未勾 | pin 有断言，通路账里还留着只核了 release 的欠轮（`docs/OCR-UPSTREAM-SYNC.md`） |
-| DOD-4 | 未勾 | 首启链路已走过一遍，缺运行级的「单个提交 / 全量扫描」与真截断（`tools/e2e-first-run.cjs`） |
+| DOD-4 | 未勾 | 首启与四种结局都真跑过，缺截断载荷真渲染一屏（`tools/fake-provider.mjs`） |
 | DOD-5 | 未勾 | 真机面是 Linux x64，Windows 安装包从未被脚本装过（`docs/measurements.md`） |
 | DOD-6 | 未勾 | 三条都有断言，缺装好的那份里 Key 不在程序目录的实测（`tools/secret-scan.mjs`） |
 
