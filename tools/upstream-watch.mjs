@@ -25,8 +25,14 @@
 //    greps: `[UPSTREAM-DEBT]` = not checked, `[UPSTREAM-MOVED]` = checked and
 //    changed, no marker = checked and unchanged.
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+
+// The one document `audit:upstream` reads. Named once, because the command
+// itself now opens it (it needs the last checked HEAD to answer "did upstream
+// move *since last round*") and three other rules point at it by path.
+export const UPSTREAM_SYNC_DOC = "docs/OCR-UPSTREAM-SYNC.md";
 
 export const UPSTREAM_URL = "https://github.com/alibaba/open-code-review.git";
 export const UPSTREAM_REF = "refs/heads/main";
@@ -280,15 +286,31 @@ export const classifyGit = (result) => {
   return { ok: true, sha, channel: "git" };
 };
 
-// The three answers: `pinned` (same as the doc), `moved` (re-read the rows),
-// `skipped` (no answer this run — explicitly *not* "unchanged").
+// The three answers: `pinned` (same commit as the reference), `moved` (re-read
+// the rows), `skipped` (no answer this run — explicitly *not* "unchanged").
+//
+// `pinned` is the *reference* the answer is measured against, and it is a
+// parameter for a reason: the command passes 「上一轮核到的 HEAD」 (read out of the
+// sync doc), not the release pin. Comparing against the pin is what made this
+// command shout 「上游 HEAD 已前进」 for six rounds in a row while the ledger rows
+// for those rounds said 「无新内容」 — upstream's default branch is *supposed* to be
+// ahead of the tag it released. The default here stays the pin so a caller that
+// says nothing keeps the old, stricter comparison; `runUpstreamWatch` is the
+// caller that now passes the recorded one.
 //
 // A short `pinned` (or a short SHA from the runner) is refused as `skipped`
 // rather than prefix-matched. Prefix matching would answer "pinned" for a
 // different commit that happens to share the recorded prefix, and a wrong
 // "pinned" is invisible: nobody re-reads a row that says nothing changed.
 // `skipped` at least says the round did not really check.
-export const upstreamDrift = ({ ok, sha, pinned = PINNED_UPSTREAM.sha, failure = "", channel = "" }) => {
+export const upstreamDrift = ({
+  ok,
+  sha,
+  pinned = PINNED_UPSTREAM.sha,
+  referenceRound = null,
+  failure = "",
+  channel = "",
+}) => {
   if (!ok) {
     return { state: "skipped", reason: failure || "git ls-remote 不可达", channel: "none" };
   }
@@ -316,6 +338,7 @@ export const upstreamDrift = ({ ok, sha, pinned = PINNED_UPSTREAM.sha, failure =
     state: String(sha).toLowerCase() === String(pinned).toLowerCase() ? "pinned" : "moved",
     sha,
     pinned,
+    referenceRound: Number.isInteger(referenceRound) ? referenceRound : null,
     channel: channel || "git",
   };
 };
@@ -326,7 +349,11 @@ export const formatDrift = (verdict, rows = ROWS_TO_REREAD) => {
     return `${DEBT_MARKER} 上游 HEAD 核对：跳过（${verdict.reason}；通路：${via}；本轮未核对，不等于上游没变）`;
   }
   if (verdict.state === "pinned") {
-    return `上游 HEAD 核对：${verdict.pinned}（与对照表一致，无需重读；通路：${via}）`;
+    // 「与上一轮核到的一致」, not 「与对照表一致」: the thing compared is the HEAD the
+    // last checking round recorded, which is not the pin. Saying "the table
+    // agrees" while comparing two other things was the old wording's mistake.
+    const when = Number.isInteger(verdict.referenceRound) ? `（第 ${verdict.referenceRound} 轮核到的那次）` : "";
+    return `上游 HEAD 核对：${verdict.pinned}（与上一轮核到的一致${when}，无需重读；通路：${via}）`;
   }
   // When the two commits share the readable 7-character prefix, the arrow alone
   // would print `375f64c → 375f64c` — technically "moved" but read as a typo. Say
@@ -335,6 +362,12 @@ export const formatDrift = (verdict, rows = ROWS_TO_REREAD) => {
   const from = verdict.pinned.slice(0, 7);
   const to = verdict.sha.slice(0, 7);
   const arrow = from === to ? `${from} → ${to}（前 7 位相同，区别在后面）` : `${from} → ${to}`;
+  // Which round the "from" side came from. Without it the arrow reads like the
+  // pin moved — the sentence it used to print for six rounds while upstream's
+  // default branch was merely ahead of its release. Named when the caller knows.
+  const since = Number.isInteger(verdict.referenceRound)
+    ? `上一次核到是第 ${verdict.referenceRound} 轮；`
+    : "";
   // The reading list is printed here, not looked up in the doc: the event
   // ("the pin moved") should carry its own consequence. `rows` is a parameter so
   // the smoke test can hand in a shorter list and assert that the dropped source
@@ -345,7 +378,7 @@ export const formatDrift = (verdict, rows = ROWS_TO_REREAD) => {
       `   ${index + 1}. ${row.label} —— \`${row.source}\`${row.note ? `（${row.note}）` : ""}`
   );
   return [
-    `${MOVED_MARKER} 上游 HEAD 已前进：${arrow}（通路：${via}）`,
+    `${MOVED_MARKER} 上游 HEAD 已前进：${arrow}（${since}通路：${via}）`,
     `   新 HEAD 全 40 位：${verdict.sha}`,
     `   这不是失败，但下面 ${rows.length} 处对照点需要重读源码（与 docs/OCR-UPSTREAM-SYNC.md 的对照表同 ${rows.length} 行），而不是只看 SHA：`,
     ...reading,
@@ -478,6 +511,140 @@ export const findDocPins = (doc) => {
   return { pins, tag, blockFound };
 };
 
+// ---- which upstream commit the last round actually looked at ----
+//
+// The pin says which *release* this wrapper is built around (`v1.13.5`, whose tag
+// commit the binary confirms itself). It is not the same fact as "the last round
+// opened `refs/heads/main` and read it", and the two were conflated: this command
+// compared upstream's HEAD against the pin, so from the round upstream's default
+// branch moved past the tag, every single run printed
+// `[UPSTREAM-MOVED] 上游 HEAD 已前进：abb7abc → …` — for six rounds running, while
+// those same rounds' ledger rows said 「无新内容」. A marker that always fires is
+// not a marker, and a tool that contradicts the document every round trains its
+// reader to ignore both.
+//
+// So the second fact gets its own machine-readable line: the HEAD the last
+// checking round really got an answer for, and the round it did it in. The
+// command compares against *that*, which makes the three answers mean what they
+// say: skipped = this round did not check; moved = upstream advanced since the
+// recorded round; no marker = checked, same commit as last time.
+//
+// The line is held to the ledger, not to a habit: `checkedHeadViolations` requires
+// the round it names to be the ledger's last row. Two places, one fact — a round
+// that updates one and not the other goes red instead of leaving a doc where the
+// table says 「第 9 轮核过」 and the落点 still points at 第 8 轮's commit.
+export const CHECKED_HEAD_PLACE = "本轮核到的上游 HEAD 行";
+
+const CHECKED_HEAD_RE = new RegExp(
+  "本轮核到的上游 HEAD：`" + SHA_IN_LINE + "`（第\\s*(\\d+)\\s*轮）"
+);
+
+/** The declaration on one line, or `null`. Mirrors `matchPinShape`: it returns
+ *  the *place* so the anchor rule can find the line by shape rather than by
+ *  trusting its wording. */
+export const matchCheckedHeadShape = (line) => {
+  const match = CHECKED_HEAD_RE.exec(String(line == null ? "" : line));
+  if (!match) return null;
+  return { where: CHECKED_HEAD_PLACE, sha: match[1], round: Number(match[2]) };
+};
+
+/** Every declaration of "the HEAD the last checking round saw", with 1-based
+ *  lines. `count` is what the violations read: two declarations are two
+ *  answers. */
+export const findCheckedHead = (doc) => {
+  const found = [];
+  String(doc == null ? "" : doc)
+    .split(/\r?\n/)
+    .forEach((line, index) => {
+      const hit = matchCheckedHeadShape(line);
+      if (hit) found.push({ line: index + 1, sha: hit.sha, round: hit.round });
+    });
+  const first = found[0] || null;
+  return {
+    count: found.length,
+    sha: first ? first.sha : null,
+    round: first ? first.round : null,
+    line: first ? first.line : null,
+    lines: found.map((entry) => entry.line),
+  };
+};
+
+/** The rule as violations. Empty is the only acceptable answer for the real sync
+ *  doc.
+ *
+ *  `ledgerRounds` is passed in rather than read here: the ledger's parser lives
+ *  further down and the smoke test drives this rule with hand-written rounds, so
+ *  one reader of the table stays one reader.
+ *
+ *  The round comparison is the part that matters. A declaration the ledger has
+ *  already moved past is *the* drift this rule exists for: the table would say
+ *  「第 129 轮核过」 while the落点 still held 第 128 轮's commit, and the command
+ *  would then say 「与上一轮核到的一致」 about a round nobody checked.
+ */
+export const checkedHeadViolations = (doc, { ledgerRounds = [] } = {}) => {
+  const head = findCheckedHead(doc);
+  const violations = [];
+  if (head.count === 0) {
+    violations.push(
+      `同步文档里没有「${CHECKED_HEAD_PLACE}」（形状：**本轮核到的上游 HEAD：\`<40 位 SHA>\`（第 N 轮）**）——` +
+        "没有这一行，`upstream:check` 只能拿上游 HEAD 去比 pin（发布版本），" +
+        "于是上游默认分支一旦越过 tag，它每一轮都会喊「已前进」"
+    );
+    return violations;
+  }
+  if (head.count > 1) {
+    violations.push(
+      `「${CHECKED_HEAD_PLACE}」出现 ${head.count} 次（应为 1 次）：第 ${head.lines.join("、")} 行——` +
+        "两处声明就是两个答案，`upstream:check` 只会读到第一个"
+    );
+  }
+  if (!isFullSha(head.sha)) {
+    violations.push(
+      `第 ${head.line} 行：「${CHECKED_HEAD_PLACE}」里的 SHA 不是完整 40 位（${JSON.stringify(head.sha)}）——` +
+        "前几位相同不等于同一个 commit，比较的一方短了，答案就会把「已前进」读成「没动」"
+    );
+  }
+  const rounds = (ledgerRounds || []).filter((round) => Number.isInteger(round));
+  const last = rounds.length ? rounds[rounds.length - 1] : null;
+  if (last === null) {
+    violations.push(
+      `通路账里没有可读的轮次，「${CHECKED_HEAD_PLACE}」因此无从对账——` +
+        "核到哪儿与第几轮核的是同一件事，两边都要有"
+    );
+  } else if (!Number.isInteger(head.round)) {
+    violations.push(`第 ${head.line} 行：「${CHECKED_HEAD_PLACE}」没有写「（第 N 轮）」`);
+  } else if (head.round !== last) {
+    violations.push(
+      `第 ${head.line} 行：「${CHECKED_HEAD_PLACE}」写着第 ${head.round} 轮，` +
+        `而通路账末行是第 ${last} 轮——核到哪儿是一件事，两处必须一起改；` +
+        "只改一处，`upstream:check` 就会拿着上一轮的 HEAD 说「与上一轮核到的一致」"
+    );
+  }
+  return violations;
+};
+
+/** What the command compares against, read out of the doc.
+ *
+ *  Not `PINNED_UPSTREAM.sha`: see the comment above. `ok: false` is a reason a
+ *  reader can act on, and the command turns it into the greppable debt sentence
+ *  rather than silently comparing against the wrong thing. */
+export const referenceFromDoc = (doc) => {
+  const head = findCheckedHead(doc);
+  if (head.count !== 1) {
+    return {
+      ok: false,
+      reason:
+        head.count === 0
+          ? `同步文档里找不到「${CHECKED_HEAD_PLACE}」，没有可比的上次核到点`
+          : `同步文档里「${CHECKED_HEAD_PLACE}」出现 ${head.count} 次（第 ${head.lines.join("、")} 行），不知道以哪一个为准`,
+    };
+  }
+  if (!isFullSha(head.sha)) {
+    return { ok: false, reason: `「${CHECKED_HEAD_PLACE}」里的 SHA 不是完整 40 位（${head.sha}）` };
+  }
+  return { ok: true, sha: head.sha, round: head.round };
+};
+
 // ---- the machine-readable region's own shape ----
 //
 // The sync doc is two regions: the part `audit:upstream` reads (between
@@ -517,6 +684,7 @@ export const MACHINE_READABLE_ANCHORS = Object.freeze([
   { name: "pin 块起点", marker: PIN_BLOCK_START },
   { name: "pin 块终点", marker: PIN_BLOCK_END },
   { name: "本轮 HEAD 核对 固定行", where: FIXED_LINE_PLACE },
+  { name: "核到的上游 HEAD 固定行", where: CHECKED_HEAD_PLACE },
   { name: "核对通路账 标题", marker: "### 核对通路账" },
   { name: "对照表 表头", marker: TABLE_HEADER },
 ]);
@@ -531,7 +699,11 @@ const anchorLines = (lines, anchor) => {
       if (line.includes(anchor.marker)) hits.push(index + 1);
       return;
     }
-    const hit = matchPinShape(line);
+    // Two declaration shapes live in this region: the pin (three places, all
+    // equal to `PINNED_UPSTREAM.sha`) and the last checked HEAD (one place, which
+    // is a different fact and therefore must not be read as a pin). They are
+    // matched by the same rule so an anchor can name either.
+    const hit = matchPinShape(line) || matchCheckedHeadShape(line);
     if (hit && hit.where === anchor.where) hits.push(index + 1);
   });
   return hits;
@@ -2621,7 +2793,7 @@ export const dodSummaryViolations = (doc, exists = () => true) => {
 export const UNVERIFIED_HEADING = "## 未验证清单";
 export const UNVERIFIED_OWNERS = Object.freeze(["上游", "本仓", "真机"]);
 export const UNVERIFIED_TRIGGER_MIN = 8;
-export const UNVERIFIED_UPSTREAM_DOC = "docs/OCR-UPSTREAM-SYNC.md";
+export const UNVERIFIED_UPSTREAM_DOC = UPSTREAM_SYNC_DOC;
 export const UNVERIFIED_COLUMNS = Object.freeze([
   "项",
   "归属",
@@ -3246,7 +3418,16 @@ export const defaultRunner = createRunner();
 
 // `code` is always 0: a moved HEAD and an unreachable network are both answers,
 // not failures, and this command must stay safe to call from any script.
-export const runUpstreamWatch = async (run = defaultRunner) => {
+//
+// `reference` / `referenceRound` are the last checked HEAD and the round that
+// recorded it (see `referenceFromDoc`). They are parameters rather than reads so
+// the smoke test can ask the override question directly — "does handing in a
+// different reference change the verdict?" — which is the one thing that proves
+// the command compares against the recorded HEAD and not the release pin.
+export const runUpstreamWatch = async (
+  run = defaultRunner,
+  { reference = PINNED_UPSTREAM.sha, referenceRound = null } = {}
+) => {
   let result;
   try {
     result = await run();
@@ -3258,17 +3439,44 @@ export const runUpstreamWatch = async (run = defaultRunner) => {
   const verdict = upstreamDrift({
     ok,
     sha: ok ? result.sha : null,
+    pinned: reference,
+    referenceRound,
     failure: result && result.failure,
     channel: result && result.channel,
   });
   return { verdict, text: formatDrift(verdict), code: 0 };
 };
 
+// The command's own reading of the doc: which commit the last checking round
+// recorded. A doc that cannot answer is *not* silently replaced by the pin —
+// that substitution is exactly how the old sentence kept saying "已前进"; it is
+// reported as debt, with the reason naming the line the rule wanted.
+export const watchFromDoc = async (run = defaultRunner, doc = "") => {
+  const reference = referenceFromDoc(doc);
+  if (!reference.ok) {
+    const verdict = { state: "skipped", reason: reference.reason, channel: "none" };
+    return { verdict, text: formatDrift(verdict), code: 0 };
+  }
+  return runUpstreamWatch(run, { reference: reference.sha, referenceRound: reference.round });
+};
+
 const isEntryPoint =
   process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
 
 if (isEntryPoint) {
-  const { text, code } = await runUpstreamWatch();
+  let doc = "";
+  try {
+    doc = readFileSync(path.resolve(UPSTREAM_SYNC_DOC), "utf8");
+  } catch (error) {
+    const verdict = {
+      state: "skipped",
+      reason: `读不到 ${UPSTREAM_SYNC_DOC}（${(error && error.message) || error}）`,
+      channel: "none",
+    };
+    console.log(formatDrift(verdict));
+    process.exit(0);
+  }
+  const { text, code } = await watchFromDoc(defaultRunner, doc);
   console.log(text);
   process.exitCode = code;
 }

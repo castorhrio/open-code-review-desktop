@@ -99,6 +99,12 @@ import {
   historyPinLeakViolations,
   ledgerRoundViolations,
   machineReadableBlockViolations,
+  checkedHeadViolations,
+  findCheckedHead,
+  referenceFromDoc,
+  watchFromDoc,
+  matchCheckedHeadShape,
+  isFullSha,
   parseApiCommit,
   parseLsRemote,
   pinPlaceCoverage,
@@ -4259,6 +4265,112 @@ if (!flags.selftest && !flags.noRespawn) {
       noTriggerViolations[0].includes("触发条件") &&
       noTriggerViolations[0].includes(`第 ${firstRow.line} 行`),
     noTriggerViolations.join("；") || "no violation"
+  );
+}
+
+/* ---- the last checked HEAD is a line, and the command compares against it ----
+ * `upstream:check` used to compare upstream's default branch with the release
+ * pin, so from the round the branch moved past the tag it printed 「上游 HEAD 已前进」
+ * every time — six rounds running, while those rounds' ledger rows said 「无新内容」.
+ * A marker that always fires is not a marker.
+ *
+ * The fix is one machine-readable line (the HEAD the last checking round really
+ * saw, and the round it did it in) plus a comparison against it, so the three
+ * states mean what they say. The checks below are the two ways it can rot: the
+ * line missing, and the line's round drifting away from the ledger's last row —
+ * the second one is the quiet kind, because the command would then happily say
+ * 「与上一轮核到的一致」 about a round nobody checked.
+ */
+{
+  const doc = fs.readFileSync(SYNC_DOC, "utf8");
+  const ledgerRounds = ledgerRowsIn(doc).map((row) => Number(row[0]));
+  const violations = checkedHeadViolations(doc, { ledgerRounds });
+  check(
+    "the sync doc records the HEAD the last round checked, on a line the audit reads",
+    violations.length === 0,
+    violations.join("；") || "no violation"
+  );
+  const head = findCheckedHead(doc);
+  check(
+    "...and that line is a whole commit, dated to the ledger's last round",
+    isFullSha(head.sha) && head.count === 1 && head.round === ledgerRounds[ledgerRounds.length - 1],
+    JSON.stringify({ count: head.count, sha: head.sha, round: head.round, ledger: ledgerRounds[ledgerRounds.length - 1] })
+  );
+  // The reference the command reads out of the doc, as one function.
+  const reference = referenceFromDoc(doc);
+  check(
+    "the command's comparison target comes out of that line, not out of the pin",
+    reference.ok && reference.sha === head.sha && reference.round === head.round,
+    JSON.stringify(reference)
+  );
+  // Reverse control (a): the line deleted. A doc that cannot say what the last
+  // round saw must report debt, never fall back to the pin.
+  const withoutLine = doc
+    .split(/\r?\n/)
+    .filter((line) => matchCheckedHeadShape(line) === null)
+    .join("\n");
+  const missing = checkedHeadViolations(withoutLine, { ledgerRounds });
+  check(
+    "deleting that line goes red, naming the line the rule wanted",
+    missing.length === 1 &&
+      missing[0].includes("本轮核到的上游 HEAD") &&
+      missing[0].includes("pin"),
+    missing.join("；") || "no violation"
+  );
+  const missingReference = referenceFromDoc(withoutLine);
+  check(
+    "...and the command then reports debt instead of comparing against the pin",
+    missingReference.ok === false && missingReference.reason.includes("本轮核到的上游 HEAD"),
+    JSON.stringify(missingReference)
+  );
+  // Reverse control (b): the ledger moves, the line does not.
+  const stale = doc.replace(
+    /（第\s*(\d+)\s*轮）/,
+    (_all, round) => `（第 ${Number(round) + 1} 轮）`
+  );
+  const staleViolations = checkedHeadViolations(stale, { ledgerRounds });
+  check(
+    "a line whose round no longer matches the ledger's last row goes red, naming both rounds",
+    staleViolations.length === 1 &&
+      staleViolations[0].includes(`第 ${head.round + 1} 轮`) &&
+      staleViolations[0].includes(`第 ${ledgerRounds[ledgerRounds.length - 1]} 轮`),
+    staleViolations.join("；") || "no violation"
+  );
+  // Reverse control (c): a short SHA, which would make "moved" and "same first
+  // seven characters" the same answer.
+  const shortSha = doc.replace(head.sha, head.sha.slice(0, 7));
+  const shortViolations = checkedHeadViolations(shortSha, { ledgerRounds });
+  check(
+    "a short SHA on that line goes red: a prefix is not a commit",
+    shortViolations.length === 1 && shortViolations[0].includes("40"),
+    shortViolations.join("；") || "no violation"
+  );
+  // The seam itself: handing the command a different reference changes the
+  // verdict. This is what proves the comparison target is a parameter and that
+  // the entry point is expected to pass the recorded HEAD.
+  const otherSha = "f".repeat(40);
+  const againstRecorded = await runUpstreamWatch(() => ({ ok: true, sha: otherSha, channel: "git" }), {
+    reference: otherSha,
+    referenceRound: head.round,
+  });
+  check(
+    "...and the command's verdict is measured against the reference it is handed, not the pin",
+    againstRecorded.verdict.state === "pinned" && !againstRecorded.text.includes(MOVED_MARKER),
+    againstRecorded.text.split("\n")[0]
+  );
+  const againstPin = await runUpstreamWatch(() => ({ ok: true, sha: otherSha, channel: "git" }));
+  check(
+    "...which is why passing nothing keeps the old, stricter comparison against the pin",
+    againstPin.verdict.state === "moved",
+    againstPin.text.split("\n")[0]
+  );
+  const watched = await watchFromDoc(() => ({ ok: true, sha: head.sha, channel: "git" }), doc);
+  check(
+    "watchFromDoc reads that line and answers the same HEAD as unchanged",
+    watched.verdict.state === "pinned" &&
+      watched.text.includes("与上一轮核到的一致") &&
+      watched.text.includes(`第 ${head.round} 轮核到的那次`),
+    watched.text
   );
 }
 
