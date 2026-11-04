@@ -11,8 +11,11 @@
 `docs/measurements.md` 的实测表里，真机面全是 Linux x64：CLI 层、真 Electron、UI 那几套都在那台机器上跑过。
 发布面却只有 Windows——12 个 Release 的资产全是 `*-setup.exe` / `*-portable.exe` / `latest.yml` / blockmap。
 中间那一层（NSIS 向导、快捷方式、「应用和功能」里的条目、SmartScreen、卸载器、portable 的临时解压）是
-**包装层**，它不在 `npm run dev` 里，也不在 `release/linux-unpacked` 里；Linux 上既跑不了 NSIS，也不该由脚本
-在别人的机器上装软件。`tools/e2e-packaged.mjs` 能证明「装完的那份字节起得来」，证明不了「装的过程」。
+**包装层**，它不在 `npm run dev` 里，也不在 `release/linux-unpacked` 里。Linux 现在**造得出**这一层的产物
+（第 139 轮起，条件写在 `使用说明.md`），也**给不出装过的证据**：本轮试过 `wine *-setup.exe /S`，
+安装走到 electron-builder 那句「应用是否在运行」的检查就停了（那一句要调 PowerShell），而造得出与装得上
+本来就不是同一件事。也不该由脚本在别人的机器上装软件。`tools/e2e-packaged.mjs` 能证明「装完的那份字节起得来」，
+证明不了「装的过程」。
 
 所以这一层的证据只有一种：一个人在 Windows x64 上按下面的顺序走一遍，把读数写回来。
 清单把「验什么、期望读到什么、这个读数记回哪一行」逐项写死，目的是让这一趟**不需要第二个懂这个仓库的人**

@@ -92,8 +92,27 @@ CLI 很强，但一切都发生在终端里：读几十条行级意见、区分"
 npm install      # 会下载原生 ocr 二进制（约 55 MB）
 npm run dev      # Vite 热更新 + Electron
 npm start        # 构建界面后运行
-npm run dist     # 打 Windows 安装包到 release/
+npm run dist     # 打 Windows 安装包到 release/（Windows 或 Linux 上均可）
+npm run verify:dist   # 这一套能不能上传：件数、字节、摘要、里面带哪一版 ocr
 ```
+
+> **Windows 那一套不再需要一台 Windows 机器。** 第 139 轮起，这台 Linux x64 机器上
+> `npm run dist:win` 造出过 `*-setup.exe`、`*-portable.exe`、`latest.yml` 与 blockmap——
+> 与已发布 12 个 Release 同形的四件。要四样东西就位：win32 那份 `ocr`
+> （`npm run fetch:binaries win`，GitHub 的 release-asset CDN 到不了时它改从 npm registry 取）、
+> `PATH` 上的 `wine`（electron-builder 要把刚造出的安装包装一次才拿到卸载器桩）、
+> Windows 那份 Electron 发行件、以及 2 GB 上下的空闲内存（7z 与 makensis 在这台机器上被 OOM 杀过）。
+> 产物与已发布的每一版一样不签名。**造出来不等于装得上**：安装向导、SmartScreen、卸载路径与
+> Key 落在哪，仍要 Windows 真机回答——那一趟写在 `docs/win-install-checklist.md`，
+> 缺哪几条读数写在 `docs/measurements.md`。
+
+> **造出来也不等于能上传，而这两件事从目录上看不出来。** 这台机器上一次被 OOM 杀掉的重跑，
+> 在 `release/` 里留下了一个 504 KB 的 `*-setup.exe`——名字像一次发布，大小是它的 0.5%，
+> 旁边连 `latest.yml` 都没有。`npm run verify:dist` 问的正是三件看不出来的事：这一次构建的配置
+> 要求的那几件在不在、它们是不是同一版、并且与那份 feed 自己写的 `size` 与 `sha512` 相符（它去算
+> 字节——摘要错一格，发布后每一台已装客户端的更新都会卡在校验那一步），以及产物里的应用起的是哪一版
+> `ocr`。今天这一棵树的答案是 `1.13.5`，与 pin 相等：从这棵树发出去的那一版正好把上面那句差距合上，
+> 而这件事在 tag 存在之前就读得到。`npm run release <x.y.z>` 现在把这一条排在打包之后、密钥扫描之前。
 
 ## 第一次使用
 

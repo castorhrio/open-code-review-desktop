@@ -36,6 +36,63 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 
 ---
 
+## 上游状态（第 139 轮，2026-11-05）
+
+本轮复核：**上游没动**。`git ls-remote` 的 `refs/heads/main` 答 `36eec0c`，仍是第 132 轮记下的那个
+commit（`pages/` 官网的 provider 展示与五语文案）；`refs/tags/v1.13.5` 仍 peel 到 `abb7abc`、npm
+`latest` 仍是 `1.13.5`，三个口径一致，**pin 不动、无移植项**，对照表 5 行无需重读。
+
+本轮产品侧做的是航运面，不是断言面：**Windows 那一套发布产物第一次在这台 Linux x64 机器上造出来了**。
+`npm run dist:win` 出 `*-setup.exe` + `*-portable.exe` + `latest.yml` + blockmap——与已发布 12 个 Release
+同形的四件，读数记在 `docs/measurements.md`。为此改了三处实现：`build/fetch-binaries.cjs` 现在有两个来源
+（GitHub release asset 优先，读不到时改取 npm registry 里同一版本的 `@alibaba-group/ocr-<平台>-<架构>`，两边的
+字节都按可得的摘要核对，落位改成原子写）；`package.json` 的 `build.win.signExecutable` 设为 `false`
+（产物本来就没签名，这一条让 Linux 不必为签名去调 `signtool`）；`tools/release.mjs` 不再按机器名拒绝，
+改成按「缺哪一样前置条件」拒绝（`tools/release-guard.mjs` 的 `crossDistBlockers` / `releaseHost`）。
+
+**这不勾 DOD-5、也不勾 DOD-6。**「造得出」与「装得上」是两条读数：本轮 `wine *-setup.exe /S` 走到
+electron-builder 那句要调 PowerShell 的「应用在运行吗」检查就停了，安装向导、SmartScreen、快捷方式、卸载器
+与 Key 落点仍然只在 Windows 真机上——那一趟写在 `docs/win-install-checklist.md`，本轮只把它那句「Linux 上
+跑不了 NSIS」改对（造得出 ≠ 跑得了）。
+
+## 上游状态（第 138 轮，2026-11-04）
+
+本轮复核：**上游没动**。`git ls-remote upstream` 与 GitHub API 的 commits 都答 `36eec0c`，仍是第 132 轮
+记下的那个 commit（`pages/` 官网的 provider 展示与五语文案）；`refs/tags/v1.13.5` 仍是 `abb7abc`、npm
+`latest` 仍是 `1.13.5`，三个口径一致，**pin 不动、无移植项**，对照表 5 行无需重读。
+
+本轮产品侧只做一件事，不新增功能：**把「最小子集」再压短一档，让被打断的人也能留下一条读数。**
+
+第 126 轮把第 10 节从说明书推到待填表（四格 + 两行贴回模板），第 137 轮把它推到「可转派」。但四格
+仍然要改一次目录、读六行、跑两条 grep——真机上被打断是常态，而「四格跑不完」和「一格都跑不了」在
+证据上是同一件事：什么都没留下。所以这一轮补的是**更短的那条路**：
+
+- `docs/win-install-checklist.md` 新增 §10.0「只留一条读数（约 3 分钟）」：装一次（默认目录）→ 记 §1 的
+  SmartScreen 读数 → 填一个可丢弃的 Key → 跑 §5.2 那两条 grep。第 1 格给 DOD-5，第 5.2 格给 DOD-6，
+  各一条不可抵赖的读数。第 10 节标题从「（5 分钟）」改成「（3 分钟起）」——标题写的是**最短**那条路。
+- 10.1 那张表里，第 1 格与第 5.2 格标上「可单独跑」。标记写在「做什么」那一格里，不是新加一列：
+  加列会让「读数格」不再是最后一列，而那一列的位置是既有断言在核的东西。
+- `tools/checklist-claims.mjs` 的 `subsetFormViolations` 因此多问三件事（不是「放宽」，是正面断言）：
+  标题里必须有「3 分钟」；标着「可单独跑」的格必须**恰好**是 1 与 5.2（多标一格会让读者以为第 2.2 格
+  也能单独跑，少标一格则这条路不存在）；这两格按第 9 节的归属必须落在**两条不同的** DoD 上——都归
+  DOD-5 的话，「各留一条读数」就是假话。`tools/checklist-claims-smoke.mjs` 78 → 83 条，新增四条反向
+  控制（标题改回 5 分钟、少标一格、多标一格、两格归同一条 DoD）。
+- `docs/measurements.md` 未验证清单里那两行的**触发条件**各补一句「只有三分钟就走 §10.0 那条路」，
+  让「这一行怎么补」在最短那条路上也读得通。
+
+**没动的**：第 9 节那张对照表（9 行一个没改）、10.2 的贴回模板（仍是两行四列）、10.3 的规矩、
+`docs/PRODUCT-DOD.md` 的方括号、以及任何 DoD 的勾选状态。
+
+另做一次具名 pass `distill`（只动注释，不动行为）：`src/components/ResultsPanel.tsx` 里 `REF_READ_HINT`
+与 `FileViewer` 两处块注释把同一件事写了两遍——「工作区是选择不是兜底」在 `REF_READ_HINT` 头部与
+`if (!file.ok)` 分支上各说一次。现在头部只留「三种失败不互换」，那句理由并到分支上；`FileViewer` 头部
+从 17 行压到 5 行，`no sticky` 这条不变量留着，量测出处改成指向 README 那一节（337px / 568px / 629px
+那三个读数本来就在那里）。`src/components/ReportView.tsx` 的块注释已经是三行，没动。
+
+上一轮（第 137 轮）的正文见 [`upstream-history.md`](upstream-history.md#上游状态第-137-轮2026-11-04)，归档之后本文件不留第二份。
+
+---
+
 ## 上游状态（第 137 轮，2026-11-04）
 
 本轮复核：**上游没动**。`git fetch upstream --tags` 本轮通了，`refs/heads/main` 仍是第 132 轮记下的

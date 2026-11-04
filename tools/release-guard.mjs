@@ -1,9 +1,10 @@
 // The two facts a release has to be cut from, in one place.
 //
-// `tools/release.mjs` bumps the version, commits, runs the full audit, packages
-// and key-scans. Every one of those steps succeeds from a detached HEAD, which is
-// the problem: `npm version --no-git-tag-version` writes the two files, the
-// commit lands on a commit no branch points at, and the artefacts are built from
+// `tools/release.mjs` bumps the version, commits, runs the full audit, packages,
+// verifies what packaging left on disk and key-scans. Every one of those steps
+// succeeds from a detached HEAD, which is the problem: `npm version
+// --no-git-tag-version` writes the two files, the commit lands on a commit no
+// branch points at, and the artefacts are built from
 // a tree that the next `git switch main` makes unreachable. Nothing fails, and
 // the release exists until it quietly does not.
 //
@@ -22,9 +23,11 @@
 // `tools/release.mjs` passes). Both checks read their answer out of *git's exit
 // status*, not out of its wording, so this file has no message to parse.
 //
-// The first thing the script refuses is the machine: this path packages a Windows
-// build (`dist:win`, `win-unpacked`) and says so rather than half-porting itself
-// to a platform it was never written for — see `parsePlatform`.
+// The first thing the script decides is the machine: this path packages a Windows
+// build, and the answer now comes from `releaseHost` — the native path is Windows,
+// while Linux may produce the same artefacts if the prerequisites it names are in
+// place. `parsePlatform` keeps answering only the native question, because that is
+// what its checks have always asserted and what a Windows box still is.
 //
 // The same split is what a *failed* release needs. Its runners throw instead of
 // exiting (`stepFailure`), this module decides what a throw means
@@ -96,9 +99,12 @@ export const RELEASE_PLATFORM = "win32";
 function unsupportedPlatformError(platform) {
   const named = typeof platform === "string" && platform ? `"${platform}"` : "an unknown platform";
   return (
-    `this release path is Windows-only — it runs \`npm run dist:win\` and moves ` +
-    `release/win-unpacked into place, so ${named} cannot cut a release with it; ` +
-    `run \`npm run dist:mac\` or \`npm run dist:linux\` by hand instead`
+    `the native path of this release is Windows-only — it runs \`npm run dist:win\` and moves ` +
+    `release/win-unpacked into place, so ${named} cannot cut a release with it. ` +
+    `Linux can produce the same artefacts with \`npm run dist:win\` once the prerequisites ` +
+    "`crossDistBlockers` names are in place (the Windows `ocr` binary, `wine`, the Windows Electron distribution); " +
+    "what no machine but Windows can answer is installing the result — see `docs/win-install-checklist.md`. " +
+    "For a macOS or Linux *package*, run `npm run dist:mac` or `npm run dist:linux` on a machine of that kind."
   );
 }
 
@@ -116,6 +122,102 @@ export function parsePlatform(platform = process.platform) {
   const value = typeof platform === "string" ? platform.trim() : "";
   if (value === RELEASE_PLATFORM) return { ok: true, reason: "ready", platform: value };
   return { ok: false, reason: "unsupported-platform", platform: value, error: unsupportedPlatformError(value) };
+}
+
+/**
+ * The other machine a Windows release can be cut from.
+ *
+ * This changed in the real world, not in this file: `npm run dist:win` on this Linux
+ * box produced `open-code-review-desktop-0.1.13-setup.exe` (93 MB),
+ * `…-portable.exe`, `latest.yml` and the blockmap — the same four kinds of file the
+ * twelve published releases carry. What makes that work is three things this box
+ * had to be given: the Windows copy of `ocr` in `node_modules` (no host install of
+ * it exists on a Linux box, so `npm run fetch:binaries win` has to answer), `wine`
+ * on `PATH` (electron-builder runs the freshly built installer once to produce the
+ * uninstaller stub, and there is no way to ask it not to), and the Windows Electron
+ * distribution (see `使用说明.md` for the two mirror variables on a box that cannot
+ * reach GitHub's release-asset CDN).
+ *
+ * So *packaging* is no longer a Windows-only act, and refusing by machine name
+ * would be a policy that the machine itself has outgrown. What is still Windows-only
+ * is the evidence half: installing the thing, SmartScreen, the uninstaller, and
+ * `docs/win-install-checklist.md` — none of which this path can produce anywhere.
+ * The refusal therefore moved from "which machine" to "which prerequisite", and it
+ * names the missing one instead of sending the reader to another operating system.
+ * Both lanes package with the same command: what differs is what has to be in place
+ * before it can run, and `build.win.signExecutable` is configuration rather than a
+ * flag, so the fallback rebuild in `tools/release-dist.mjs` inherits it too.
+ * A fourth condition is a capacity fact and is not refused here: the 7z payload step
+ * and makensis each want roughly 2 GB, and this box has been seen to OOM-kill both.
+ * That one is written in `使用说明.md`, because it is fixed by freeing memory and
+ * re-running, not by installing anything.
+ */
+export const CROSS_RELEASE_PLATFORM = "linux";
+
+/** What the release packages with, on either machine. */
+export const DIST_COMMAND = "npm run dist:win";
+
+/**
+ * The prerequisites the cross path needs, as named blockers.
+ *
+ * Both answers are injected rather than read here, for the same reason `capture` is:
+ * a decision that probes the disk by itself cannot be asked what it would say on a
+ * machine nobody owns. The caller (`tools/release.mjs`) looks at `node_modules` and
+ * at `wine --version`, and hands the two booleans over.
+ */
+export function crossDistBlockers({ hasWinBinary = false, hasWine = false } = {}) {
+  const blockers = [];
+  if (!hasWinBinary) {
+    blockers.push(
+      "node_modules 里没有 win32 那份 `ocr` 二进制（Linux 上 `npm install` 只会装本机那一版）——" +
+        "先跑 `npm run fetch:binaries win`，否则产物里带的 CLI 不存在"
+    );
+  }
+  if (!hasWine) {
+    blockers.push(
+      "`wine` 不在 PATH 上——electron-builder 要把刚造出来的安装包装一次才拿得到卸载器桩，" +
+        "这一条没有替代命令，装了它才能出 `*-setup.exe`"
+    );
+  }
+  return blockers;
+}
+
+/** The refusal for a Linux box that cannot package yet, counting what it prints. */
+function hostBlocked(platform, blockers) {
+  return {
+    ok: false,
+    reason: "cross-blocked",
+    platform,
+    blockers,
+    error: `这台机器可以造 Windows 产物，但缺 ${blockers.length} 样：\n  - ${blockers.join("\n  - ")}`,
+  };
+}
+
+/**
+ * The machine this release can be cut from, and what it packages with.
+ *
+ * `parsePlatform` above keeps answering the *native* question (only Windows runs
+ * `dist:win`), because that is what its checks have always asserted and what the
+ * Windows box still is. This wraps it: a Windows machine gets the native answer with
+ * the native dist command attached; a Linux machine that has *answered* the
+ * prerequisite question with an empty list gets the same command; a Linux machine
+ * with a non-empty list, or with no list at all, is refused — not asking is not the
+ * same as nothing being missing. Everything else is refused exactly as before.
+ */
+export function releaseHost({ platform = process.platform, blockers } = {}) {
+  const native = parsePlatform(platform);
+  if (native.ok) return { ...native, dist: DIST_COMMAND };
+  const value = typeof platform === "string" ? platform.trim() : "";
+  if (value !== CROSS_RELEASE_PLATFORM) return { ...native, dist: null };
+  if (!Array.isArray(blockers)) {
+    return hostBlocked(value, [
+      "这一趟没有拿到可核对的前置条件清单（`blockers` 不是一个数组）：Linux 要先答「win32 那份 `ocr` 在不在、`wine` 在不在」，" +
+        "没答不等于不缺",
+    ]);
+  }
+  const missing = blockers.filter((line) => typeof line === "string" && line.trim() !== "");
+  if (missing.length) return hostBlocked(value, missing);
+  return { ok: true, reason: "ready-cross", platform: value, dist: DIST_COMMAND };
 }
 
 /** The refusal for a HEAD that is not on a branch. */
@@ -176,16 +278,24 @@ export const RELEASE_GUARD_MESSAGES = { DETACHED, DIRTY };
  * branch to release from" before anything is written. The rest are the commands
  * `tools/release.mjs` runs once it has passed.
  *
+ * `verify-dist` sits between packaging and the key scan for one reason: the last act
+ * of a release is a human uploading what this directory holds, and 第 139 轮 showed
+ * what that human sees on a build whose `makensis` was killed — a `*-setup.exe` named
+ * like a release at 504 KB, no feed beside it. Asking "is this set complete, one
+ * version, and do the bytes match what `latest.yml` claims" is cheaper than the scan
+ * that follows and answers a question the scan cannot ask, so it runs before the
+ * release prints its "ready to publish" line rather than after.
+ *
  * Kept here as names — and the commands below — so the check can assert the
  * order, rather than compare source offsets. A guard that had drifted below the
  * version bump would still pass every check that only looked at its answer;
  * asserting the plan is what makes the position a property of the code the
  * release actually executes.
  */
-export const RELEASE_STEPS = ["precheck", "bump", "commit", "audit", "dist", "secret-scan"];
+export const RELEASE_STEPS = ["precheck", "bump", "commit", "audit", "dist", "verify-dist", "secret-scan"];
 
 /** Everything after the precheck, with the version already substituted. */
-function releaseCommands(version) {
+function releaseCommands(version, dist = DIST_COMMAND) {
   return [
     { name: "bump", command: `npm version ${version} --no-git-tag-version` },
     {
@@ -193,7 +303,8 @@ function releaseCommands(version) {
       command: `git add package.json package-lock.json && git commit -m "chore(release): ${version}"`,
     },
     { name: "audit", command: "npm run audit" },
-    { name: "dist", command: "npm run dist:win" },
+    { name: "dist", command: dist },
+    { name: "verify-dist", command: "node tools/release-verify.mjs" },
     { name: "secret-scan", command: "npm run audit:secrets" },
   ];
 }
@@ -205,11 +316,14 @@ function releaseCommands(version) {
  * the caller has to remember to do. So "the precheck runs first, and nothing
  * runs after it failed" is checkable by calling this with a detached HEAD and
  * finding an empty plan — no source offsets involved.
+ *
+ * `dist` comes from `releaseHost`: which packaging command this machine may run is
+ * decided once, above, and the plan carries it instead of re-spelling `dist:win`.
  */
-export function planRelease({ version, capture } = {}) {
+export function planRelease({ version, capture, dist = DIST_COMMAND } = {}) {
   const pre = releasePrecheck(capture);
   if (!pre.ok) return { ...pre, steps: [] };
-  return { ...pre, steps: releaseCommands(version) };
+  return { ...pre, steps: releaseCommands(version, dist) };
 }
 
 /**

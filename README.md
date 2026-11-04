@@ -96,11 +96,16 @@ One boundary belongs at the top of this list: install, uninstall and per-user ke
 npm install              # downloads the native ocr binary for THIS platform (~55 MB)
 npm run dev              # Vite HMR + Electron
 npm start                # build the UI, then run it
-npm run dist             # Windows installer + portable into release/
+npm run dist             # Windows installer + portable into release/ (on Windows or Linux)
+npm run verify:dist      # is that release/ an uploadable set? completeness, sizes, sha512, the ocr inside
 npm run fetch:binaries   # pull the other platforms' binaries (needed to cross-build)
 npm run dist:mac         # macOS dmg + zip      (build on macOS)
 npm run dist:linux       # Linux AppImage + deb (build on Linux/WSL)
 ```
+
+> **The Windows set no longer needs a Windows machine.** Since round 139, `npm run dist:win` on this repository's Linux x64 box produced `*-setup.exe`, `*-portable.exe`, `latest.yml` and the blockmap — the same four kinds of file every published release carries. Four things have to be in place: the Windows `ocr` (`npm run fetch:binaries win`, which now also answers from the npm registry when GitHub's release-asset CDN cannot be reached), `wine` on `PATH` (electron-builder runs the installer it just built to obtain the uninstaller stub), the Windows Electron distribution, and roughly 2 GB free memory (the 7z and makensis steps have been OOM-killed here). The artefacts stay unsigned, as every published release is. **Building is not installing**: the wizard, SmartScreen, the uninstall path and where the key ends up are still Windows-machine evidence — `docs/win-install-checklist.md` is that run, and `docs/measurements.md` says which readings are missing. The two mirror variables for a box that cannot reach GitHub's asset CDN are named in `使用说明.md`.
+
+> **Building is not publishing either, and the difference is not visible.** One killed rebuild here left `release/` holding a `*-setup.exe` of 504 KB — named like a release, 0.5% of its size — with no `latest.yml` beside it. `npm run verify:dist` asks the three questions a glance cannot: whether every file this build's own config calls for is actually there, whether they are all the one version and match the `size` and `sha512` that feed states (it hashes the bytes; a published feed with the wrong hash means every installed client's update fails at verification, on someone else's machine), and which `ocr` the packaged app will spawn. On today's tree that last answer is `1.13.5`, equal to the pin — so the release cut from this tree is the one that closes the gap quoted above, and it is readable before any tag exists. `npm run release <x.y.z>` now runs this check as a step between packaging and the key scan.
 
 ## First run
 

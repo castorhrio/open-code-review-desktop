@@ -35,7 +35,7 @@ tag v1.13.5
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`abb7abcd5c5196fa0278dc87db85780fa269562f`（第 138 轮：`git ls-remote upstream` 与 GitHub API 的 commits 都答 `36eec0c`，仍是第 132 轮记下的那个 commit，无新内容；`refs/tags/v1.13.5` 与 npm `latest` 仍分别答 `v1.13.5` / `1.13.5`，**pin 不动**（pin 跟的是发布版本，不是默认分支）；通路：git）
+**本轮 HEAD 核对：`abb7abcd5c5196fa0278dc87db85780fa269562f`（第 140 轮：`git ls-remote upstream` 超时 124，HEAD 与 tag 由 GitHub API 答上——`refs/heads/main` 仍是第 132 轮记下的 `36eec0c`，`refs/tags/v1.13.5` 仍 peel 到 `abb7abc`，`npm view` 答 `latest` 仍是 `1.13.5`，三个口径与上一轮一致，无新内容；**pin 不动**（pin 跟的是发布版本，不是默认分支）；通路：api）
 
 ### 核到的上游 HEAD（核对的落点，不是 pin）
 
@@ -45,7 +45,7 @@ pin 说封装的是哪个**发布版本**（`v1.13.5`，二进制自报的那个
 已前进」，而那六轮的通路账一行行写着「无新内容」——一个总在响的标记等于没有标记。所以这一行的
 轮次必须与通路账末行相等（`checkedHeadViolations`），`upstream:check` 比的也是这一行，而不是 pin。
 
-**本轮核到的上游 HEAD：`36eec0c0269d0687a761fb3291ccbf427ab9336f`（第 138 轮）**
+**本轮核到的上游 HEAD：`36eec0c0269d0687a761fb3291ccbf427ab9336f`（第 140 轮）**
 
 ### 核对通路账
 
@@ -156,6 +156,8 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 | 136 | 2026-11-04 | api | `36eec0c` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**（`git fetch upstream --tags` 超时 124，HEAD 由 GitHub API 答上；`refs/heads/main` 仍是第 132 轮记下的 `36eec0c`，`git log d3cd23f..36eec0c` 仍只有那两个 commit；`refs/tags/v1.13.5` 与 npm `latest` 未变；对照表 5 行一个都没被碰到）；本轮产品改动是把「拿到 Windows 机器的人能不能零歧义走完清单」推到可执行：第 5.2 步两条命令写死默认安装目录（原样复制即可，改过目录只换那一处）、第 10.2 节补「六行读数用「；」写在同一格」的填法、第 10.3 节不再教人「跑完子集就改状态行」——`tools/checklist-claims.mjs` 的正向判定从「状态行是 pending」改成「那一条 DoD 还没勾」，堵住「状态行一改、没跑到的行删掉也不红」这条缝，`tools/checklist-claims-smoke.mjs` 76 → 78 条 | — |
 | 137 | 2026-11-04 | git | `36eec0c` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**（`git fetch upstream --tags` 通了，`refs/heads/main` 仍是第 132 轮记下的 `36eec0c`，`git log 36eec0c..upstream/main` 是空的；`refs/tags/v1.13.5` 与 npm `latest` 未变；对照表 5 行一个都没被碰到）；本轮产品侧做两件事：① 把 DOD-5 / DOD-6 缺的那一趟从「没人跑」推到「可转派」——`docs/win-install-checklist.md` 文件头状态行下加一行「待跑」（谁、按 §10 最小子集、读数贴回 §10.2），`docs/measurements.md` 未验证清单里那两行的「为什么没验」末尾各加一句「已可转派（第 137 轮）」，两份 README 的已验证行为段开头补一句真机边界（安装 / 卸载与 Key 落点只验到 `tools/e2e-packaged.mjs` 能到的那一层，NSIS 向导待真机跑）；② 具名 pass `polish`：结果页 / 报告页 / 设置页的文案收敛——同一个动作两个名字（结果页「HTML 报告」与报告页「导出 HTML」）统一成「导出 HTML」，「改小范围」按本仓既有说法改成「缩小范围」（`format.ts` / `finding.tsx` 早就这么写），「改小排除规则」改成「放宽排除规则」，同一句续跑建议在结果页出现两种说法（「想能续跑就改用」/「想保留可续跑的能力就改用」）收成一句，设置页「保留上限」改成「保留条数上限」；空态那句「范围不对的话」改成「范围选错了就换个模式」；`src/lib/format.ts` 的状态判定一个字没动 | — |
 | 138 | 2026-11-04 | git | `36eec0c` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**（`git ls-remote upstream` 与 GitHub API 的 commits 都答 `36eec0c`，仍是第 132 轮记下的那个 commit；`refs/tags/v1.13.5` 与 npm `latest` 未变；对照表 5 行一个都没被碰到）；本轮产品改动是把最小子集再压短一档：`docs/win-install-checklist.md` 新增 §10.0「只留一条读数（约 3 分钟）」（装一次默认目录 → 记 §1 SmartScreen → 填一个可丢弃的 Key → 跑 §5.2 两条 grep，第 1 格给 DOD-5、第 5.2 格给 DOD-6），第 10 节标题改成「（3 分钟起）」，10.1 里第 1 格与第 5.2 格标上「可单独跑」；`tools/checklist-claims.mjs` 的 `subsetFormViolations` 多问三件事（标题含「3 分钟」、标着的格恰好是 1 与 5.2、两格按第 9 节落在两条不同的 DoD 上），`tools/checklist-claims-smoke.mjs` 78 → 83 条；`docs/measurements.md` 那两行的触发条件各补一句「只有三分钟就走 §10.0」；另做具名 pass `distill`（只动注释）：`ResultsPanel.tsx` 的 `REF_READ_HINT` 与 `FileViewer` 两处块注释把「工作区是选择不是兜底」写了两遍，头部只留「三种失败不互换」、理由并到 `if (!file.ok)` 分支，`FileViewer` 头部 17 行 → 5 行（`no sticky` 不变量留着，量测出处指向 README） | — |
+| 139 | 2026-11-05 | git | `36eec0c` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**（`git ls-remote` 答 `refs/heads/main` 仍是第 132 轮记下的 `36eec0c`，`refs/tags/v1.13.5` 仍 peel 到 `abb7abc`，`npm view` 答 `latest` 为 `1.13.5`；对照表 5 行一个都没被碰到）；本轮产品改动全在航运面：`build/fetch-binaries.cjs` 有了第二个来源（GitHub release asset 取不到时改取 npm registry 里同一版本的 `@alibaba-group/ocr-<平台>-<架构>`，两边字节都按可得的摘要核对，落位改成原子写并先清掉 `.part` / `.staged` 残留），`package.json` 的 `build.win.signExecutable` 设为 `false`，`tools/release.mjs` 不再按机器名拒绝、改按 `crossDistBlockers` 缺哪一样拒绝（`releaseHost`；`tools/release-guard-smoke.mjs` 检查点 166 → 184）；这台 Linux x64 机器第一次造出过完整的四件 Windows 产物（读数记在 `docs/measurements.md`，含随后被 OOM 杀掉那两次重跑），DOD-5 / DOD-6 一个字没勾——造得出与装得上是两条读数 | — |
+| 140 | 2026-11-05 | api | `36eec0c` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**（`git ls-remote upstream` 超时 124，HEAD 与 tag 由 GitHub API 答上、`refs/heads/main` 仍是第 132 轮记下的 `36eec0c`，release 与 npm 分别是 `v1.13.5` 与 `1.13.5`；对照表 5 行一个都没被碰到）；本轮产品改动是「发之前本地能验到哪一层」的下一层：新增 `tools/release-verify.mjs`（`npm run verify:dist`）——按 `package.json` 自己的 `build.win.target` / `build.nsis.differentialPackage` / `build.publish` 推出该有几件，再核对它们是不是同一版、`latest.yml` 写的 `size` 与 `sha512` 是否与磁盘字节（流式现算）相符、打包树里那份 CLI 是不是 pin 的那一版；`RELEASE_STEPS` 因此在 `dist` 与 `secret-scan` 之间多一格 `verify-dist`，发版命令不能再跳过它；这台机器上真实的 `release/` 第一次被点名（`makensis` 被 OOM 杀掉两次后剩下的 504 KB `setup.exe` 加三件缺失，exit 1），而「下一版发出去带的是 `ocr 1.13.5`」这条读数在 tag 存在之前就读到了——`npm run audit:release-pin` 只能回答已经发布的那一版；规则 61 条由 `tools/release-verify-smoke.mjs`（`audit:release-verify-rules`，挂进 `audit:static`）钉住，解析那一半的夹具是**已发布 v0.1.13 的 `latest.yml` 原文**（它没有顶层 `size`，第一版把这一格当必需，真产物反而会红） | — |
 
 「最近一次对照」只写**那一项最近被人工重新核对**的轮次。该列没有列出本轮，表示本轮
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
@@ -247,42 +249,31 @@ tool 结果文本**（`Error: diff not found for: …`、`Diffs exist for: …`�
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。搬完这里只留一句
    指针——「本文件只留当前一轮」不是约定而是断言（`previousRoundPointerViolations`）。
 
-## 当前状态（第 138 轮，2026-11-04）
+## 当前状态（第 140 轮，2026-11-05）
 
-本轮复核：**上游没动**。`git ls-remote upstream` 与 GitHub API 的 commits 都答 `36eec0c`，仍是第 132 轮
-记下的那个 commit（`pages/` 官网的 provider 展示与五语文案）；`refs/tags/v1.13.5` 仍是 `abb7abc`、npm
-`latest` 仍是 `1.13.5`，三个口径一致，**pin 不动、无移植项**，对照表 5 行无需重读。
+本轮复核：**上游没动**。`git ls-remote upstream` 超时 124，`refs/heads/main` 由 GitHub API 答上，仍是第
+132 轮记下的那个 commit（`pages/` 官网的 provider 展示与五语文案）；`refs/tags/v1.13.5` 仍 peel 到
+`abb7abc`、npm `latest` 仍是 `1.13.5`，三个口径一致，**pin 不动、无移植项**，对照表 5 行无需重读。
 
-本轮产品侧只做一件事，不新增功能：**把「最小子集」再压短一档，让被打断的人也能留下一条读数。**
+本轮产品侧继续做航运面：**「造得出来」之后那一层——这套字节能不能上传——现在也有读数了**。新增
+`tools/release-verify.mjs`（`npm run verify:dist`），它问四件事：该有几件（由 `package.json` 自己的
+`build.win.target` / `build.nsis.differentialPackage` / `build.publish` 推出来，不抄一份清单）、是不是同一版
+（目录里混着上一版的产物会单独点名，因为上传是按文件名挑的）、`latest.yml` 写的 `size` 与 `sha512` 是否与磁盘
+字节相符（流式现算，不看文件名像不像），以及打包树里那份 `ocr` 是不是 pin 的那一版。`RELEASE_STEPS` 因此在
+`dist` 与 `secret-scan` 之间多出一格 `verify-dist`——发版命令不能再靠人看出来。
 
-第 126 轮把第 10 节从说明书推到待填表（四格 + 两行贴回模板），第 137 轮把它推到「可转派」。但四格
-仍然要改一次目录、读六行、跑两条 grep——真机上被打断是常态，而「四格跑不完」和「一格都跑不了」在
-证据上是同一件事：什么都没留下。所以这一轮补的是**更短的那条路**：
+两条读数都记在 `docs/measurements.md`。第一条是红的，而红正是本轮要的形态：这台机器上真实的 `release/` 是
+`makensis` 被 OOM 杀掉两次之后留下的残骸——`setup.exe` 504,146 字节（同一次成功的构建是 97,223,736），
+blockmap / portable / `latest.yml` 三件缺，命令点名这三件并以 1 退出。第二条是绿的：
+`win-unpacked/resources/app` 里那份 `@alibaba-group/open-code-review` 写 **1.13.5**、win32 那份
+`opencodereview.exe` 在——**下一版发出去带的是 pin 的那一版 CLI**。这一条 `npm run audit:release-pin`
+答不了（它读最新发布 tag，也就是已经发出去的那一版带 `1.13.0`），而它在 tag 存在之前就读得到。
 
-- `docs/win-install-checklist.md` 新增 §10.0「只留一条读数（约 3 分钟）」：装一次（默认目录）→ 记 §1 的
-  SmartScreen 读数 → 填一个可丢弃的 Key → 跑 §5.2 那两条 grep。第 1 格给 DOD-5，第 5.2 格给 DOD-6，
-  各一条不可抵赖的读数。第 10 节标题从「（5 分钟）」改成「（3 分钟起）」——标题写的是**最短**那条路。
-- 10.1 那张表里，第 1 格与第 5.2 格标上「可单独跑」。标记写在「做什么」那一格里，不是新加一列：
-  加列会让「读数格」不再是最后一列，而那一列的位置是既有断言在核的东西。
-- `tools/checklist-claims.mjs` 的 `subsetFormViolations` 因此多问三件事（不是「放宽」，是正面断言）：
-  标题里必须有「3 分钟」；标着「可单独跑」的格必须**恰好**是 1 与 5.2（多标一格会让读者以为第 2.2 格
-  也能单独跑，少标一格则这条路不存在）；这两格按第 9 节的归属必须落在**两条不同的** DoD 上——都归
-  DOD-5 的话，「各留一条读数」就是假话。`tools/checklist-claims-smoke.mjs` 78 → 83 条，新增四条反向
-  控制（标题改回 5 分钟、少标一格、多标一格、两格归同一条 DoD）。
-- `docs/measurements.md` 未验证清单里那两行的**触发条件**各补一句「只有三分钟就走 §10.0 那条路」，
-  让「这一行怎么补」在最短那条路上也读得通。
+**这仍不勾 DOD-5、也不勾 DOD-6。**「这套字节自相一致、且是同一版」与「装得上」是两条读数，后者仍然只在
+Windows 真机上——那一趟写在 `docs/win-install-checklist.md`。本轮也没给它补读数：这台机器的空闲内存与磁盘
+都不支持再跑一次完整构建，所以未验证清单多了一行——`verify:dist` 的绿目前只在按真字节组装的一次性树上取过。
 
-**没动的**：第 9 节那张对照表（9 行一个没改）、10.2 的贴回模板（仍是两行四列）、10.3 的规矩、
-`docs/PRODUCT-DOD.md` 的方括号、以及任何 DoD 的勾选状态。
-
-另做一次具名 pass `distill`（只动注释，不动行为）：`src/components/ResultsPanel.tsx` 里 `REF_READ_HINT`
-与 `FileViewer` 两处块注释把同一件事写了两遍——「工作区是选择不是兜底」在 `REF_READ_HINT` 头部与
-`if (!file.ok)` 分支上各说一次。现在头部只留「三种失败不互换」，那句理由并到分支上；`FileViewer` 头部
-从 17 行压到 5 行，`no sticky` 这条不变量留着，量测出处改成指向 README 那一节（337px / 568px / 629px
-那三个读数本来就在那里）。`src/components/ReportView.tsx` 的块注释已经是三行，没动。
-
-上一轮（第 137 轮）的正文见 [`upstream-history.md`](upstream-history.md#上游状态第-137-轮2026-11-04)，归档之后本文件不留第二份。
-
+上一轮（第 139 轮）的正文见 [`upstream-history.md`](upstream-history.md#上游状态第-139-轮2026-11-05)，归档之后本文件不留第二份。
 
 ### 参数面：`ocr review --help` / `ocr scan --help` 与本仓真的拼出的每一行
 

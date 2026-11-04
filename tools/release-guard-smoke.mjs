@@ -69,10 +69,14 @@ import {
   planRelease,
   runRelease,
   stepFailure,
+  CROSS_RELEASE_PLATFORM,
+  DIST_COMMAND,
   RELEASE_GUARD_MESSAGES,
   RELEASE_PLATFORM,
   RELEASE_STEPS,
   RELEASE_USAGE,
+  crossDistBlockers,
+  releaseHost,
 } from "./release-guard.mjs";
 
 const failures = [];
@@ -216,13 +220,12 @@ function stripComments(source, { blankStrings = false } = {}) {
  * `electron-builder --win` into a fresh dir, `win-unpacked` moved into `release/`.
  * That was true and unstated, which meant a mac or a linux box got a release that
  * failed somewhere in the middle — after the bump and the commit — with a message
- * from electron-builder about a target it does not have. `parsePlatform` is the
+ * from electron-builder about a target it does not have. `parsePlatform` is that
  * refusal, and it is a value so the sentence can be read here.
  *
- * It is *not* a `process.platform` switch over the command names: the move and the
- * fallback are `win-unpacked` all the way down, so a switch would produce a script
- * that looks cross-platform and moves the wrong directory on the platforms it
- * claimed to support.
+ * It answers the *native* question only. A Linux box turned out to be able to
+ * produce the same artefacts, so the script asks `releaseHost` (block below), which
+ * keeps refusing by anything a machine lacks and stops refusing by its name.
  */
 {
   check("this release path names the one platform it packages for", RELEASE_PLATFORM === "win32", RELEASE_PLATFORM);
@@ -310,25 +313,30 @@ function stripComments(source, { blankStrings = false } = {}) {
     const raw = fs.readFileSync(path.join(ROOT, "tools", "release.mjs"), "utf8");
     const script = stripComments(raw);
     check(
-      "the release script refuses the machine before it plans anything",
-      /parsePlatform\(\s*process\.platform\s*\)/.test(script),
-      "tools/release.mjs does not call parsePlatform(process.platform)"
+      "the release script asks its own machine before it plans anything",
+      /releaseHost\(\s*\{\s*platform:\s*process\.platform/.test(script),
+      "tools/release.mjs does not call releaseHost({ platform: process.platform, … })"
+    );
+    check(
+      "...and on a machine that is not Windows, it asks what that machine is missing",
+      /crossBlockers\(\)/.test(script) && /crossDistBlockers\(/.test(script),
+      "tools/release.mjs does not hand releaseHost the cross-packaging blockers"
     );
     check(
       "...printing the module's own sentence, so the words have one home",
-      /console\.error\(\s*platform\.error\s*\)/.test(script) && /process\.exit\(\s*2\s*\)/.test(script),
-      "tools/release.mjs does not print platform.error and exit 2"
+      /console\.error\(\s*host\.error\s*\)/.test(script) && /process\.exit\(\s*2\s*\)/.test(script),
+      "tools/release.mjs does not print host.error and exit 2"
     );
 
     // Each refusal is a sentence the user reads *instead of* the others, so the
     // order the script reads its inputs in decides which one they get. The three
     // are placed by position in the comment-stripped source because the script
     // cannot be imported; a reordering that keeps all three calls would pass a
-    // presence-only check while turning "this path is Windows-only" into "no
+    // presence-only check while turning "this machine cannot package" into "no
     // version given" — a different, and misleading, first answer.
-    const orderOf = (src) => ["parsePlatform(", "parseVersion(", "planRelease("].map((call) => src.indexOf(call));
+    const orderOf = (src) => ["releaseHost(", "parseVersion(", "planRelease("].map((call) => src.indexOf(call));
     const [machineAt, versionAt, planAt] = orderOf(script);
-    const calls = ["parsePlatform(", "parseVersion(", "planRelease("].map((call) => script.split(call).length - 1);
+    const calls = ["releaseHost(", "parseVersion(", "planRelease("].map((call) => script.split(call).length - 1);
     check(
       "the script asks the machine, then the version, then plans the release",
       machineAt >= 0 && versionAt > machineAt && planAt > versionAt,
@@ -364,6 +372,104 @@ function stripComments(source, { blankStrings = false } = {}) {
       codeOnly.includes("/") ? `slash at ${codeOnly.indexOf("/")}; extend stripComments before trusting the source checks above` : ""
     );
   }
+}
+
+/* ---- the Linux lane: the same artefacts, from named prerequisites ----
+ * Measured, not assumed: `npm run dist:win` on this box produced
+ * `open-code-review-desktop-0.1.13-setup.exe` (93 MB), `…-portable.exe`, `latest.yml`
+ * and the blockmap. So the question stopped being "which machine" and became "what
+ * is missing" — and the answer a reader gets has to name the missing thing, because
+ * "Windows-only" now sends them to a machine they may not need.
+ */
+{
+  check("the cross lane names the platform it was added for", CROSS_RELEASE_PLATFORM === "linux", CROSS_RELEASE_PLATFORM);
+  check("...and that both lanes package with one command", DIST_COMMAND === "npm run dist:win", DIST_COMMAND);
+
+  const both = crossDistBlockers({ hasWinBinary: false, hasWine: false });
+  check(
+    "a box missing both prerequisites is told about both",
+    both.length === 2 && /ocr/.test(both[0]) && /wine/.test(both[1]),
+    JSON.stringify(both)
+  );
+  check(
+    "...naming the command that fixes the binary, not just the gap",
+    /fetch:binaries win/.test(both[0]),
+    both[0]
+  );
+  check(
+    "...and saying what the wine step is for, since there is no command to run instead",
+    /卸载器/.test(both[1]),
+    both[1]
+  );
+  check(
+    "a box with the binary but no wine gets one blocker, not two",
+    crossDistBlockers({ hasWinBinary: true, hasWine: false }).length === 1,
+    JSON.stringify(crossDistBlockers({ hasWinBinary: true, hasWine: false }))
+  );
+  check(
+    "and a box with both is not missing anything",
+    crossDistBlockers({ hasWinBinary: true, hasWine: true }).length === 0,
+    JSON.stringify(crossDistBlockers({ hasWinBinary: true, hasWine: true }))
+  );
+  // The defaults answer "nothing is in place", not "everything is": a caller that
+  // forgot to look would otherwise be told its box is ready to package.
+  check("an argument-less call refuses rather than assuming the files are there", crossDistBlockers({}).length === 2, JSON.stringify(crossDistBlockers({})));
+
+  const winHost = releaseHost({ platform: "win32", blockers: ["缺这个", "缺那个"] });
+  check(
+    "a Windows machine keeps the native answer, blockers and all",
+    winHost.ok === true && winHost.reason === "ready" && winHost.dist === DIST_COMMAND,
+    JSON.stringify(winHost)
+  );
+
+  const linuxHost = releaseHost({ platform: "linux", blockers: [] });
+  check(
+    "a Linux machine with everything in place may cut the release",
+    linuxHost.ok === true && linuxHost.reason === "ready-cross" && linuxHost.platform === "linux",
+    JSON.stringify(linuxHost)
+  );
+  check("...and packages with the same command as Windows does", linuxHost.dist === DIST_COMMAND, String(linuxHost.dist));
+
+  const blocked = releaseHost({ platform: "linux", blockers: both });
+  check(
+    "a Linux machine that is missing something is refused by what it is missing",
+    blocked.ok === false && blocked.reason === "cross-blocked" && blocked.blockers.length === 2,
+    JSON.stringify(blocked)
+  );
+  check(
+    "...printing every blocker on its own line under a count that matches",
+    /缺 2 样/.test(blocked.error || "") && blocked.error.split("\n").filter((line) => line.startsWith("  - ")).length === 2,
+    blocked.error
+  );
+  check("...and never pretending a release may start", blocked.error !== undefined && blocked.dist === undefined, JSON.stringify(blocked));
+
+  for (const other of ["darwin", "freebsd", "win32-x64"]) {
+    const answer = releaseHost({ platform: other, blockers: [] });
+    check(
+      `${other} is refused exactly as the native path refuses it, with no dist command`,
+      answer.ok === false && answer.reason === "unsupported-platform" && answer.dist === null && answer.error === parsePlatform(other).error,
+      JSON.stringify(answer)
+    );
+  }
+
+  // A `blockers` value that is not a list is a caller that did not look, and "did
+  // not look" is not evidence that nothing is missing.
+  for (const bad of [null, undefined, "缺 wine", 42, {}]) {
+    const answer = releaseHost({ platform: "linux", blockers: bad });
+    check(
+      `a blockers argument of ${JSON.stringify(bad) ?? String(bad)} is refused, not read as ready`,
+      answer.ok === false && answer.reason === "cross-blocked" && answer.blockers.length === 1 && /没有拿到可核对的前置条件清单/.test(answer.error),
+      JSON.stringify(answer)
+    );
+  }
+  // The mirror image of the count check above: a blank entry would be counted and
+  // then print nothing, which is how a refusal becomes untrustworthy.
+  const blanked = releaseHost({ platform: "linux", blockers: ["", "   ", null, 42, "真的缺 wine"] });
+  check(
+    "only the blockers that are actual sentences are counted and printed",
+    blanked.ok === false && blanked.blockers.length === 1 && blanked.blockers[0] === "真的缺 wine" && /缺 1 样/.test(blanked.error),
+    JSON.stringify(blanked)
+  );
 }
 
 /* ---- a detached HEAD is refused, before anything is written ---- */
@@ -441,6 +547,29 @@ function stripComments(source, { blankStrings = false } = {}) {
   );
   check("...keeping git's own words", /Command failed/.test(answer.error || ""), answer.error);
   check("...and still naming the branch it got that far with", answer.branch === "main", answer.branch);
+}
+
+/* ---- the plan packages with the command the host decision handed it ----
+ * Both lanes run `npm run dist:win`, so what is worth pinning is the threading: the
+ * plan runs the command it was *given*, and the default comes from the module rather
+ * than from a string re-spelled at a call site.
+ */
+{
+  const clean = fakeGit({ [SYMBOLIC]: "main\n", [STATUS]: "" });
+  const handed = planRelease({ version: "0.1.14", capture: clean.capture, dist: "npm run dist:win --probe" });
+  const handedDist = handed.steps.find((step) => step.name === "dist");
+  check(
+    "a plan runs the dist command it was handed",
+    handedDist && handedDist.command === "npm run dist:win --probe",
+    JSON.stringify(handedDist)
+  );
+  const defaultedDist = planRelease({ version: "0.1.14", capture: clean.capture }).steps.find((step) => step.name === "dist");
+  check("...and the module's own command when nothing was handed", defaultedDist.command === DIST_COMMAND, defaultedDist.command);
+  check(
+    "...which is also what a ready Linux box plans, so the two lanes cannot mean different builds",
+    releaseHost({ platform: "linux", blockers: [] }).dist === defaultedDist.command,
+    JSON.stringify({ host: releaseHost({ platform: "linux", blockers: [] }).dist, plan: defaultedDist.command })
+  );
 }
 
 /* ---- the plan: the precheck is first, and a refusal has nothing after it ----
@@ -539,6 +668,7 @@ function stripComments(source, { blankStrings = false } = {}) {
       "npm version 0.1.14 --no-git-tag-version",
       'git add package.json package-lock.json && git commit -m "chore(release): 0.1.14"',
       "npm run audit",
+      "node tools/release-verify.mjs",
       "npm run audit:secrets",
     ].join(" | "),
     ran.join(" | ")
@@ -549,8 +679,8 @@ function stripComments(source, { blankStrings = false } = {}) {
     JSON.stringify(packaged)
   );
   check(
-    "and the key scan runs after packaging, over the packages it produced",
-    answer.ran[answer.ran.length - 1] === "secret-scan" && answer.ran[answer.ran.length - 2] === "dist",
+    "and the release ends dist -> verify-dist -> secret-scan: the artefacts are checked after they exist, and the scan still comes last",
+    answer.ran.slice(-3).join(" -> ") === "dist -> verify-dist -> secret-scan",
     answer.ran.join(" -> ")
   );
 
@@ -727,7 +857,7 @@ function stripComments(source, { blankStrings = false } = {}) {
  */
 {
   const steps = (...names) => ({ ok: true, steps: names.map((name) => ({ name, command: `cmd:${name}` })) });
-  const plan = steps("bump", "commit", "audit", "dist", "secret-scan");
+  const plan = steps("bump", "commit", "audit", "dist", "verify-dist", "secret-scan");
 
   // The real runner's shape: `spawnSync`'s non-zero status becomes an `Error`
   // carrying that status, so the release's exit status is the failed command's.

@@ -1,15 +1,25 @@
-// One command to cut a release: bump, gate, package, key-scan.
+// One command to cut a release: bump, gate, package, verify the artefacts, key-scan.
 //
 //   node tools/release.mjs 0.1.12
 //
-// WINDOWS ONLY, ON PURPOSE
-// Every command below packages a Windows build — `npm run dist:win`, then
-// `electron-builder --win` into a fresh dir when the locked `win-unpacked.tmp`
-// cannot be renamed — and the fallback moves `win-unpacked` and the two Windows
-// artefacts into `release/`. macOS and Linux releases are cut by
-// `npm run dist:mac` / `npm run dist:linux` on a machine of that kind. So the
-// script refuses a non-Windows machine up front (`parsePlatform`) instead of
-// growing a `process.platform` switch that would still move `win-unpacked`.
+// CUTTING A RELEASE: WHICH MACHINE, AND WHAT IT NEEDS
+// The packaging half of a Windows release no longer needs a Windows machine:
+// `npm run dist:win:cross` (electron-builder with `signExecutable` off, so the
+// unsigned artefacts stay unsigned the way every published release is) produces
+// `*-setup.exe`, `*-portable.exe`, `latest.yml` and the blockmap on Linux too.
+// Three things have to be there for that to come out:
+//   - the Windows copy of `ocr` under `node_modules` — `npm run fetch:binaries win`
+//     answers, and a Linux `npm install` never will, since npm only installs the
+//     host platform's optionalDependency;
+//   - `wine` on `PATH`, because electron-builder runs the installer it just built
+//     once to get the uninstaller stub, and there is no switch to skip that;
+//   - the Windows Electron distribution, which on a box that cannot reach GitHub's
+//     release-asset CDN comes from `ELECTRON_MIRROR` / `ELECTRON_BUILDER_BINARIES_MIRROR`
+//     (see `使用说明.md`).
+// So the refusal below is about the missing prerequisite, not the machine's name.
+// macOS is still refused outright: `npm run dist:mac` produces a dmg only on macOS,
+// and this path moves `win-unpacked`, so a mac would get a half-port here that
+// looks cross-platform and is not.
 //
 // WHAT THIS DOES NOT DO, ON PURPOSE
 // - It does not push. The release commit stays local until a human pushes it;
@@ -17,6 +27,8 @@
 // - It does not publish a GitHub Release. The auto-update feed reads
 //   releases/latest, so installed clients see nothing until a Release exists —
 //   which is a separate, explicitly authorized step.
+// - It does not prove the installer installs. That is `docs/win-install-checklist.md`,
+//   on a Windows machine, and no amount of packaging on this box substitutes for it.
 //
 // WHY THE FALLBACK EXISTS
 // electron-builder assembles the app in <output>/win-unpacked.tmp and renames it
@@ -34,31 +46,13 @@
 // because a script that starts packaging the moment it is imported cannot be
 // called by a check.
 import { execSync, spawnSync } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 
 import { fallbackOutputDir, retryDistIntoFallback } from "./release-dist.mjs";
-import { parsePlatform, parseVersion, planRelease, runRelease, stepFailure } from "./release-guard.mjs";
+import { crossDistBlockers, parseVersion, planRelease, releaseHost, runRelease, stepFailure } from "./release-guard.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-
-// The machine comes first: a wrong version is a typo that the next run fixes,
-// while a wrong machine means not one command below can produce the artefacts
-// this path exists to produce. Refused with the two commands that do work there,
-// before the precheck and before anything on disk changes.
-const platform = parsePlatform(process.platform);
-if (!platform.ok) {
-  console.error(platform.error);
-  process.exit(2);
-}
-
-// The version decides the commit message, the output dir and every artefact's
-// name, so it is refused here rather than three steps later by `npm version`.
-const parsed = parseVersion(process.argv.slice(2));
-if (!parsed.ok) {
-  console.error(parsed.error);
-  process.exit(2);
-}
-const version = parsed.version;
 
 // The two runners `executeRelease` calls. Everything the release *decides* lives
 // in `release-guard.mjs`; what is left here is the part that can only happen on
@@ -78,6 +72,17 @@ const run = (cmd, opts = {}) => {
 };
 const capture = (cmd) => execSync(cmd, { cwd: ROOT, encoding: "utf8" });
 
+// Where electron-builder looks for the CLI the packaged app will spawn. A Linux box
+// never has it from `npm install` (npm only takes the host platform's
+// optionalDependency), which is the first blocker `crossDistBlockers` names.
+const WIN_OCR_BINARY = path.join(ROOT, "node_modules", "@alibaba-group", "ocr-win32-x64", "bin", "opencodereview.exe");
+
+const crossBlockers = () =>
+  crossDistBlockers({
+    hasWinBinary: fs.existsSync(WIN_OCR_BINARY),
+    hasWine: spawnSync("wine", ["--version"], { stdio: "ignore" }).status === 0,
+  });
+
 // Two states a release must not start from, and both of them fail silently:
 // a clean-tree check on a dirty tree ships someone's half-finished work, and a
 // detached HEAD gives every step below a place to succeed — the bump, the
@@ -86,12 +91,27 @@ const capture = (cmd) => execSync(cmd, { cwd: ROOT, encoding: "utf8" });
 // it, live in `release-guard.mjs`, where `tools/release-guard-smoke.mjs` can
 // call them one fixture at a time. This script only executes the plan — and the
 // precheck has refused before a single command is built.
-const plan = planRelease({ version, capture });
+const host = releaseHost({ platform: process.platform, blockers: process.platform === "win32" ? [] : crossBlockers() });
+if (!host.ok) {
+  console.error(host.error);
+  process.exit(2);
+}
+
+// The version decides the commit message, the output dir and every artefact's
+// name, so it is refused here rather than three steps later by `npm version`.
+const parsed = parseVersion(process.argv.slice(2));
+if (!parsed.ok) {
+  console.error(parsed.error);
+  process.exit(2);
+}
+const version = parsed.version;
+
+const plan = planRelease({ version, capture, dist: host.dist });
 if (!plan.ok) {
   console.error(`release aborted: ${plan.error}`);
   process.exit(2);
 }
-console.log(`releasing ${version} from ${plan.branch}`);
+console.log(`releasing ${version} from ${plan.branch} (${host.platform} → ${host.dist})`);
 
 const runDist = (step) => {
   console.log(`\n$ ${step.command}`);
@@ -138,5 +158,6 @@ if (!outcome.ok) {
   process.exit(outcome.code ?? 1);
 }
 
-console.log(`\nrelease ${version} packaged under release/`);
+console.log(`\nrelease ${version} packaged under release/ — the artefact set is complete, one version, and matches its own latest.yml`);
+console.log("still not answered by any of that: whether the installer installs (`docs/win-install-checklist.md`, on Windows).");
 console.log("remaining, both human acts: git push, then publish a GitHub Release if you want installed clients to update.");
