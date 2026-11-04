@@ -36,6 +36,39 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 
 ---
 
+## 上游状态（第 133 轮，2026-11-04）
+
+本轮复核：**上游没动**。`refs/heads/main` 仍是第 132 轮记下的 `36eec0c`（`git fetch upstream --tags`
+通了，`git log 36eec0c..upstream/main` 是空的），`refs/tags/v1.13.5` 仍是 `abb7abc`、npm `latest`
+仍是 `1.13.5`，三个口径一致，**pin 不动、无移植项**，对照表 5 行无需重读。
+
+本轮产品改动是 **DOD-4 的最后那一半：截断那一屏第一次被真渲染**。第 131–132 轮把「结束时的语气」
+从退出码改成从徽章派生，`tools/format-notice-smoke.mjs` 逐条钉住十种结局的措辞；第 130 轮的
+`tools/fake-provider.mjs` 能在本机 loopback 上真跑出 `summary.budget_exceeded=true`。两者之间那一屏
+从来没有人看过，所以这一轮把它接上了：`tools/e2e-fake-provider.cjs` 在真 Electron 里、对着一次性
+HOME 与一次性 Electron 档案、把假 provider 摆成一个 provider 条目、在表单里填 25000 的 token 上限、
+按下「开始审查」，然后读屏幕上写了什么——徽章的 `data-run-status`、徽章的文字、`<main>` 的正文、
+以及这一趟出现过的每一条提示语（`MutationObserver` 记，因为会消失的那一条正是最容易说错的那一条）。
+判据抽进 `tools/e2e-fake-provider-rules.cjs`，由 `tools/e2e-fake-provider-smoke.mjs`（48 条，
+`npm run audit:truncation-rules`，挂进 `audit:static`）钉住；真跑那一趟是 `npm run audit:e2e-truncation`
+（挂进 `audit:app`）。
+
+读数是这一屏：截断那一趟 `data-run-status=limited`、徽章文字「未审完」、提示语是
+`warning: 审查停在了 token 预算上限`，报告页同样是 `limited` 且带着截断条与那条标记发现；同一份
+仓库、同一个页面、把预算清空再跑一次的对照运行读回 `complete` / 完成、success 语气——**同一套规则
+两个方向都跑过**，所以「截断时它变绿」不是因为对任何一屏都绿。反向控制也真跑了一遍：把
+`statusBadge()` 里 `limited` 那一支删掉、重新构建，这一趟立刻红在「徽章写了完成」与「提示语写了完成」
+两条上（对照运行仍绿），改回即绿。
+
+`docs/PRODUCT-DOD.md` 的 DOD-4 未勾原因据此改写：缺的那一半从「截断那一屏没渲染过」变成
+「『单个提交』仍只到预览级」，勾选状态不动（勾选归 scheduler 侧）；`tools/upstream-watch.mjs` 的
+`DOD_EVIDENCE_SHAPES` 为 `tools/e2e-fake-provider.cjs` 补了三格形状（真 Electron、读
+`data-run-status`、预算真的从表单进命令行）。`tools/fake-provider-cli.mjs` 顺带能让 Electron 进程复用
+同一份 fixture：目录与 HOME 可以交进来，且 `process.execPath` 在 Electron 下会自动带上
+`ELECTRON_RUN_AS_NODE`——否则 `ocr config set` 会去启动一个窗口并死在 SUID 沙箱里。
+
+---
+
 ## 上游状态（第 132 轮，2026-11-04）
 
 本轮复核：**上游 HEAD 前进了** `d3cd23f` → `36eec0c`（`git fetch upstream --tags` 通了，`git log

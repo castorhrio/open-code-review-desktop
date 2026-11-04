@@ -1368,3 +1368,29 @@ stderr 是第 82 轮加的，`rawStderr` 是第 88 轮加的，但前者只被�
 固定 `LC_ALL=C`，`readFileAtRef` 这一侧无法主动制造；真 git 的证据改用一条本来就未被
 识别的真实措辞。
 
+
+---
+
+## 第 133 轮 — 同一个 `process.execPath`，两个方向都要说清楚
+
+第 133 轮把假 provider 的截断载荷第一次交给真 Electron 渲染（`tools/e2e-fake-provider.cjs`），
+踩到一个只在「Electron 里 spawn 子进程」时才出现的坑，两个方向各错一次，方向相反：
+
+**方向一：Electron 里 spawn 出来的 Node 脚本，会去开窗口。** `tools/fake-provider-cli.mjs`
+用 `process.execPath` 起子进程——在纯 Node 下那是 `node`，在 `tools/e2e-fake-provider.cjs`
+里那是 Electron 二进制。于是 `ocr config set` 那一步不是执行脚本，而是让 Electron 把那个
+脚本当应用入口去开窗口，然后死在 SUID 沙箱上（`the SUID sandbox helper binary ... is not
+configured correctly`）。修法是在**子进程**的环境里补 `ELECTRON_RUN_AS_NODE=1`，让同一个
+二进制按纯 Node 跑；只在 `process.versions.electron` 为真时补，纯 Node 下不多一个变量。
+
+**方向二：反过来，harness 自己不能带着这个变量。** `tools/e2e-fake-provider.mjs` 起
+Electron 之前 `delete env.ELECTRON_RUN_AS_NODE`——如果调用方的 shell 里恰好有这个变量
+（在 Electron 里跑 npm script 时很常见），Electron 会按纯 Node 跑，应用死在
+`require("electron").app` 是 `undefined` 上，而失败现场看起来像「应用坏了」，不像
+「harness 坏了」。
+
+**为什么值得入档**：这两条都不是本仓的业务逻辑，而是「同一个 `process.execPath` 在不同
+父进程下含义不同」这一件事的两面。它们不会让任何 audit 变红——写错了只会让那一趟 e2e
+以「应用起不来」的形式失败，而失败信息指向的是应用。所以只能靠注释与这份记录维持：
+`tools/fake-provider-cli.mjs` 第 102–108 行与 `tools/e2e-fake-provider.mjs` 第 42–46 行
+各自写明了原因，改那两处之前先读它们。

@@ -35,7 +35,7 @@ tag v1.13.5
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`abb7abcd5c5196fa0278dc87db85780fa269562f`（第 133 轮：`git fetch upstream --tags` 本轮通了，`refs/heads/main` 仍是 `36eec0c`（`git log 36eec0c..upstream/main` 是空的），无新内容；`refs/tags/v1.13.5` 与 npm `latest` 仍分别答 `v1.13.5` / `1.13.5`，**pin 不动**（pin 跟的是发布版本，不是默认分支）；通路：git）
+**本轮 HEAD 核对：`abb7abcd5c5196fa0278dc87db85780fa269562f`（第 134 轮：`git fetch upstream --tags` 本轮通了，`refs/heads/main` 仍是 `36eec0c`（`git log 36eec0c..upstream/main` 是空的），无新内容；`refs/tags/v1.13.5` 与 npm `latest` 仍分别答 `v1.13.5` / `1.13.5`，**pin 不动**（pin 跟的是发布版本，不是默认分支）；通路：git）
 
 ### 核到的上游 HEAD（核对的落点，不是 pin）
 
@@ -45,7 +45,7 @@ pin 说封装的是哪个**发布版本**（`v1.13.5`，二进制自报的那个
 已前进」，而那六轮的通路账一行行写着「无新内容」——一个总在响的标记等于没有标记。所以这一行的
 轮次必须与通路账末行相等（`checkedHeadViolations`），`upstream:check` 比的也是这一行，而不是 pin。
 
-**本轮核到的上游 HEAD：`36eec0c0269d0687a761fb3291ccbf427ab9336f`（第 133 轮）**
+**本轮核到的上游 HEAD：`36eec0c0269d0687a761fb3291ccbf427ab9336f`（第 134 轮）**
 
 ### 核对通路账
 
@@ -151,6 +151,7 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 | 131 | 2026-11-04 | none | **这一轮没有核对上游**：产品侧只改了结束提示语的语气（`src/lib/format.ts` 的 `completionNotice()` 改成从 `statusBadge()` 的 `id` 派生、`src/store.tsx` 补 `error` 分支、新增 `tools/format-notice-smoke.mjs`），通路上一次都没走、账也没记——本轮（第 132 轮）把这一行补上，是为了让「第 131 轮核过没有」有答案，而不是把它当成核过 | `[UPSTREAM-DEBT]` HEAD |
 | 132 | 2026-11-04 | git | **上游 HEAD 前进**：`d3cd23f` → `36eec0c`（`git fetch upstream --tags` 通了，`git log d3cd23f..upstream/main` 两个 commit：`90444ea fix(action): only rewrite the bot's own summary comment (#1560)` 改的是 `action.yml` 与 `scripts/github-actions/post-review-comments.js`（上游 CI 侧，本仓不跑 Action、不发评论），`36eec0c feat(pages): showcase supported model providers (#1862)` 是 `pages/` 官网的 provider 展示与五语文案；`refs/tags/v1.13.5` 与 npm `1.13.5` 均未变，**pin 不前进**；对照表 5 行的上游文件一个都没被碰到，**无移植项**）；本轮产品改动是徽章与提示语用同一种声音说话——`STATUS.unknown` / `skipped` 与「叫不出名字的状态」都取 warn 色，`tools/format-notice-smoke.mjs` 新增「徽章颜色就是提示语语气」的整表断言（两条反向控制）、`STATUS` 闭集断言、以及按字符走的 `stripComments`（旧正则会把 `"https://…"` 剥掉）；`DOD_EVIDENCE_SHAPES` 里 `ResultsPanel.tsx` 那一格从 `STATUS` 改成 `statusBadge`（第 131 轮之后这一屏不再出现那个词，形状表停在旧词上会让本套断言一直红） | — |
 | 133 | 2026-11-04 | git | `36eec0c` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**（`git fetch upstream --tags` 通了，`refs/heads/main` 仍是第 132 轮记下的 `36eec0c`，`git log 36eec0c..upstream/main` 是空的；对照表 5 行无需重读）；本轮产品改动是 DOD-4 的最后那一半——`tools/e2e-fake-provider.cjs` 在真 Electron 里把假 provider 的截断载荷渲染成一屏并读 `data-run-status`（截断读到 `limited` / 未审完、提示语 warning 且不写「完成」，报告页同；同一套规则的完成态对照读到 `complete` / 完成），判据由 `tools/e2e-fake-provider-rules.cjs` + `tools/e2e-fake-provider-smoke.mjs`（48 条，`audit:static`）钉住，真跑那一趟挂在 `audit:app`（`audit:e2e-truncation`）；反向控制真跑过：删掉 `statusBadge()` 的 `limited` 分支后这一趟红在「徽章写了完成」与「提示语写了完成」两条上，改回即绿 | — |
+| 134 | 2026-11-04 | git | `36eec0c` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**（`git fetch upstream --tags` 通了，`refs/heads/main` 仍是第 132 轮记下的 `36eec0c`，`git log 36eec0c..upstream/main` 是空的；`refs/tags/v1.13.5` 与 npm `latest` 未变；对照表 5 行无需重读）；本轮产品侧只做一件事——把「这一轮做不到的那一趟」写成被回答过的状态，而不是再补一处断言：`docs/measurements.md` 未验证清单里 DOD-5 / DOD-6 对应的两行各加一句带日期的「阻塞原因」（本机是 Linux，NSIS 包装层与 portable 产物在这里无法执行），`docs/PRODUCT-DOD.md` 的 DOD-5 / DOD-6 未勾原因把这一句引进来并写明「什么条件下能勾」（按 `docs/win-install-checklist.md` 第 10 节四格各留一条读数），勾选状态不动；另把第 133 轮踩到的 `ELECTRON_RUN_AS_NODE` 坑入档 `docs/hardening-log.md`（Electron 里 spawn 出来的 `ocr` 子进程若继承 `ELECTRON_RUN_AS_NODE`，`ocr config set` 会去开窗口并死在 SUID 沙箱） | — |
 
 「最近一次对照」只写**那一项最近被人工重新核对**的轮次。该列没有列出本轮，表示本轮
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
@@ -242,38 +243,37 @@ tool 结果文本**（`Error: diff not found for: …`、`Diffs exist for: …`�
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。搬完这里只留一句
    指针——「本文件只留当前一轮」不是约定而是断言（`previousRoundPointerViolations`）。
 
-## 当前状态（第 133 轮，2026-11-04）
+## 当前状态（第 134 轮，2026-11-04）
 
 本轮复核：**上游没动**。`refs/heads/main` 仍是第 132 轮记下的 `36eec0c`（`git fetch upstream --tags`
 通了，`git log 36eec0c..upstream/main` 是空的），`refs/tags/v1.13.5` 仍是 `abb7abc`、npm `latest`
 仍是 `1.13.5`，三个口径一致，**pin 不动、无移植项**，对照表 5 行无需重读。
 
-本轮产品改动是 **DOD-4 的最后那一半：截断那一屏第一次被真渲染**。第 131–132 轮把「结束时的语气」
-从退出码改成从徽章派生，`tools/format-notice-smoke.mjs` 逐条钉住十种结局的措辞；第 130 轮的
-`tools/fake-provider.mjs` 能在本机 loopback 上真跑出 `summary.budget_exceeded=true`。两者之间那一屏
-从来没有人看过，所以这一轮把它接上了：`tools/e2e-fake-provider.cjs` 在真 Electron 里、对着一次性
-HOME 与一次性 Electron 档案、把假 provider 摆成一个 provider 条目、在表单里填 25000 的 token 上限、
-按下「开始审查」，然后读屏幕上写了什么——徽章的 `data-run-status`、徽章的文字、`<main>` 的正文、
-以及这一趟出现过的每一条提示语（`MutationObserver` 记，因为会消失的那一条正是最容易说错的那一条）。
-判据抽进 `tools/e2e-fake-provider-rules.cjs`，由 `tools/e2e-fake-provider-smoke.mjs`（48 条，
-`npm run audit:truncation-rules`，挂进 `audit:static`）钉住；真跑那一趟是 `npm run audit:e2e-truncation`
-（挂进 `audit:app`）。
+本轮产品侧只做一件事，而且**不是**再补一处断言：**把「这一轮做不到的那一趟」写成被回答过的状态。**
 
-读数是这一屏：截断那一趟 `data-run-status=limited`、徽章文字「未审完」、提示语是
-`warning: 审查停在了 token 预算上限`，报告页同样是 `limited` 且带着截断条与那条标记发现；同一份
-仓库、同一个页面、把预算清空再跑一次的对照运行读回 `complete` / 完成、success 语气——**同一套规则
-两个方向都跑过**，所以「截断时它变绿」不是因为对任何一屏都绿。反向控制也真跑了一遍：把
-`statusBadge()` 里 `limited` 那一支删掉、重新构建，这一趟立刻红在「徽章写了完成」与「提示语写了完成」
-两条上（对照运行仍绿），改回即绿。
+第 122–133 轮共 12 轮，其中 11 轮是断言、清单与 DoD 的自我完备化——这条路线本身是对的（第 133 轮
+第一次让真 Electron 渲染出截断那一屏，是本仓质量最扎实的一轮之一），但它已经走到边际价值极低的地方：
+函数级 smoke、e2e 判据、真跑三层都在证明同一份已被人写下的实现是对的。而六条 DoD 里唯一没被任何
+断言覆盖的两条——DOD-5（装得上）与 DOD-6（装好的那份里 Key 不在程序目录）——缺的**不是代码**，是
+一次 Windows x64 上的真机安装；这台机器是 Linux x64，NSIS 包装层与 portable 产物在这里根本执行不了。
 
-`docs/PRODUCT-DOD.md` 的 DOD-4 未勾原因据此改写：缺的那一半从「截断那一屏没渲染过」变成
-「『单个提交』仍只到预览级」，勾选状态不动（勾选归 scheduler 侧）；`tools/upstream-watch.mjs` 的
-`DOD_EVIDENCE_SHAPES` 为 `tools/e2e-fake-provider.cjs` 补了三格形状（真 Electron、读
-`data-run-status`、预算真的从表单进命令行）。`tools/fake-provider-cli.mjs` 顺带能让 Electron 进程复用
-同一份 fixture：目录与 HOME 可以交进来，且 `process.execPath` 在 Electron 下会自动带上
-`ELECTRON_RUN_AS_NODE`——否则 `ocr config set` 会去启动一个窗口并死在 SUID 沙箱里。
+所以本轮不写新 e2e、不写新断言，只把这件事写成两处可读的状态：
 
-上一轮（第 132 轮）的正文见 [`upstream-history.md`](upstream-history.md#上游状态第-132-轮2026-11-04)，归档之后本文件不留第二份。
+- `docs/measurements.md` 未验证清单里 DOD-5 / DOD-6 对应的两行（「安装版之后的首启链路」与「装好之后
+  Key 落在哪」）各加一句带日期的**阻塞原因**：本机是 Linux x64，NSIS 包装层与 portable 产物在这里无法
+  执行——这一行不是「还没人看」，是「这台机器做不到」；能勾的条件只有一条，就是有人在 Windows x64 上
+  按 `docs/win-install-checklist.md` 第 10 节走完四格并把读数贴回本行。
+- `docs/PRODUCT-DOD.md` 的 DOD-5 / DOD-6 未勾原因把这一句引进来，并写明「缺的是一次真机上的目录搜索，
+  不是又一条断言」；勾选状态不动（勾选归 scheduler 侧）。
+
+另把第 133 轮踩到的那个坑入档 `docs/hardening-log.md`：同一个 `process.execPath` 在 Electron 与纯 Node
+下含义不同，两个方向各错一次——Electron 里 spawn 出来的 Node 脚本要补 `ELECTRON_RUN_AS_NODE=1`（否则
+`ocr config set` 会去开窗口并死在 SUID 沙箱），而 harness 自己起 Electron 之前必须把这个变量删掉（否则
+应用死在 `require("electron").app` 是 `undefined` 上，失败现场看起来像应用坏了）。这两条不会让任何
+audit 变红，只能靠注释与这份记录维持。
+
+上一轮（第 133 轮）的正文见 [`upstream-history.md`](upstream-history.md#上游状态第-133-轮2026-11-04)，归档之后本文件不留第二份。
+
 
 ### 参数面：`ocr review --help` / `ocr scan --help` 与本仓真的拼出的每一行
 
