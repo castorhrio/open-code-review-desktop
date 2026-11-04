@@ -25,6 +25,8 @@ import {
   claimsSummaryViolations,
   dodCheckboxOf,
   pastedReading,
+  measuredTableRows,
+  measurementTableViolations,
   quotedRowCounts,
   readClaimsSummary,
   recordedCountViolations,
@@ -452,7 +454,201 @@ const lineOf = (doc, name) => {
   );
 }
 
-/* ---- 8. 仓库本身，而不是夹具 ---- */
+/* ---- 8. 实测表：一张表，还是一堆段落 ----
+ *
+ * `docs/measurements.md` 上半张表（`# 实测值`）是「跑过什么」的唯一记录。第 121–124
+ * 轮各加一行、每行前留一个空行，Markdown 于是把它渲染成五张表：只有第一张有表头，
+ * 后四段是带竖线的普通段落——而脚本按「`|` 开头」照读，行一个不少，所以「表还在」
+ * 与「表渲染得出来」在门禁里是同一句话。这一节把两者分开：每格只改一个事实（空行、
+ * 列数、正文行、第二个表头、表头改名、表头换列、缺分隔行、标题改名），要求点名文件
+ * 与行号；最后一格看仓库本身，问的是这张表的行号是否连续——连续就是没有被切断。
+ */
+{
+  const HEADER = "| 日期 | 场景 | 实测 | 来源 |";
+  const SEPARATOR = "| --- | --- | --- | --- |";
+  const ROW_A = "| 2026-11-04 | 某次跑 | 绿 | 命令 |";
+  const ROW_B = "| 2026-11-04 | 又一次 | 也绿 | 命令 |";
+  const measuredDoc = (table) =>
+    [
+      "# 实测值",
+      "",
+      "说明文字。",
+      "",
+      ...table,
+      "",
+      "## 未验证清单（截至 2026-11-04）",
+      "",
+      "| 项 | 归属 | 为什么没验 | 下次要验的触发条件 |",
+      "| --- | --- | --- | --- |",
+      ROW_FIRST_RUN,
+      "",
+    ].join("\n");
+  const lineOfText = (doc, text) => {
+    const index = String(doc).split(/\r?\n/).findIndex((line) => line === text);
+    return index === -1 ? null : index + 1;
+  };
+  const violationsOfTable = (doc, path = MEASUREMENTS_DOC) => measurementTableViolations({ measurementsDoc: doc, measurementsPath: path });
+
+  const base = measuredDoc([HEADER, SEPARATOR, ROW_A, ROW_B]);
+  check(
+    "基线：一张表两行读数，绿（否则下面每一格反向控制都证明不了什么）",
+    violationsOfTable(base).length === 0,
+    violationsOfTable(base).join("；")
+  );
+  check(
+    "前提：读得出表头之外有几条读数（分隔行不算，所以 3 = 表头 + 2 行）",
+    measuredTableRows(base).length === 3,
+    JSON.stringify(measuredTableRows(base).map((row) => row.cells[0]))
+  );
+
+  // 1. 空行断表——第 121–124 轮留下的就是这一格。
+  {
+    const broken = measuredDoc([HEADER, SEPARATOR, ROW_A, "", ROW_B]);
+    const violations = violationsOfTable(broken);
+    const blankLine = lineOfText(broken, ROW_B) - 1;
+    const lines = broken.split(/\r?\n/);
+    check(
+      "表中间插一个空行：点名文件与那个空行的行号，并说清「断成了两张」（markdown 会在这里结束表格）",
+      violations.length === 1 &&
+        violations[0].includes(MEASUREMENTS_DOC) &&
+        violations[0].includes(`第 ${blankLine} 行`) &&
+        lines[blankLine - 1] === "" &&
+        violations[0].includes("断成了两张"),
+      violations.join("；") || "没有违规"
+    );
+  }
+
+  // 2. 列数少一格。
+  {
+    const short = "| 2026-11-04 | 某次跑 | 绿 |";
+    const broken = measuredDoc([HEADER, SEPARATOR, ROW_A, short, ROW_B]);
+    const violations = violationsOfTable(broken);
+    const want = lineOfText(broken, short);
+    check(
+      "少写一列：点名那一行、两个列数，并给出补法（空着写「—」，不要省略）",
+      violations.length === 1 &&
+        violations[0].includes(`第 ${want} 行`) &&
+        violations[0].includes("3 列") &&
+        violations[0].includes("4 列") &&
+        violations[0].includes("不要省略"),
+      violations.join("；") || "没有违规"
+    );
+  }
+
+  // 3. 一行正文夹在表中间。
+  {
+    const prose = "这一行是后来补的说明。";
+    const broken = measuredDoc([HEADER, SEPARATOR, ROW_A, prose, ROW_B]);
+    const violations = violationsOfTable(broken);
+    const want = lineOfText(broken, prose);
+    check(
+      "正文行夹在表中间：点名那一行，并说清 markdown 会在这里结束表格",
+      violations.length === 1 &&
+        violations[0].includes(`第 ${want} 行`) &&
+        violations[0].includes("不是表格行") &&
+        violations[0].includes("结束表格"),
+      violations.join("；") || "没有违规"
+    );
+  }
+
+  // 4. 第二个表头 + 分隔行（这就是「两张表」的完整形状）。
+  {
+    const broken = measuredDoc([HEADER, SEPARATOR, ROW_A, HEADER, SEPARATOR, ROW_B]);
+    const violations = violationsOfTable(broken);
+    const firstHeader = lineOfText(broken, HEADER);
+    check(
+      "表中间又起了一个表头 + 分隔行：两句各自点名行号（第二次出现的表头、第二行分隔行），且不点名第一行表头",
+      violations.length === 2 &&
+        violations.some((violation) => violation.includes("又出现了一次表头")) &&
+        violations.some((violation) => violation.includes("又是一行表头分隔行")) &&
+        violations.every((violation) => /第 \d+ 行/.test(violation)) &&
+        violations.every((violation) => !violation.includes(`第 ${firstHeader} 行`)),
+      violations.join("；") || "没有违规"
+    );
+  }
+
+  // 5. 表头被改名（这一节就找不到表头了）。
+  {
+    const broken = measuredDoc(["| 时间 | 场景 | 实测 | 来源 |", SEPARATOR, ROW_A]);
+    const violations = violationsOfTable(broken);
+    check(
+      "表头改名（「日期」→「时间」）：点名「没有表头」，而不是逐行报列数",
+      violations.length === 1 && violations[0].includes("没有表头") && violations[0].includes(MEASUREMENTS_DOC),
+      violations.join("；") || "没有违规"
+    );
+  }
+
+  // 6. 表头换列（还是四列，但顺序不是那四个问题）。
+  {
+    const swapped = "| 日期 | 实测 | 场景 | 来源 |";
+    const broken = measuredDoc([swapped, SEPARATOR, ROW_A]);
+    const violations = violationsOfTable(broken);
+    const want = lineOfText(broken, swapped);
+    check(
+      "表头换列：点名那一行与应有的四个列名",
+      violations.length === 1 &&
+        violations[0].includes(`第 ${want} 行`) &&
+        violations[0].includes("应为") &&
+        violations[0].includes("日期 | 场景 | 实测 | 来源"),
+      violations.join("；") || "没有违规"
+    );
+  }
+
+  // 7. 分隔行丢了。
+  {
+    const broken = measuredDoc([HEADER, ROW_A, ROW_B]);
+    const violations = violationsOfTable(broken);
+    check(
+      "表头下面没有分隔行：点名那一行，并说清「不把这一组行当表」",
+      violations.length === 1 && violations[0].includes("分隔行") && violations[0].includes("不把这一组行当表"),
+      violations.join("；") || "没有违规"
+    );
+  }
+
+  // 8. 标题被改名 / 整节不见了。
+  {
+    const broken = measuredDoc([HEADER, SEPARATOR, ROW_A]).replace("# 实测值", "# 实测量");
+    const violations = violationsOfTable(broken);
+    check(
+      "「# 实测值」标题被改名：点名路径（这一条靠标题定位那一节）",
+      violations.length === 1 && violations[0].includes(MEASUREMENTS_DOC) && violations[0].includes("# 实测值"),
+      violations.join("；") || "没有违规"
+    );
+  }
+  check("文档整个空掉：也走「没有这一节」那句，而不是静默通过", violationsOfTable("").length === 1, violationsOfTable("").join("；") || "没有违规");
+
+  // 9. 仓库本身：这张表现在必须是连续的、且行号一个不跳。
+  {
+    const measurements = read(MEASUREMENTS_DOC) || "";
+    const violations = measurementTableViolations({ measurementsDoc: measurements });
+    check("仓库里：实测表是一张表，没有空行切断、没有列数不符（正向）", violations.length === 0, violations.join("；") || "没有违规");
+    const rows = measuredTableRows(measurements);
+    // 表头与第一条读数之间隔着那行分隔行（`measuredTableRows` 不把分隔行算成读数），
+    // 除此之外每两条相邻读数的行号必须差 1——差 2 就是中间夹了一个空行。
+    const contiguous = rows.every((row, index) => {
+      if (index === 0) return true;
+      if (index === 1) return row.line === rows[0].line + 2;
+      return row.line === rows[index - 1].line + 1;
+    });
+    check(
+      "仓库里：实测表的读数行号连续（只在表头与第一条之间隔那一行分隔行），且至少 16 行（表头 + 15 条读数）",
+      rows.length >= 16 && contiguous,
+      JSON.stringify({
+        rows: rows.length,
+        contiguous,
+        first: rows[0] && rows[0].line,
+        last: rows.length ? rows[rows.length - 1].line : null,
+      })
+    );
+    check(
+      "仓库里：每一条读数都是四列（四个问题各有一格）",
+      rows.every((row) => row.cells.length === 4),
+      JSON.stringify(rows.filter((row) => row.cells.length !== 4).map((row) => ({ line: row.line, cells: row.cells.length })))
+    );
+  }
+}
+
+/* ---- 9. 仓库本身，而不是夹具 ---- */
 
 {
   const measurements = read(MEASUREMENTS_DOC) || "";
@@ -506,7 +702,7 @@ const lineOf = (doc, name) => {
   );
 }
 
-/* ---- 9. 接线 ---- */
+/* ---- 10. 接线 ---- */
 
 {
   const pkg = JSON.parse(read("package.json"));

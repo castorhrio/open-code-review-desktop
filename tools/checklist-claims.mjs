@@ -27,6 +27,13 @@
 // 一样能在浅克隆里跑。反向控制在 `tools/checklist-claims-smoke.mjs`：每一格只改一个事实，
 // 要求点名文件与行号。
 //
+// 第四件事是同一份文件里的另一半（第 125 轮）：**实测表本身有没有被空行切断**。
+// `docs/measurements.md` 有两张表，上面那张是「跑过什么」，下面那张是「没跑过什么」；
+// 前三件事核的是下面那张与人读的清单之间的缝，上面那张却只有「行读得出来」这一层
+// 被用过——第 121–124 轮各加一行、每行前留一个空行，Markdown 于是渲染成五张表，
+// 后四行是带竖线的段落，而脚本读到的行一个不少。断言因此问渲染形状而不是行数，
+// 细节写在 `measurementTableViolations` 上面。
+//
 // 两个读法上的约定，写在这里因为规则靠它们区分「这一行在说什么」：
 //
 //   - **「第 N 步」与「第 N 节」不是一回事。** 触发条件里写「按清单第 5 步去验」是
@@ -285,6 +292,151 @@ export const recordedCountViolations = ({ measurementsDoc, rows = [], checklistP
 };
 
 /**
+ * `docs/measurements.md` 的实测表：`# 实测值` 这一节里那张表，一段一张。
+ *
+ * 这张表是「跑过什么」的唯一一份记录，也是本仓唯一一张**会被外面的人读**的表：
+ * README 指着它，读者按它的行核对。第 121–124 轮各自往表里加了一行，但每行前面
+ * 都留了一个空行——于是 Markdown 把它渲染成五张表：只有第一张有表头，后面四段是
+ * 带竖线的**普通段落**。脚本读它时按「`|` 开头的行」照读，行都在，所以这件事在
+ * 门禁里看不见：表格有两份形状（渲染出来的、脚本读的），只有一份被核对过。这正
+ * 是第 119 轮收过的「同一份读数、两处各解析一次」那一类病的残留。
+ *
+ * 所以断言问的是**渲染形状**，四件事：
+ *   1. `# 实测值` 这一节有一张表，表头逐字是 `| 日期 | 场景 | 实测 | 来源 |`；
+ *   2. 表头下面紧跟分隔行（`| --- | …`），且整张表只有这一行分隔行；
+ *   3. 从表头到最后一行表格行之间**没有空行、没有不是表格行的行**——空行把表切成
+ *      两张，第二张没有表头；
+ *   4. 每一行的列数与表头相等——列数不一致会渲染成错位的格子，或者干脆不成表。
+ *
+ * 只读文档正文，不读磁盘、不读 git，所以浅克隆里也能跑。反向控制在
+ * `tools/checklist-claims-smoke.mjs`：每格只改一个事实，要求点名文件与行号。
+ */
+export const MEASURED_TABLE_HEADER = Object.freeze(["日期", "场景", "实测", "来源"]);
+
+const measuredTableSection = (doc) => {
+  const lines = String(doc == null ? "" : doc).split(/\r?\n/);
+  const start = lines.findIndex((line) => /^#\s*实测值/.test(line.trim()));
+  if (start === -1) return null;
+  let end = lines.length;
+  for (let index = start + 1; index < lines.length; index += 1) {
+    if (/^##\s/.test(lines[index].trim())) {
+      end = index;
+      break;
+    }
+  }
+  return { lines, start, end };
+};
+
+/** 实测表的行（1-based 行号 + 单元格），分隔行不算——它不是一个读数。
+ *  第一行是表头，所以「有几条实测」= `length - 1`。 */
+export const measuredTableRows = (doc) => {
+  const section = measuredTableSection(doc);
+  if (section === null) return [];
+  const rows = [];
+  for (let index = section.start + 1; index < section.end; index += 1) {
+    const trimmed = section.lines[index].trim();
+    if (!trimmed.startsWith("|")) continue;
+    const cells = cellsOf(trimmed);
+    if (isSeparator(cells)) continue;
+    rows.push({ line: index + 1, cells });
+  }
+  return rows;
+};
+
+export const measurementTableViolations = ({ measurementsDoc, measurementsPath = MEASUREMENTS_DOC }) => {
+  const section = measuredTableSection(measurementsDoc);
+  if (section === null) {
+    return [
+      `${measurementsPath} 里找不到「# 实测值」这一节：这张表是「跑过什么」的唯一记录，` +
+        "标题被改名或删掉时，下面几条都无从问起（形状：`# 实测值`）",
+    ];
+  }
+  const { lines, start, end } = section;
+  const at = (index) => index + 1;
+  const isTableLine = (line) => line.trim().startsWith("|");
+
+  // 表头是这一节里第一行以「日期」开头的表格行。它若不是（该节根本没有表，
+  // 或者表头被换掉），下面那句话要说清「没有表头」，而不是逐行报列数。
+  let headerIndex = -1;
+  for (let index = start + 1; index < end; index += 1) {
+    if (!isTableLine(lines[index])) continue;
+    if (cellsOf(lines[index].trim())[0] === MEASURED_TABLE_HEADER[0]) headerIndex = index;
+    break;
+  }
+  if (headerIndex === -1) {
+    return [
+      `${measurementsPath} 第 ${at(start)} 行起的「# 实测值」这一节里没有表头（形状：\`| 日期 | 场景 | 实测 | 来源 |\`）：` +
+        "没有表头，这张表渲染出来只是一段带竖线的文字——读的人看到的不是表格",
+    ];
+  }
+
+  const violations = [];
+  const headerCells = cellsOf(lines[headerIndex].trim());
+  if (headerCells.join("|") !== MEASURED_TABLE_HEADER.join("|")) {
+    violations.push(
+      `${measurementsPath} 第 ${at(headerIndex)} 行的表头是「${headerCells.join(" | ")}」，` +
+        `应为「${MEASURED_TABLE_HEADER.join(" | ")}」：这四列是这张表的四个问题（何时、什么、多少、怎么来的），` +
+        "改掉一列，下面的行就与它对不上"
+    );
+  }
+  const separatorIndex = headerIndex + 1;
+  const separatorOk =
+    separatorIndex < end && isTableLine(lines[separatorIndex]) && isSeparator(cellsOf(lines[separatorIndex].trim()));
+  if (!separatorOk) {
+    violations.push(
+      `${measurementsPath} 第 ${at(separatorIndex)} 行应为表头分隔行（\`| --- | --- | --- | --- |\`）：` +
+        "缺了它，markdown 不把这一组行当表——连表头一起变成段落"
+    );
+  }
+
+  // 最后一行表格行：它之后的空行与正文属于这一节，不属于表。
+  let lastRow = headerIndex;
+  for (let index = headerIndex + 1; index < end; index += 1) if (isTableLine(lines[index])) lastRow = index;
+
+  for (let index = headerIndex + 1; index <= lastRow; index += 1) {
+    const trimmed = lines[index].trim();
+    if (trimmed === "") {
+      violations.push(
+        `${measurementsPath} 第 ${at(index)} 行是空行，把实测表断成了两张：后面那几行因此没有表头，` +
+          "渲染出来是带竖线的普通段落——脚本仍按「`|` 开头」把它们读成行，所以这件事只在人眼前才看得见"
+      );
+      continue;
+    }
+    if (!trimmed.startsWith("|") || !trimmed.endsWith("|")) {
+      violations.push(
+        `${measurementsPath} 第 ${at(index)} 行夹在实测表里，却不是表格行（首尾都要是 \`|\`）：` +
+          "一行正文落在表中间，markdown 会在这里结束表格，后面的行重新变成段落"
+      );
+      continue;
+    }
+    const cells = cellsOf(trimmed);
+    if (isSeparator(cells)) {
+      if (index !== separatorIndex) {
+        violations.push(
+          `${measurementsPath} 第 ${at(index)} 行又是一行表头分隔行：一张表只该有一行——` +
+            "出现第二行，说明这张表被切成了两张（第二张没有表头，渲染出来是段落）"
+        );
+      }
+      continue;
+    }
+    if (index !== headerIndex && cells[0] === MEASURED_TABLE_HEADER[0]) {
+      violations.push(
+        `${measurementsPath} 第 ${at(index)} 行又出现了一次表头（「${MEASURED_TABLE_HEADER[0]}」）：` +
+          "表头在实测表里只该有一次，第二次出现意味着这里被断成了另一张表"
+      );
+      continue;
+    }
+    if (cells.length !== headerCells.length) {
+      violations.push(
+        `${measurementsPath} 第 ${at(index)} 行有 ${cells.length} 列，而表头是 ${headerCells.length} 列：` +
+          "列数不一致时这一行会渲染成错位的格子，或者干脆不成为表格的一部分——" +
+          "四列各回答一个问题，空着的那格写「—」，不要省略"
+      );
+    }
+  }
+  return violations;
+};
+/**
  * 三件事的违规清单。空数组是唯一可接受的结果。
  *
  * 参数都是文档正文（字符串），不是路径：这样反向控制可以只改一个事实，而不必在
@@ -445,9 +597,15 @@ if (isEntryPoint) {
     ...claimsSummaryViolations({ line: summaryLine, status, claimRows: claims, rows }),
     ...recordedCountViolations({ measurementsDoc, rows }),
     ...checklistClaimViolations({ measurementsDoc, checklistDoc, dodDoc }),
+    // 同一份文件的上半张表：读得出的行数不算数，渲染得出来的形状才算。
+    ...measurementTableViolations({ measurementsDoc }),
   ];
 
+  const measuredRows = measuredTableRows(measurementsDoc);
   console.log(summaryLine);
+  console.log(
+    `${MEASUREMENTS_DOC} 的实测表：${Math.max(0, measuredRows.length - 1)} 条读数，表头 + 分隔行之外一段到底（被空行切断时下面会点名行号）`
+  );
   for (const violation of violations) console.log(`FAIL    ${violation}`);
   if (violations.length) {
     console.log(

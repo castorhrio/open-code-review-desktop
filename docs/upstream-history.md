@@ -36,6 +36,16 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 
 ---
 
+## 上游状态（第 124 轮，2026-11-04）
+
+那个 commit 只碰规则数据：新增 `internal/config/rules/rule_docs/csharp.md`、`internal/config/rules/system_rules.json` 加一行并补测试，另 5 个是 `pages/` 下的多语审查规则文档。对照表 5 行的上游文件一个都没被碰到，所以它对本仓的影响是「下一次发版时多一门语言的规则」，不是调用面变更；等它进下一个发布时再按那 5 行重读一遍。
+
+本轮产品侧只做一件事：**把两处「读者第一眼会读错」的地方改对。** 第一处是 README 的「已验证行为」里那条「安装版能启动并调用到内置二进制」——它验的是 `release/linux-unpacked` 里的可执行文件（`tools/e2e-packaged.mjs`），而发布面只有 Windows 的 `*-setup.exe`，不标平台就等于把脚本验的平台说成发布平台；两份 README 的对应条目因此各补一句平台与脚本名。
+
+第二处是安装段：`v0.1.13` 安装包里带的是 `ocr 1.13.0`，而源码树 pin 在 `1.13.5`。这个差距在 `docs/measurements.md` 里早有登记（`npm run audit:release-pin` 从发布 tag 的 `package.json` 与 lockfile 读出来的），但下载安装包的人看不到那一行；两份 README 的安装段因此各补一句，并写明两个数字是脚本从 tag 里读出来的、不是照句子抄的。
+
+Windows x64 上按 `docs/win-install-checklist.md` 装一次 `v0.1.13` 仍是 DOD-5 / DOD-6 缺的那一趟，本轮没有推进它：这台机器是 Linux，跑不了 NSIS 包装层，而「怎么执行这一趟」已经写过三轮，再写一遍不会多出一条读数。
+
 ## 上游状态（第 123 轮，2026-11-04）
 
 本轮复核：**上游没动。** `npm run upstream:check` 走 api 通路答上 `refs/heads/main` 仍是第 121 轮记下的 `8041473`（`git ls-remote` 超时 124），`/releases/latest` 与 npm `latest` 仍分别答 `v1.13.5` / `1.13.5`——三个口径一致，**pin 不动**、对照表 5 行无需重读、**无移植项**。
