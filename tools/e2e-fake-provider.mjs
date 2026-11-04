@@ -54,7 +54,7 @@ function runOnce(extraArgs) {
     const child = spawn(electronPath, args, { cwd: ROOT, env, stdio: ["ignore", "inherit", "inherit"] });
     // The harness has its own watchdog; a process killed before it fires must not
     // take the whole gate down with it.
-    const killer = setTimeout(() => child.kill(), 420000);
+    const killer = setTimeout(() => child.kill(), 480000);
     const done = (value) => {
       clearTimeout(killer);
       try {
@@ -127,7 +127,7 @@ const judge = (name, fn) => {
   });
 };
 
-for (const mode of ["truncated", "complete"]) {
+for (const mode of ["truncated", "complete", "commit"]) {
   const missing = RULES.missingSteps(steps, mode);
   results.push({
     name: `the ${mode} pass reported every step it is required to report`,
@@ -154,6 +154,19 @@ judge("the same rules, pointed at the finished control run, still say 完成", (
     : ["the control run's results screen was never captured, so the truncation rule above has no control"]
 );
 
+// 四范围里最后那一格：`单个提交` 的运行级证据。判据读的是命令行（`--commit <sha>` 真的
+// 进了 spawn 参数）与屏幕（范围提示、徽章、发现），两处缺一处都红。
+judge("the 单个提交 scope really ran with --commit <sha> on the command line", () =>
+  views.commit
+    ? RULES.commitScopeViolations({
+        view: views.commit,
+        scopeScreen: facts.commit?.scopeScreen,
+        spawnArgs: facts.commit?.spawnArgs,
+        sha: facts.commit?.sha,
+      })
+    : ["the 单个提交 run's results screen was never captured — the harness did not get that far"]
+);
+
 for (const r of results) console.log(`${r.ok ? "ok      " : "FAIL    "} ${r.name}${r.detail ? `  <- ${r.detail}` : ""}`);
 
 /* ---- the readings, so the next person does not have to re-run this to quote them ---- */
@@ -169,6 +182,13 @@ console.log(
   `budget typed=${JSON.stringify(facts.truncated?.typedBudget)} reached the CLI as --max-tokens-budget=${JSON.stringify(
     (facts.truncated?.spawnArgs || []).flatMap((args) => (args.includes("--max-tokens-budget") ? args[args.indexOf("--max-tokens-budget") + 1] : []))
   )}; provider requests=${facts.truncated?.providerRequests ?? "?"} (truncated) / ${facts.complete?.providerRequests ?? "?"} (control)`
+);
+console.log(
+  `单个提交 data-run-status=${JSON.stringify(views.commit?.status)} label=${JSON.stringify(views.commit?.label)} in ${ms(
+    facts.commit?.ms
+  )}; typed=${JSON.stringify(facts.commit?.typed)} reached the CLI as --commit=${JSON.stringify(
+    (facts.commit?.spawnArgs || []).flatMap((args) => (args.includes("--commit") ? args[args.indexOf("--commit") + 1] : []))
+  )}`
 );
 
 const failed = results.filter((r) => !r.ok);

@@ -35,6 +35,15 @@
 // finished one, because the finished one really does say 完成 and really has no
 // truncation band. Two runs, one rule set, two answers.
 //
+// Since round 135 there is a **third** pass, and it is about a different promise:
+// the `单个提交` scope. It was the last of the four scopes with only preview-level
+// evidence — the preview proves the CLI can resolve the scope, not that pressing
+// 开始审查 puts `--commit <sha>` on the command line. So this pass chooses the
+// scope, types the fixture's `topic` commit, presses the button, and reads back
+// the badge and the spawn log. The judgement lives in
+// `tools/e2e-fake-provider-rules.cjs` (`commitScopeViolations`), which is what
+// makes "the command line really carried that SHA" a rule rather than a claim.
+//
 // The judgements live in `tools/e2e-fake-provider-rules.cjs` (pure, exercised by
 // `tools/e2e-fake-provider-smoke.mjs`); this file only collects the facts they
 // judge and writes them to the report path `tools/e2e-fake-provider.mjs` hands
@@ -134,12 +143,12 @@ const finish = () => {
   app.exit(0);
 };
 
-// Two real runs (one truncated, one not) plus a git fixture and a bundle load fit
-// inside this; a hang does not.
+// Three real runs (truncated, control, 单个提交) plus a git fixture and a bundle
+// load fit inside this; a hang does not.
 setTimeout(() => {
   check("the truncation flow finished within the watchdog", false, "the harness hung and was stopped; whatever it was waiting for never arrived");
   finish();
-}, 300000).unref?.();
+}, 360000).unref?.();
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -216,6 +225,9 @@ const pressButton = (win, text) => press(win, mainButton(text));
 const pressNav = (win, label) => press(win, `document.querySelector('button[aria-label=${JSON.stringify(label)}]')`);
 
 const BUDGET_FIELD = 'main input[placeholder="0 = 不限"]';
+/** 单个提交那一趟要填的那个格子。占位符是 `ReviewPanel` 里 `RefInput` 的 `placeholder`，
+ * 与「基线 (from)」「目标 (to)」两个格子靠它区分——三个 diff 范围共用同一个组件。 */
+const COMMIT_FIELD = 'main input[placeholder="abc1234"]';
 
 /** The run button's label and whether it can be pressed. */
 const runButtonState = (win) =>
@@ -332,6 +344,79 @@ async function runWithBudget(win, { budget, label, timeout = 180000 }) {
   const view = await captureView(win);
 
   return { view, ms, spawned: runsSpawned().slice(before), typed, effective, opened };
+}
+
+/**
+ * 第三趟：`单个提交` 范围，走的是同一个人会走的那几步——切范围、填提交号、按开始审查。
+ *
+ * 为什么单独一趟：四范围里只有它到第 134 轮为止仍停在预览级（工作区、分支对比、全量扫描
+ * 都有运行级证据）。预览只证明「CLI 能算出这个范围有哪些文件」，不证明「按下开始审查之后
+ * 命令行里真的带着 `--commit <sha>`」——而后者才是 README 第一条承诺「Four scopes」的意思。
+ *
+ * 与 `runWithBudget` 分开写而不是加参数，是因为两者的前置动作不同：那一趟开参数抽屉填预算，
+ * 这一趟在「审查范围」里切范围并填提交号。合成一个函数会让「预算」与「范围」两个概念在同一
+ * 段代码里互相借道，读的人分不清哪一步属于哪一趟。
+ */
+async function runCommitScope(win, { sha, label, timeout = 180000 }) {
+  await pressNav(win, "审查");
+  const picked = await waitFor(
+    win,
+    `(() => {
+       const b = [...document.querySelectorAll("main button")].find((x) => (x.textContent || "").trim() === "单个提交");
+       return b ? "scope" : null;
+     })()`,
+    { label: `${label}: the 单个提交 scope button`, timeout: 60000 }
+  )
+    .then(() => pressButton(win, "单个提交"))
+    .catch(() => null);
+  if (!picked) throw new Error(`${label}: 单个提交 was not there to press, so this scope could not be chosen`);
+
+  const typed = await waitFor(win, `Boolean(document.querySelector(${JSON.stringify(COMMIT_FIELD)}))`, {
+    label: `${label}: the commit field`,
+    timeout: 15000,
+  })
+    .then(() => typeInto(win, COMMIT_FIELD, sha))
+    .catch(() => null);
+  if (typed === null) throw new Error(`${label}: choosing 单个提交 never showed the commit field`);
+
+  // 切范围会让预览重跑一次；按钮只在范围能算出来时可按，所以等它可按就是等预览落地。
+  const ready = await waitFor(
+    win,
+    `(() => {
+       const b = [...document.querySelectorAll("main button")].find((x) => (x.textContent || "").trim() === "开始审查");
+       return b && !b.disabled ? "ready" : null;
+     })()`,
+    { label: `${label}: 开始审查 to be pressable`, timeout: 60000 }
+  ).catch(() => null);
+  if (!ready) {
+    const screen = await evalJs(win, MAIN_TEXT).catch(() => "");
+    throw new Error(`${label}: 开始审查 never became pressable for the commit scope. Screen said:\n${String(screen).slice(0, 700)}`);
+  }
+
+  // 按下之前的那一屏：范围提示（`ocr review --commit SHA`）只在这里，运行结束后
+  // 结果页会把它换掉。所以「范围真的切过去了」这条事实必须在按之前读，而不是事后补。
+  const scopeScreen = await evalJs(win, MAIN_TEXT).catch(() => "");
+
+  const before = runsSpawned().length;
+  const pressed = await pressButton(win, "开始审查");
+  if (!pressed) throw new Error(`${label}: 开始审查 was not there to press`);
+
+  const started = Date.now();
+  await waitFor(
+    win,
+    `(() => {
+       const badge = document.querySelector("[data-run-status]");
+       const main = document.querySelector("main");
+       if (!badge || !main) return null;
+       return main.innerText.includes(${JSON.stringify(RULES.FINDING_MARKER)}) ? "results" : null;
+     })()`,
+    { label: `${label}: the results screen with the published finding`, timeout }
+  );
+  const ms = Date.now() - started;
+
+  await sleep(900);
+  const view = await captureView(win);
+  return { view, ms, spawned: runsSpawned().slice(before), typed, scopeScreen };
 }
 
 /* ---- how far the flow got, so a step that never ran is red and named ---- */
@@ -503,6 +588,43 @@ app.whenReady().then(async () => {
       return {
         ok,
         detail: !run ? "no review/scan child was spawned by the control run" : `typed=${JSON.stringify(complete.typed)} carries budget flag=${Boolean(run.args.includes("--max-tokens-budget"))}`,
+      };
+    });
+
+    /* ---- run 3: 单个提交。四范围里最后一个只有预览级证据的，补上运行级。 ---- */
+    const commitSha = truncatedFixture.commit;
+    if (!commitSha) throw new Error("the fixture repository reported no commit SHA, so the 单个提交 scope has nothing to name");
+    const commitRun = await runCommitScope(window, { sha: commitSha, label: "commit" });
+    views.commit = commitRun.view;
+    facts.commit = {
+      sha: commitSha,
+      typed: commitRun.typed,
+      ms: commitRun.ms,
+      scopeScreen: commitRun.scopeScreen,
+      spawnArgs: commitRun.spawned.map((r) => r.args),
+      providerRequests: smallFixture.provider.requests.length,
+    };
+
+    await step("the 单个提交 scope reached the CLI as --commit <sha>", async () => {
+      const run = commitRun.spawned.find((r) => RUN_COMMANDS.includes(r.args[0]));
+      const at = run ? run.args.indexOf("--commit") : -1;
+      const value = at >= 0 ? run.args[at + 1] : null;
+      return {
+        ok: Boolean(run) && value === commitSha,
+        detail: !run
+          ? "no review/scan child was spawned by the commit run"
+          : `${run.args.slice(0, 8).join(" ")} … typed=${JSON.stringify(commitRun.typed)} --commit=${JSON.stringify(value)}`,
+      };
+    });
+
+    await step("the commit run finished and the results screen replaced the run view", async () => {
+      const badge = commitRun.view.status;
+      const ok = Boolean(badge) && commitRun.view.badgeCount === 1;
+      return {
+        ok,
+        detail: ok
+          ? `the results screen carries one badge, data-run-status=${JSON.stringify(badge)}, in ${commitRun.ms}ms`
+          : `the commit run did not reach a finished results screen: ${JSON.stringify({ badge, badges: commitRun.view.badgeCount })}`,
       };
     });
 

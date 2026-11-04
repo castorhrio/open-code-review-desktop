@@ -12,8 +12,9 @@
 //
 // Everything it touches is temporary and off to the side:
 //
-//   * a `mkdtemp` repository with `main` (a.go) and `feature` (b.go) plus an
-//     uncommitted line, so all four GUI scopes have something to name;
+//   * a `mkdtemp` repository with `main` (a.go), `feature` (b.go), a `topic`
+//     branch whose one commit adds c.go, plus an uncommitted line — so all four
+//     GUI scopes have something to name, `单个提交` included;
 //   * a `mkdtemp` HOME, because the CLI keeps its config in
 //     `~/.opencodereview/config.json` — pointing HOME at a throwaway directory is
 //     what keeps a real developer's saved provider and Key out of the test, and
@@ -56,6 +57,13 @@ const git = (cwd, args) =>
  * reviewable change, `range main…feature` has exactly one, and neither is empty
  * by accident. No remote: the workspace scope does not need one, and a fixture
  * with a fake remote would be asserting something about clones.
+ *
+ * Since round 135 there is also a `topic` branch off `main` with one commit of
+ * its own (`c.go`), and its SHA is returned. That is what the `--commit` scope
+ * needs: a commit whose diff against its parent is exactly one file. It is a
+ * *separate* branch on purpose — putting the second commit on `feature` would
+ * have changed what `range main…feature` covers, and the range assertions were
+ * already written against one file.
  */
 export async function seedRepo(dir) {
   await git(dir, ["init", "-q"]);
@@ -69,9 +77,41 @@ export async function seedRepo(dir) {
   fs.writeFileSync(path.join(dir, "b.go"), "package main\n\nfunc helper() int { return 1 }\n");
   await git(dir, ["add", "."]);
   await git(dir, ["commit", "-q", "-m", "add helper"]);
+  // The commit the `单个提交` scope names: one file, one commit, its own branch.
+  await git(dir, ["checkout", "-q", "-b", "topic", "main"]);
+  fs.writeFileSync(path.join(dir, "c.go"), 'package main\n\nfunc topic() string { return "topic" }\n');
+  await git(dir, ["add", "."]);
+  await git(dir, ["commit", "-q", "-m", "add topic"]);
+  const commit = await git(dir, ["rev-parse", "HEAD"]);
+  await git(dir, ["checkout", "-q", "feature"]);
   // An uncommitted line, so the `workspace` scope has a change to report too.
   fs.appendFileSync(path.join(dir, "a.go"), "\n// trailing\n");
-  return dir;
+  return { dir, commit };
+}
+
+/**
+ * The environment a child `ocr` process gets, given whether *this* process is
+ * Electron.
+ *
+ * Two directions, and both are load-bearing:
+ *
+ *   * **Electron → set it.** `process.execPath` is then the Electron binary, and
+ *     without `ELECTRON_RUN_AS_NODE=1` it tries to open a window on the CLI's
+ *     script and dies in the SUID sandbox. Round 133 paid for this one.
+ *   * **plain Node → do not set it.** The switch means nothing to `node`, but an
+ *     inherited `ELECTRON_RUN_AS_NODE=1` in the ambient environment is a lie about
+ *     how this process is running, and a fixture that copied it through would be
+ *     asserting the wrong thing about its own child. So it is *removed*, not
+ *     merely left alone.
+ *
+ * Pure and exported so `tools/e2e-fake-provider-smoke.mjs` can ask both
+ * directions without starting anything.
+ */
+export function electronRunAsNodeEnv(baseEnv, isElectron) {
+  const env = { ...(baseEnv || {}) };
+  if (isElectron) env.ELECTRON_RUN_AS_NODE = "1";
+  else delete env.ELECTRON_RUN_AS_NODE;
+  return env;
 }
 
 /**
@@ -105,7 +145,10 @@ export async function startFixture({ providerOptions = {}, timeoutMs = 180000, d
   // SUID sandbox ("the SUID sandbox helper binary ... is not configured
   // correctly"). `ELECTRON_RUN_AS_NODE` is the switch that makes that same binary
   // behave as plain Node, so the CLI below runs the same way in both harnesses.
-  const env = { ...process.env, HOME: home, USERPROFILE: home, ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: "1" } : {}) };
+  // Both directions live in `electronRunAsNodeEnv` below, because "the switch is
+  // set under Electron and not under Node" is a claim, and a claim that only
+  // exists in a comment is one nobody can push back on.
+  const env = electronRunAsNodeEnv({ ...process.env, HOME: home, USERPROFILE: home }, Boolean(process.versions.electron));
 
   const run = (args, options = {}) =>
     new Promise((resolve) => {
@@ -132,8 +175,12 @@ export async function startFixture({ providerOptions = {}, timeoutMs = 180000, d
     }
   };
 
+  let commit = null;
   try {
-    if (ownsDir) await seedRepo(dir);
+    if (ownsDir) {
+      const seeded = await seedRepo(dir);
+      commit = seeded.commit;
+    }
 
     for (const [key, value] of [
       ["provider", PROVIDER_NAME],
@@ -158,6 +205,9 @@ export async function startFixture({ providerOptions = {}, timeoutMs = 180000, d
     home,
     provider,
     env,
+    /** The SHA of the `topic` branch's commit — what the `单个提交` scope names.
+     * `null` when the caller handed in a directory it seeded itself. */
+    commit,
     /** Run the CLI as the harness would; never throws on a non-zero exit. */
     run,
     /** Run the CLI with `--format json` and parse the report it printed.

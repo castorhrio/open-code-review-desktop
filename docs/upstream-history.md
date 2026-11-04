@@ -36,6 +36,35 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 
 ---
 
+## 上游状态（第 134 轮，2026-11-04）
+
+本轮复核：**上游没动**。`refs/heads/main` 仍是第 132 轮记下的 `36eec0c`（`git fetch upstream --tags`
+通了，`git log 36eec0c..upstream/main` 是空的），`refs/tags/v1.13.5` 仍是 `abb7abc`、npm `latest`
+仍是 `1.13.5`，三个口径一致，**pin 不动、无移植项**，对照表 5 行无需重读。
+
+本轮产品侧只做一件事，而且**不是**再补一处断言：**把「这一轮做不到的那一趟」写成被回答过的状态。**
+
+第 122–133 轮共 12 轮，其中 11 轮是断言、清单与 DoD 的自我完备化——这条路线本身是对的（第 133 轮
+第一次让真 Electron 渲染出截断那一屏，是本仓质量最扎实的一轮之一），但它已经走到边际价值极低的地方：
+函数级 smoke、e2e 判据、真跑三层都在证明同一份已被人写下的实现是对的。而六条 DoD 里唯一没被任何
+断言覆盖的两条——DOD-5（装得上）与 DOD-6（装好的那份里 Key 不在程序目录）——缺的**不是代码**，是
+一次 Windows x64 上的真机安装；这台机器是 Linux x64，NSIS 包装层与 portable 产物在这里根本执行不了。
+
+所以本轮不写新 e2e、不写新断言，只把这件事写成两处可读的状态：
+
+- `docs/measurements.md` 未验证清单里 DOD-5 / DOD-6 对应的两行（「安装版之后的首启链路」与「装好之后
+  Key 落在哪」）各加一句带日期的**阻塞原因**：本机是 Linux x64，NSIS 包装层与 portable 产物在这里无法
+  执行——这一行不是「还没人看」，是「这台机器做不到」；能勾的条件只有一条，就是有人在 Windows x64 上
+  按 `docs/win-install-checklist.md` 第 10 节走完四格并把读数贴回本行。
+- `docs/PRODUCT-DOD.md` 的 DOD-5 / DOD-6 未勾原因把这一句引进来，并写明「缺的是一次真机上的目录搜索，
+  不是又一条断言」；勾选状态不动（勾选归 scheduler 侧）。
+
+另把第 133 轮踩到的那个坑入档 `docs/hardening-log.md`：同一个 `process.execPath` 在 Electron 与纯 Node
+下含义不同，两个方向各错一次——Electron 里 spawn 出来的 Node 脚本要补 `ELECTRON_RUN_AS_NODE=1`（否则
+`ocr config set` 会去开窗口并死在 SUID 沙箱），而 harness 自己起 Electron 之前必须把这个变量删掉（否则
+应用死在 `require("electron").app` 是 `undefined` 上，失败现场看起来像应用坏了）。这两条不会让任何
+audit 变红，只能靠注释与这份记录维持。
+
 ## 上游状态（第 133 轮，2026-11-04）
 
 本轮复核：**上游没动**。`refs/heads/main` 仍是第 132 轮记下的 `36eec0c`（`git fetch upstream --tags`

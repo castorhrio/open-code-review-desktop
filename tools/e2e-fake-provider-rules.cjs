@@ -50,14 +50,22 @@ const TRUNCATED_USAGE = { prompt_tokens: 20000, completion_tokens: 10000, total_
 
 /** 这一趟必须报出来的步骤。少了哪一条就是红灯：一个从报告里消失的检查，在一份只数失败的
  * 汇总里读起来跟绿的一样（`tools/e2e-flow.cjs` 与 `tools/e2e-first-run.cjs` 同一条纪律）。
- * `modes` 说明哪一趟该有它——填预算那一步只有截断那一趟会走。 */
+ * `modes` 说明哪一趟该有它——填预算那一步只有截断那一趟会走，`--commit` 那一步只有
+ * 单个提交那一趟会走。 */
 const HARNESS_STEPS = Object.freeze([
-  { name: "the harness booted against a throwaway profile, not the user's", modes: ["truncated", "complete"] },
-  { name: "the review page rendered against the fixture repository", modes: ["truncated", "complete"] },
+  { name: "the harness booted against a throwaway profile, not the user's", modes: ["truncated", "complete", "commit"] },
+  { name: "the review page rendered against the fixture repository", modes: ["truncated", "complete", "commit"] },
   { name: "the budget came from the form, not from the fixture's config", modes: ["truncated"] },
   { name: "the run finished and the results screen replaced the run view", modes: ["truncated", "complete"] },
   { name: "at least one toast was captured while it was on screen", modes: ["truncated", "complete"] },
+  { name: "the 单个提交 scope reached the CLI as --commit <sha>", modes: ["commit"] },
+  { name: "the commit run finished and the results screen replaced the run view", modes: ["commit"] },
 ]);
+
+/** `单个提交` 那一趟在「审查范围」里该显示的命令行提示。它只在这个范围下渲染
+ * （`ReviewPanel` 的 `Section actions` 读 `MODE_META[mode].command`），所以屏幕上出现它
+ * 就是「范围真的切过去了」的证据——比「按钮被点过」更接近用户看到的东西。 */
+const COMMIT_SCOPE_HINT = "ocr review --commit SHA";
 
 /** 这一趟该报而没报的步骤名。 */
 function missingSteps(reported, mode) {
@@ -189,6 +197,58 @@ function reportViolations(view, { expectTruncated } = {}) {
   return v;
 }
 
+/**
+ * `单个提交` 那一趟该说什么。
+ *
+ * 这一条守的是 README 第一条承诺（Four scopes）里唯一还停在预览级的那一格：预览只证明
+ * 「CLI 能算出这个范围有哪些文件」，不证明「按下开始审查之后命令行里真的带着
+ * `--commit <sha>`」。所以判据读两处事实：
+ *
+ *   * **命令行**（`spawnArgs`，harness 在 `cp.spawn` 上记的）：`review` 的参数里必须有
+ *     `--commit`，且紧跟其后的就是那个 SHA。这是「范围真的传下去了」的唯一硬证据——
+ *     界面上写着「单个提交」而命令行里没有 `--commit`，正是这一条要抓的那种假绿。
+ *   * **屏幕**（`view`）：范围提示是 `ocr review --commit SHA`（说明范围切过去了）、徽章是
+ *     `complete`、那条标记发现在。截断/失败不在这条判据的射程内——那是
+ *     `truncationViolations` 的事。
+ *
+ * 反向控制：把 `ocr-service.js` 里 `if (spec.mode === "commit") args.push("--commit", ...)`
+ * 那一行删掉，这一趟必须红在「命令行里没有 --commit」上；`tools/e2e-fake-provider-smoke.mjs`
+ * 用一份没有 `--commit` 的 spawnArgs 钉住这个方向。
+ */
+function commitScopeViolations({ view, scopeScreen, spawnArgs, sha } = {}) {
+  const v = [];
+  const args = Array.isArray(spawnArgs) ? spawnArgs : [];
+  // 只认**真正的运行**：预览（`--preview`）也带 `--commit`，把它算进来就等于用「范围算得出来」
+  // 冒充「范围跑起来了」——那正是这一条要堵的假绿。
+  const run = args.find((a) => Array.isArray(a) && (a[0] === "review" || a[0] === "scan") && !a.includes("--preview"));
+  const status = String((view && view.status) || "");
+  const label = String((view && view.label) || "");
+  const screen = String((view && view.screen) || "");
+  const before = String(scopeScreen || "");
+
+  if (!run) {
+    v.push("这一趟没有起任何真正的 review/scan 子进程（只有预览）——按下开始审查之后什么都没跑");
+  } else {
+    const at = run.indexOf("--commit");
+    if (at < 0) {
+      v.push(`命令行里没有 --commit：这一趟跑的不是「单个提交」范围（${run.slice(0, 8).join(" ")} …）`);
+    } else if (run[at + 1] !== sha) {
+      v.push(`--commit 后面不是那个提交：${JSON.stringify(run[at + 1])} ≠ ${JSON.stringify(sha)}`);
+    }
+  }
+
+  if (!before.includes(COMMIT_SCOPE_HINT)) {
+    v.push(`按下开始审查之前的那一屏没有「${COMMIT_SCOPE_HINT}」——范围没有真的切到单个提交`);
+  }
+  if (status !== COMPLETE.id) {
+    v.push(`单个提交那一趟的徽章是 ${JSON.stringify(status)}（文字=「${label}」），期望 ${COMPLETE.id}`);
+  }
+  if (!screen.includes(FINDING_MARKER)) {
+    v.push(`单个提交那一趟没有那条标记发现（${FINDING_MARKER}），运行级结论无从谈起`);
+  }
+  return v;
+}
+
 module.exports = {
   FINDING_MARKER,
   TRUNCATION_BAND,
@@ -198,6 +258,7 @@ module.exports = {
   COMPLETE,
   BUDGET_TOKENS,
   TRUNCATED_USAGE,
+  COMMIT_SCOPE_HINT,
   HARNESS_STEPS,
   missingSteps,
   claimsOf,
@@ -206,4 +267,5 @@ module.exports = {
   linesWith,
   truncationViolations,
   reportViolations,
+  commitScopeViolations,
 };

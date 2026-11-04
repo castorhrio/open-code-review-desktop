@@ -1394,3 +1394,13 @@ Electron 之前 `delete env.ELECTRON_RUN_AS_NODE`——如果调用方的 shell 
 以「应用起不来」的形式失败，而失败信息指向的是应用。所以只能靠注释与这份记录维持：
 `tools/fake-provider-cli.mjs` 第 102–108 行与 `tools/e2e-fake-provider.mjs` 第 42–46 行
 各自写明了原因，改那两处之前先读它们。
+
+**第 135 轮起，这句话不再成立。** 「只能靠注释维持」本身就是一处该被消掉的约定，所以
+`tools/fake-provider-cli.mjs` 把两个方向抽成了可导出的纯函数 `electronRunAsNodeEnv(baseEnv,
+isElectron)`（Electron 下补 `ELECTRON_RUN_AS_NODE=1`、纯 Node 下把它删掉、两种情况都不改
+调用方传进来的那份环境），`startFixture` 里只剩一处调用；`tools/e2e-fake-provider-smoke.mjs`
+用 6 条断言钉住它：Electron 下补上、纯 Node 下删掉、纯函数不改入参、fixture 源码里没有内联的
+`ELECTRON_RUN_AS_NODE: "1"`（防止有人绕过函数直接写）、`tools/e2e-fake-provider.mjs` 起
+Electron 之前确实 `delete env.ELECTRON_RUN_AS_NODE`（第三个方向），以及一条把两个方向都写反
+的反向控制——写反之后前两条必须红。改那两处之前先读它们，改错了 `npm run audit:truncation-rules`
+会点名。

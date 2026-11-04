@@ -347,9 +347,24 @@ check(
   JSON.stringify(STEPS.map((s) => s.name))
 );
 check(
-  "每条步骤声明的趟次只有 truncated / complete 两种",
-  STEPS.every((s) => s.modes.every((m) => m === "truncated" || m === "complete")),
+  "每条步骤声明的趟次只有 truncated / complete / commit 三种",
+  STEPS.every((s) => s.modes.every((m) => m === "truncated" || m === "complete" || m === "commit")),
   JSON.stringify([...new Set(STEPS.flatMap((s) => s.modes))])
+);
+check(
+  "单个提交那一趟的两步都只属于它自己（别的趟不报也不算缺项）",
+  (() => {
+    const own = STEPS.filter((s) => s.modes.length === 1 && s.modes[0] === "commit").map((s) => s.name);
+    const withoutCommit = STEPS.filter((s) => !s.modes.includes("commit")).map((s) => s.name);
+    const withoutCommitOnly = STEPS.filter((s) => !(s.modes.length === 1 && s.modes[0] === "commit")).map((s) => s.name);
+    const missingForCommit = RULES.missingSteps(withoutCommit, "commit");
+    return (
+      own.length === 2 &&
+      own.every((name) => missingForCommit.includes(name)) &&
+      RULES.missingSteps(withoutCommitOnly, "truncated").length === 0
+    );
+  })(),
+  JSON.stringify(STEPS.filter((s) => s.modes.length === 1 && s.modes[0] === "commit").map((s) => s.name))
 );
 check(
   "报全了就是没有缺项",
@@ -359,7 +374,9 @@ check(
 check(
   "少报一步就点名那一步（「没跑」不许读成「通过」）",
   (() => {
-    const all = STEPS.map((s) => s.name);
+    // 丢掉的必须是截断那一趟该报的一步：步骤表末尾现在是单个提交那两步，丢它们不会让
+    // 截断那一趟变红，那样这条断言就变成了一句永远为真的话。
+    const all = STEPS.filter((s) => s.modes.includes("truncated")).map((s) => s.name);
     const dropped = all[all.length - 1];
     const missing = RULES.missingSteps(all.filter((n) => n !== dropped), "truncated");
     return missing.length === 1 && missing[0] === dropped;
@@ -402,6 +419,136 @@ check(
   JSON.stringify(RULES.linesWith(["a 完成", "b 无关", "c 完成", "d 完成", "e 完成"].join("\n"), RULES.COMPLETION_WORD))
 );
 
+/* ---- 7.5 单个提交：四范围里最后那一格的判据 ---- */
+
+/** 这一趟该有的读数：范围提示在屏幕上、徽章 complete、发现还在、命令行里带着那个 SHA。 */
+const COMMIT_SHA = "0123456789abcdef0123456789abcdef01234567";
+const commitView = {
+  status: RULES.COMPLETE.id,
+  label: RULES.COMPLETE.label,
+  badgeCount: 1,
+  screen: screenOf(RULES.FINDING_MARKER),
+  claims: [{ type: "success", text: `审查${RULES.COMPLETION_WORD}` }],
+};
+/** 按下开始审查之前的那一屏：范围提示只在这里（结果页会把它换掉）。 */
+const commitScopeScreen = screenOf(RULES.COMMIT_SCOPE_HINT, "c.go");
+const commitArgs = ["review", "--commit", COMMIT_SHA, "--audience", "agent", "--format", "json"];
+
+check(
+  "范围提示的常量就是 `MODE_META.commit.command`（屏幕上出现它才算范围切过去了）",
+  (() => {
+    const src = read("src/lib/spec.ts");
+    const m = src.match(/commit: \{\s*label: "单个提交",\s*command: "([^"]+)"/);
+    return Boolean(m) && m[1] === RULES.COMMIT_SCOPE_HINT;
+  })(),
+  `规则里是「${RULES.COMMIT_SCOPE_HINT}」`
+);
+check(
+  "单个提交那一趟全绿（命令行带 --commit <sha>、范围提示、徽章、发现）",
+  RULES.commitScopeViolations({ view: commitView, scopeScreen: commitScopeScreen, spawnArgs: [commitArgs], sha: COMMIT_SHA }).length === 0,
+  JSON.stringify(RULES.commitScopeViolations({ view: commitView, scopeScreen: commitScopeScreen, spawnArgs: [commitArgs], sha: COMMIT_SHA }))
+);
+
+const COMMIT_MUTATIONS = [
+  {
+    name: "命令行里没有 --commit（范围没传下去，界面却写着单个提交）",
+    args: [["review", "--audience", "agent", "--format", "json"]],
+    expect: "命令行里没有 --commit",
+  },
+  {
+    name: "--commit 后面是别的提交",
+    args: [["review", "--commit", "deadbeef", "--audience", "agent", "--format", "json"]],
+    expect: "--commit 后面不是那个提交",
+  },
+  { name: "一个子进程都没起", args: [], expect: "没有起任何真正的 review/scan 子进程" },
+  {
+    name: "按下之前那一屏的范围提示不是单个提交",
+    scopeScreen: screenOf("c.go"),
+    expect: "范围没有真的切到单个提交",
+  },
+  {
+    name: "只有预览、没有真正的运行（预览也带 --commit，不能拿它冒充）",
+    args: [["review", "--preview", "--commit", COMMIT_SHA, "--format", "json"]],
+    expect: "只有预览",
+  },
+  { name: "徽章不是 complete", view: { ...commitView, status: RULES.LIMITED.id }, expect: "期望 complete" },
+  { name: "没有那条标记发现", view: { ...commitView, screen: "" }, expect: "没有那条标记发现" },
+];
+
+for (const m of COMMIT_MUTATIONS) {
+  const v = RULES.commitScopeViolations({
+    view: m.view || commitView,
+    scopeScreen: m.scopeScreen === undefined ? commitScopeScreen : m.scopeScreen,
+    spawnArgs: m.args || [commitArgs],
+    sha: COMMIT_SHA,
+  });
+  check(
+    `单个提交单点变异「${m.name}」必须红，且点名它守的那句话`,
+    v.length > 0 && v.some((x) => x.includes(m.expect)),
+    v.join(" / ") || "（绿了——这一格没有断言）"
+  );
+}
+
+/* ---- 7.6 ELECTRON_RUN_AS_NODE 的两个方向 ---- */
+
+const { electronRunAsNodeEnv } = await import("./fake-provider-cli.mjs");
+
+check(
+  "Electron 下给子进程补上 ELECTRON_RUN_AS_NODE=1（否则 execPath 会去开窗口）",
+  electronRunAsNodeEnv({ PATH: "/bin" }, true).ELECTRON_RUN_AS_NODE === "1",
+  JSON.stringify(electronRunAsNodeEnv({ PATH: "/bin" }, true))
+);
+check(
+  "纯 Node 下不补，且把环境里继承来的那个删掉（否则是在对自己的子进程说假话）",
+  (() => {
+    const env = electronRunAsNodeEnv({ PATH: "/bin", ELECTRON_RUN_AS_NODE: "1" }, false);
+    return !("ELECTRON_RUN_AS_NODE" in env) && env.PATH === "/bin";
+  })(),
+  JSON.stringify(electronRunAsNodeEnv({ PATH: "/bin", ELECTRON_RUN_AS_NODE: "1" }, false))
+);
+check(
+  "两个方向都不改传进来的那份环境（纯函数，调用方的那份还是原样）",
+  (() => {
+    const base = { PATH: "/bin", ELECTRON_RUN_AS_NODE: "1" };
+    electronRunAsNodeEnv(base, true);
+    electronRunAsNodeEnv(base, false);
+    return base.ELECTRON_RUN_AS_NODE === "1" && Object.keys(base).length === 2;
+  })(),
+  "base 未被改写"
+);
+check(
+  "反向控制：两个方向都写反的实现，上面两条断言必须红",
+  (() => {
+    const flipped = (baseEnv, isElectron) => {
+      const env = { ...(baseEnv || {}) };
+      if (isElectron) delete env.ELECTRON_RUN_AS_NODE;
+      else env.ELECTRON_RUN_AS_NODE = "1";
+      return env;
+    };
+    const electron = flipped({ PATH: "/bin" }, true);
+    const node = flipped({ PATH: "/bin", ELECTRON_RUN_AS_NODE: "1" }, false);
+    return electron.ELECTRON_RUN_AS_NODE !== "1" && node.ELECTRON_RUN_AS_NODE === "1";
+  })(),
+  "写反之后 Electron 下没有、Node 下有"
+);
+check(
+  "fixture 真的走这个函数，而不是在注释里承诺（源码里没有内联的 ELECTRON_RUN_AS_NODE 赋值）",
+  (() => {
+    const src = read("tools/fake-provider-cli.mjs");
+    const code = src
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("//") && !line.trim().startsWith("*"))
+      .join("\n");
+    return code.includes("electronRunAsNodeEnv(") && !/ELECTRON_RUN_AS_NODE:\s*"1"/.test(code);
+  })(),
+  "startFixture 里只有一处调用"
+);
+check(
+  "Electron runner 起 harness 之前删掉继承来的 ELECTRON_RUN_AS_NODE（第三个方向）",
+  read("tools/e2e-fake-provider.mjs").includes("delete env.ELECTRON_RUN_AS_NODE"),
+  "tools/e2e-fake-provider.mjs"
+);
+
 /* ---- 8. 接线：这一趟真的挂进了门禁，反向控制没被摘掉 ---- */
 
 const pkg = JSON.parse(read("package.json"));
@@ -418,6 +565,11 @@ check(
   pkg.scripts["audit:e2e-truncation"] === "node tools/e2e-fake-provider.mjs" &&
     pkg.scripts["audit:truncation-rules"] === "node tools/e2e-fake-provider-smoke.mjs",
   `${pkg.scripts["audit:e2e-truncation"]} / ${pkg.scripts["audit:truncation-rules"]}`
+);
+check(
+  "runner 也把单个提交那一趟的判据接上了（四范围里最后那一格）",
+  runnerSrc.includes("commitScopeViolations") && runnerSrc.includes("facts.commit"),
+  "commitScopeViolations + facts.commit"
 );
 check(
   "runner 同时用上截断判据与它的反向控制（少了任何一条，绿就只是那一趟跑过）",
