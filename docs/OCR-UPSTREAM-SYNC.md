@@ -35,7 +35,7 @@ tag v1.13.5
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`abb7abcd5c5196fa0278dc87db85780fa269562f`（第 126 轮：`git fetch upstream --tags` 本轮通了，`refs/heads/main` 仍是 `8041473`（第 124 轮记下的那个 C# 规则 commit，`git log abb7abc..upstream/main` 仍只有它一个），`refs/tags/v1.13.5` 与 npm `latest` 仍分别答 `v1.13.5` / `1.13.5`，**pin 不动**（pin 跟的是发布版本，不是默认分支）；通路：git）**
+**本轮 HEAD 核对：`abb7abcd5c5196fa0278dc87db85780fa269562f`（第 127 轮：`git fetch upstream --tags` 本轮通了，`refs/heads/main` 从 `8041473` 走到 `d3cd23f`（1 个 commit：`feat(lang): review Starlark files (#1851)`，紧接第 124 轮记下的那个 C# 规则 commit），`refs/tags/v1.13.5` 与 npm `latest` 仍分别答 `v1.13.5` / `1.13.5`，**pin 不动**（pin 跟的是发布版本，不是默认分支）；通路：git）**
 
 ### 核对通路账
 
@@ -134,6 +134,7 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 | 124 | 2026-11-04 | git | **上游 HEAD 前进**：`abb7abc` → `8041473`（`git fetch upstream --tags` 本轮通了，`git log abb7abc..upstream/main` 只有这一个 commit：`feat(rules): add C# review rules (#1840)`，8 个文件——新增 `internal/config/rules/rule_docs/csharp.md`、`internal/config/rules/system_rules.json` 加一行并补测试、`pages/` 下 5 份多语审查规则文档）；`refs/tags/v1.13.5` 与 npm `1.13.5` 均未变，**pin 不前进**（pin 跟的是发布版本，不是默认分支）；对照表 5 行的上游文件（`internal/llm/resolver.go`、`cmd/opencodereview/config_cmd.go`、`llm_cmd.go` / `providers.go`、`internal/session/manifest.go` 的两张 `failure_class` 枚举）一个都没被这个 commit 碰到，**无移植项**；本轮产品侧只补两处诚实度缺口：README 的打包验证那条标明平台（Linux x64 解包目录，`tools/e2e-packaged.mjs`），安装段写明 `v0.1.13` 安装包带 `ocr 1.13.0` 而源码树 pin 在 `1.13.5` | — |
 | 125 | 2026-11-04 | api | `8041473` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**（`git ls-remote` 超时 124，HEAD / tag / release 由 GitHub API 答上；HEAD 仍是第 121 轮记下的那个 C# 规则 commit，对照表 5 行的上游文件一个都没被碰到）；本轮把 `docs/measurements.md` 上半张表从「行读得出来」变成「表渲染得出来」——`tools/checklist-claims.mjs` 新增 `measurementTableViolations`（表头逐字 + 紧跟分隔行 + 表内不许空行与正文行 + 列数与表头相等），反向控制 8 格、检查 48 → 62 条；四处空行（第 23 / 25 / 27 / 29 行）先被断言点名再删掉，实测表现在是一张表、18 条读数行号连续 | — |
 | 126 | 2026-11-04 | git | `8041473` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**（`git fetch upstream --tags` 本轮通了，`git log abb7abc..upstream/main` 仍只有第 124 轮记下的那个 C# 规则 commit，对照表 5 行的上游文件一个都没被碰到）；本轮产品改动是把 `docs/win-install-checklist.md` 第 10 节从「说明书」推到「待填表」——10.1 四格各留一个「读数格」、10.2 两行可直接复制只填空就能贴回未验证清单的模板，`tools/checklist-claims.mjs` 新增 `subsetFormViolations`（四格步骤号与顺序、每格留空、模板四列且含空 / 日期占位符 / 「读数」、模板行名必须是第 9 节点过的落点、DOD-5 与 DOD-6 各有一行、模板行名真的在未验证清单里），门禁那句读数多一个数字（第 10 节贴回模板 2 行），`tools/checklist-claims-smoke.mjs` 62 → 76 条 | — |
+| 127 | 2026-11-04 | git | **上游 HEAD 前进**：`8041473` → `d3cd23f`（1 个 commit：`feat(lang): review Starlark files (#1851)`——`internal/config/allowlist/supported_file_types.json` 加 `.bzl` / `.bazel` / `.star` 三个扩展名、`internal/config/rules/system_rules.json` 加两行、`internal/tool/file_find.go` 把 `BUILD` / `WORKSPACE` 加进无扩展名白名单，其余是 `pages/` 多语文档与新增的 `rule_docs/starlark.md`）；`refs/tags/v1.13.5` 与 npm `1.13.5` 均未变，**pin 不前进**（pin 跟的是发布版本，不是默认分支）；对照表 5 行的上游文件一个都没被这批改动碰到，**无移植项**（allowlist 与规则表在引擎侧，本仓只显示 CLI 给出的排除原因，不自己判定哪些文件进审查）；本轮产品改动是应用图标——`build/make-icon.cjs` 改成按几何画（4×4 超采样、描边随尺寸加粗、`.ico` 六个尺寸各自渲染），换掉原来那张字形与底色只有 1.38:1、缩到 16 就变空方块的渲染 | — |
 
 「最近一次对照」只写**那一项最近被人工重新核对**的轮次。该列没有列出本轮，表示本轮
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
@@ -225,30 +226,22 @@ tool 结果文本**（`Error: diff not found for: …`、`Diffs exist for: …`�
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。搬完这里只留一句
    指针——「本文件只留当前一轮」不是约定而是断言（`previousRoundPointerViolations`）。
 
-## 当前状态（第 126 轮，2026-11-04）
+## 当前状态（第 127 轮，2026-11-04）
 
-本轮复核：**上游没动。** `git fetch upstream --tags` 这次通了（只有本仓同名的 `v0.1.x` tag 因已存在被拒，与上游无关），
-`refs/heads/main` 仍是 `8041473`——第 124 轮记下的那个 C# 规则 commit，`git log abb7abc..upstream/main` 仍只有它一个；
-`refs/tags/v1.13.5` 与 npm `latest` 仍分别答 `v1.13.5` / `1.13.5`。三个口径一致，**pin 不动**、对照表 5 行无需重读、
-**无移植项**（那一个 commit 只在 `internal/config/rules/` 与 `pages/` 里加 C# 规则，本仓不读规则数据）。
+本轮复核：**上游 HEAD 前进，发布版本没动。** `git fetch upstream --tags` 这次通了，`refs/heads/main` 从
+`8041473` 走到 `d3cd23f`（1 个 commit：`feat(lang): review Starlark files (#1851)`）；`refs/tags/v1.13.5`
+与 npm `latest` 仍分别答 `v1.13.5` / `1.13.5`，所以**pin 不动**（pin 跟的是发布版本，不是默认分支）。
+那 18 个变更文件里，对照表 5 行的上游文件一个都没被碰到：引擎侧加的是三个扩展名、两行规则映射与无扩展名
+白名单里的 `BUILD` / `WORKSPACE`，其余是 `pages/` 多语文档与新增的 `rule_docs/starlark.md`。这几处都在
+引擎里，本仓不自己判定哪些文件进审查、只显示 CLI 给出的排除原因，**无移植项**；夹具里那两条（`go.mod`
+仍是「暂不支持的类型」、`testdata/sample.json` 仍是默认排除路径）也不会因为这张白名单变脸。
 
-本轮产品侧只做一件事：**第 10 节从「说明书」推到「待填表」。** 第 120–123 轮把「知道该验什么」写到位、把「读数没贴回」
-写成断言，但那一节仍是散文：一个拿到 Windows 机器的人要读完整节才知道「读数写在哪、贴回哪一行」。现在 10.1 是四格读数表，
-每格最后一列留着一个空（`____`）；10.2 是两行可以直接复制、只填空就能贴回 `docs/measurements.md` 未验证清单的模板——
-行名、归属、触发条件都写好了，只留「为什么没验」那一格给人填，而那一格必须含日期与「读数」二字（`pastedReading` 认这两个标记）。
+本轮产品改动在本程序最外层：**应用图标从「阈值化一张暗色渲染」改成按几何画出来。** 旧产物在 1024 上量出来
+的字形与底色只有 1.38:1，缩到 16 就只剩一块近乎空的深色方块；新脚本用 4×4 超采样画圆角方、镜片环与手柄，
+描边随尺寸加粗（16 上是 1.92px、48 上是 4.13px、256 上是 22.02px），`.ico` 的六个尺寸各自渲染而不是把 1024
+缩下去，镜片里的蓝色在 32 以下直接不画。配色取自 `src/styles.css` 的暗色主题，脚本里不再读任何位图源。
 
-待填表比说明书多一个风险：**同一件事写了两处**。模板里的行名是第 9 节那张对照表的落点，第 9 节改了落点而模板没跟着改，
-人就会把读数贴到一行没人认的名字上——而那时清单还是绿的。所以 `tools/checklist-claims.mjs` 多一条 `subsetFormViolations`，
-问四件事：四格的步骤号恰好是 1 / 2.2 / 4.2 / 5.2 且顺序照这个、每格都留着空；模板恰好两行四列、每行含空 / 日期占位符 / 「读数」、
-触发条件引用清单的某一步；模板点到的每一行第 9 节都点过、且 DOD-5 与 DOD-6 各有一行；模板的行名真的在未验证清单里。
-门禁那句读数因此多一个数字（第 10 节贴回模板 2 行），`tools/checklist-claims-smoke.mjs` 62 → 76 条。
-
-反向控制在真仓库上各跑一次：把 10.1 第 4.2 格的空填掉 → 点名第 351 行「没有留空」；把模板第一行的行名改成「首启链路」→
-点名第 361 行「第 9 节那张对照表没有把任何一格记回这一行」，并连带点名 DOD-5 那一行没人推进、以及未验证清单里没有这个名字。
-改回即绿。
-
-上一轮（第 125 轮）的正文见 [`upstream-history.md`](upstream-history.md#上游状态第-125-轮2026-11-04)，归档之后本文件不留第二份。
-
+上一轮（第 126 轮）的正文见 [`upstream-history.md`](upstream-history.md#上游状态第-126-轮2026-11-04)，归档之后本文件不留第二份。
 
 ### 参数面：`ocr review --help` / `ocr scan --help` 与本仓真的拼出的每一行
 

@@ -1,13 +1,35 @@
 // SPDX-License-Identifier: Apache-2.0
 "use strict";
-// One-off asset generator: turns the raw AI-rendered icon into electron-builder
-// assets (build/icon.png + a multi-resolution build/icon.ico).
+// The app icon, drawn from geometry instead of converted from a raster render.
 //
-// The raw render has two problems for a Windows app icon:
-//   1. a light-grey canvas behind the rounded square (would show as a white box)
-//   2. a small watermark glyph cluster in the bottom-right corner
-// Fix: derive alpha from colour distance to the background, drop every connected
-// component except the biggest one (the squircle), then crop to a square.
+// Why this exists at all: an app icon is the one piece of the product a user
+// meets before any of the UI — the Windows taskbar entry, the desktop shortcut,
+// the installer header, the title bar. Nothing in `npm run audit` can see it, so
+// it is exactly the kind of surface that rots quietly.
+//
+// What the previous version produced (a 2026-10 AI render, `build/icon-source.png`,
+// thresholded and recoloured by this script) measured, at 1024px:
+//
+//   - the glyph sat at 1.38:1 against the squircle behind it (fill #172032,
+//     stroke #283848) — below the 3:1 a non-text graphic needs, and far below
+//     anything a taskbar-sized copy can show;
+//   - every stroke was 1–2px at 1024, i.e. 0.03px at 16 — the shape disappeared
+//     when Windows shrank it, leaving a nearly blank dark square;
+//   - the lens was full of AI-render detail (text-like rows, blocks) which reads
+//     as dirt once the icon is 32px or smaller.
+//
+// So the icon is now drawn: a squircle, a magnifier ring and a handle, in the
+// app's own palette (`src/styles.css`), with the stroke widened on small sizes
+// and the lens tint dropped there — the two things a downscale cannot do for
+// itself. Everything here is arithmetic on a supersampled grid: no source image,
+// no filter pass, no text, no external asset. Same input, same bytes, every run.
+//
+// Geometry is expressed as fractions of the side, so one set of numbers serves
+// every output size. The palette is copied from `src/styles.css` (dark theme) on
+// purpose — an icon that is not the same blue as the app reads as someone else's
+// product next to it. `tools/e2e-packaged.mjs` and the UI audits read that file,
+// not this one, so if the palette moves the icon does not follow automatically;
+// this comment is the reminder.
 
 const fs = require("fs");
 const path = require("path");
@@ -18,134 +40,193 @@ const icoModule = require("png-to-ico");
 const pngToIco =
   typeof icoModule === "function" ? icoModule : icoModule.default || icoModule.imagesToIco;
 
-const SRC = process.argv[2];
 const OUT_DIR = path.resolve(__dirname);
-if (!SRC || !fs.existsSync(SRC)) {
-  console.error("usage: node build/make-icon.cjs <source.png>");
-  process.exit(1);
-}
+const REPO_DIR = path.resolve(__dirname, "..");
+
+// `--canvas` (0.20) is the corner radius of the squircle; the magnifier is
+// deliberately placed up-left of centre so the squircle's own corners read as
+// padding rather than as a mis-centred glyph.
+const GEOMETRY = {
+  cornerRadius: 0.2,
+  lens: { cx: 0.45, cy: 0.44, outerRadius: 0.27 },
+  // Stroke width as a fraction of the side. Two ends, because one number cannot
+  // serve both: at 1024 a 0.120 stroke is 123px (a slab), at 16 a 0.086 stroke
+  // is 1.4px (a grey smear). `strokeFor` interpolates between them.
+  strokeAtLarge: 0.086,
+  strokeAtSmall: 0.12,
+  strokeLargeFrom: 48,
+  strokeSmallUntil: 16,
+  // Handle runs to the lower-right at 45°, from the ring's mid-line out.
+  handleEnd: { x: 0.77, y: 0.76 },
+  // Below this the lens is left as flat fill: a 3px tinted disc inside a 2px
+  // ring is noise, not glass.
+  lensTintFrom: 32,
+};
+
+// `src/styles.css`, dark theme: --raised / --ink / --accent. Kept as literals
+// because this script runs before any bundler and must not depend on the CSS.
+const PALETTE = {
+  fill: [0x17, 0x1c, 0x26],
+  glyph: [0xe6, 0xeb, 0xf3],
+  lens: [0x5b, 0x7c, 0xfa],
+};
 
 const ICO_SIZES = [256, 128, 64, 48, 32, 16];
-const T_LO = 18; // <= this distance from the background colour -> fully transparent
-const T_HI = 60; // >= this distance -> fully opaque
+const APP_ICON_SIZE = 512; // `main.js` window icon (Linux / title bar)
+const BUILDER_ICON_SIZE = 1024; // electron-builder wants >= 512 for its own conversions
+const SUPERSAMPLE = 4; // 4x4 subpixels per output pixel, each with its own edge coverage
+
+const strokeFor = (size) => {
+  if (size <= GEOMETRY.strokeSmallUntil) return GEOMETRY.strokeAtSmall;
+  if (size >= GEOMETRY.strokeLargeFrom) return GEOMETRY.strokeAtLarge;
+  const t = (size - GEOMETRY.strokeSmallUntil) / (GEOMETRY.strokeLargeFrom - GEOMETRY.strokeSmallUntil);
+  return GEOMETRY.strokeAtSmall + (GEOMETRY.strokeAtLarge - GEOMETRY.strokeAtSmall) * t;
+};
+
+// ---- signed distances, in fractions of the side (negative = inside) ----
+// Written out rather than pulled from a library: three shapes, no dependency,
+// and the numbers stay readable next to the geometry they belong to.
+
+const sdRoundRect = (x, y, halfSide, radius) => {
+  const qx = Math.abs(x - 0.5) - (halfSide - radius);
+  const qy = Math.abs(y - 0.5) - (halfSide - radius);
+  const ax = Math.max(qx, 0);
+  const ay = Math.max(qy, 0);
+  return Math.hypot(ax, ay) + Math.min(Math.max(qx, qy), 0) - radius;
+};
+
+const sdCircle = (x, y, cx, cy, radius) => Math.hypot(x - cx, y - cy) - radius;
+
+const sdSegment = (x, y, ax, ay, bx, by) => {
+  const vx = bx - ax;
+  const vy = by - ay;
+  const wx = x - ax;
+  const wy = y - ay;
+  const len = vx * vx + vy * vy;
+  const t = len === 0 ? 0 : Math.min(1, Math.max(0, (wx * vx + wy * vy) / len));
+  return Math.hypot(wx - t * vx, wy - t * vy);
+};
+
+// One subpixel's coverage of a shape, over a single subpixel of edge width.
+const coverage = (distance, subpixel) => {
+  const c = 0.5 - distance / subpixel;
+  return c <= 0 ? 0 : c >= 1 ? 1 : c;
+};
+
+const mix = (from, to, t) => [
+  from[0] + (to[0] - from[0]) * t,
+  from[1] + (to[1] - from[1]) * t,
+  from[2] + (to[2] - from[2]) * t,
+];
+
+// Renders one size. `size` is the real output edge; the geometry is the same at
+// every size, only `strokeFor(size)` and the lens tint change.
+const renderIcon = (size) => {
+  const stroke = strokeFor(size);
+  const { cx, cy, outerRadius } = GEOMETRY.lens;
+  const ringMid = outerRadius - stroke / 2;
+  const lensInner = outerRadius - stroke;
+  const handHalf = stroke / 2;
+  const startRadius = ringMid;
+  const diagonal = Math.SQRT1_2;
+  const handStart = {
+    x: cx + diagonal * startRadius,
+    y: cy + diagonal * startRadius,
+  };
+  const tinted = size >= GEOMETRY.lensTintFrom;
+
+  const grid = size * SUPERSAMPLE;
+  const subpixel = 1 / grid;
+  const colour = new Float64Array(size * size * 3);
+  const alpha = new Float64Array(size * size);
+
+  for (let gy = 0; gy < grid; gy++) {
+    const y = (gy + 0.5) * subpixel;
+    for (let gx = 0; gx < grid; gx++) {
+      const x = (gx + 0.5) * subpixel;
+
+      const shape = coverage(sdRoundRect(x, y, 0.5, GEOMETRY.cornerRadius), subpixel);
+      if (shape <= 0) continue;
+
+      let rgb = PALETTE.fill;
+      if (tinted) {
+        const lens = coverage(sdCircle(x, y, cx, cy, lensInner), subpixel);
+        if (lens > 0) rgb = mix(rgb, PALETTE.lens, lens);
+      }
+      const ring = coverage(Math.abs(sdCircle(x, y, cx, cy, ringMid)) - stroke / 2, subpixel);
+      const handle = coverage(
+        sdSegment(x, y, handStart.x, handStart.y, GEOMETRY.handleEnd.x, GEOMETRY.handleEnd.y) - handHalf,
+        subpixel
+      );
+      const glyph = Math.max(ring, handle);
+      if (glyph > 0) rgb = mix(rgb, PALETTE.glyph, glyph);
+
+      const cell = ((gy / SUPERSAMPLE) | 0) * size + ((gx / SUPERSAMPLE) | 0);
+      alpha[cell] += shape;
+      colour[cell * 3] += shape * rgb[0];
+      colour[cell * 3 + 1] += shape * rgb[1];
+      colour[cell * 3 + 2] += shape * rgb[2];
+    }
+  }
+
+  const samples = SUPERSAMPLE * SUPERSAMPLE;
+  const data = Buffer.alloc(size * size * 4);
+  for (let i = 0; i < size * size; i++) {
+    const a = alpha[i] / samples;
+    const o = i * 4;
+    if (a <= 0) continue;
+    // Un-premultiply: colour was accumulated weighted by each subpixel's own
+    // coverage, so dividing by the summed coverage keeps edges from darkening.
+    const w = alpha[i];
+    data[o] = Math.round(colour[i * 3] / w);
+    data[o + 1] = Math.round(colour[i * 3 + 1] / w);
+    data[o + 2] = Math.round(colour[i * 3 + 2] / w);
+    data[o + 3] = Math.round(a * 255);
+  }
+  return new Jimp({ width: size, height: size, data });
+};
+
+const writePng = async (size, file) => {
+  const img = renderIcon(size);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  await img.writeAsync(file);
+  const bytes = fs.statSync(file).size;
+  console.log(`wrote ${path.relative(REPO_DIR, file)} (${size}x${size}, ${bytes} bytes)`);
+  return file;
+};
 
 async function main() {
-  const img = await Jimp.read(SRC);
-  const { width: W, height: H, data } = img.bitmap;
-
-  const bgAt = (x, y) => {
-    const i = (y * W + x) * 4;
-    return [data[i], data[i + 1], data[i + 2]];
-  };
-  const bg = [...bgAt(1, 1), ...bgAt(W - 2, 1), ...bgAt(1, H - 2), ...bgAt(W - 2, H - 2)].reduce(
-    (acc, _v, idx) => {
-      acc[idx % 3] += _v / 4;
-      return acc;
-    },
-    [0, 0, 0]
-  );
-
-  // 1. alpha from colour distance to the background
-  const mask = new Uint8Array(W * H); // 0 = background, 1 = foreground
-  for (let p = 0; p < W * H; p++) {
-    const i = p * 4;
-    const dist = Math.max(
-      Math.abs(data[i] - bg[0]),
-      Math.abs(data[i + 1] - bg[1]),
-      Math.abs(data[i + 2] - bg[2])
+  if (process.argv[2]) {
+    // The raster path is gone on purpose: `build/icon-source.png` measured
+    // 1.38:1 glyph-on-fill and could not be fixed by any post-processing. Say so
+    // instead of silently ignoring an argument someone still has in muscle memory.
+    console.error(
+      "这个脚本现在按几何画图标，不再需要源图参数：直接跑 `npm run icon`。\n" +
+        "（旧的 `build/icon-source.png` 是一张对比度 1.38:1 的暗色渲染，改成阈值 / 调色救不回来。）"
     );
-    const a = dist <= T_LO ? 0 : dist >= T_HI ? 255 : Math.round(((dist - T_LO) / (T_HI - T_LO)) * 255);
-    data[i + 3] = a;
-    mask[p] = a >= 128 ? 1 : 0;
+    process.exit(1);
   }
 
-  // 2. keep only the largest connected foreground component (kills the watermark)
-  const label = new Int32Array(W * H).fill(-1);
-  let best = -1;
-  let bestSize = 0;
-  const queue = new Int32Array(W * H);
-  let id = 0;
-  for (let start = 0; start < W * H; start++) {
-    if (mask[start] !== 1 || label[start] !== -1) continue;
-    let head = 0;
-    let tail = 0;
-    queue[tail++] = start;
-    label[start] = id;
-    let size = 0;
-    while (head < tail) {
-      const cur = queue[head++];
-      size++;
-      const cx = cur % W;
-      const cy = (cur / W) | 0;
-      for (const [nx, ny] of [
-        [cx - 1, cy],
-        [cx + 1, cy],
-        [cx, cy - 1],
-        [cx, cy + 1],
-      ]) {
-        if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
-        const n = ny * W + nx;
-        if (mask[n] === 1 && label[n] === -1) {
-          label[n] = id;
-          queue[tail++] = n;
-        }
-      }
-    }
-    if (size > bestSize) {
-      bestSize = size;
-      best = id;
-    }
-    id++;
-  }
-  for (let p = 0; p < W * H; p++) {
-    if (label[p] !== best) data[p * 4 + 3] = 0;
-  }
-  img.bitmap.data = data;
-  img.rgba(true);
-  console.log(`foreground components: ${id}, kept largest (${bestSize}px)`);
+  const builderIcon = await writePng(BUILDER_ICON_SIZE, path.join(OUT_DIR, "icon.png"));
+  await writePng(APP_ICON_SIZE, path.join(REPO_DIR, "assets", "icon.png"));
 
-  // 3. crop to the bounding box of the remaining opaque pixels, square it up
-  let minX = W,
-    minY = H,
-    maxX = 0,
-    maxY = 0;
-  for (let y = 0; y < H; y++) {
-    for (let x = 0; x < W; x++) {
-      if (data[(y * W + x) * 4 + 3] > 0) {
-        if (x < minX) minX = x;
-        if (x > maxX) maxX = x;
-        if (y < minY) minY = y;
-        if (y > maxY) maxY = y;
-      }
-    }
-  }
-  const side = Math.max(maxX - minX + 1, maxY - minY + 1);
-  const offX = minX - Math.floor((side - (maxX - minX + 1)) / 2);
-  const offY = minY - Math.floor((side - (maxY - minY + 1)) / 2);
-  img.crop(offX < 0 ? 0 : offX, offY < 0 ? 0 : offY, side, side);
-  console.log(`cropped to ${side}x${side} at (${offX},${offY})`);
-
-  // 4. emit icon.png at 1024 (electron-builder wants >= 512)
-  const png1024 = img.clone().resize(1024, 1024);
-  fs.mkdirSync(OUT_DIR, { recursive: true });
-  await png1024.writeAsync(path.join(OUT_DIR, "icon.png"));
-  console.log("wrote build/icon.png (1024x1024)");
-
-  // 5. emit a multi-resolution .ico so the build never depends on electron-builder's
-  //    own icon conversion step
+  // Per-size renders, not downscales of the 1024: `strokeFor` gives 16 and 32 a
+  // thicker ring, which a resize from the big copy cannot produce. This is the
+  // whole reason the .ico is generated here rather than left to electron-builder.
   const tmp = path.join(OUT_DIR, ".ico-tmp");
   fs.mkdirSync(tmp, { recursive: true });
-  const files = [];
-  for (const s of ICO_SIZES) {
-    const f = path.join(tmp, `icon-${s}.png`);
-    await img.clone().resize(s, s).writeAsync(f);
-    files.push(f);
-  }
+  const files = await Promise.all(
+    ICO_SIZES.map((size) => writePng(size, path.join(tmp, `icon-${size}.png`)))
+  );
   const ico = await pngToIco(files.map((f) => fs.readFileSync(f)));
   fs.writeFileSync(path.join(OUT_DIR, "icon.ico"), ico);
   files.forEach((f) => fs.unlinkSync(f));
   fs.rmdirSync(tmp);
-  console.log(`wrote build/icon.ico (${ico.length} bytes, sizes ${ICO_SIZES.join(",")})`);
+  console.log(
+    `wrote build/icon.ico (${ico.length} bytes, sizes ${ICO_SIZES.join(",")}; ` +
+      `stroke ${ICO_SIZES.map((s) => `${s}:${(strokeFor(s) * s).toFixed(2)}px`).join(" ")}）`
+  );
+  console.log(`source: this file's GEOMETRY / PALETTE; build/icon.png is ${builderIcon ? "1024" : "?"}`);
 }
 
 main().catch((err) => {
