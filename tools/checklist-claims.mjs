@@ -34,6 +34,12 @@
 // 后四行是带竖线的段落，而脚本读到的行一个不少。断言因此问渲染形状而不是行数，
 // 细节写在 `measurementTableViolations` 上面。
 //
+// 第五件事（第 126 轮）是第 10 节那一节本身：**最小可行子集从「说明书」推到「待填表」**。
+// 前四件事核的都是「读数有没有落点」，而落点写得再准，一个拿到 Windows 机器的人仍要
+// 读完整节才知道「读数写在哪、贴回哪一行」。所以第 10 节改成 10.1 四格读数 + 10.2 两行
+// 贴回模板，这一条核的是那张待填表本身：四格都在、每格都留着空、模板两行与第 9 节的
+// 落点是同一件事、模板的行名真的在未验证清单里。细节写在 `subsetFormViolations` 上面。
+//
 // 两个读法上的约定，写在这里因为规则靠它们区分「这一行在说什么」：
 //
 //   - **「第 N 步」与「第 N 节」不是一回事。** 触发条件里写「按清单第 5 步去验」是
@@ -166,6 +172,7 @@ export const pastedReading = (cell) => {
 export const claimsSummaryLine = ({
   status,
   claimRows = [],
+  templateRows = [],
   rows = [],
   checklistPath = CHECKLIST_DOC,
   measurementsPath = MEASUREMENTS_DOC,
@@ -173,6 +180,7 @@ export const claimsSummaryLine = ({
   const cited = rows.filter((row) => citesChecklistStep(row.trigger, checklistPath)).length;
   return (
     `真机清单的欠账：${checklistPath} 状态 ${status}，第 9 节对照表 ${claimRows.length} 行，` +
+    `第 10 节贴回模板 ${templateRows.length} 行，` +
     `${measurementsPath} 未验证清单 ${rows.length} 行，其中 ${cited} 行按清单的某一步去验`
   );
 };
@@ -182,6 +190,7 @@ export const claimsSummaryLine = ({
 export const CLAIMS_SUMMARY_SHAPE = Object.freeze({
   status: /状态\s*([^\s，]+)，/,
   claims: /第 9 节对照表\s*(\d+)\s*行/,
+  template: /第 10 节贴回模板\s*(\d+)\s*行/,
   rows: /未验证清单\s*(\d+)\s*行/,
   cited: /其中\s*(\d+)\s*行按清单的某一步去验/,
 });
@@ -193,11 +202,13 @@ export const readClaimsSummary = (line) => {
     return hit === null ? null : hit[1];
   };
   const claims = pick(CLAIMS_SUMMARY_SHAPE.claims);
+  const template = pick(CLAIMS_SUMMARY_SHAPE.template);
   const rows = pick(CLAIMS_SUMMARY_SHAPE.rows);
   const cited = pick(CLAIMS_SUMMARY_SHAPE.cited);
   return {
     status: pick(CLAIMS_SUMMARY_SHAPE.status),
     claims: claims === null ? null : Number(claims),
+    template: template === null ? null : Number(template),
     rows: rows === null ? null : Number(rows),
     cited: cited === null ? null : Number(cited),
   };
@@ -210,17 +221,31 @@ export const readClaimsSummary = (line) => {
  * 或者把某一项数漏。它不是同义反复：两边走的是两条路（一边是模板插值，一边是
  * 正则读回），反向控制就是拿一句被改坏一个数字的话喂进来。
  */
-export const claimsSummaryViolations = ({ line, status, claimRows = [], rows = [], checklistPath = CHECKLIST_DOC }) => {
+export const claimsSummaryViolations = ({
+  line,
+  status,
+  claimRows = [],
+  templateRows = [],
+  rows = [],
+  checklistPath = CHECKLIST_DOC,
+}) => {
   const parsed = readClaimsSummary(line);
   const violations = [];
   const want = {
     rows: rows.length,
     cited: rows.filter((row) => citesChecklistStep(row.trigger, checklistPath)).length,
     claims: claimRows.length,
+    template: templateRows.length,
     status,
   };
-  const label = { rows: "未验证清单的行数", cited: "其中按清单某一步去验的行数", claims: "第 9 节对照表的行数", status: "清单状态" };
-  for (const key of ["status", "claims", "rows", "cited"]) {
+  const label = {
+    rows: "未验证清单的行数",
+    cited: "其中按清单某一步去验的行数",
+    claims: "第 9 节对照表的行数",
+    template: "第 10 节贴回模板的行数",
+    status: "清单状态",
+  };
+  for (const key of ["status", "claims", "template", "rows", "cited"]) {
     if (parsed[key] === null) {
       violations.push(
         `门禁这句话里读不出「${label[key]}」（形状见 tools/checklist-claims.mjs 的 CLAIMS_SUMMARY_SHAPE）：` +
@@ -436,6 +461,220 @@ export const measurementTableViolations = ({ measurementsDoc, measurementsPath =
   }
   return violations;
 };
+/* ---- 第 10 节：最小可行子集，从「说明书」推到「待填表」 ----
+ *
+ * 第 122 轮把「清单存在 ≠ 读数已贴回」写成断言之后，第 10 节那四格仍然只是一段散文：
+ * 一个拿到 Windows 机器的人要读完整节才知道「读数写在哪、贴回哪一行」。第 126 轮把它
+ * 改成待填表——10.1 的四格各留一个「读数格」，10.2 是两行可以直接复制、只填空就能贴回
+ * `docs/measurements.md` 的模板。
+ *
+ * 待填表比说明书多一个风险：**同一件事写了两处**。模板里的行名是第 9 节那张对照表的
+ * 落点，第 9 节改了落点而模板没跟着改，人就会把读数贴到一行不存在的名字上——而那时
+ * 清单还是绿的。所以这一条问四件事：
+ *
+ *   1. 10.1 那张「读数格」表在，四格的步骤号恰好是 1 / 2.2 / 4.2 / 5.2（顺序也照这个），
+ *      且每一格的最后一列都留着一个空（`____`）——没有空，就不是待填表；
+ *   2. 10.2 的围栏块里恰好两行，每行四列（与未验证清单同形），「为什么没验」那一格
+ *      同时留着空、日期占位符 `YYYY-MM-DD` 与「读数」二字——这三样正是 `pastedReading`
+ *      认的标记，缺一样，贴回去仍然算没贴；
+ *   3. 模板的行名集合必须等于第 9 节里那四格点到的行名集合——两处说的是同一件事；
+ *   4. 模板的每一行都真的在未验证清单里——贴回时替换的是同名行，名字错了就没有落点。
+ */
+export const SUBSET_STEPS = Object.freeze(["1", "2.2", "4.2", "5.2"]);
+export const SUBSET_BLANK = "____";
+export const SUBSET_DATE_PLACEHOLDER = "YYYY-MM-DD";
+export const SUBSET_GRID_HEADER_LAST = "读数格";
+
+/** 某一节的行范围（`start` 是标题行，`end` 是下一个二级标题）。`###` 不算二级标题，
+ *  所以第 10 节里的 10.1 / 10.2 / 10.3 都落在同一段里。 */
+const sectionRange = (doc, headingPattern) => {
+  const lines = String(doc == null ? "" : doc).split(/\r?\n/);
+  const start = lines.findIndex((line) => headingPattern.test(line.trim()));
+  if (start === -1) return null;
+  let end = lines.length;
+  for (let index = start + 1; index < lines.length; index += 1) {
+    if (/^##\s/.test(lines[index].trim())) {
+      end = index;
+      break;
+    }
+  }
+  return { lines, start, end };
+};
+
+/** 一格开头那个步骤号（`1 SmartScreen` → `1`，`2.2 安装目录页` → `2.2`）。 */
+export const stepOf = (cell) => {
+  const hit = /^(\d+(?:\.\d+)*)/.exec(String(cell == null ? "" : cell).trim());
+  return hit === null ? null : hit[1];
+};
+
+/** 第 10 节里那张「读数格」表：一行一格，最后一列是给人填的空。 */
+export const subsetGridRows = (doc) => {
+  const range = sectionRange(doc, /^##\s*10[.、]/);
+  if (range === null) return [];
+  const { lines, start, end } = range;
+  let headerIndex = -1;
+  for (let index = start + 1; index < end; index += 1) {
+    const trimmed = lines[index].trim();
+    if (!trimmed.startsWith("|")) continue;
+    const cells = cellsOf(trimmed);
+    if (cells[cells.length - 1] === SUBSET_GRID_HEADER_LAST) {
+      headerIndex = index;
+      break;
+    }
+  }
+  if (headerIndex === -1) return [];
+  const rows = [];
+  for (let index = headerIndex + 1; index < end; index += 1) {
+    const trimmed = lines[index].trim();
+    if (!trimmed.startsWith("|")) break;
+    const cells = cellsOf(trimmed);
+    if (isSeparator(cells)) continue;
+    rows.push({ line: index + 1, step: stepOf(cells[0]), cells });
+  }
+  return rows;
+};
+
+/** 第 10 节里那个围栏块中的表格行（贴回模板）。只认围栏里的行：围栏外的表格是
+ *  10.1 那张读数格表，两者混在一起读会让「模板有几行」答错。 */
+export const subsetPastebackRows = (doc) => {
+  const range = sectionRange(doc, /^##\s*10[.、]/);
+  if (range === null) return [];
+  const { lines, start, end } = range;
+  const rows = [];
+  let inFence = false;
+  for (let index = start + 1; index < end; index += 1) {
+    const trimmed = lines[index].trim();
+    if (trimmed.startsWith("```")) {
+      inFence = !inFence;
+      continue;
+    }
+    if (!inFence || !trimmed.startsWith("|")) continue;
+    const cells = cellsOf(trimmed);
+    if (isSeparator(cells)) continue;
+    rows.push({ line: index + 1, name: cells[0], cells });
+  }
+  return rows;
+};
+
+export const subsetFormViolations = ({
+  checklistDoc,
+  measurementsDoc,
+  checklistPath = CHECKLIST_DOC,
+  measurementsPath = MEASUREMENTS_DOC,
+}) => {
+  const checklist = String(checklistDoc == null ? "" : checklistDoc);
+  if (sectionRange(checklist, /^##\s*10[.、]/) === null) {
+    return [
+      `${checklistPath} 里没有第 10 节（最小可行子集）：那一节是「一次跑不完也能留下一条读数」的入口，` +
+        "它不见了，真机上被打断的人就只剩 20–30 分钟的完整跑这一条路",
+    ];
+  }
+
+  const violations = [];
+
+  // 1. 10.1 的四格读数表。
+  const grid = subsetGridRows(checklist);
+  if (grid.length === 0) {
+    violations.push(
+      `${checklistPath} 第 10 节里没有「读数格」那张表（表头最后一列逐字是「${SUBSET_GRID_HEADER_LAST}」）：` +
+        "没有它，这一节又回到「读完整节才知道读数写在哪」"
+    );
+  } else {
+    const steps = grid.map((row) => row.step);
+    if (steps.join(",") !== SUBSET_STEPS.join(",")) {
+      violations.push(
+        `${checklistPath} 第 10 节读数格表的四格是「${steps.join(" / ")}」，应为「${SUBSET_STEPS.join(" / ")}」：` +
+          "这四格就是最小证据的四步，多一格少一格或换了顺序，第 9 节那张对照表就对不上了"
+      );
+    }
+    for (const row of grid) {
+      const cell = row.cells[row.cells.length - 1];
+      if (cell.includes(SUBSET_BLANK)) continue;
+      violations.push(
+        `${checklistPath} 第 ${row.line} 行（第 ${row.step} 格）的「${SUBSET_GRID_HEADER_LAST}」里没有留空（\`${SUBSET_BLANK}\`）：` +
+          "这一列是给人填的，没有空就只是一句期望读数——待填表与说明书的区别就在这一格"
+      );
+    }
+  }
+
+  // 2. 10.2 的贴回模板。
+  const paste = subsetPastebackRows(checklist);
+  if (paste.length === 0) {
+    violations.push(
+      `${checklistPath} 第 10 节里没有贴回模板（围栏块里的表格行）：` +
+        "没有它，跑完的人仍要自己拼一行 markdown 才能贴回未验证清单"
+    );
+  }
+  for (const row of paste) {
+    if (row.cells.length !== 4) {
+      violations.push(
+        `${checklistPath} 第 ${row.line} 行的贴回模板有 ${row.cells.length} 列，而未验证清单是四列（项 / 归属 / 为什么没验 / 触发条件）：` +
+          "列数不对，贴回去会把整张表挤歪"
+      );
+      continue;
+    }
+    const why = row.cells[2];
+    const missing = [
+      why.includes(SUBSET_BLANK) ? null : `空（\`${SUBSET_BLANK}\`）`,
+      why.includes(SUBSET_DATE_PLACEHOLDER) ? null : `日期占位符（\`${SUBSET_DATE_PLACEHOLDER}\`）`,
+      why.includes("读数") ? null : "「读数」二字",
+    ].filter(Boolean);
+    if (missing.length) {
+      violations.push(
+        `${checklistPath} 第 ${row.line} 行的贴回模板「为什么没验」那一格缺 ${missing.join("、")}：` +
+          "这三样正是 `pastedReading` 认的标记，缺一样，贴回去仍然算没贴"
+      );
+    }
+    if (!citesChecklistStep(row.cells[3], checklistPath)) {
+      violations.push(
+        `${checklistPath} 第 ${row.line} 行的贴回模板「触发条件」那一格没有引用 ${checklistPath} 的某一步：` +
+          "这一行的补法就是按清单跑一趟，路径与步骤不写在这里，贴回去之后这一行就没有落点"
+      );
+    }
+  }
+
+  // 3. 模板的行名必须是第 9 节真的点过的落点，且两条 DoD 各有一行。
+  //
+  // 这里刻意不按「第 10 节的四格 → 第 9 节的哪一行」去推：第 9 节是按节组织的
+  // （`2 向导（目录、详情面板、完成页）` 覆盖 2.1–2.4，`4.1–4.2 首启与六行读数`
+  // 覆盖两格），子集步骤与它没有一一对应，硬推会推出一张要人维护的映射表——那正是
+  // 这一条要防的东西。所以只问两件能问清的事：模板点到的每一行，第 9 节都点过；
+  // 以及 DOD-5 与 DOD-6 各至少有一行——最小子集的意义就是「两条 DoD 各留一条读数」。
+  const claims = checklistClaimRows(checklist);
+  const targetDod = new Map(claims.map((claim) => [claimKey(claim.target), claim.primaryDod]));
+  const templateNames = [...new Set(paste.map((row) => claimKey(row.name)))];
+  for (const row of paste) {
+    if (targetDod.has(claimKey(row.name))) continue;
+    violations.push(
+      `${checklistPath} 第 ${row.line} 行的贴回模板指向「${row.name}」，而第 9 节那张对照表没有把任何一格记回这一行：` +
+        "两处说的是同一件事——第 9 节改了落点，模板要跟着改，否则读数会贴到一行没人认的名字上"
+    );
+  }
+  const coveredDods = new Set(templateNames.map((name) => targetDod.get(name)).filter(Boolean));
+  // 模板一行都没有时，上面那句已经说了「没有贴回模板」；再报两条「没有一行推进 DOD-x」
+  // 只是同一件事的三种说法，读者会以为缺了三样东西。
+  for (const id of paste.length ? ["DOD-5", "DOD-6"] : []) {
+    if (coveredDods.has(id)) continue;
+    violations.push(
+      `${checklistPath} 第 10 节的贴回模板没有一行推进 ${id}（模板点到的行按第 9 节归属是「${[...coveredDods].join("、") || "（空）"}」）：` +
+        "最小子集的意义就是「两条 DoD 各留一条读数」，少一条，这一趟跑完仍有一条勾不上"
+    );
+  }
+
+  // 4. 模板的每一行都真的在未验证清单里。
+  const rows = unverifiedRows(measurementsDoc);
+  const known = new Set(rows.map((row) => claimKey(row.name)));
+  for (const row of paste) {
+    if (known.has(claimKey(row.name))) continue;
+    violations.push(
+      `${checklistPath} 第 ${row.line} 行的贴回模板指向「${row.name}」，而 ${measurementsPath} 的未验证清单里没有这一行：` +
+        "贴回时替换的是同名行，名字错了就没有落点——要么改模板，要么那一行已经被搬走了"
+    );
+  }
+
+  return violations;
+};
+
 /**
  * 三件事的违规清单。空数组是唯一可接受的结果。
  *
@@ -590,15 +829,18 @@ if (isEntryPoint) {
 
   const status = checklistStatus(checklistDoc);
   const claims = checklistClaimRows(checklistDoc);
+  const templateRows = subsetPastebackRows(checklistDoc);
   const rows = unverifiedRows(measurementsDoc);
-  const summaryLine = claimsSummaryLine({ status, claimRows: claims, rows });
+  const summaryLine = claimsSummaryLine({ status, claimRows: claims, templateRows, rows });
   const violations = [
     // 门禁自己那句话先过一遍自己的规则：印出来的数字要能读回来、且与表格相等。
-    ...claimsSummaryViolations({ line: summaryLine, status, claimRows: claims, rows }),
+    ...claimsSummaryViolations({ line: summaryLine, status, claimRows: claims, templateRows, rows }),
     ...recordedCountViolations({ measurementsDoc, rows }),
     ...checklistClaimViolations({ measurementsDoc, checklistDoc, dodDoc }),
     // 同一份文件的上半张表：读得出的行数不算数，渲染得出来的形状才算。
     ...measurementTableViolations({ measurementsDoc }),
+    // 第 10 节那张待填表：四格都在、都留着空，模板与第 9 节的落点是同一件事。
+    ...subsetFormViolations({ checklistDoc, measurementsDoc }),
   ];
 
   const measuredRows = measuredTableRows(measurementsDoc);

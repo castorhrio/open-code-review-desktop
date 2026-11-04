@@ -30,6 +30,13 @@ import {
   quotedRowCounts,
   readClaimsSummary,
   recordedCountViolations,
+  subsetFormViolations,
+  subsetGridRows,
+  subsetPastebackRows,
+  SUBSET_BLANK,
+  SUBSET_DATE_PLACEHOLDER,
+  SUBSET_STEPS,
+  stepOf,
   unverifiedRows,
 } from "./checklist-claims.mjs";
 import { auditScriptClosure } from "./upstream-watch.mjs";
@@ -93,7 +100,24 @@ const CLAIM_ROWS = [
   "| 6 portable | 免安装版（portable）的运行面 | DOD-5 |",
 ];
 
-const checklistDoc = ({ status = CHECKLIST_PENDING_MARK, claims = CLAIM_ROWS } = {}) =>
+const SUBSET_GRID = [
+  "| 1 SmartScreen | 双击 setup | 出现并走得下去 | 读数：____ |",
+  "| 2.2 安装目录页 | 走到目录页 | 默认路径 + 无 UAC | 读数：____ |",
+  "| 4.2 六行读数 | 设置 → 关于与卸载 | 六行一致 | 读数：____ |",
+  "| 5.2 两个目录 grep | 两条命令 | 有命中 / 零命中 | 读数：____ |",
+];
+
+const SUBSET_PASTEBACK = [
+  "| 安装版之后的首启链路 | 真机 | 读数（YYYY-MM-DD）：____ | 已按 `docs/win-install-checklist.md` 第 1 步跑过 |",
+  "| 装好之后 Key 落在哪 | 真机 | 读数（YYYY-MM-DD）：____ | 已按 `docs/win-install-checklist.md` 第 5.2 步跑过 |",
+];
+
+const checklistDoc = ({
+  status = CHECKLIST_PENDING_MARK,
+  claims = CLAIM_ROWS,
+  grid = SUBSET_GRID,
+  pasteback = SUBSET_PASTEBACK,
+} = {}) =>
   [
     "# Windows x64 安装包真机清单",
     "",
@@ -104,6 +128,20 @@ const checklistDoc = ({ status = CHECKLIST_PENDING_MARK, claims = CLAIM_ROWS } =
     "| 清单项 | 记回 `docs/measurements.md` 的哪一行 | 推进哪条 DoD |",
     "| --- | --- | --- |",
     ...claims,
+    "",
+    "## 10. 最小可行子集（5 分钟）",
+    "",
+    "### 10.1 四格读数（照这一张填）",
+    "",
+    "| 格 | 做什么 | 期望读数 | 读数格 |",
+    "| --- | --- | --- | --- |",
+    ...grid,
+    "",
+    "### 10.2 贴回模板（复制这两行，只填空）",
+    "",
+    "```markdown",
+    ...pasteback,
+    "```",
     "",
   ].join("\n");
 
@@ -336,24 +374,26 @@ const lineOf = (doc, name) => {
   const base = good();
   const rows = unverifiedRows(base.measurementsDoc);
   const claims = checklistClaimRows(base.checklistDoc);
-  const line = claimsSummaryLine({ status: "pending", claimRows: claims, rows });
+  const templateRows = subsetPastebackRows(base.checklistDoc);
+  const line = claimsSummaryLine({ status: "pending", claimRows: claims, templateRows, rows });
   const parsed = readClaimsSummary(line);
 
   check(
-    "前提：门禁那句读数印出来能读回四个数字（对照表 3 行 / 未验证清单 4 行 / 其中 3 行 / 状态 pending）",
-    parsed.status === "pending" && parsed.claims === 3 && parsed.rows === 4 && parsed.cited === 3,
+    "前提：门禁那句读数印出来能读回五个数字（对照表 3 行 / 贴回模板 2 行 / 未验证清单 4 行 / 其中 3 行 / 状态 pending）",
+    parsed.status === "pending" && parsed.claims === 3 && parsed.template === 2 && parsed.rows === 4 && parsed.cited === 3,
     JSON.stringify(parsed)
   );
   check(
     "基线：门禁自己那句读数与表格相等（绿）",
-    claimsSummaryViolations({ line, status: "pending", claimRows: claims, rows }).length === 0,
-    claimsSummaryViolations({ line, status: "pending", claimRows: claims, rows }).join("；") || "没有违规"
+    claimsSummaryViolations({ line, status: "pending", claimRows: claims, templateRows, rows }).length === 0,
+    claimsSummaryViolations({ line, status: "pending", claimRows: claims, templateRows, rows }).join("；") || "没有违规"
   );
 
   const wrongRows = claimsSummaryViolations({
     line: line.replace("未验证清单 4 行", "未验证清单 10 行"),
     status: "pending",
     claimRows: claims,
+    templateRows,
     rows,
   });
   check(
@@ -366,6 +406,7 @@ const lineOf = (doc, name) => {
     line: line.replace("其中 3 行按清单的某一步去验", "其中 2 行按清单的某一步去验"),
     status: "pending",
     claimRows: claims,
+    templateRows,
     rows,
   });
   check(
@@ -378,6 +419,7 @@ const lineOf = (doc, name) => {
     line: line.replace("第 9 节对照表 3 行", "第 9 节对照表 5 行"),
     status: "pending",
     claimRows: claims,
+    templateRows,
     rows,
   });
   check(
@@ -390,6 +432,7 @@ const lineOf = (doc, name) => {
     line: line.replace("状态 pending", "状态 executed"),
     status: "pending",
     claimRows: claims,
+    templateRows,
     rows,
   });
   check(
@@ -402,6 +445,7 @@ const lineOf = (doc, name) => {
     line: line.replace("，其中 3 行按清单的某一步去验", ""),
     status: "pending",
     claimRows: claims,
+    templateRows,
     rows,
   });
   check(
@@ -648,7 +692,160 @@ const lineOf = (doc, name) => {
   }
 }
 
-/* ---- 9. 仓库本身，而不是夹具 ---- */
+/* ---- 9. 第 10 节那张待填表 ----
+ *
+ * 第 122 轮把「清单存在 ≠ 读数已贴回」写成断言之后，第 10 节那四格仍是一段散文：
+ * 一个拿到 Windows 机器的人要读完整节才知道「读数写在哪、贴回哪一行」。第 126 轮把它
+ * 改成待填表（10.1 四格读数 + 10.2 两行贴回模板），这一节钉住那张表本身。
+ *
+ * 每格只改一个事实：删掉整节、把「读数格」表头改名、把某一格的空填掉、把四格换序、
+ * 把围栏拆掉、把日期占位符删掉、把模板的行名换成第 9 节没点过的、换成不推进 DOD-6 的、
+ * 把触发条件里的清单路径删掉、把未验证清单里那一行搬走。要求点名文件与行号。
+ */
+{
+  const violationsOfForm = (patch) =>
+    subsetFormViolations({ measurementsDoc: measurementsDoc(), checklistDoc: checklistDoc(), ...patch });
+
+  check("基线：夹具里的第 10 节是绿的（否则下面每一格反向控制都证明不了什么）", violationsOfForm({}).length === 0, violationsOfForm({}).join("；"));
+
+  const grid = subsetGridRows(checklistDoc());
+  const paste = subsetPastebackRows(checklistDoc());
+  check(
+    "前提：读数格表读出四格，步骤号是 1 / 2.2 / 4.2 / 5.2",
+    grid.length === 4 && grid.map((row) => row.step).join(",") === SUBSET_STEPS.join(","),
+    JSON.stringify(grid.map((row) => row.step))
+  );
+  check("前提：贴回模板读出两行，每行四列", paste.length === 2 && paste.every((row) => row.cells.length === 4), JSON.stringify(paste.map((row) => row.cells.length)));
+  check(
+    "前提：步骤号只认开头那个数字（`4.1–4.2 首启与六行读数` → `4.1`）",
+    stepOf("4.1–4.2 首启与六行读数") === "4.1" && stepOf("2.2 安装目录页") === "2.2" && stepOf("向导") === null,
+    JSON.stringify([stepOf("4.1–4.2 首启与六行读数"), stepOf("2.2 安装目录页"), stepOf("向导")])
+  );
+
+  // 1. 整节不见了。
+  {
+    const broken = checklistDoc().replace(/## 10\.[\s\S]*$/, "");
+    const violations = violationsOfForm({ checklistDoc: broken });
+    check(
+      "第 10 节整节不见了：点名文件与「没有第 10 节」",
+      violations.length === 1 && violations[0].includes(CHECKLIST_DOC) && violations[0].includes("没有第 10 节"),
+      violations.join("；") || "没有违规"
+    );
+  }
+
+  // 2. 「读数格」表头被改名。
+  {
+    const broken = checklistDoc().replace("| 格 | 做什么 | 期望读数 | 读数格 |", "| 格 | 做什么 | 期望读数 | 备注 |");
+    const violations = violationsOfForm({ checklistDoc: broken });
+    check(
+      "「读数格」表头被改名：点名「没有那张表」",
+      violations.length === 1 && violations[0].includes("读数格") && violations[0].includes("没有"),
+      violations.join("；") || "没有违规"
+    );
+  }
+
+  // 3. 某一格的空被填掉（待填表退化成说明书）。
+  {
+    const filled = "| 4.2 六行读数 | 设置 → 关于与卸载 | 六行一致 | 读数：六行与清单一致 |";
+    const broken = checklistDoc({ grid: SUBSET_GRID.map((row) => (row.startsWith("| 4.2") ? filled : row)) });
+    const violations = violationsOfForm({ checklistDoc: broken });
+    const want = broken.split(/\r?\n/).findIndex((line) => line === filled) + 1;
+    check(
+      "某一格的「读数格」没有留空：点名那一行与那一格",
+      violations.length === 1 && violations[0].includes(`第 ${want} 行`) && violations[0].includes("4.2") && violations[0].includes(SUBSET_BLANK),
+      violations.join("；") || "没有违规"
+    );
+  }
+
+  // 4. 四格换序。
+  {
+    const swapped = [SUBSET_GRID[0], SUBSET_GRID[2], SUBSET_GRID[1], SUBSET_GRID[3]];
+    const violations = violationsOfForm({ checklistDoc: checklistDoc({ grid: swapped }) });
+    check(
+      "四格换序：点名两边的步骤号（顺序也是这一条的一部分）",
+      violations.length === 1 && violations[0].includes("4.2 / 2.2") && violations[0].includes(SUBSET_STEPS.join(" / ")),
+      violations.join("；") || "没有违规"
+    );
+  }
+
+  // 5. 围栏被拆掉（模板行落回正文，读不到）。
+  {
+    const broken = checklistDoc().replace("```markdown\n", "").replace(/\n```\n$/, "\n");
+    const violations = violationsOfForm({ checklistDoc: broken });
+    check(
+      "贴回模板的围栏被拆掉：点名「没有贴回模板」",
+      violations.some((violation) => violation.includes("没有贴回模板")),
+      violations.join("；") || "没有违规"
+    );
+  }
+
+  // 6. 日期占位符被删掉。
+  {
+    const broken = checklistDoc({
+      pasteback: [SUBSET_PASTEBACK[0].replace("（YYYY-MM-DD）", ""), SUBSET_PASTEBACK[1]],
+    });
+    const violations = violationsOfForm({ checklistDoc: broken });
+    check(
+      "模板里少了日期占位符：点名那一行与缺的那一样",
+      violations.length === 1 && violations[0].includes(SUBSET_DATE_PLACEHOLDER) && violations[0].includes("缺"),
+      violations.join("；") || "没有违规"
+    );
+  }
+
+  // 7. 模板的行名换成第 9 节没点过的。
+  {
+    const broken = checklistDoc({
+      pasteback: [SUBSET_PASTEBACK[0].replace("安装版之后的首启链路", "首启链路"), SUBSET_PASTEBACK[1]],
+    });
+    const violations = violationsOfForm({ checklistDoc: broken });
+    check(
+      "模板的行名第 9 节没点过：点名那一行与那个名字",
+      violations.some((violation) => violation.includes("首启链路") && violation.includes("第 9 节")),
+      violations.join("；") || "没有违规"
+    );
+  }
+
+  // 8. 模板两行都推进 DOD-5（DOD-6 那一行被换掉）。
+  {
+    const broken = checklistDoc({
+      pasteback: [SUBSET_PASTEBACK[0], SUBSET_PASTEBACK[1].replace("装好之后 Key 落在哪", "免安装版（portable）的运行面")],
+    });
+    const violations = violationsOfForm({ checklistDoc: broken });
+    check(
+      "模板里没有一行推进 DOD-6：点名缺的那条 DoD",
+      violations.length === 1 && violations[0].includes("DOD-6") && violations[0].includes("各留一条读数"),
+      violations.join("；") || "没有违规"
+    );
+  }
+
+  // 9. 模板的触发条件里没有清单路径。
+  {
+    const broken = checklistDoc({
+      pasteback: [SUBSET_PASTEBACK[0].replace("`docs/win-install-checklist.md` 第 1 步", "那份清单"), SUBSET_PASTEBACK[1]],
+    });
+    const violations = violationsOfForm({ checklistDoc: broken });
+    check(
+      "模板的触发条件没有引用清单路径：点名那一行",
+      violations.length === 1 && violations[0].includes("触发条件") && violations[0].includes(CHECKLIST_DOC),
+      violations.join("；") || "没有违规"
+    );
+  }
+
+  // 10. 未验证清单里那一行被搬走（模板指向一个不存在的行名）。
+  {
+    const violations = subsetFormViolations({
+      checklistDoc: checklistDoc(),
+      measurementsDoc: measurementsDoc({ rows: [ROW_FIRST_RUN, ROW_PORTABLE, ROW_UPDATE] }),
+    });
+    check(
+      "模板指向的那一行已从未验证清单搬走：点名那一行与那个名字",
+      violations.length === 1 && violations[0].includes("装好之后 Key 落在哪") && violations[0].includes("没有这一行"),
+      violations.join("；") || "没有违规"
+    );
+  }
+}
+
+/* ---- 10. 仓库本身，而不是夹具 ---- */
 
 {
   const measurements = read(MEASUREMENTS_DOC) || "";
@@ -661,8 +858,15 @@ const lineOf = (doc, name) => {
   const liveRows = unverifiedRows(measurements);
   const liveClaims = checklistClaimRows(checklist);
   const liveStatus = checklistStatus(checklist);
-  const liveLine = claimsSummaryLine({ status: liveStatus, claimRows: liveClaims, rows: liveRows });
-  const liveSummary = claimsSummaryViolations({ line: liveLine, status: liveStatus, claimRows: liveClaims, rows: liveRows });
+  const liveTemplate = subsetPastebackRows(checklist);
+  const liveLine = claimsSummaryLine({ status: liveStatus, claimRows: liveClaims, templateRows: liveTemplate, rows: liveRows });
+  const liveSummary = claimsSummaryViolations({
+    line: liveLine,
+    status: liveStatus,
+    claimRows: liveClaims,
+    templateRows: liveTemplate,
+    rows: liveRows,
+  });
   check(
     "仓库里：门禁那句读数能被读回来、且与表格逐项相等（不是同义反复——反向控制在夹具里各改坏一个数字）",
     liveSummary.length === 0 && readClaimsSummary(liveLine).rows === liveRows.length,
@@ -702,7 +906,7 @@ const lineOf = (doc, name) => {
   );
 }
 
-/* ---- 10. 接线 ---- */
+/* ---- 11. 接线 ---- */
 
 {
   const pkg = JSON.parse(read("package.json"));
