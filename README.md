@@ -56,7 +56,7 @@ Everything below was exercised against the real CLI, without spending tokens unl
 - keeping several providers configured, switching the active one, and the per-run override (`--provider` / `--model` reach only that one command line, never the global config)
 - testing the connection from the form values (the CLI runs in an empty temp HOME, so nothing is written), the model names a rejected request lists becoming one-click fixes, and the automatic re-test after saving
 - failure output handling, session listing / loading / HTML export / deletion, `ocr rules check`, `ocr llm providers` parsing
-- the packaged app boots and reaches the bundled binary
+- the packaged app boots and reaches the bundled binary (Linux x64 unpacked tree, `tools/e2e-packaged.mjs`)
 - the run log streams the CLI's own progress lines live (`full-scan: N file(s) discovered`, `estimated cost: …`, `scan dispatch: …`, `Session: …`, per-file exclusions and failures) while keeping the failure payload out of it
 - a completed whole-file scan against a live provider — the results page renders that payload (the run's own token count and duration are in [`docs/measurements.md`](docs/measurements.md))
 - live progress during a run (files discovered, completed tool calls, comments so far, the CLI's own cost estimate), with per-tool-call chatter counted rather than streamed; large scans are gated behind an explicit size/cost confirmation
@@ -79,6 +79,8 @@ Everything below was exercised against the real CLI, without spending tokens unl
 **Option A — Windows installer (recommended).** Download the `*-setup.exe` for the release you want from [Releases](../../releases) and run it. The wizard lets you pick the install directory, shows the install path when it finishes, offers to launch the app, and creates desktop + Start-menu shortcuts **plus a Start-menu "卸载 / Uninstall" entry**. Per-user install by default, no administrator rights. Because it is unsigned, SmartScreen may warn — choose *More info → Run anyway*.
 
 **Option B — Windows portable.** Run the `*-portable.exe` directly, no installation. It extracts to a temp dir each run, writes nothing to the registry, and has no uninstaller — just delete the exe.
+
+> The `v0.1.13` installer ships `ocr 1.13.0`, while the source tree in this repository is pinned to `1.13.5`. That gap is a release that predates the pin move, not a missing dependency bump: the next Windows release aligns them. Both numbers are read out of the release tag by `npm run audit:release-pin`, not copied from this sentence.
 
 **Option C — macOS and Linux: there is nothing to download.** Releases carry Windows assets only — every one of the twelve releases is `*-setup.exe` + `*-portable.exe` + `latest.yml` + blockmap, and nothing else. `npm run dist:mac` / `npm run dist:linux` are configured here, but each needs its own host (the dmg only builds on macOS, the AppImage / deb on Linux or WSL/Docker), no such artifact has ever been published, and no build from either script has ever been run — so on those platforms this is a source-only project, with the unsigned first-launch warning (Gatekeeper / SmartScreen) applying to whatever you produce yourself.
 

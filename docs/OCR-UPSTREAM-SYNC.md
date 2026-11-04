@@ -35,7 +35,7 @@ tag v1.13.5
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`abb7abcd5c5196fa0278dc87db85780fa269562f`（第 123 轮：HEAD 由 `npm run upstream:check` 的 api 通路答上（`git ls-remote` 超时，`refs/heads/main` 仍是第 121 轮记下的 `8041473`），`/releases/latest` 与 npm `latest` 仍分别答 `v1.13.5` / `1.13.5`，**pin 不动**（pin 跟的是发布版本，不是默认分支）；通路：api）**
+**本轮 HEAD 核对：`abb7abcd5c5196fa0278dc87db85780fa269562f`（第 124 轮：HEAD 由 `npm run upstream:check` 的 git 通路答上，`refs/heads/main` 已从 `abb7abc` 前进到 `8041473`（就是第 121 轮记下的那个 C# 规则 commit），`/releases/latest` 与 npm `latest` 仍分别答 `v1.13.5` / `1.13.5`，**pin 不动**（pin 跟的是发布版本，不是默认分支）；通路：git）**
 
 ### 核对通路账
 
@@ -131,6 +131,7 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 | 121 | 2026-11-04 | api | **上游 HEAD 前进**：`abb7abc` → `8041473`（1 个 commit：`feat(rules): add C# review rules (#1840)`——新增 `internal/config/rules/rule_docs/csharp.md`、`internal/config/rules/system_rules.json` 加一行并补测试、`pages/` 下 5 份多语审查规则文档，共 8 个文件；`git ls-remote` 超时 124，HEAD 由 GitHub API 答上）；`refs/tags/v1.13.5` 与 npm `1.13.5` 均未变，**pin 不前进**（pin 跟的是发布版本，不是默认分支）；对照表 5 行的上游文件一个都没被这个 commit 碰到，**无移植项**；本轮产品改动是把 `docs/win-install-checklist.md` 里那两个期望版本从「人记得回来改」变成「脚本会点名」：`tools/release-pin.mjs` 新增 `checklistVersionViolations`（清单里每个 `X.Y.Z` 只能是最新发布 tag 的版本或它带的 `ocr` 版本，§4.2 那两行必须与之一致，也可以写成「以那条命令的读数为准」且不写数字），`tools/release-pin-smoke.mjs` 30 → 41 条 | — |
 | 122 | 2026-11-04 | api | `8041473` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**（`git ls-remote` 超时 124，HEAD / tag / release 由 GitHub API 答上；HEAD 仍是第 121 轮记下的那个 C# 规则 commit，对照表 5 行的上游文件一个都没被碰到）；本轮把「清单存在 ≠ 读数已贴回」这条缝补上：新增 `tools/checklist-claims.mjs`（`npm run audit:checklist-claims`，挂进 `audit:static`）——未验证清单里「按清单第 N 步去验」的行必须引用清单路径、第 9 节对照表与未验证清单双向对上（删清单的行、删第 9 节的行各堵一个洞）、DOD-5 / DOD-6 勾上时那两行的「为什么没验」必须已换成带日期与「读数」二字的实测读数；`docs/win-install-checklist.md` 新增 §10「最小可行子集（5 分钟）」（只做第 1、2.2、4.2、5.2 四格就能各留一条读数，并写明没跑到的行不许删）；`使用说明.md` 进中文排版的显式清单 | — |
 | 123 | 2026-11-04 | api | `8041473` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**（`git ls-remote` 超时，HEAD / tag / release 由 GitHub API 答上；HEAD 仍是第 121 轮记下的 C# 规则 commit `8041473`，它那 8 个变更文件 `internal/config/rules/rule_docs/csharp.md`、`system_rules.json` + 测试、`pages/` 五份多语审查规则文档，一个都不在对照表 5 行里，也无本仓要移植的调用面）；本轮把两处「欠账没有落点」回敬给规则本身：`tools/checklist-claims.mjs` 的门禁读数改由现算得到并读回校验（`claimsSummaryLine` / `readClaimsSummary` / `claimsSummaryViolations`），`docs/measurements.md` 里最后一句引用「未验证清单 N 行 / 其中 M 行」的读数必须与表格相等（`recordedCountViolations`），`tools/upstream-watch.mjs` 新增 `dodConfirmationViolations`——把决定交给 scheduler 侧的未勾原因必须写清「scheduler 侧要确认的是：…」并指到仓内记录（DOD-2 由此从「一句话没有落点」变成一句可核对的话，勾选状态不动） | — |
+| 124 | 2026-11-04 | git | **上游 HEAD 前进**：`abb7abc` → `8041473`（`git fetch upstream --tags` 本轮通了，`git log abb7abc..upstream/main` 只有这一个 commit：`feat(rules): add C# review rules (#1840)`，8 个文件——新增 `internal/config/rules/rule_docs/csharp.md`、`internal/config/rules/system_rules.json` 加一行并补测试、`pages/` 下 5 份多语审查规则文档）；`refs/tags/v1.13.5` 与 npm `1.13.5` 均未变，**pin 不前进**（pin 跟的是发布版本，不是默认分支）；对照表 5 行的上游文件（`internal/llm/resolver.go`、`cmd/opencodereview/config_cmd.go`、`llm_cmd.go` / `providers.go`、`internal/session/manifest.go` 的两张 `failure_class` 枚举）一个都没被这个 commit 碰到，**无移植项**；本轮产品侧只补两处诚实度缺口：README 的打包验证那条标明平台（Linux x64 解包目录，`tools/e2e-packaged.mjs`），安装段写明 `v0.1.13` 安装包带 `ocr 1.13.0` 而源码树 pin 在 `1.13.5` | — |
 
 「最近一次对照」只写**那一项最近被人工重新核对**的轮次。该列没有列出本轮，表示本轮
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
@@ -222,16 +223,18 @@ tool 结果文本**（`Error: diff not found for: …`、`Diffs exist for: …`�
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。搬完这里只留一句
    指针——「本文件只留当前一轮」不是约定而是断言（`previousRoundPointerViolations`）。
 
-## 当前状态（第 123 轮，2026-11-04）
-本轮复核：**上游没动。** `npm run upstream:check` 走 api 通路答上 `refs/heads/main` 仍是第 121 轮记下的 `8041473`（`git ls-remote` 超时 124），`/releases/latest` 与 npm `latest` 仍分别答 `v1.13.5` / `1.13.5`——三个口径一致，**pin 不动**、对照表 5 行无需重读、**无移植项**。
+## 当前状态（第 124 轮，2026-11-04）
+本轮复核：**上游 HEAD 前进了，但没有新发布。** `npm run upstream:check` 走 git 通路答上 `refs/heads/main` 已从 `abb7abc` 前进到 `8041473`，`git fetch upstream --tags` 之后 `git log abb7abc..upstream/main` 只有那一个 commit（`feat(rules): add C# review rules (#1840)`），`/releases/latest` 与 npm `latest` 仍分别答 `v1.13.5` / `1.13.5`——**pin 不动**、对照表 5 行无需重读、**无移植项**。
 
-本轮产品侧只做一件事：**把第 120–121 轮建立的「真机清单 + 版本门禁」链条闭合。** 那两轮之后，链条上还剩一处只靠人的纪律连接的地方——清单文件头写着「这份文件是一次操作的说明书，不是验证记录」，但这句话本身没有断言：把 `docs/measurements.md` 未验证清单里那两行删掉，欠账就消失了，而 run 还是绿的。
+那个 commit 只碰规则数据：新增 `internal/config/rules/rule_docs/csharp.md`、`internal/config/rules/system_rules.json` 加一行并补测试，另 5 个是 `pages/` 下的多语审查规则文档。对照表 5 行的上游文件一个都没被碰到，所以它对本仓的影响是「下一次发版时多一门语言的规则」，不是调用面变更；等它进下一个发布时再按那 5 行重读一遍。
 
-`tools/checklist-claims.mjs`（`npm run audit:checklist-claims`，挂进 `audit:static`）因此问三件互相咬合的事：未验证清单里「按清单第 N 步去验」的行必须真的引用清单路径；清单第 9 节那张「读数记回哪一行」的对照表与未验证清单**双向**对上（正向堵「行先没了」，反向堵「第 9 节的行被删了，读数没有落点」）；DOD-5 / DOD-6 一旦是 `[x]`，清单文件头就不能还写着「尚未执行」，且这两条点到的每一行「为什么没验」必须已换成带日期与「读数」二字的实测读数。两个读法上的约定写在文件头：「第 N 步」与「第 N 节」不是一回事（`应用内更新` 那一行引用清单是为了说「这一项不在那一趟里」），一条对照行只认第一个 `DOD-<n>`（`DOD-5（主）；…DOD-4…` 的主归属是 DOD-5）。规则由 `tools/checklist-claims-smoke.mjs` 的 32 条检查钉住，反向控制逐格点名文件与行号。
+本轮产品侧只做一件事：**把两处「读者第一眼会读错」的地方改对。** 第一处是 README 的「已验证行为」里那条「安装版能启动并调用到内置二进制」——它验的是 `release/linux-unpacked` 里的可执行文件（`tools/e2e-packaged.mjs`），而发布面只有 Windows 的 `*-setup.exe`，不标平台就等于把脚本验的平台说成发布平台；两份 README 的对应条目因此各补一句平台与脚本名。
 
-同一轮里 `docs/win-install-checklist.md` 新增 §10「最小可行子集（5 分钟）」：第 1–7 节是 20–30 分钟的一趟，而「一次跑不完」不该等于「什么都没留下」——只做第 1、2.2、4.2、5.2 四格，DOD-5 与 DOD-6 就各有一条读数，并写明没跑到的行不许删（门禁会点名）。`使用说明.md` 也进了中文排版的显式清单：它是 Windows 用户装完第一眼读的中文文档，此前只靠 README 的链接被覆盖。
+第二处是安装段：`v0.1.13` 安装包里带的是 `ocr 1.13.0`，而源码树 pin 在 `1.13.5`。这个差距在 `docs/measurements.md` 里早有登记（`npm run audit:release-pin` 从发布 tag 的 `package.json` 与 lockfile 读出来的），但下载安装包的人看不到那一行；两份 README 的安装段因此各补一句，并写明两个数字是脚本从 tag 里读出来的、不是照句子抄的。
 
-上一轮（第 121 轮）的正文见 [`upstream-history.md`](upstream-history.md#上游状态第-121-轮2026-11-04)，归档之后本文件不留第二份。
+Windows x64 上按 `docs/win-install-checklist.md` 装一次 `v0.1.13` 仍是 DOD-5 / DOD-6 缺的那一趟，本轮没有推进它：这台机器是 Linux，跑不了 NSIS 包装层，而「怎么执行这一趟」已经写过三轮，再写一遍不会多出一条读数。
+
+上一轮（第 123 轮）的正文见 [`upstream-history.md`](upstream-history.md#上游状态第-123-轮2026-11-04)，归档之后本文件不留第二份。
 
 ### 参数面：`ocr review --help` / `ocr scan --help` 与本仓真的拼出的每一行
 

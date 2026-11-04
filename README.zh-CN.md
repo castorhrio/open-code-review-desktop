@@ -58,7 +58,7 @@ CLI 很强，但一切都发生在终端里：读几十条行级意见、区分"
 - 多服务商并存配置、「设为当前」，以及按次覆盖（`--provider` / `--model` 只出现在那一次命令行里，不写回全局配置）
 - 按表单值测试连通（跑在隔离的空 HOME 里，不写配置）、失败时报错里的模型名可一键回填、保存后自动复测
 - 失败输出处理、会话列表 / 载入 / 导出 HTML / 删除、`ocr rules check`、`ocr llm providers` 解析
-- 安装版能启动并调用到内置二进制
+- 安装版能启动并调用到内置二进制（Linux x64 解包目录，`tools/e2e-packaged.mjs`）
 - 运行日志实时转发 CLI 自己的进度行（`full-scan: N file(s) discovered`、`estimated cost: …`、`scan dispatch: …`、`Session: …`、逐个文件的排除与失败原因），同时不把失败载荷刷进日志
 - 一次真实的全量扫描已跑通并产出评论，结果页按该载荷渲染（当次的 token 与耗时记在 [`docs/measurements.md`](docs/measurements.md)）
 - 两个结果界面在千级规模下的表现：`?huge=1` 挂载 1200 条评论——结果列表每一行、阅读页每一块——审计每次打印这次挂载耗时，超过上限即变红；两者都不做虚拟化，这个决定有测量依据（具体数字记在 [`docs/measurements.md`](docs/measurements.md)，不写在这里）
@@ -79,6 +79,8 @@ CLI 很强，但一切都发生在终端里：读几十条行级意见、区分"
 **方式 A — 安装包（推荐）。** 从 [Releases](../../releases) 下载对应版本的 `*-setup.exe` 双击安装。当前用户级安装，不需要管理员权限。因为**未做代码签名**，SmartScreen 可能提示"Windows 已保护你的电脑"→ 点「更多信息」→「仍要运行」。
 
 **方式 B — 免安装绿色版。** 直接运行 `*-portable.exe`，无需安装。
+
+> `v0.1.13` 安装包里带的是 `ocr 1.13.0`，而本仓库源码树 pin 在 `1.13.5`。这个差距来自「上一次发版早于 pin 前进」，不是漏升依赖：下一次在 Windows 上发版即对齐。两个数字都由 `npm run audit:release-pin` 从发布 tag 里读出来，不是照这句话抄的。
 
 > v0.1.0 的资产已在本项目由 `ocr-desktop` 改名后原地重命名为 `open-code-review-desktop-0.1.0-*.exe`；文件字节未变（SHA-256 已核对），但改名前的下载链接现在会返回 404。
 

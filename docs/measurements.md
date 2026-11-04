@@ -27,6 +27,8 @@ README 的 Status 段只写**能力**（能渲染 1200 条、有耗时上限断�
 
 | 2026-11-04 | 第 123 轮：门禁自己那句读数进断言（`claimsSummaryLine` / `readClaimsSummary` / `claimsSummaryViolations` / `recordedCountViolations`），DOD-2 的「归 scheduler 侧」也要求写出要确认的对象（`dodConfirmationViolations`） | `npm run audit:checklist-claims` 48 条全绿（原 34 + 14），门禁打印「……未验证清单 11 行，其中 6 行按清单的某一步去验」，`npm run audit:upstream` 351 条 ok 行 0 条红（原 345 + 6）；反向控制在真仓库上各跑一次：把本文件第 26 行的 11 改成 10 → 退出码 1 并点名第 26 行「写「未验证清单 10 行」，而这张表现在有 11 行」，把 DOD-2 的确认句删掉 → smoke 点名第 52 行「把决定交给 scheduler 侧，却没有写「scheduler 侧要确认的是：…」」 | `node tools/checklist-claims.mjs`；`node tools/checklist-claims-smoke.mjs`；`node tools/upstream-watch-smoke.mjs`（Linux x64，二进制 `v1.13.5 (abb7abcd)`） |
 
+| 2026-11-04 | 第 124 轮：上游 HEAD 前进（`abb7abc` → `8041473`，只有 `feat(rules): add C# review rules (#1840)` 一个 commit，8 个文件全是规则数据与 `pages/` 文档），`v1.13.5` / npm `1.13.5` 未变，pin 不动、无移植项；产品侧只改两份 README 的两处诚实度缺口（打包验证那条标明平台、安装段写明安装包带 `ocr 1.13.0` 而源码树 pin `1.13.5`） | `npm run upstream:check` 走 git 通路答上（`git fetch upstream --tags` 本轮通了，`git log abb7abc..upstream/main` 只此一个 commit）；`npm run audit:static` 28 项全绿、2486 条 ok 行、exit 0（其中 `audit:upstream` 351 条、`audit:checklist-claims` 48 条、`audit:typography` 25 条）；`audit:checklist-claims` 打印「未验证清单 11 行，其中 6 行按清单的某一步去验」，与贴回后的表格相等 | `npm run upstream:check`；`npm run audit:static`（Linux x64，二进制 `v1.13.5 (abb7abcd)`） |
+
 ## 这张表怎么读：验证面，以及不可复现的那一半
 
 表里那几条「整套门禁重跑」的读数是**验证面**，不是又一个数字，所以它们把「怎么跑出来的」
