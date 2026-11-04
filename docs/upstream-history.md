@@ -36,6 +36,16 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 
 ---
 
+## 上游状态（第 119 轮，2026-11-04）
+
+本轮复核：**上游什么都没动。** `npm run upstream:check` 走 git 通路答上 `refs/heads/main` 仍是 `abb7abc`（第 111–114、116–118 轮核到的都是它），`/releases/latest` 由 GitHub API 答 `v1.13.5`，npm `latest` 由 `npm view` 答 `1.13.5`——三处口径一致，**pin 不动、对照表 5 行无需重读、无移植项**。
+
+本轮产品侧不改能力，只补上一轮那套账的三处缺口，都属「门禁红了要说得清原因」这一件事：
+
+1. **同一事实不再两处解析**：`releaseAssetViolations` 原来用 `String(tag).replace(/^v/, "")` 自己从 tag 名里剥版本，而 `releaseTagOf` 已经解析过一次；现在签名收成 `{ tag, version, manifest, lock }`，版本由调用方传入，空版本算一条红而不是「跳过这次比对」——与下方「文档那一行」的规则同一个形状（`includes("")` 对每一行都真）。
+2. **浅克隆里的红要说出原因**：`main()` 在 `git tag -l 'v*'` 为空时不再说「没有发布」（那句话会让人去查另一个项目的 tag），而是点名「`--depth` 克隆与 tarball 解出来的目录都长这样」并指出可以先跑不要 git 的那一半。
+3. **第二个环境依赖登记进账**：`audit:static` 从第 114 轮起要本机已装 CLI，第 118 轮起还要本 checkout 的 tag 历史；后者这一轮真量了一次——`git clone --depth 1 --no-tags` 的副本里 `tools/release-pin.mjs` 退出码 2 并说出原因，`tools/release-pin-smoke.mjs` 同一副本里 30 条全绿（规则那一半不碰 git），代价写进 `docs/measurements.md` 的未验证清单与实测表。
+
 ## 上游状态（第 118 轮，2026-11-04）
 
 本轮复核：**上游什么都没动。** `refs/heads/main` 仍是 `abb7abc`（`/commits/main` 答上，第 111、112、113、114、116、117 轮核到的都是它），

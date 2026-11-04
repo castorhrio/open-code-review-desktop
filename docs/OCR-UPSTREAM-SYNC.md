@@ -35,7 +35,7 @@ tag v1.13.5
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`abb7abcd5c5196fa0278dc87db85780fa269562f`（第 119 轮：HEAD 由 `npm run upstream:check` 的 git 通路答上（`refs/heads/main` 仍是 `abb7abc`），/releases/latest` 由 GitHub API 答 `v1.13.5`、npm `latest` 由 `npm view` 答 `1.13.5`，三处口径一致，**pin 不动**；通路：git）**
+**本轮 HEAD 核对：`abb7abcd5c5196fa0278dc87db85780fa269562f`（第 120 轮：HEAD 由 `npm run upstream:check` 的 git 通路答上（`refs/heads/main` 仍是 `abb7abc`），/releases/latest` 由 GitHub API 答 `v1.13.5`、npm `latest` 由 `npm view` 答 `1.13.5`，三处口径一致，**pin 不动**；通路：git）**
 
 ### 核对通路账
 
@@ -127,6 +127,7 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 | 117 | 2026-11-04 | api | `abb7abc` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**（`git ls-remote` 超时 124，HEAD / tag / release 由 GitHub API 答上）；本轮产品改动是把「装完的那份字节」第一次交给脚本：新增 `tools/e2e-packaged.mjs`（`npm run audit:packaged`）——用一次性 HOME 启动 `release/<platform>-unpacked` 里的可执行文件，经 DevTools 协议读界面，断言渲染层来自 `resources/app/out`、应用自报「安装版」且安装目录就是打包树、内置 CLI 在打包树里且自报 pin 的 tag 与 commit 前缀、配置落在一次性档案里、开发者真实配置摘要不变；反向控制是同一套断言指向源码树（必须变红并点名安装目录与 CLI 位置）；规则抽成四个纯函数由 `tools/e2e-packaged-smoke.mjs`（`audit:packaged-rules`，挂进 `audit:static`）用 24 条检查钉住 | — |
 | 118 | 2026-11-04 | api | `abb7abc` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**；本轮把「发布资产里带的是哪一版 `ocr`」从人读变成脚本能答：新增 `tools/release-pin.mjs`（`npm run audit:release-pin`）——按 tag 的 `package.json` 名字筛出本产品的发布（这份 checkout 里还躺着上游的 `v0.2.x` / `v1.13.x`，只按版本号选会答到另一个产品），读那份 tag 的 `package.json` 依赖区间与同一份 `package-lock.json` 的解析版本，再把源码树的依赖区间 + lockfile 解析与 pin 双向对上；结果：`v0.1.13` 里带的是 `ocr 1.13.0`，源码树这一侧是 `1.13.5`，差的两版写成一句话、不设成永久红（发版要 Windows 机器）；`docs/measurements.md` 那一行必须写 tag、版本与命令，否则红——规则 28 条由 `tools/release-pin-smoke.mjs` 钉住，挂进 `audit:static` | — |
 | 119 | 2026-11-04 | git | `abb7abc` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**（`npm run upstream:check` 走 git 通路答上 HEAD，release 与 npm 分别由 GitHub API 与 `npm view` 答上）；本轮把第 118 轮那套「发布资产版本」的账补齐：`releaseAssetViolations` 不再自己从 tag 名里剥 `v` 前缀（版本由 `releaseTagOf` 解析后传入，一处事实一处解析，空版本算红而不是跳过比对），`main()` 在 tag 列表为空时点名「浅克隆 / tarball」而不是说「没有发布」（那会把人指向另一个项目的 tag），`audit:static` 的第二个环境依赖（本机 git tag 历史）在 `git clone --depth 1 --no-tags` 的副本上真跑一次（退出码 2、smoke 仍 30 条全绿）并登记进 `docs/measurements.md` 的未验证清单 | — |
+| 120 | 2026-11-04 | git | `abb7abc` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**；本轮只补 DOD-5 的真机面：新增 `docs/win-install-checklist.md`（逐项写清验什么、期望读数、读数记回 `docs/measurements.md` 哪一行，期望值从 `package.json` 的 `build.nsis` 与 `build/installer.nsh` 读出），未验证清单据此多两行、四行触发条件改指清单步骤，DOD-5 与 DOD-6 的未勾原因各加一句，勾选状态不动 | — |
 
 「最近一次对照」只写**那一项最近被人工重新核对**的轮次。该列没有列出本轮，表示本轮
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
@@ -218,16 +219,20 @@ tool 结果文本**（`Error: diff not found for: …`、`Diffs exist for: …`�
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。搬完这里只留一句
    指针——「本文件只留当前一轮」不是约定而是断言（`previousRoundPointerViolations`）。
 
-## 当前状态（第 119 轮，2026-11-04）
-本轮复核：**上游什么都没动。** `npm run upstream:check` 走 git 通路答上 `refs/heads/main` 仍是 `abb7abc`（第 111–114、116–118 轮核到的都是它），`/releases/latest` 由 GitHub API 答 `v1.13.5`，npm `latest` 由 `npm view` 答 `1.13.5`——三处口径一致，**pin 不动、对照表 5 行无需重读、无移植项**。
+## 当前状态（第 120 轮，2026-11-04）
+本轮复核：**上游什么都没动。** `npm run upstream:check` 走 git 通路答上 `refs/heads/main` 仍是 `abb7abc`，`/releases/latest` 由 GitHub API 答 `v1.13.5`，npm `latest` 由 `npm view` 答 `1.13.5`——三处口径一致，**pin 不动、对照表 5 行无需重读、无移植项**。
 
-本轮产品侧不改能力，只补上一轮那套账的三处缺口，都属「门禁红了要说得清原因」这一件事：
+本轮不改能力，只把 DOD-5 那条「真机面」从「没人写过该验什么」推到「一次真机跑就能勾」：新增
+[`win-install-checklist.md`](win-install-checklist.md)，逐项写清 SmartScreen 的三种读数、NSIS 向导四个页面各该看到什么
+（期望值全从 `package.json` 的 `build.nsis` 与 `build/installer.nsh` 读出，不是凭印象）、桌面与开始菜单两个快捷方式、
+装完之后「关于与卸载」六行的读数、直接问内置二进制的那一版、portable 的注册表查询、卸载两个入口的「删了哪四项、
+留了哪两处」，以及每一格读数记回 `docs/measurements.md` 的哪一行。`docs/measurements.md` 的未验证清单因此多两行
+（装好之后 Key 落在哪、免安装版的运行面），另外四行的触发条件改成指着清单里的具体步骤；`docs/PRODUCT-DOD.md`
+的 DOD-5 与 DOD-6 未勾原因各加一句「那一趟写成哪份文件」，勾选状态一个字没动。
 
-1. **同一事实不再两处解析**：`releaseAssetViolations` 原来用 `String(tag).replace(/^v/, "")` 自己从 tag 名里剥版本，而 `releaseTagOf` 已经解析过一次；现在签名收成 `{ tag, version, manifest, lock }`，版本由调用方传入，空版本算一条红而不是「跳过这次比对」——与下方「文档那一行」的规则同一个形状（`includes("")` 对每一行都真）。
-2. **浅克隆里的红要说出原因**：`main()` 在 `git tag -l 'v*'` 为空时不再说「没有发布」（那句话会让人去查另一个项目的 tag），而是点名「`--depth` 克隆与 tarball 解出来的目录都长这样」并指出可以先跑不要 git 的那一半。
-3. **第二个环境依赖登记进账**：`audit:static` 从第 114 轮起要本机已装 CLI，第 118 轮起还要本 checkout 的 tag 历史；后者这一轮真量了一次——`git clone --depth 1 --no-tags` 的副本里 `tools/release-pin.mjs` 退出码 2 并说出原因，`tools/release-pin-smoke.mjs` 同一副本里 30 条全绿（规则那一半不碰 git），代价写进 `docs/measurements.md` 的未验证清单与实测表。
+清单本身不是证据：它只说明知道该验什么，读数贴回之前那几行仍是「没验过」。
 
-上一轮（第 118 轮）的正文见 [`upstream-history.md`](upstream-history.md#上游状态第-118-轮2026-11-04)，归档之后本文件不留第二份。，归档之后本文件不留第二份。
+上一轮（第 119 轮）的正文见 [`upstream-history.md`](upstream-history.md#上游状态第-119-轮2026-11-04)，归档之后本文件不留第二份。
 
 ### 参数面：`ocr review --help` / `ocr scan --help` 与本仓真的拼出的每一行
 

@@ -63,11 +63,11 @@
   证据候选：tools/e2e-first-run.cjs（真 Electron 里走完首启 → 引导 → 配 provider → 预览，以及成本确认挡住的那次 spawn）
   证据候选：src/components/ResultsPanel.tsx（完成／部分／失败／警告徽章与截断态）
 - [ ] DOD-5：**航运资产**：`v0.1.13`（或更新）`*-setup.exe` / portable 可装可启；内置二进制可达；未签名 SmartScreen 有说明
-  未勾原因：`docs/measurements.md` 记的真机面是 Linux x64，而发布面只有 Windows x64 的 `*-setup.exe`，安装包本身从未被脚本化装过一次；等 Windows x64 上装一次并记下首启结果再勾。
+  未勾原因：`docs/measurements.md` 记的真机面是 Linux x64，而发布面只有 Windows x64 的 `*-setup.exe`，安装包本身从未被装过一次；缺的那一趟已经写成 `docs/win-install-checklist.md`（逐项写明验什么、期望读数、读数记回哪一行），有人按它在 Windows x64 上装一次、把读数贴回 `docs/measurements.md` 之后，这一条才具备被勾的条件。
   证据候选：docs/measurements.md（真机记录，以及「没验证过什么」那一节）
   证据候选：tools/release.mjs（发版脚本停在人操边界前）
 - [ ] DOD-6：**安全底线**：Key 不进本程序副本；`asar` 保持 false（spawn 契约）；发版密钥扫描绿
-  未勾原因：`asar` 保持 false、Key 只经 `ocr config set` 写入、发版前密钥扫描（`tools/secret-scan.mjs`）三条都有断言，缺的是「装好的那一份里 Key 真的不在本程序目录」的实测；等真机上装一次、翻一遍用户数据目录再勾。
+  未勾原因：`asar` 保持 false、Key 只经 `ocr config set` 写入、发版前密钥扫描（`tools/secret-scan.mjs`）三条都有断言，缺的是「装好的那一份里 Key 真的不在本程序目录」的实测；这一遍怎么翻写在 `docs/win-install-checklist.md` 的第 5、7 步（程序目录、Electron 用户数据目录、卸载后重装各看一次），读数贴回 `docs/measurements.md` 之后才够勾。
   证据候选：package.json（`asar` 保持 false 的 spawn 契约）
   证据候选：config-handler.js（Key 只经 `ocr config set` 写入，本程序不存副本）
   证据候选：tools/secret-scan.mjs（发版前的密钥扫描）
