@@ -57,11 +57,12 @@
   证据候选：docs/OCR-UPSTREAM-SYNC.md（pin 三处声明与对照表）
   证据候选：tools/upstream-watch-smoke.mjs（pin 与对照表的双射、通路账、DoD 版本事实）
 - [ ] DOD-4：**主路径可演示**：四范围 + `--preview`；成本护栏；完成/部分/失败/警告徽章；预算截断不显示「干净」；续跑仅在 CLI 支持的模式显示
-  未勾原因：首启链路已经有人走过了——空档案 → 引导卡三步 → 选仓 → 配 provider → 清单自己算出来 → 成本确认挡住的那一次 `scan`，全在真 Electron 里跑（`tools/e2e-first-run.cjs`）；「预算截断」从第 130 轮起也不用真花钱了——`tools/fake-provider.mjs` 按被 pin 的那一版二进制真发的请求形态作答，`npm run audit:provider` 在本机 loopback 上真跑出一次 `summary.budget_exceeded=true` 的截断（连同完成态、全量扫描、provider 挂掉共四种结局，0 token）。第 131 轮又把「结束时的语气」从退出码改成从徽章派生，`tools/format-notice-smoke.mjs` 逐条钉住十种结局的语气、标题与「徽章颜色就是提示语语气」，所以「截断不显示干净」在界面层与提示语层都有断言了。还缺的是把这份 fixture 交给 Electron 的那一半：「截断那一屏不写『完成』」仍没有一屏真渲染过截断载荷（现有证据是 `src/components/ResultsPanel.tsx` 的 `runLimitReached` 与上面那份提示语断言）；四范围里「单个提交」也仍只到预览级（运行级现在有工作区、分支对比与全量扫描三条）。
+  未勾原因：首启链路已经有人走过了——空档案 → 引导卡三步 → 选仓 → 配 provider → 清单自己算出来 → 成本确认挡住的那一次 `scan`，全在真 Electron 里跑（`tools/e2e-first-run.cjs`）；「预算截断」从第 130 轮起也不用真花钱了——`tools/fake-provider.mjs` 按被 pin 的那一版二进制真发的请求形态作答，`npm run audit:provider` 在本机 loopback 上真跑出一次 `summary.budget_exceeded=true` 的截断（连同完成态、全量扫描、provider 挂掉共四种结局，0 token）。第 131 轮又把「结束时的语气」从退出码改成从徽章派生，`tools/format-notice-smoke.mjs` 逐条钉住十种结局的语气、标题与「徽章颜色就是提示语语气」。第 133 轮补上了最后那一屏：`tools/e2e-fake-provider.cjs` 在真 Electron 里把这份 fixture 接着起了一次运行——预算从表单填 25000、`--max-tokens-budget 25000` 真的进了命令行、结果页与报告页都渲染出那条标记发现，读回来的 `data-run-status` 是 `limited`（徽章文字「未审完」）、提示语是 warning 语气且不写「完成」，同一趟的对照运行仍是 `complete` / 完成；反向控制也真跑过：把 `statusBadge()` 的 `limited` 分支删掉后这一趟红在「徽章写了完成」与「提示语写了完成」两条上。这一条仍不勾，因为它是整套主路径的合并项，缺的那一半已经不是截断而是「单个提交」——四范围里它仍只到预览级（运行级现在有工作区、分支对比与全量扫描三条），补上它才有资格谈勾选。
   证据候选：tools/e2e-flow.mjs（真 Electron + 真 CLI 走完预览与四范围）
   证据候选：tools/e2e-flow.cjs（真 Electron 里断言预览与分支对比范围的那几条 check）
   证据候选：tools/e2e-first-run.cjs（真 Electron 里走完首启 → 引导 → 配 provider → 预览，以及成本确认挡住的那次 spawn）
   证据候选：tools/fake-provider-smoke.mjs（真 CLI 在假 provider 上跑出的四种结局：完成 / 预算截断 / 全量扫描 / provider 挂掉）
+  证据候选：tools/e2e-fake-provider.cjs（真 Electron 里渲染截断那一屏：徽章读数、截断条、提示语，以及同一套规则的完成态对照）
   证据候选：src/components/ResultsPanel.tsx（完成／部分／失败／警告徽章与截断态）
   证据候选：tools/format-notice-smoke.mjs（十种结局的语气与标题、徽章颜色与提示语语气一致、STATUS 闭集）
 - [ ] DOD-5：**航运资产**：`v0.1.13`（或更新）`*-setup.exe` / portable 可装可启；内置二进制可达；未签名 SmartScreen 有说明
@@ -90,7 +91,7 @@
 | DOD-1 | 未勾 | 缺陌生人第一眼的记录，仓里只有措辞断言（`README.zh-CN.md`） |
 | DOD-2 | 未勾 | 参数面已与 `tools/cli-surface.mjs` 双向对上，勾选与副本核对归 scheduler 侧 |
 | DOD-3 | 未勾 | pin 有断言，通路账里还留着只核了 release 的欠轮（`docs/OCR-UPSTREAM-SYNC.md`） |
-| DOD-4 | 未勾 | 首启与四种结局都真跑过，缺截断载荷真渲染一屏（`tools/fake-provider.mjs`） |
+| DOD-4 | 未勾 | 首启与四种结局都真跑过、截断那一屏也真渲染过，缺「单个提交」的运行级（`tools/e2e-fake-provider.cjs`） |
 | DOD-5 | 未勾 | 真机面是 Linux x64，Windows 安装包从未被脚本装过（`docs/measurements.md`） |
 | DOD-6 | 未勾 | 三条都有断言，缺装好的那份里 Key 不在程序目录的实测（`tools/secret-scan.mjs`） |
 

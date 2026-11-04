@@ -36,6 +36,34 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 
 ---
 
+## 上游状态（第 132 轮，2026-11-04）
+
+本轮复核：**上游 HEAD 前进了** `d3cd23f` → `36eec0c`（`git fetch upstream --tags` 通了，`git log
+d3cd23f..upstream/main` 两个 commit）。两个都不在对照表 5 行里，**pin 不动、无移植项**：
+
+- `90444ea fix(action): only rewrite the bot's own summary comment (#1560)`——改的是 GitHub Action 的
+  `scripts/github-actions/post-review-comments.js` 与 `action.yml`（只重写机器人自己那条汇总评论）。
+  这是**上游 CI 侧**的调用面，本仓不跑 Action、也不发评论，无移植项。
+- `36eec0c feat(pages): showcase supported model providers (#1862)`——`pages/` 官网新增
+  `ProvidersSection` 与 11 个 provider 图标、五语文案。纯站点，无 CLI / 配置 / 输出面变化。
+
+`refs/tags/v1.13.5` 与 npm `latest`（`1.13.5`）未变，三个口径一致。
+
+本轮产品改动是**徽章与提示语终于用同一种声音说话**。第 131 轮把结束时的语气改成从徽章派生，但
+`STATUS.unknown` 的徽章仍是中性灰——「没有信息」与「不要当完成读」是两句话，而它们说的是同一件事；
+`skipped`（上游只在「什么都没跑」的空 manifest 上用这个词）同样如此。现在两者都取 warn 色，
+`statusBadge()` 对**叫不出名字的状态**（没有 status，或上游将来新增的词）也走同一个常量，于是
+「徽章的颜色就是提示语的语气」成了一条可以对整张表断言的规则（`tools/format-notice-smoke.mjs`：
+success↔ok / warning↔warn / error↔bad，两条反向控制——中性灰的旧 `unknown`、一律涂成 ok 色的实现
+都必须被抓住）。同一份 smoke 里另加两件事：`STATUS` 的 key 集合是闭集（上游加词会红，而不是静默
+产出一个没人断言过的 `data-run-status`），以及 `stripComments` 换成按字符走的剥离器（旧的两条正则
+会把 `"https://…"` 从 `//` 处剥掉，自测里带一条反向控制钉住这个理由）。
+
+`docs/PRODUCT-DOD.md` 的 DOD-4 未勾原因跟着实现同步：`tools/format-notice-smoke.mjs` 成为它的证据
+候选之一，`tools/upstream-watch.mjs` 的 `DOD_EVIDENCE_SHAPES` 里 `ResultsPanel.tsx` 那一格从
+「四态徽章取自 STATUS」改成「徽章取自 statusBadge」——第 131 轮之后这一屏不再出现 `STATUS` 这个词，
+形状表停在旧词上会让 `audit:upstream` 一直红（它确实红了，本轮修的就是它）。
+
 ## 上游状态（第 131 轮，2026-11-04）
 
 这一轮**没有核对上游**：产品侧只改了「运行结束时的语气」——`src/lib/format.ts` 的 `completionNotice()`

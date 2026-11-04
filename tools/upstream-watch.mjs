@@ -2127,6 +2127,19 @@ export const DOD_EVIDENCE_SHAPES = Object.freeze([
   },
   {
     id: "DOD-4",
+    // 第 133 轮补上的那一半：真 Electron 里渲染截断载荷，读徽章的 `data-run-status`
+    // 与这一屏的话，不读 `src/lib/format.ts` 的函数返回值。三处「必须能在这份记录里
+    // 读到的证据」各对应一条承诺：起点真的是 Electron、读数真的是那个属性、预算真的是
+    // 从表单进了命令行（否则「截断」是夹具编的，不是 CLI 算的）。
+    path: "tools/e2e-fake-provider.cjs",
+    must: [
+      { label: "真 Electron", pattern: /require\("electron"\)/ },
+      { label: "读徽章的 data-run-status", pattern: /data-run-status/ },
+      { label: "预算从表单进命令行", pattern: /--max-tokens-budget/ },
+    ],
+  },
+  {
+    id: "DOD-4",
     path: "tools/e2e-flow.mjs",
     must: [
       { label: "真 Electron 进程", pattern: /spawn\(electronPath/ },
