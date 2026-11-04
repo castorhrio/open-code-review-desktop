@@ -51,6 +51,8 @@ The CLI is excellent but you live in a terminal: reading 40 line-level findings,
 
 Everything below was exercised against the real CLI, without spending tokens unless the line says otherwise. It is what `v0.1.13` has actually been run against — not a plan.
 
+One boundary belongs at the top of this list: install, uninstall and per-user key placement have been exercised only as far as `tools/e2e-packaged.mjs` reaches, which is the Linux x64 unpacked tree. The NSIS wizard itself — SmartScreen, shortcuts, the uninstaller, and where the key lands on a real install — is pending a real-machine run; `docs/win-install-checklist.md` is that run, and it has not been done yet.
+
 - all four review scopes, and `--preview` for workspace / range / commit / scan
 - the per-mode flag whitelist (`ocr scan` rejects `--effort`, `--no-filter` and `--background-file`; sending them would abort the whole run)
 - keeping several providers configured, switching the active one, and the per-run override (`--provider` / `--model` reach only that one command line, never the global config)

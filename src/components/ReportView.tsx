@@ -173,7 +173,7 @@ export function ReportView() {
                 {limited ? "这次审查在达到上限时停下，没有提出问题。" : "这次审查没有提出问题。"}
               </p>
               <p className="mt-1 text-meta text-faint">
-                已审 {String(s.files_reviewed ?? "—")} 个文件。范围不对的话，换个模式或改小排除规则再跑一次。
+                已审 {String(s.files_reviewed ?? "—")} 个文件。范围选错了就换个模式，或放宽排除规则再跑一次。
               </p>
             </Card>
           ) : (

@@ -35,7 +35,7 @@ tag v1.13.5
 
 ### 本轮 HEAD 核对（三处声明之二：固定行）
 
-**本轮 HEAD 核对：`abb7abcd5c5196fa0278dc87db85780fa269562f`（第 136 轮：`git fetch upstream --tags` 本轮超时（124），HEAD 由 GitHub API 答上，`refs/heads/main` 仍是 `36eec0c`（`git log d3cd23f..36eec0c` 仍只有第 132 轮记下的那两个 commit），无新内容；`refs/tags/v1.13.5` 与 npm `latest` 仍分别答 `v1.13.5` / `1.13.5`，**pin 不动**（pin 跟的是发布版本，不是默认分支）；通路：api）
+**本轮 HEAD 核对：`abb7abcd5c5196fa0278dc87db85780fa269562f`（第 137 轮：`git fetch upstream --tags` 本轮通了，`refs/heads/main` 仍是第 132 轮记下的 `36eec0c`（`git log 36eec0c..upstream/main` 是空的），无新内容；`refs/tags/v1.13.5` 与 npm `latest` 仍分别答 `v1.13.5` / `1.13.5`，**pin 不动**（pin 跟的是发布版本，不是默认分支）；通路：git）
 
 ### 核到的上游 HEAD（核对的落点，不是 pin）
 
@@ -45,7 +45,7 @@ pin 说封装的是哪个**发布版本**（`v1.13.5`，二进制自报的那个
 已前进」，而那六轮的通路账一行行写着「无新内容」——一个总在响的标记等于没有标记。所以这一行的
 轮次必须与通路账末行相等（`checkedHeadViolations`），`upstream:check` 比的也是这一行，而不是 pin。
 
-**本轮核到的上游 HEAD：`36eec0c0269d0687a761fb3291ccbf427ab9336f`（第 136 轮）**
+**本轮核到的上游 HEAD：`36eec0c0269d0687a761fb3291ccbf427ab9336f`（第 137 轮）**
 
 ### 核对通路账
 
@@ -154,6 +154,7 @@ smoke 用 `git log -1 --format=%s` 取出 N，要求**账末行轮次是 N 或 N
 | 134 | 2026-11-04 | git | `36eec0c` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**（`git fetch upstream --tags` 通了，`refs/heads/main` 仍是第 132 轮记下的 `36eec0c`，`git log 36eec0c..upstream/main` 是空的；`refs/tags/v1.13.5` 与 npm `latest` 未变；对照表 5 行无需重读）；本轮产品侧只做一件事——把「这一轮做不到的那一趟」写成被回答过的状态，而不是再补一处断言：`docs/measurements.md` 未验证清单里 DOD-5 / DOD-6 对应的两行各加一句带日期的「阻塞原因」（本机是 Linux，NSIS 包装层与 portable 产物在这里无法执行），`docs/PRODUCT-DOD.md` 的 DOD-5 / DOD-6 未勾原因把这一句引进来并写明「什么条件下能勾」（按 `docs/win-install-checklist.md` 第 10 节四格各留一条读数），勾选状态不动；另把第 133 轮踩到的 `ELECTRON_RUN_AS_NODE` 坑入档 `docs/hardening-log.md`（Electron 里 spawn 出来的 `ocr` 子进程若继承 `ELECTRON_RUN_AS_NODE`，`ocr config set` 会去开窗口并死在 SUID 沙箱） | — |
 | 135 | 2026-11-04 | git | `36eec0c` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**（`git ls-remote` 通了，`refs/heads/main` 仍是第 132 轮记下的 `36eec0c`，`git log d3cd23f..36eec0c` 仍只有第 132 轮记下的那两个 commit——`90444ea` 改 `action.yml` 与 `scripts/github-actions/post-review-comments.js`（上游 CI 侧，本仓不跑 Action、不发评论），`36eec0c` 是 `pages/` 官网的 provider 展示与五语文案；`refs/tags/v1.13.5` 与 npm `latest` 未变；对照表 5 行一个都没被碰到）；本轮产品改动是 DOD-4 的最后那一格——`tools/e2e-fake-provider.cjs` 新增第三趟「单个提交」（fixture 多一个 `topic` 分支提交并暴露其 SHA，harness 在真 Electron 里切范围、填 SHA、按开始审查），判据 `commitScopeViolations` 只认不带 `--preview` 的那次 spawn，四范围的运行级证据至此齐了；另把 `ELECTRON_RUN_AS_NODE` 的两个方向从注释变成断言（`electronRunAsNodeEnv` 抽成纯函数，`tools/e2e-fake-provider-smoke.mjs` 钉住 Electron 下补、纯 Node 下删、以及 harness 起 Electron 前删掉继承来的那个） | — |
 | 136 | 2026-11-04 | api | `36eec0c` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**（`git fetch upstream --tags` 超时 124，HEAD 由 GitHub API 答上；`refs/heads/main` 仍是第 132 轮记下的 `36eec0c`，`git log d3cd23f..36eec0c` 仍只有那两个 commit；`refs/tags/v1.13.5` 与 npm `latest` 未变；对照表 5 行一个都没被碰到）；本轮产品改动是把「拿到 Windows 机器的人能不能零歧义走完清单」推到可执行：第 5.2 步两条命令写死默认安装目录（原样复制即可，改过目录只换那一处）、第 10.2 节补「六行读数用「；」写在同一格」的填法、第 10.3 节不再教人「跑完子集就改状态行」——`tools/checklist-claims.mjs` 的正向判定从「状态行是 pending」改成「那一条 DoD 还没勾」，堵住「状态行一改、没跑到的行删掉也不红」这条缝，`tools/checklist-claims-smoke.mjs` 76 → 78 条 | — |
+| 137 | 2026-11-04 | git | `36eec0c` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**（`git fetch upstream --tags` 通了，`refs/heads/main` 仍是第 132 轮记下的 `36eec0c`，`git log 36eec0c..upstream/main` 是空的；`refs/tags/v1.13.5` 与 npm `latest` 未变；对照表 5 行一个都没被碰到）；本轮产品侧做两件事：① 把 DOD-5 / DOD-6 缺的那一趟从「没人跑」推到「可转派」——`docs/win-install-checklist.md` 文件头状态行下加一行「待跑」（谁、按 §10 最小子集、读数贴回 §10.2），`docs/measurements.md` 未验证清单里那两行的「为什么没验」末尾各加一句「已可转派（第 137 轮）」，两份 README 的已验证行为段开头补一句真机边界（安装 / 卸载与 Key 落点只验到 `tools/e2e-packaged.mjs` 能到的那一层，NSIS 向导待真机跑）；② 具名 pass `polish`：结果页 / 报告页 / 设置页的文案收敛——同一个动作两个名字（结果页「HTML 报告」与报告页「导出 HTML」）统一成「导出 HTML」，「改小范围」按本仓既有说法改成「缩小范围」（`format.ts` / `finding.tsx` 早就这么写），「改小排除规则」改成「放宽排除规则」，同一句续跑建议在结果页出现两种说法（「想能续跑就改用」/「想保留可续跑的能力就改用」）收成一句，设置页「保留上限」改成「保留条数上限」；空态那句「范围不对的话」改成「范围选错了就换个模式」；`src/lib/format.ts` 的状态判定一个字没动 | — |
 
 「最近一次对照」只写**那一项最近被人工重新核对**的轮次。该列没有列出本轮，表示本轮
 复核过上游、这一项没有变化，**不是欠账**；只有上游 HEAD / tag 真的前进，才需要重看
@@ -245,33 +246,46 @@ tool 结果文本**（`Error: diff not found for: …`、`Diffs exist for: …`�
    [`upstream-history.md`](upstream-history.md)，哪怕结论是「无新内容」。搬完这里只留一句
    指针——「本文件只留当前一轮」不是约定而是断言（`previousRoundPointerViolations`）。
 
-## 当前状态（第 136 轮，2026-11-04）
+## 当前状态（第 137 轮，2026-11-04）
 
-本轮复核：**上游没动**。`git fetch upstream --tags` 本轮超时（124），HEAD 由 GitHub API 答上：
-`refs/heads/main` 仍是第 132 轮记下的 `36eec0c`（`git log d3cd23f..36eec0c` 仍只有第 132 轮记下的
-那两个 commit：`90444ea` 改 `action.yml` 与 `scripts/github-actions/post-review-comments.js`（上游 CI 侧，
-本仓不跑 Action、不发评论），`36eec0c` 是 `pages/` 官网的 provider 展示与五语文案）；`refs/tags/v1.13.5`
-仍是 `abb7abc`（tag 对象 `e739d39`）、npm `latest` 仍是 `1.13.5`，三个口径一致，**pin 不动、无移植项**，
-对照表 5 行无需重读。
+本轮复核：**上游没动**。`git fetch upstream --tags` 本轮通了，`refs/heads/main` 仍是第 132 轮记下的
+`36eec0c`（`git log 36eec0c..upstream/main` 是空的）；`refs/tags/v1.13.5` 仍是 `abb7abc`、npm `latest`
+仍是 `1.13.5`，三个口径一致，**pin 不动、无移植项**，对照表 5 行无需重读。
 
-本轮产品侧做的是**唯一还能在 Linux x64 上推进的那件事**：让拿到 Windows 机器的人零歧义地走完
-`docs/win-install-checklist.md`，并把「状态行一改、欠账就没人核」这条缝钉住。
+本轮产品侧做两件事，都不新增功能。
 
-- 第 5.2 步那两条命令原来写着 `<安装目录>` 占位符，一个从没读过本仓的人得先回去找第 2.2 步选了哪个
-  目录才能跑。现在第二条写死默认安装目录 `$env:LOCALAPPDATA\Programs\Open Code Review`，**原样复制
-  即可**；改过目录的人只换那一处路径，其余不动。第 10.1 节第 4 格跟着改成「原样复制 §5.2 那两条命令」。
-- 第 10.2 节的贴回模板补一句填法：markdown 表格的一格里不能换行，第 4.2 步那六行读数要用「；」写在
-  同一格里——逐行抄成六行会把那张表挤歪，贴回去 `npm run audit:checklist-claims` 会点名列数不对。
-- 第 10.3 节原来教人「跑完把状态行改成已执行」，而那一节里的「跑完」指的是**四格子集**。这是真缺陷：
-  `tools/checklist-claims.mjs` 的正向那一条（第 9 节点到的每一行必须还在未验证清单里）当时只认
-  `status === "pending"`，状态行一改，没跑到的 portable / 卸载 / 单实例 / 内置二进制自报版本那几行
-  删掉也不红。两处一起改：措辞上「只跑了子集时状态行先别动，另起一行写 `> 子集已跑：YYYY-MM-DD`」；
-  判定上把「行没了算不算欠账」的依据从状态行换成 **DoD 的方括号**——行没了只有两种可能，读数贴回后
-  搬走（那时 DoD 已勾，允许）或欠账被删（不许）。`tools/checklist-claims-smoke.mjs` 76 → 78 条，
-  新增的两格正是这个洞的两面：状态行改成已执行 + DOD-5 未勾 + 少一行 → 点名那一行；同一份夹具把
-  DOD-5 勾上、读数贴回 → 绿。
+**一、把 DOD-5 / DOD-6 缺的那一趟从「没人跑」推到「可转派」。** 第 134 轮已经承认：这两条缺的不是
+断言，是一台 Windows x64 机器。这一轮不再加断言，只让「有人在等这一趟」变成文件头第一眼能读到的事实：
 
-上一轮（第 135 轮）的正文见 [`upstream-history.md`](upstream-history.md#上游状态第-135-轮2026-11-04)，归档之后本文件不留第二份。
+- `docs/win-install-checklist.md` 的状态行下面多一行「待跑：需一位持有 Windows x64 机器的人，按 §10
+  最小子集（约 5 分钟）先跑一趟；读数贴回 §10.2 模板」。状态行本身不动（仍是「尚未执行」），
+  `tools/checklist-claims.mjs` 一个字没改——它认的是 `> 状态：` 那一行，新加的那行不参与判定。
+- `docs/measurements.md` 未验证清单里「安装版之后的首启链路」与「装好之后 Key 落在哪」两行的
+  「为什么没验」末尾各加一句「已可转派（第 137 轮）」，结构不动、行名不动。
+- 两份 README 的「已验证行为」段开头补一句真机边界：安装、卸载与 Key 的落点只验到
+  `tools/e2e-packaged.mjs` 能到的那一层（Linux x64 解包目录），NSIS 向导本身待真机跑。这一句是
+  诚实声明，不是新的「已验」措辞——它说的是**没验到哪**。
+
+**二、具名 pass `polish`：结果页 / 报告页 / 设置页的文案收敛一次。** 先 critique 再改，结论是：
+这三屏没有 AI 味的营销词（`一键` / `智能` / `无缝` / `轻松` 一个都没有），真正的缺陷是**同一个东西
+两种叫法**，以及**一句不具体的建议**：
+
+- 同一个动作两个名字：结果页那颗按钮叫「HTML 报告」，报告页同一件事叫「导出 HTML」，`title` 却逐字
+  相同。统一成「导出 HTML」。
+- 「改小范围」不是本仓的说法：`src/lib/format.ts` 与 `src/components/finding.tsx` 早就写「缩小范围」，
+  结果页两处写成「改小范围（按目录、按 diff）」。改成「缩小范围」。
+- 「改小排除规则」方向反了：排除规则越小，被排除的文件越少，读者要的是「放宽」。改成「放宽排除规则」。
+- 同一句续跑建议在结果页出现两种说法（「想能续跑就改用…」与「想保留可续跑的能力就改用…」），收成
+  「要能续跑，就改用「分支对比」或「单个提交」」。
+- 空态那句「范围不对的话」不具体（对谁不对？），改成「范围选错了就换个模式」。
+- 设置页「保留上限」这个标签读起来像「上限被保留了」，改成「保留条数上限」；那张卡的 hint 从
+  「被上限截断的运行留下的证据」改成「被上限截断的运行在这里留一条记录，重开时据此提示」。
+
+**没动的**：`src/lib/format.ts` 的状态判定（第 131/132 轮刚锁）、`STATUS` 闭集、徽章与提示语同源、
+`docs/win-install-checklist.md` §4.2 那六行标签（它们被清单表格与 `npm run audit:release-pin` 逐字
+引用，改名要同时改三处，收益不抵风险）、以及任何 `tools/*` 的规则。
+
+上一轮（第 136 轮）的正文见 [`upstream-history.md`](upstream-history.md#上游状态第-136-轮2026-11-04)，归档之后本文件不留第二份。
 
 
 ### 参数面：`ocr review --help` / `ocr scan --help` 与本仓真的拼出的每一行

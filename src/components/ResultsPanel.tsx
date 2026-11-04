@@ -313,7 +313,7 @@ function RunningView() {
           : "每个文件先做一次预分析、再带着工具逐段读，所以前几分钟通常一条评论都没有——这不是卡住。"}
         {runResumable
           ? "中断后可在「历史」里续跑，已审完的文件不会重复计费。"
-          : "但工作区改动的会话不支持续跑，中断了要重跑；想能续跑就改用「分支对比」或「单个提交」。"}
+          : "但工作区改动的会话不支持续跑，中断了要重跑；要能续跑，就改用「分支对比」或「单个提交」。"}
       </div>
     </div>
   );
@@ -458,7 +458,7 @@ export function ResultsPanel() {
               {resume.failed ? `（${resume.failed} 个文件失败）` : ""}。
               {resume.resumable
                 ? "保持同样的范围与模型服务点「续跑未完成部分」，已经审完的文件不会重复计费。"
-                : "工作区改动的会话不支持续跑，只能重新运行；想保留可续跑的能力就改用「分支对比」或「单个提交」。"}
+                : "工作区改动的会话不支持续跑，只能重新运行；要能续跑，就改用「分支对比」或「单个提交」。"}
             </p>
           }
           action={
@@ -467,10 +467,10 @@ export function ResultsPanel() {
                 <Button variant="primary" onClick={() => void startRun(resume.sessionId)}>
                   续跑未完成部分
                 </Button>
-                <p className="text-meta text-faint">也可以回「审查」页改小范围（按目录、按 diff）再跑一次。</p>
+                <p className="text-meta text-faint">也可以回「审查」页缩小范围（按目录、按 diff）再跑一次。</p>
               </>
             ) : (
-              <p className="text-meta text-faint">回「审查」页改小范围（按目录、按 diff）再跑一次。</p>
+              <p className="text-meta text-faint">回「审查」页缩小范围（按目录、按 diff）再跑一次。</p>
             )
           }
         />
@@ -643,7 +643,7 @@ export function ResultsPanel() {
           {sessionId && (
             <Button variant="ghost" size="sm" title="导出自包含 HTML 报告，可单独打开或转发" onClick={() => void exportSession(sessionId)}>
               <FileCode2 className="size-3.5" />
-              HTML 报告
+              导出 HTML
             </Button>
           )}
           <Button variant="ghost" size="sm" onClick={() => void exportJson()}>
@@ -766,7 +766,7 @@ export function ResultsPanel() {
           description={
             <>
               <p className="text-meta text-faint">
-                已审 {String(s.files_reviewed ?? "—")} 个文件。范围不对的话，换个模式或改小排除规则再跑一次。
+                已审 {String(s.files_reviewed ?? "—")} 个文件。范围选错了就换个模式，或放宽排除规则再跑一次。
               </p>
               {failed.length > 0 && (
                 <p className="mt-1 text-meta text-warn">其中 {failed.length} 个文件没有审完，上方有提示。</p>

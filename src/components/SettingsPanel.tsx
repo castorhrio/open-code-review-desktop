@@ -587,10 +587,10 @@ export function SettingsPanel() {
           </p>
         </Card>
 
-        <Card title="上限证据" hint="被上限截断的运行留下的证据">
+        <Card title="上限证据" hint="被上限截断的运行在这里留一条记录，重开时据此提示">
           <dl className="grid grid-cols-[minmax(0,1fr)] gap-2">
             <InfoRow
-              label="保留上限"
+              label="保留条数上限"
               value={
                 evidence === null ? "读取中…" : evidence.ok ? `最近 ${evidence.value.limit} 条` : "—"
               }
