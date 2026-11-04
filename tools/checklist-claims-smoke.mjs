@@ -226,6 +226,40 @@ const lineOf = (doc, name) => {
   );
 }
 
+/* ---- 3b. 状态行改成「已执行」之后删掉一行（第 136 轮补的洞） ---- */
+
+{
+  // 只跑了第 10 节那四格子集的人，照旧版第 10.3 步把状态行改成「已执行」，再删掉没跑到的
+  // 那一行。旧规则只认 `pending`，所以这一格当时是绿的：状态行是人手写的一句话，它一改，
+  // 「第 9 节点到的行还在不在」整段就失效了。现在区分「读数贴回后搬走」与「欠账被删」的
+  // 是 DoD 的方括号，不是状态行。
+  const executed = checklistDoc({ status: CHECKLIST_EXECUTED_MARK });
+  const broken = measurementsDoc({ rows: [ROW_FIRST_RUN, ROW_KEY, ROW_UPDATE] });
+  const violations = violationsOf({ checklistDoc: executed, measurementsDoc: broken });
+  check(
+    "状态行改成「已执行」但 DOD-5 还没勾、未验证清单少了一行：仍点名那一行（状态行不是读数已贴回的凭据）",
+    violations.length === 1 &&
+      violations[0].includes("免安装版（portable）的运行面") &&
+      violations[0].includes("DOD-5 还没勾"),
+    violations.join("；") || "没有违规"
+  );
+
+  // 反向控制：同一次删除，DOD-5 勾上、剩下那一行的读数也贴回之后就是允许的形状。
+  const green = violationsOf({
+    checklistDoc: executed,
+    measurementsDoc: measurementsDoc({
+      rows: [ROW_FIRST_RUN, ROW_KEY, ROW_UPDATE],
+      why: { "安装版之后的首启链路": "2026-11-04 读数：SmartScreen 出现，六行与清单一致" },
+    }),
+    dodDoc: dodDoc({ five: "x" }),
+  });
+  check(
+    "...而 DOD-5 勾上、读数贴回之后同一次删除是绿的（读数贴回、行搬走是允许的形状）",
+    green.length === 0,
+    green.join("；") || "没有违规"
+  );
+}
+
 /* ---- 4. 第 9 节的一行被删掉（读数没有落点） ---- */
 
 {

@@ -197,16 +197,21 @@ Get-ChildItem "$env:USERPROFILE\Desktop" -Filter "*Open Code Review*"
 
 ### 5.2 翻两个地方
 
+两条命令**原样复制**即可，不需要替换任何东西：第二条写的是第 2.2 步的默认安装目录
+（`$env:LOCALAPPDATA\Programs\Open Code Review`，也就是 `C:\Users\<你>\AppData\Local\Programs\Open Code Review`）。
+第 2.2 步**改过**目录的话，只把第二条命令里那个路径换成你选的那个，其余一个字都不用动。
+
 ```powershell
 # 1) 用户配置：应当有 api_key
 Select-String -Path "$env:USERPROFILE\.opencodereview\config.json" -Pattern "api_key"
 
-# 2) 程序目录：不应当有任何 json 里含 api_key（把路径换成第 2.2 步选的那个）
-Get-ChildItem -Recurse -File "<安装目录>" -Include *.json |
+# 2) 程序目录：不应当有任何 json 里含 api_key
+Get-ChildItem -Recurse -File "$env:LOCALAPPDATA\Programs\Open Code Review" -Include *.json |
   Select-String -Pattern "api_key"
 ```
 
-**期望读数**：第一条有命中（那是唯一一份 Key）；第二条**零命中**。
+**期望读数**：第一条有命中（那是唯一一份 Key）；第二条**零命中**。第二条要扫的是整个安装目录
+（含 `resources\app\node_modules`），跑十几秒是正常的；它一条都不打印才是对的。
 
 ### 5.3 Electron 用户数据目录也别漏
 
@@ -349,13 +354,17 @@ reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall" /s /f "Open
 | 1 SmartScreen | 双击 `*-setup.exe` | 出现「Windows 已保护你的电脑」，点「更多信息」→「仍要运行」之后向导起来。**未出现也要记**，并写一句为什么（不是经浏览器下载的、企业策略关掉了）；未出现不等于已签名 | 读数：____ |
 | 2.2 安装目录页 | 走到安装目录页，试着改一次目录 | 默认 `C:\Users\<你>\AppData\Local\Programs\Open Code Review`；改目录被接受；**没有 UAC 提权弹窗** | 读数：默认路径 ____，改目录 ____，UAC ____ |
 | 4.2 六行读数 | 装完从图标起，设置 → 关于与卸载 | 六行与 §4.2 那张表逐行一致，徽章 `安装版 · win32` | 读数：____ |
-| 5.2 两个目录 grep | 填一个可丢弃的 Key，再跑 §5.2 那两条命令 | 用户配置有命中（那是唯一一份 Key）、程序目录零命中 | 读数：用户配置 ____，程序目录 ____ |
+| 5.2 两个目录 grep | 填一个可丢弃的 Key，再**原样复制** §5.2 那两条命令（第二条已写死默认安装目录；第 2.2 步改过目录就只换那一处路径） | 用户配置有命中（那是唯一一份 Key）、程序目录零命中 | 读数：用户配置 ____，程序目录 ____ |
 
 ### 10.2 贴回模板（复制这两行，只填空）
 
 把下面两行各填一处，替换掉 `docs/measurements.md` 未验证清单里**同名的那一行**。行名、归属、
 触发条件都已经写好，只留「为什么没验」那一格给人填——那一格必须含日期与「读数」二字，
 `npm run audit:checklist-claims` 认这两个标记（`pastedReading`）。
+
+填法只有一条要注意：**markdown 表格的一格里不能换行**，所以第 4.2 步那六行读数要写在同一格里，
+用「；」隔开（例如 `程序版本 v0.1.13；ocr CLI v1.13.0；可执行文件 …；来源 CLI 自带平台包；安装目录 …；配置目录 …`）。
+逐行抄成六行会把那张表挤歪，贴回去之后 `npm run audit:checklist-claims` 会点名列数不对。
 
 ```markdown
 | 安装版之后的首启链路 | 真机 | 读数（YYYY-MM-DD）：SmartScreen ____；安装目录页 ____；六行读数 ____ | 已按 `docs/win-install-checklist.md` 第 1 步 / 第 2.2 步 / 第 4.2 步跑过，下次发版后复跑 |
@@ -369,9 +378,13 @@ reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall" /s /f "Open
 ### 10.3 跑完之后
 
 - 把 10.2 那两行贴回 `docs/measurements.md` 的未验证清单（**替换同名行，不是追加**）。
-- 把本文件头的状态行从「尚未执行」改成「已执行」。
+- **只跑了这四格时，状态行先别动。** 文件头那句「尚未执行」说的是第 1–7 节那一趟完整跑，
+  四格子集不算跑完：把它改成「已执行」，`npm run audit:checklist-claims` 就不再核对「第 9 节点到的
+  每一行还在不在未验证清单里」——没跑到的 portable、卸载、单实例、内置二进制自报版本那几行，
+  删掉也没人红。只跑了子集时，在状态行下面另起一行写 `> 子集已跑：YYYY-MM-DD`，状态行保持原样。
+- 第 1–7 节全部跑完、第 9 节那六行读数都贴回之后，才把状态行改成「已执行」。
 - **没跑到的行不许删。** `npm run audit:checklist-claims` 会核对两件事：第 9 节点到的每一行都还在
-  未验证清单里（清单还写着「尚未执行」时），以及 DOD-5 / DOD-6 勾上时那两行的「为什么没验」已经
-  换成读数。只跑了子集就把别的行删掉，它会点名行号。
+  未验证清单里（只要那一条 DoD 还没勾——它认的是方括号，不是状态行），以及 DOD-5 / DOD-6 勾上时
+  那两行的「为什么没验」已经换成读数。只跑了子集就把别的行删掉，它会点名行号。
 - 子集**不覆盖**：portable（第 6 步）、卸载（第 7 步）、单实例（第 4.4 步）、内置二进制自报版本（第 4.3 步）。
   这几行继续留在未验证清单里，触发条件仍指回本文件对应的那一步。

@@ -36,6 +36,35 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 
 ---
 
+## 上游状态（第 135 轮，2026-11-04）
+
+本轮复核：**上游没动**。`refs/heads/main` 仍是第 132 轮记下的 `36eec0c`（`git ls-remote` 通了，
+`git log d3cd23f..36eec0c` 仍只有第 132 轮记下的那两个 commit：`90444ea` 改 `action.yml` 与
+`scripts/github-actions/post-review-comments.js`（上游 CI 侧，本仓不跑 Action、不发评论），
+`36eec0c` 是 `pages/` 官网的 provider 展示与五语文案），`refs/tags/v1.13.5` 仍是 `abb7abc`、
+npm `latest` 仍是 `1.13.5`，三个口径一致，**pin 不动、无移植项**，对照表 5 行无需重读。
+
+本轮产品侧做的是**上一轮简报里唯一在 Linux x64 上可推进的真实缺口**：DOD-4 的「单个提交」范围
+此前只到预览级，四范围里它是唯一没有运行级证据的那一格，而 README 的 Features 表第一条就写着
+「Four scopes」。
+
+- `tools/fake-provider-cli.mjs` 的一次性仓库多一个 `topic` 分支（`main` 上分出来、一个 commit、
+  只加 `c.go`），并把它的 SHA 交出来。放在**独立分支**上是有意的：把第二个 commit 挂在 `feature`
+  上会改掉 `range main…feature` 覆盖的内容，而范围那几条断言早就按「一个文件」写好了。
+- `tools/e2e-fake-provider.cjs` 新增第三趟：真 Electron 里切到「单个提交」、把那个 SHA 填进表单、
+  按下开始审查，读回 `data-run-status`、徽章文字、`<main>` 正文与提示语，并把这一趟的 spawn 参数
+  记进报告。判据是 `tools/e2e-fake-provider-rules.cjs` 的 `commitScopeViolations`，它**只认不带
+  `--preview` 的那次 spawn**——预览也带 `--commit`，拿它冒充运行正是这一条要抓的假绿。
+- 真跑读数：`--commit 7dba261…` 逐字进了命令行（与填进表单的 SHA 相等），605ms 后结果页读到
+  `data-run-status=complete` / 徽章「完成」并带那条 `FAKE-PROVIDER` 发现；同一趟的截断与对照运行
+  仍绿（`limited` / `complete`），17 条检查 0 条红。四范围的运行级证据至此齐了。
+
+另把第 134 轮自己承认「只能靠注释与这份记录维持」的那两条钉成断言：`ELECTRON_RUN_AS_NODE` 的两个
+方向抽成纯函数 `electronRunAsNodeEnv(baseEnv, isElectron)`（Electron 下补、纯 Node 下删、不改入参），
+`tools/e2e-fake-provider-smoke.mjs` 用 6 条断言钉住它，含一条把两个方向都写反的反向控制。
+
+---
+
 ## 上游状态（第 134 轮，2026-11-04）
 
 本轮复核：**上游没动**。`refs/heads/main` 仍是第 132 轮记下的 `36eec0c`（`git fetch upstream --tags`

@@ -742,15 +742,27 @@ export const checklistClaimViolations = ({
 
   const byName = new Map(rows.map((row) => [claimKey(row.name), row]));
   const claimed = new Set(claims.map((claim) => claimKey(claim.target)));
+  const dod = String(dodDoc == null ? "" : dodDoc);
 
-  // 正向：对照表点名的每一行，在清单还没执行时必须在未验证清单里，且触发条件引用清单。
+  // 正向：对照表点名的每一行，只要那一条 DoD 还没勾，就必须还在未验证清单里，且触发条件引用清单。
+  //
+  // 第 136 轮之前这里只认 `status === "pending"`。状态行是人手写的一句话，而
+  // `docs/win-install-checklist.md` 第 10 节当时教人「跑完把状态行改成已执行」——只跑了
+  // 四格子集的人也照做，于是「第 9 节点到的行还在不在」这一条整段失效：没跑到的
+  // portable / 卸载 / 单实例 / 内置二进制自报版本那几行，删掉也不红。行没了只有两种可能：
+  // 读数贴回之后搬走（允许，那时 DoD 已勾），或者欠账被删（不许）。区分它们的是 DoD 的
+  // 方括号，不是状态行——状态行只说明「那一趟跑过」，方括号才说明「读数已经贴回」。
   for (const claim of claims) {
     const row = byName.get(claimKey(claim.target));
     if (row === undefined) {
-      if (status === "pending") {
+      const dodChecked = claim.primaryDod !== null && dodCheckboxOf(dod, claim.primaryDod) === true;
+      if (!dodChecked) {
         violations.push(
           `${checklistPath} 第 ${claim.line} 行说读数记回「${claim.target}」，而 ${measurementsPath} 的未验证清单里没有这一行：` +
-            `清单文件头还写着「${CHECKLIST_PENDING_MARK}」——行先没了，就是读数没贴回就把欠账删了`
+            (status === "pending"
+              ? `清单文件头还写着「${CHECKLIST_PENDING_MARK}」——行先没了，就是读数没贴回就把欠账删了`
+              : `${claim.primaryDod === null ? "这一行没有归属的 DoD" : `${claim.primaryDod} 还没勾`}——` +
+                `状态行改成「${CHECKLIST_EXECUTED_MARK}」不等于读数已贴回，行先没了，就是欠账被删了`)
         );
       }
       continue;
@@ -774,7 +786,6 @@ export const checklistClaimViolations = ({
   }
 
   // DoD 的方括号：勾上之前，读数必须已经贴回。
-  const dod = String(dodDoc == null ? "" : dodDoc);
   if (dod.trim() === "") {
     violations.push(`${dodPath} 读不到或为空：DOD-5 / DOD-6 的方括号无从核对，而这一条要防的正是「提前勾」`);
     return violations;
