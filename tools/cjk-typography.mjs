@@ -186,12 +186,22 @@ export const typographyViolations = (file, text) => {
 };
 
 /**
+ * The Chinese usage guide — the first document a Windows user opens after
+ * installing. It is in the explicit list for the same reason the DoD is: today a
+ * README links it, so the derivation covers it, and the day a README stops
+ * linking it (a first-screen rewrite) it would leave the checked set silently.
+ * 第 122 轮 added it after noticing that the one document a stranger reads first
+ * was covered only by a link.
+ */
+export const USAGE_GUIDE_DOC = "使用说明.md";
+
+/**
  * The documents that must be checked even when no README links them. Kept short
  * on purpose: a long hand-kept list is the thing the derivation exists to
  * replace, so this holds only the documents whose absence from the set would be
  * a real blind spot — the bar the next change comes from.
  */
-export const REQUIRED_DOCS = Object.freeze([PRODUCT_DOD_DOC]);
+export const REQUIRED_DOCS = Object.freeze([PRODUCT_DOD_DOC, USAGE_GUIDE_DOC]);
 export const EXPLICIT_DOCS = REQUIRED_DOCS;
 
 /**

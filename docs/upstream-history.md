@@ -36,6 +36,16 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 
 ---
 
+## 上游状态（第 121 轮，2026-11-04）
+
+本轮复核：**上游 HEAD 前进了，但没有新发布。** `npm run upstream:check` 走 api 通路答上 `refs/heads/main` 已从 `abb7abc` 前进到 `8041473`（`git ls-remote` 超时 124），`/releases/latest` 与 npm `latest` 仍分别答 `v1.13.5` / `1.13.5`——**pin 不动**：pin 跟的是被封装的那个发布版本，不是默认分支。
+
+那个 commit 是 `feat(rules): add C# review rules (#1840)`，8 个文件：新增 `internal/config/rules/rule_docs/csharp.md`，`internal/config/rules/system_rules.json` 加一行并补测试，另 5 个是 `pages/` 下的多语审查规则文档。上面 5 个对照点的上游文件（`internal/llm/resolver.go`、`cmd/opencodereview/config_cmd.go`、`llm_cmd.go` / `providers.go`、`internal/session/manifest.go` 里那两张 `failure_class` 枚举）一个都没被碰到——**无移植项**，等它进下一个发布时再按那 5 行重读一遍。
+
+本轮产品侧只有一件事：**`docs/win-install-checklist.md` §4.2 里那两个期望版本，从「人记得回来改」变成「脚本会点名」。** 那张清单要能被人拿着安装包冷读，所以 §4.2 把「程序版本」与「`ocr CLI`」两个读数写成了具体字符；而这两个数字都出自最新发布 tag，一次发版就会同时变——正是没人会去翻清单的时刻。旧的写法只在文件里留了一句「下一次发版后以那条命令的读数为准」，没有人会回来执行它。
+
+`tools/release-pin.mjs` 因此多一条 `checklistVersionViolations`：清单里出现的每个 `X.Y.Z` 只能是最新发布 tag 的版本、或那个 tag 的 lockfile 解析出的 `ocr` 版本；`方法`上「程序版本」那一格必须写发布的版本，`ocr CLI` 那一格必须写那一份发布里带的版本、并指出 `npm run audit:release-pin`——或者写成「以那条命令的读数为准」且**一个数字都不写**（不会过期的那一种写法）。它点名文件名与行号，`audit:static` 里那一项先红。规则本身由 `tools/release-pin-smoke.mjs` 从 30 条加到 41 条钉住，反向控制包括「写一个不存在的版本即点名行号」「删掉那一行即红」「空文件即红」「不写数字的那一种写法仍绿」，另加两条看仓库而不是夹具的（清单里那两行还在、`ocr CLI` 那一格还指着那条命令）。
+
 ## 上游状态（第 120 轮，2026-11-04）
 
 本轮复核：**上游什么都没动。** `npm run upstream:check` 走 git 通路答上 `refs/heads/main` 仍是 `abb7abc`，`/releases/latest` 由 GitHub API 答 `v1.13.5`，npm `latest` 由 `npm view` 答 `1.13.5`——三处口径一致，**pin 不动、对照表 5 行无需重读、无移植项**。
