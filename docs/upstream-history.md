@@ -36,6 +36,22 @@ N 必须晚于该段轮次；新轮次正文加在最上面，段落轮次递减
 
 ---
 
+## 上游状态（第 118 轮，2026-11-04）
+
+本轮复核：**上游什么都没动。** `refs/heads/main` 仍是 `abb7abc`（`/commits/main` 答上，第 111、112、113、114、116、117 轮核到的都是它），
+`/releases/latest` 仍是 `v1.13.5`，npm `latest` 同为 `1.13.5`——三处口径一致，**pin 不动、对照表 5 行无需重读、无移植项**。
+
+本轮产品侧的改动是把**发布资产里带的是哪一版 `ocr`** 从「人读过一次」变成「脚本能答」：`tools/release-pin.mjs`
+（`npm run audit:release-pin`，挂进 `audit:static`）读最新发布 tag 的 `package.json` 与同一份 tag 的 `package-lock.json`——`npmRebuild: false`
+加上 electron-builder 会把 `node_modules` 抄进 `resources/app`，所以 lockfile 解析出来的那一版就是产物里的那一版。它同时补上了
+`audit:upstream` 看不见的一半：依赖区间写着 pin、而 lockfile 还停在旧版本时，`dependencyPinViolations` 是绿的，产物却是旧的。
+本轮读数：`v0.1.13` 里带 `ocr 1.13.0`，源码树这一侧 `1.13.5`——差的这两版写成一行打印，不设成永久红（发版要 Windows 机器，
+一条恒红的门禁只会教会所有人忽略它）；`docs/measurements.md` 那一行必须写出 tag、版本与命令，tag 一前进就会红。
+
+这条脚本自带一个本仓特有的坑：checkout 里还躺着上游的 tag（`v0.2.0`–`v0.2.2`、`v1.13.x`），它们按版本号排在本产品的 `v0.1.13` **之后**，
+所以「选最高的 vX.Y.Z」会答到另一个产品上；选择器因此读每个候选 tag 的 `package.json` 名字，smoke 里有一格专门要求「只按版本号选」
+选中 `v1.13.5` 而正确的选择是 `v0.1.13`。
+
 ## 上游状态（第 117 轮，2026-11-04）
 
 本轮复核：`abb7abc` / `v1.13.5` / npm `1.13.5`，三条通路答案一致、无新内容，**pin 不前进、无移植项**。

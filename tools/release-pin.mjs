@@ -28,6 +28,23 @@
 // quote the tag and the version this script reads, so a new release tag turns the
 // doc red until someone writes the new answer down.
 //
+// Which half is a gate and which is a report, spelled out because the two do not
+// read the same in code. The *source tree* half is gated, missing lockfile record
+// included: no record there means the next release ships a version nobody named,
+// and a fresh `npm install` on another machine resolves a third one. The *release
+// tag* half is reported: its own two files must agree with each other (that part
+// runs as a check), but how far the tag sits behind the pin stays a printed
+// sentence, because closing it needs a Windows machine.
+//
+// The gate is also why `audit:static` now has a second environment dependency —
+// the first is `audit:surface`'s installed CLI, this one is the checkout's git tag
+// history. From a `--depth 1` clone or an unpacked tarball `git tag -l` is empty,
+// so `main()` says that out loud and exits non-zero instead of reporting "no
+// releases"; `release-pin-smoke.mjs` needs no git at all (it drives the exported
+// predicates against fabricated files), so that half keeps working there. The cost
+// is listed in the 未验证清单 of `docs/measurements.md` and was measured once, in a
+// `--depth 1 --no-tags` clone (第 119 轮).
+//
 // One trap is worth naming because it is this repository's own history: the
 // checkout carries the *upstream* project's tags as well (`v0.2.0`–`v0.2.2` are
 // upstream releases, and they sort **higher** than our `v0.1.13`). Selecting
@@ -163,14 +180,24 @@ export const treePinViolations = ({ pkg, lock, pinned = PINNED_UPSTREAM }) => {
  * a lockfile alone does not say which product that dependency belongs to. The
  * check is deliberately silent about the pin — that comparison is reported, not
  * gated (see the header).
+ *
+ * `version` is the tag's own version as `releaseTagOf` parsed it, passed in by the
+ * caller rather than re-derived here: one fact, one place. An empty `version` is a
+ * violation and not a skipped comparison, for the same reason the doc-row rule
+ * below refuses an empty version — a check that quietly compares against nothing
+ * is indistinguishable from a check that passes.
  */
-export const releaseAssetViolations = ({ tag, manifest, lock }) => {
+export const releaseAssetViolations = ({ tag, version, manifest, lock }) => {
   const violations = [];
   if (manifest === null || typeof manifest !== "object") {
     return [`发布 tag ${tag} 里读不到 package.json——那一份发布声明的依赖区间无从回答`];
   }
-  if (manifest.version && manifest.version !== String(tag).replace(/^v/, "")) {
-    violations.push(`${tag} 封的那份 package.json 写着版本 ${manifest.version}：tag 与包里的版本不是同一件事，先弄清发的是哪一份`);
+  if (typeof version !== "string" || version === "") {
+    violations.push(`没有给 ${tag} 解析出的版本号：这一条比的是「tag 与包里的版本是不是同一件事」，缺一半就无从比起`);
+  } else if (manifest.version && manifest.version !== version) {
+    violations.push(
+      `${tag} 封的那份 package.json 写着版本 ${manifest.version}，而 tag 名里的版本是 ${version}：tag 与包里的版本不是同一件事，先弄清发的是哪一份`
+    );
   }
   const dependency = ((manifest && manifest.dependencies) || {})[UPSTREAM_PACKAGE];
   if (dependency === undefined) {
@@ -276,14 +303,24 @@ export const main = () => {
   const lock = readJson(LOCKFILE);
   const pinned = PINNED_UPSTREAM;
 
+  const tagList = git("tag", "-l", "v*");
   const { releases, skipped } = desktopReleaseTags({
-    tagList: git("tag", "-l", "v*"),
+    tagList,
     productName: pkg.name,
     readManifest: (tag) => readAtTag(tag, MANIFEST),
   });
   const latest = latestRelease(releases);
   if (latest === null) {
-    console.error(`没有任何 tag 是 ${pkg.name} 的发布——这一条无话可说，不是通过`);
+    // Two different facts, two different sentences. An empty tag list is the
+    // shallow-clone / tarball shape (`--depth 1` fetches no tags, and an unpacked
+    // tarball never had them), and a reader who sees only "no release found" would
+    // go looking at the tags of the wrong project.
+    console.error(
+      tagList.trim() === ""
+        ? "这个 checkout 里一个 tag 都没有（`git tag -l 'v*'` 是空的）：`--depth` 克隆与 tarball 解出来的目录都长这样。" +
+            "门禁这一半读的是 tag 历史——补一份完整克隆，或只跑 `node tools/release-pin-smoke.mjs`（那一半不要 git）"
+        : `有一个 tag 列表，但没有一个是 ${pkg.name} 的发布——这一条无话可说，不是通过`
+    );
     process.exit(2);
   }
   const assetLock = readAtTag(latest.tag, LOCKFILE);
@@ -332,7 +369,7 @@ export const main = () => {
     tree.join("；")
   );
 
-  const asset = releaseAssetViolations({ tag: latest.tag, manifest: assetManifest, lock: assetLock });
+  const asset = releaseAssetViolations({ tag: latest.tag, version: latest.version, manifest: assetManifest, lock: assetLock });
   check(`发布 tag ${latest.tag} 里的声明与它自己的 lockfile 一致（这一份回答是自洽的）`, asset.length === 0, asset.join("；"));
 
   let ancestor = true;

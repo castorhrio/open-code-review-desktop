@@ -8,6 +8,11 @@
 // trap: this checkout carries the *upstream* project's tags, and a selector that
 // picks "the highest vX.Y.Z" answers about the wrong product (the fixture proves
 // the naive answer differs from the correct one).
+//
+// This file is also the half of `audit:release-pin` that works in a `--depth 1`
+// clone or a tarball: it imports no git, only the predicates. The run itself reads
+// tag history and says so when there is none (see the header of release-pin.mjs,
+// and the 未验证清单 row in `docs/measurements.md` that records the cost).
 import fs from "node:fs";
 import path from "node:path";
 
@@ -20,6 +25,7 @@ import {
   latestRelease,
   measurementAnswerViolations,
   releaseAssetViolations,
+  releaseTagOf,
   releaseTagsFrom,
   treePinViolations,
 } from "./release-pin.mjs";
@@ -42,6 +48,9 @@ const CLI = "@alibaba-group/open-code-review";
  *  premise below refuses the day the pin catches up to it. */
 const OLD = "1.13.0";
 const RELEASE_TAG = "v0.1.13";
+/** The version that tag name carries — passed into the predicate instead of being
+ *  re-derived there, so this constant is the one place the fixture states it. */
+const RELEASE_VERSION = "0.1.13";
 
 const lockWith = (version) => ({
   packages: { [`node_modules/${CLI}`]: { version, resolved: `https://registry.example/${CLI}/-/${version}.tgz` } },
@@ -55,7 +64,8 @@ const assetManifest = (range, version = "0.1.13") => ({ name: PRODUCT, version, 
 
 const goodAsset = () => ({
   tag: RELEASE_TAG,
-  manifest: assetManifest(`^${OLD}`),
+  version: RELEASE_VERSION,
+  manifest: assetManifest(`^${OLD}`, RELEASE_VERSION),
   lock: lockWith(OLD),
 });
 
@@ -79,6 +89,11 @@ check(
   "前提：夹具里那个「旧版本」真的比 pin 旧（pin 前进到它时这一套要换夹具）",
   OLD !== WANT && compareVersions(OLD, WANT) < 0,
   `夹具用 ${OLD}，pin 是 ${WANT}`
+);
+check(
+  "前提：夹具里那个 tag 与版本号是同一件事（谓词不再自己从 tag 名里剥前缀）",
+  releaseTagOf(RELEASE_TAG).version === RELEASE_VERSION,
+  `${RELEASE_TAG} 与 ${RELEASE_VERSION}`
 );
 check("前提：一棵自洽的源码树是绿的", treePinViolations(goodTree()).length === 0, treePinViolations(goodTree()).join("；"));
 check("前提：一份自洽的发布 tag 是绿的", releaseAssetViolations(goodAsset()).length === 0, releaseAssetViolations(goodAsset()).join("；"));
@@ -110,7 +125,12 @@ check(
 );
 
 // ---- one release tag ----
-const drift = releaseAssetViolations({ tag: RELEASE_TAG, manifest: assetManifest(`^${OLD}`), lock: lockWith(WANT) });
+const drift = releaseAssetViolations({
+  tag: RELEASE_TAG,
+  version: RELEASE_VERSION,
+  manifest: assetManifest(`^${OLD}`, RELEASE_VERSION),
+  lock: lockWith(WANT),
+});
 check(
   "反向控制：发布 tag 的声明与它自己的 lockfile 不一致 → 点名两边",
   drift.some((line) => line.includes(OLD) && line.includes(WANT)),
@@ -119,30 +139,48 @@ check(
 
 check(
   "反向控制：tag 与包里的版本不是同一件事 → 点名两边",
-  releaseAssetViolations({ tag: RELEASE_TAG, manifest: assetManifest(`^${OLD}`, "0.1.12"), lock: lockWith(OLD) }).some(
-    (line) => line.includes("0.1.12") && line.includes(RELEASE_TAG)
-  )
+  releaseAssetViolations({
+    tag: RELEASE_TAG,
+    version: RELEASE_VERSION,
+    manifest: assetManifest(`^${OLD}`, "0.1.12"),
+    lock: lockWith(OLD),
+  }).some((line) => line.includes("0.1.12") && line.includes(RELEASE_TAG) && line.includes(RELEASE_VERSION))
 );
 
 check(
   "反向控制：那份发布没有封装这个 CLI → 红",
   releaseAssetViolations({
     tag: RELEASE_TAG,
-    manifest: { name: PRODUCT, version: "0.1.13", dependencies: {} },
+    version: RELEASE_VERSION,
+    manifest: { name: PRODUCT, version: RELEASE_VERSION, dependencies: {} },
     lock: lockWith(OLD),
   }).some((line) => line.includes(CLI))
 );
 
 check(
   "反向控制：发布 tag 里读不到 package.json → 红（不是跳过）",
-  releaseAssetViolations({ tag: RELEASE_TAG, manifest: null, lock: lockWith(OLD) }).length === 1
+  releaseAssetViolations({ tag: RELEASE_TAG, version: RELEASE_VERSION, manifest: null, lock: lockWith(OLD) }).length === 1
 );
 
 check(
   "反向控制：发布 tag 的 lockfile 里没有解析记录 → 红",
-  releaseAssetViolations({ tag: RELEASE_TAG, manifest: assetManifest(`^${OLD}`), lock: { packages: {} } }).some((line) =>
-    line.includes("解析记录")
-  )
+  releaseAssetViolations({
+    tag: RELEASE_TAG,
+    version: RELEASE_VERSION,
+    manifest: assetManifest(`^${OLD}`, RELEASE_VERSION),
+    lock: { packages: {} },
+  }).some((line) => line.includes("解析记录"))
+);
+
+check(
+  "反向控制：调用方没给 tag 解析出的版本号 → 红（不是跳过这一条比对）",
+  releaseAssetViolations({
+    tag: RELEASE_TAG,
+    version: "",
+    manifest: assetManifest(`^${OLD}`, "0.1.12"),
+    lock: lockWith(OLD),
+  }).some((line) => line.includes("版本号")),
+  releaseAssetViolations({ tag: RELEASE_TAG, version: "", manifest: assetManifest(`^${OLD}`, "0.1.12"), lock: lockWith(OLD) }).join("；")
 );
 
 // ---- the row in docs/measurements.md ----
