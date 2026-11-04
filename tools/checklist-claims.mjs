@@ -479,11 +479,26 @@ export const measurementTableViolations = ({ measurementsDoc, measurementsPath =
  *      认的标记，缺一样，贴回去仍然算没贴；
  *   3. 模板的行名集合必须等于第 9 节里那四格点到的行名集合——两处说的是同一件事；
  *   4. 模板的每一行都真的在未验证清单里——贴回时替换的是同名行，名字错了就没有落点。
+ *
+ * 第 138 轮加的是第五件事，也是这一节唯一还缺的那一半：**四格仍然太长**。真机上被打断
+ * 是常态，而「四格跑不完」和「一格都跑不了」在证据上是同一件事——什么都没留下。所以
+ * 10.1 里有两格标着「可单独跑」（第 1 格 SmartScreen 与第 5.2 格两条 grep）：它们不依赖
+ * 前面任何一格，装一次、填一个可丢弃的 Key 就能各留一条读数，分别给 DOD-5 与 DOD-6。
+ * 这一条因此还问：标着「可单独跑」的恰好是这两格，且它们按第 9 节的归属真的落在两条
+ * 不同的 DoD 上——标错了格，或者两格都归同一条 DoD，那「各留一条读数」就是假话。
  */
 export const SUBSET_STEPS = Object.freeze(["1", "2.2", "4.2", "5.2"]);
 export const SUBSET_BLANK = "____";
 export const SUBSET_DATE_PLACEHOLDER = "YYYY-MM-DD";
 export const SUBSET_GRID_HEADER_LAST = "读数格";
+
+/** 10.1 里「这一格不依赖别的格」的标记。它出现在「做什么」那一格里，不是新加一列——
+ *  加列会让「读数格」不再是最后一列，而那一列的位置是上面第 1 条在核的东西。 */
+export const SUBSET_SOLO_MARK = "可单独跑";
+/** 标着「可单独跑」的两格：第 1 格给 DOD-5，第 5.2 格给 DOD-6。 */
+export const SUBSET_SOLO_STEPS = Object.freeze(["1", "5.2"]);
+/** 第 10 节标题里那句时长承诺。四格约 5 分钟，两格约 3 分钟——标题写的是**最短**那条路。 */
+export const SUBSET_MINUTES_MARK = "3 分钟";
 
 /** 某一节的行范围（`start` 是标题行，`end` 是下一个二级标题）。`###` 不算二级标题，
  *  所以第 10 节里的 10.1 / 10.2 / 10.3 都落在同一段里。 */
@@ -499,6 +514,13 @@ const sectionRange = (doc, headingPattern) => {
     }
   }
   return { lines, start, end };
+};
+
+/** 第 10 节那一行标题（`## 10. 最小可行子集（3 分钟起）`）。标题里那句时长是这一节
+ *  对读者的承诺：最短那条路要多久。读不到标题时返回 null，由调用方决定怎么报。 */
+export const subsetHeading = (doc) => {
+  const range = sectionRange(doc, /^##\s*10[.、]/);
+  return range === null ? null : range.lines[range.start].trim();
 };
 
 /** 一格开头那个步骤号（`1 SmartScreen` → `1`，`2.2 安装目录页` → `2.2`）。 */
@@ -572,6 +594,17 @@ export const subsetFormViolations = ({
 
   const violations = [];
 
+  // 0. 标题里那句时长承诺。四格约 5 分钟，标着「可单独跑」的两格约 3 分钟——标题写的是
+  //    最短那条路，因为读者是在「我只有三分钟」的时候翻到这一节的。
+  const heading = subsetHeading(checklist);
+  if (heading !== null && !heading.includes(SUBSET_MINUTES_MARK)) {
+    violations.push(
+      `${checklistPath} 第 10 节的标题是「${heading}」，里面没有「${SUBSET_MINUTES_MARK}」：` +
+        "标题那句时长是这一节对读者的承诺——四格约 5 分钟，而标着「可单独跑」的两格约 3 分钟；" +
+        "标题只写 5 分钟，只有三分钟的人会以为这一节轮不到他，于是什么都不留"
+    );
+  }
+
   // 1. 10.1 的四格读数表。
   const grid = subsetGridRows(checklist);
   if (grid.length === 0) {
@@ -593,6 +626,48 @@ export const subsetFormViolations = ({
       violations.push(
         `${checklistPath} 第 ${row.line} 行（第 ${row.step} 格）的「${SUBSET_GRID_HEADER_LAST}」里没有留空（\`${SUBSET_BLANK}\`）：` +
           "这一列是给人填的，没有空就只是一句期望读数——待填表与说明书的区别就在这一格"
+      );
+    }
+  }
+
+  // 1b. 「可单独跑」的两格：最小子集里还有一条更短的路。
+  //
+  // 这一条不是「允许出现」而是一条正面断言：标着的必须恰好是第 1 格与第 5.2 格。多标一格，
+  // 读者会以为别的格也能单独跑（第 2.2 格要走到目录页、第 4.2 格要装完再起一次，都不止
+  // 三分钟）；少标一格，这条路就不存在了，而它正是这一轮要补的那一半。
+  //
+  // 表本身不在时上面那句已经说了「没有那张表」；再报一条「一格都没标」只是同一件事的
+  // 第二种说法，读者会以为缺了两样东西。
+  const solo = grid.filter((row) => row.cells.some((cell) => cell.includes(SUBSET_SOLO_MARK)));
+  const soloSteps = solo.map((row) => row.step);
+  if (grid.length === 0) {
+    // 没有表就没有格可标，上面那句已经报过。
+  } else if (soloSteps.join(",") !== SUBSET_SOLO_STEPS.join(",")) {
+    violations.push(
+      `${checklistPath} 第 10 节标着「${SUBSET_SOLO_MARK}」的格是「${soloSteps.join(" / ") || "（没有）"}」，` +
+        `应为「${SUBSET_SOLO_STEPS.join(" / ")}」：这两格是「装一次就能各留一条读数」的那条路，` +
+        "多标一格会让读者以为别的格也能单独跑，少标一格则这条路不存在"
+    );
+  } else {
+    // 两格必须真的落在两条不同的 DoD 上。第 9 节是按节组织的（`5 配置与 Key 的位置`
+    // 覆盖 5.1–5.4），所以按步骤号的第一段去找那一行——找不到就是第 9 节改了落点。
+    const claims = checklistClaimRows(checklist);
+    const dodOfStep = (step) => {
+      const head = step.split(".")[0];
+      const claim = claims.find((row) => stepOf(row.item) === head);
+      return claim === undefined ? null : claim.primaryDod;
+    };
+    const dods = soloSteps.map(dodOfStep);
+    const missing = soloSteps.filter((step, index) => dods[index] === null);
+    if (missing.length) {
+      violations.push(
+        `${checklistPath} 第 10 节标着「${SUBSET_SOLO_MARK}」的第 ${missing.join(" / ")} 格在第 9 节那张对照表里没有落点：` +
+          "这两格的意义是「各给一条 DoD 留一条读数」，第 9 节读不出它推进哪一条，这一趟跑完就不知道该勾哪条"
+      );
+    } else if (new Set(dods).size !== dods.length) {
+      violations.push(
+        `${checklistPath} 第 10 节标着「${SUBSET_SOLO_MARK}」的两格按第 9 节都归 ${dods[0]}：` +
+          "最小子集的意义是「两条 DoD 各留一条读数」，两格归同一条，另一条跑完仍然勾不上"
       );
     }
   }

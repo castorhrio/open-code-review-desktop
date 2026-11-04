@@ -35,7 +35,11 @@ import {
   subsetPastebackRows,
   SUBSET_BLANK,
   SUBSET_DATE_PLACEHOLDER,
+  SUBSET_MINUTES_MARK,
+  SUBSET_SOLO_MARK,
+  SUBSET_SOLO_STEPS,
   SUBSET_STEPS,
+  subsetHeading,
   stepOf,
   unverifiedRows,
 } from "./checklist-claims.mjs";
@@ -101,10 +105,10 @@ const CLAIM_ROWS = [
 ];
 
 const SUBSET_GRID = [
-  "| 1 SmartScreen | 双击 setup | 出现并走得下去 | 读数：____ |",
+  "| 1 SmartScreen **可单独跑** | 双击 setup | 出现并走得下去 | 读数：____ |",
   "| 2.2 安装目录页 | 走到目录页 | 默认路径 + 无 UAC | 读数：____ |",
   "| 4.2 六行读数 | 设置 → 关于与卸载 | 六行一致 | 读数：____ |",
-  "| 5.2 两个目录 grep | 两条命令 | 有命中 / 零命中 | 读数：____ |",
+  "| 5.2 两个目录 grep **可单独跑** | 两条命令 | 有命中 / 零命中 | 读数：____ |",
 ];
 
 const SUBSET_PASTEBACK = [
@@ -129,7 +133,7 @@ const checklistDoc = ({
     "| --- | --- | --- |",
     ...claims,
     "",
-    "## 10. 最小可行子集（5 分钟）",
+    "## 10. 最小可行子集（3 分钟起）",
     "",
     "### 10.1 四格读数（照这一张填）",
     "",
@@ -751,6 +755,13 @@ const lineOf = (doc, name) => {
   );
   check("前提：贴回模板读出两行，每行四列", paste.length === 2 && paste.every((row) => row.cells.length === 4), JSON.stringify(paste.map((row) => row.cells.length)));
   check(
+    "前提：第 10 节标题读得出来，且「可单独跑」的两格是 1 / 5.2",
+    subsetHeading(checklistDoc()) === "## 10. 最小可行子集（3 分钟起）" &&
+      grid.filter((row) => row.cells.some((cell) => cell.includes(SUBSET_SOLO_MARK))).map((row) => row.step).join(",") ===
+        SUBSET_SOLO_STEPS.join(","),
+    JSON.stringify({ heading: subsetHeading(checklistDoc()), solo: SUBSET_SOLO_STEPS })
+  );
+  check(
     "前提：步骤号只认开头那个数字（`4.1–4.2 首启与六行读数` → `4.1`）",
     stepOf("4.1–4.2 首启与六行读数") === "4.1" && stepOf("2.2 安装目录页") === "2.2" && stepOf("向导") === null,
     JSON.stringify([stepOf("4.1–4.2 首启与六行读数"), stepOf("2.2 安装目录页"), stepOf("向导")])
@@ -865,7 +876,57 @@ const lineOf = (doc, name) => {
     );
   }
 
-  // 10. 未验证清单里那一行被搬走（模板指向一个不存在的行名）。
+  // 10. 标题里那句时长承诺被改回 5 分钟（只有三分钟的人会以为轮不到他）。
+  {
+    const broken = checklistDoc().replace("## 10. 最小可行子集（3 分钟起）", "## 10. 最小可行子集（5 分钟）");
+    const violations = violationsOfForm({ checklistDoc: broken });
+    check(
+      "第 10 节标题里没有「3 分钟」：点名标题与那句承诺",
+      violations.length === 1 && violations[0].includes(SUBSET_MINUTES_MARK) && violations[0].includes("标题"),
+      violations.join("；") || "没有违规"
+    );
+  }
+
+  // 11. 「可单独跑」少标一格（那条三分钟的路不存在了）。
+  {
+    const broken = checklistDoc({
+      grid: SUBSET_GRID.map((row) => (row.startsWith("| 5.2") ? row.replace(` **${SUBSET_SOLO_MARK}**`, "") : row)),
+    });
+    const violations = violationsOfForm({ checklistDoc: broken });
+    check(
+      "「可单独跑」少标一格：点名标着的格与应有的两格",
+      violations.length === 1 && violations[0].includes(SUBSET_SOLO_MARK) && violations[0].includes(SUBSET_SOLO_STEPS.join(" / ")),
+      violations.join("；") || "没有违规"
+    );
+  }
+
+  // 12. 「可单独跑」多标一格（读者会以为第 2.2 格也能单独跑）。
+  {
+    const broken = checklistDoc({
+      grid: SUBSET_GRID.map((row) => (row.startsWith("| 2.2") ? row.replace("| 2.2 安装目录页 |", `| 2.2 安装目录页 **${SUBSET_SOLO_MARK}** |`) : row)),
+    });
+    const violations = violationsOfForm({ checklistDoc: broken });
+    check(
+      "「可单独跑」多标一格：点名多出来的那一格",
+      violations.length === 1 && violations[0].includes("1 / 2.2 / 5.2"),
+      violations.join("；") || "没有违规"
+    );
+  }
+
+  // 13. 两格按第 9 节归同一条 DoD（「各留一条读数」变成假话）。
+  {
+    const broken = checklistDoc({
+      claims: CLAIM_ROWS.map((row) => (row.startsWith("| 5 ") ? row.replace("| DOD-6 |", "| DOD-5 |") : row)),
+    });
+    const violations = violationsOfForm({ checklistDoc: broken });
+    check(
+      "「可单独跑」的两格归同一条 DoD：点名那一条",
+      violations.some((violation) => violation.includes(SUBSET_SOLO_MARK) && violation.includes("DOD-5")),
+      violations.join("；") || "没有违规"
+    );
+  }
+
+  // 14. 未验证清单里那一行被搬走（模板指向一个不存在的行名）。
   {
     const violations = subsetFormViolations({
       checklistDoc: checklistDoc(),

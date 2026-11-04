@@ -16,13 +16,9 @@ import { toast } from "sonner";
 const SEVERITIES = ["critical", "high", "medium", "low", ""] as const;
 
 /**
- * What a failed read at a ref means, in one line.
- *
- * The three reasons are not interchangeable: a file that is not in the reviewed
- * snapshot is a fact about the review, an unresolvable ref is a fact about the
- * input, and a failed read is neither. The working tree is offered after all
- * three, but only as a choice — it is often a different file from the one the
- * finding is about.
+ * What a failed read at a ref means, in one line. The three reasons are not
+ * interchangeable: a file missing from the reviewed snapshot is a fact about the
+ * review, an unresolvable ref is a fact about the input, a failed read is neither.
  */
 const REF_READ_HINT: Record<string, string> = {
   missing: "这个文件在这次审查的 ref 里不存在——它可能在那之后被删除、改名，或从未提交到那里。",
@@ -32,20 +28,13 @@ const REF_READ_HINT: Record<string, string> = {
 
 /**
  * The file around a finding. Two homes, because the 3-pane grid only has room
- * for it above 1240px of container width:
+ * for it above 1240px of container width: `pane` is its own grid column (wide),
+ * `stacked` is its own row under the finding (narrow). Either way it is a flex
+ * column that fills its box — no `sticky` — so the toolbar stays on screen and a
+ * long line scrolls sideways inside the code region, not the whole detail column.
  *
- *   pane     its own grid column (wide).
- *   stacked  its own row under the finding, inside the detail column (narrow).
- *
- * Either way the viewer is a flex column that fills its box, so the toolbar is
- * always on screen and the code scrolls in its own region — no `sticky`, and a
- * long line scrolls sideways inside the code region instead of turning the
- * whole detail column into a sideways scroller.
- *
- * Why this exists at all: measured on the built UI, the code column was 337px
- * at the 1000px window floor and 568px at 1440px, while the widest line in the
- * fixture needs 629px — so on a 1280px laptop most lines of the very thing the
- * user came to read were cut off.
+ * Why the split exists, and the measurements behind it: README.md, "The one
+ * full-width screen is container-responsive, not viewport-responsive".
  */
 function FileViewer({
   current,
@@ -85,8 +74,9 @@ function FileViewer({
     // A read that failed is not a read. The pane used to answer a failed ref
     // read with the working tree instead, so the code beside a finding could be
     // a file the review never saw — and the only symptom was a finding that
-    // looked wrong. So the failure is stated, the ref it failed on is named,
-    // and the working tree is something the reader asks for on purpose.
+    // looked wrong. So the failure is stated, the ref it failed on is named, and
+    // the working tree is offered after all three reasons as a choice, never as
+    // a fallback: it is often a different file from the one the finding is about.
     return (
       <div className={cn("flex min-w-0 flex-col items-start gap-2", stacked ? "px-4 py-3" : "p-4")}>
         {/* A ref name and a path are both unbreakable Latin tokens, and this pane
