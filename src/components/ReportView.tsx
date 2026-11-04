@@ -1,5 +1,5 @@
 import { ArrowLeft, FileCode2 } from "lucide-react";
-import { SEVERITY_RANK, STATUS, coverageOf, runLimitReached, shortRef, terminalState } from "@/lib/format";
+import { SEVERITY_RANK, coverageOf, runLimitReached, shortRef, statusBadge } from "@/lib/format";
 import type { Finding } from "@/lib/types";
 import { copyText } from "@/lib/clipboard";
 import { useStore } from "@/store";
@@ -48,8 +48,9 @@ export function ReportView() {
     );
   }
 
-  const st = terminalState(result);
-  const status = STATUS[st] || { label: st || "未知", cls: "border-line bg-raised text-muted" };
+  // Same badge as the results screen, truncation included — the two surfaces
+  // must not spell the same run differently.
+  const status = statusBadge(result);
   const s = result.summary || {};
   const failed = coverageOf(result, "failed");
   const waived = coverageOf(result, "waived");
@@ -70,7 +71,9 @@ export function ReportView() {
           <ArrowLeft className="size-3.5" />
           返回结果
         </Button>
-        <Badge className={status.cls}>{status.label}</Badge>
+        <Badge className={status.cls} data-run-status={status.id}>
+          {status.label}
+        </Badge>
         <RunFailureNote result={result} />
         {resultOrigin?.kind === "session" && <Badge tone="accent">历史会话</Badge>}
         <span className="tnum min-w-0 truncate text-meta text-muted">

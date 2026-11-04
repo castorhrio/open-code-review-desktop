@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { api, type Provider } from "@/lib/api";
-import { cliFailure, coverageOf, manifestBudgetExceeded, needsContinuation, reviewedCommit, sessionFileRef, sessionState, terminalState } from "@/lib/format";
+import { cliFailure, completionNotice, coverageOf, manifestBudgetExceeded, needsContinuation, reviewedCommit, sessionFileRef, sessionState, terminalState } from "@/lib/format";
 import { logSource, noticeText } from "@/lib/notices";
 import { intOrEmpty, MODE_META, resumableMode, validateSpec } from "@/lib/spec";
 import type {
@@ -504,8 +504,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
           toast.error(failure.reason || "审查失败", { description: failure.detail, duration: 15000 });
         }
       } else {
-        setRunLabel("完成");
-        toast.success("审查完成", { description: `${r.value?.comments?.length ?? 0} 条评论` });
+        // The exit code is 0 for a run a declared limit cut short, so "审查完成"
+        // was said over a run whose later files were never dispatched. The
+        // wording comes from `completionNotice`, which reads the same signals
+        // the badge and the band do — one decision, three surfaces.
+        const done = completionNotice(r.value);
+        setRunLabel(done.label);
+        if (done.tone === "warning") toast.warning(done.title, { description: done.description, duration: 12000 });
+        else toast.success(done.title, { description: done.description });
       }
       if (r.value) {
         // The CLI resolved the endpoints with git before the run started and

@@ -203,6 +203,77 @@ export function runLimitReached(value: RunResult | null | undefined): boolean {
 }
 
 /**
+ * The badge a result's own status earns, on both results surfaces.
+ *
+ * `STATUS` maps the CLI's vocabulary to words, and for a run a declared limit cut
+ * short that mapping is not enough: the CLI still reports `status: "complete"` —
+ * the files it did read were reviewed in full — so the badge read 完成 in the ok
+ * tone over a run whose later files were never dispatched. The 已达审查上限 chip
+ * and the band further down correct that, but the badge is what a person reads
+ * first, and 完成 is the strongest claim this app makes. `docs/PRODUCT-DOD.md`
+ * DOD-4 says a budget-truncated run must not be shown as clean, so a *success*
+ * state that `runLimitReached` recognises as cut short is shown as 未审完 in the
+ * warn tone instead.
+ *
+ * A `partial` / `failed` state keeps its own word: those already say the run did
+ * not finish, and folding them into a second word for the same fact would lose
+ * the difference between "stopped at a limit" and "some files failed".
+ *
+ * `id` is the seam the render is checked against — `tools/e2e-fake-provider.cjs`
+ * reads it off the real results screen (`data-run-status`) instead of scraping a
+ * class name, so "the badge says which state it is in" is a value and not a
+ * guess about the DOM.
+ */
+export function statusBadge(value: RunResult | null | undefined): { id: string; label: string; cls: string } {
+  const st = terminalState(value);
+  const named = STATUS[st];
+  const label = named ? named.label : st || "未知";
+  const cls = named ? named.cls : "border-line bg-raised text-muted";
+  const finished = st === "complete" || st === "success";
+  if (!finished || !runLimitReached(value)) return { id: st || "unknown", label, cls };
+  return { id: "limited", label: "未审完", cls: "border-warn/40 bg-warn/10 text-warn" };
+}
+
+/**
+ * What the app says the moment a run ends without an error.
+ *
+ * Three surfaces say this and they used to decide it separately: the toast at the
+ * end of a run, the label the running view shows while the results screen is being
+ * built, and the silent `role="status"` line that announces a finished run to a
+ * screen reader. All three read the exit code, and `ocr` exits 0 for a run a
+ * declared limit cut short — so a truncated run was announced as 「审查完成」 in a
+ * toast that disappears and in a status line nobody sees, while the badge
+ * (`statusBadge`) and the band (`RunLimitNotice`) below said otherwise. `docs/PRODUCT-DOD.md`
+ * DOD-4 promises a budget-truncated run never reads as clean, and "审查完成" is the
+ * cleanest thing this app says.
+ *
+ * Nothing here is a second opinion: the label is `statusBadge`'s, and the warning
+ * tone follows the same `runLimitReached` signal the badge and the band use. The
+ * wording names which limit — a budget stop and a tool-round stop are the two the
+ * CLI reports, and the fix for them differs (raise the budget, or widen the
+ * rounds).
+ */
+export function completionNotice(value: RunResult | null | undefined): {
+  label: string;
+  title: string;
+  description: string;
+  tone: "success" | "warning";
+} {
+  const badge = statusBadge(value);
+  const comments = value?.comments?.length ?? 0;
+  if (badge.id !== "limited") {
+    return { label: badge.label, title: `审查${badge.label}`, description: `${comments} 条评论`, tone: "success" };
+  }
+  const budget = Boolean(value?.summary?.budget_exceeded);
+  return {
+    label: badge.label,
+    title: budget ? "审查停在了 token 预算上限" : "审查停在了审查上限",
+    description: `已审完的 ${comments} 条评论保留在下方，后面的文件没有审到。提高上限或缩小范围再跑一次。`,
+    tone: "warning",
+  };
+}
+
+/**
  * Whether a persisted manifest records the aggregate token budget stopping the
  * run. Upstream attributes every item the budget left undispatched to
  * `failed(budget)` and deliberately keeps them in coverage — it is a controlled

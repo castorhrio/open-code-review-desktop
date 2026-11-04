@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Download, ExternalLink, FileCode2, FolderOpen, Search, TriangleAlert, Wrench, Copy, BookOpenText } from "lucide-react";
 import { api, type FileWindow } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import { SEVERITY_DOT, SEVERITY_LABEL, SEVERITY_RANK, SEVERITY_TEXT, STATUS, coverageOf, runLimitReached, shortRef, summaryLine, terminalState } from "@/lib/format";
+import { SEVERITY_DOT, SEVERITY_LABEL, SEVERITY_RANK, SEVERITY_TEXT, completionNotice, coverageOf, runLimitReached, shortRef, statusBadge, summaryLine } from "@/lib/format";
 import { copyText } from "@/lib/clipboard";
 import type { Finding } from "@/lib/types";
 import { useStore } from "@/store";
@@ -506,8 +506,9 @@ export function ResultsPanel() {
     );
   }
 
-  const st = terminalState(result);
-  const status = STATUS[st] || { label: st || "未知", cls: "border-line bg-raised text-muted" };
+  // A truncated run is the one case where the CLI's own word and the badge must
+  // disagree — see `statusBadge`.
+  const status = statusBadge(result);
   const s = result.summary || {};
   const failed = coverageOf(result, "failed");
   const waived = coverageOf(result, "waived");
@@ -546,11 +547,13 @@ export function ResultsPanel() {
           because nothing new happened. */}
       {resultOrigin?.kind === "run" && (
         <p role="status" className="sr-only">
-          审查完成，{comments.length} 条评论
+          {completionNotice(result).title}，{comments.length} 条评论
         </p>
       )}
       <PanelHeader>
-        <Badge className={status.cls}>{status.label}</Badge>
+        <Badge className={status.cls} data-run-status={status.id}>
+          {status.label}
+        </Badge>
         <RunFailureNote result={result} />
         {resultOrigin?.kind === "session" && <Badge tone="accent">历史会话</Badge>}
         {/* The counts say how big the run was; nothing on this screen said what

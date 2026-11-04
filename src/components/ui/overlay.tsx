@@ -77,17 +77,19 @@ export function Separator({ className }: { className?: string }) {
   return <div className={cn("h-px w-full shrink-0 bg-line", className)} />;
 }
 
+/** Extra `data-*` attributes reach the `<span>` — the renderer's own state is
+ * read back by the end-to-end harness through one (`data-run-status`), and
+ * scraping a class name to find it would make that read depend on the design
+ * system's spelling. */
 export function Badge({
   children,
   className,
   tone = "neutral",
   title,
-}: {
+  ...rest
+}: React.ComponentPropsWithoutRef<"span"> & {
   children: React.ReactNode;
-  className?: string;
   tone?: "neutral" | "ok" | "warn" | "bad" | "accent";
-  /** Badges are `nowrap` and often truncate; this keeps the full value reachable. */
-  title?: string;
 }) {
   const tones = {
     neutral: "border-line bg-raised text-muted",
@@ -98,6 +100,7 @@ export function Badge({
   } as const;
   return (
     <span
+      {...rest}
       title={title}
       className={cn(
         "inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-meta font-medium",
